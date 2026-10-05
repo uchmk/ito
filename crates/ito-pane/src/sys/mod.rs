@@ -33,6 +33,11 @@ pub fn consoles() -> Vec<u32> {
 #[cfg(not(windows))]
 pub fn end_new_consoles(_before: &[u32]) {}
 
+#[cfg(not(any(windows, unix)))]
+pub fn process_cwd(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Neither: no process table to read.
 #[cfg(not(any(windows, unix)))]
 pub fn children(_pid: u32) -> Vec<u32> {

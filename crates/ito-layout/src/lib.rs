@@ -86,6 +86,20 @@ pub struct Divider {
     pub area: Rect,
 }
 
+impl<T> Node<T> {
+    /// The same shape with each pane's `T` turned into a `U` (a session
+    /// restored after a restart gets a new id).
+    pub fn map<U>(self, f: &mut impl FnMut(T) -> U) -> Node<U> {
+        match self {
+            Node::Leaf(t) => Node::Leaf(f(t)),
+            Node::Split { dir, ratio, first, second } => {
+                let first = Box::new(first.map(f));
+                Node::Split { dir, ratio, first, second: Box::new(second.map(f)) }
+            }
+        }
+    }
+}
+
 impl<T: Clone + PartialEq> Node<T> {
     /// The panes, first to last (left to right, top to bottom).
     pub fn leaves(&self) -> Vec<T> {
@@ -296,6 +310,13 @@ mod tests {
         assert_eq!(n.neighbor(&3, Toward::Up, AREA), Some(2));
         assert_eq!(n.neighbor(&1, Toward::Left, AREA), None, "nothing past the edge");
         assert_eq!(n.neighbor(&2, Toward::Up, AREA), None);
+    }
+
+    #[test]
+    fn the_shape_survives_a_map() {
+        let n = three().map(&mut |t| t * 10);
+        assert_eq!(n.leaves(), vec![10, 20, 30]);
+        assert_eq!(n.layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>(), three().layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>());
     }
 
     #[test]

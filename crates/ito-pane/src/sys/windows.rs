@@ -68,6 +68,12 @@ pub fn end_new_consoles(before: &[u32]) {
     }
 }
 
+/// Another process's folder is not to be had on Windows without reading its
+/// memory; a shell that says where it is (OSC 7) is the way there.
+pub fn process_cwd(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Where a DLL loaded by name may come from: the folder the exe is in and
 /// System32, and nowhere else. `alacritty_terminal` loads `conpty.dll` by name,
 /// and the default search also tries the working directory and every folder on

@@ -81,3 +81,16 @@ fn alive(pid: u32) -> bool {
             .is_ok_and(|s| !s.is_empty() && !s.starts_with('Z'))
     }
 }
+
+/// The folder process `pid` is in: `/proc` on Linux, `lsof` on macOS.
+pub fn process_cwd(pid: u32) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("lsof").args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n')).map(std::path::PathBuf::from)
+    }
+}

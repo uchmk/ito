@@ -615,6 +615,12 @@ impl Terminal {
         self.prompt.load(Ordering::Relaxed)
     }
 
+    /// Where the shell is: what it said last (OSC 7), or else, where the
+    /// system can tell (Linux, macOS), the folder its process is in.
+    pub fn current_dir(&self) -> Option<PathBuf> {
+        self.shell_cwd.clone().or_else(|| self.shell_pid.and_then(crate::sys::process_cwd))
+    }
+
     /// When the shell last marked its prompt (OSC 133 `A` or `B`).
     pub fn last_prompt(&self) -> Option<Instant> {
         *self.prompt_at.lock().unwrap_or_else(|e| e.into_inner())
