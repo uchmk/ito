@@ -23,6 +23,11 @@ pub fn end_tree(pid: u32) {
 /// one snapshot of the process table on Windows, `/proc` on Linux, `pgrep` on
 /// macOS. Empty when the platform will not say.
 pub fn children(pid: u32) -> Vec<u32> {
+    named_children(pid).into_iter().map(|(child, _)| child).collect()
+}
+
+/// [`children`] with each one's executable name (`OpenConsole.exe`).
+pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -36,12 +41,31 @@ pub fn children(pid: u32) -> Vec<u32> {
     let mut ok = unsafe { Process32FirstW(snap, &mut e) }.is_ok();
     while ok {
         if e.th32ParentProcessID == pid && e.th32ProcessID != pid {
-            out.push(e.th32ProcessID);
+            let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            out.push((e.th32ProcessID, String::from_utf16_lossy(&e.szExeFile[..len])));
         }
         ok = unsafe { Process32NextW(snap, &mut e) }.is_ok();
     }
     let _ = unsafe { CloseHandle(snap) };
     out
+}
+
+/// This process's console hosts as they are now: what [`end_new_consoles`]
+/// compares against after a pane failed to start.
+pub fn consoles() -> Vec<u32> {
+    named_children(std::process::id()).into_iter().filter(|(_, name)| super::is_console_host(name)).map(|(pid, _)| pid).collect()
+}
+
+/// End the console hosts this process has gained since `before`: the
+/// pseudoconsole of a pane whose shell failed to start. `alacritty_terminal`
+/// creates the pseudoconsole, then the shell; when the shell fails it returns
+/// the error without closing the pseudoconsole, and its `OpenConsole.exe`
+/// (`conhost.exe` for the ConPTY built into Windows) lived until filer quit,
+/// one per attempt (filer's TODO, finding 3 of the 2026-10 x64 run).
+pub fn end_new_consoles(before: &[u32]) {
+    for pid in super::strays(before, &named_children(std::process::id())) {
+        end_tree(pid);
+    }
 }
 
 /// Where a DLL loaded by name may come from: the folder the exe is in and

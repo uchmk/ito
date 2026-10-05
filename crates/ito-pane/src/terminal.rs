@@ -4,7 +4,7 @@
 use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event as PtyEvent, EventListener, WindowSize};
@@ -240,6 +240,18 @@ pub(crate) fn pane_env() -> std::collections::HashMap<String, String> {
     [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
 }
 
+/// Held while a PTY is being made, so that the console hosts one spawn sees
+/// appear are its own and not another's; see [`new_pty`].
+pub(crate) static SPAWNING: Mutex<()> = Mutex::new(());
+
+/// `tty::new`, but a shell that fails to start does not leave its
+/// pseudoconsole running on Windows; see `sys::end_new_consoles`. The caller
+/// holds [`SPAWNING`].
+pub(crate) fn new_pty(options: &tty::Options, window: WindowSize) -> io::Result<tty::Pty> {
+    let consoles = crate::sys::consoles();
+    tty::new(options, window, 0).inspect_err(|_| crate::sys::end_new_consoles(&consoles))
+}
+
 impl Terminal {
     /// Start a shell in `cwd`. The cell size is what the PTY is told, so a
     /// program asking for pixels (an image protocol, say) gets the truth.
@@ -268,7 +280,10 @@ impl Terminal {
             escape_args: true,
         };
         let window = window_size(size, cell);
-        let pty = tty::new(&options, window, 0)?;
+        let pty = {
+            let _one_at_a_time = SPAWNING.lock().unwrap_or_else(|e| e.into_inner());
+            new_pty(&options, window)?
+        };
         #[cfg(windows)]
         let shell_pid = pty.child_watcher().pid().map(|p| p.get());
         #[cfg(unix)]

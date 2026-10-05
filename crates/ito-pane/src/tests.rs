@@ -570,6 +570,66 @@ mod pane {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Only a console host that was not there before is a stray, whatever
+    /// case Windows spells its name in.
+    #[test]
+    fn only_a_new_console_host_is_a_stray() {
+        let now = [(1, "OpenConsole.exe".to_owned()), (2, "conhost.exe".to_owned()), (3, "git.exe".to_owned()), (4, "CONHOST.EXE".to_owned())];
+        assert_eq!(strays(&[2], &now), vec![1, 4]);
+        assert_eq!(strays(&[1, 2, 4], &now), Vec::<u32>::new());
+    }
+
+    /// A shell that does not exist leaves no console host behind (filer's TODO:
+    /// three failed `<C-t>` left three `OpenConsole.exe`). On Windows only,
+    /// where the pseudoconsole is a process of its own.
+    #[cfg(windows)]
+    #[test]
+    fn a_shell_that_fails_leaves_no_console_behind() {
+        let dir = crate::util::test_dir("term-no-shell");
+        // Holding the lock keeps the other tests' panes from opening consoles
+        // in between, which would read as left behind.
+        let _one_at_a_time = SPAWNING.lock().unwrap_or_else(|e| e.into_inner());
+        let before = crate::sys::consoles();
+        let options = alacritty_terminal::tty::Options {
+            shell: Some(alacritty_terminal::tty::Shell::new("no-such-shell-tsumugi.exe".to_owned(), Vec::new())),
+            working_directory: Some(dir),
+            drain_on_exit: false,
+            env: Default::default(),
+            escape_args: true,
+        };
+        let window = alacritty_terminal::event::WindowSize { num_lines: 24, num_cols: 80, cell_width: 8, cell_height: 16 };
+        assert!(new_pty(&options, window).is_err(), "the shell does not exist");
+        let after = crate::sys::consoles();
+        let left: Vec<u32> = after.into_iter().filter(|p| !before.contains(p)).collect();
+        assert!(left.is_empty(), "console hosts left behind: {left:?}");
+    }
+
+    /// filer #243: a key sent as a win32-input-mode record is named after it in
+    /// the log, so `\e[66;48;98;1;2;1_` reads as `Alt+b` without a table.
+    #[test]
+    fn the_pty_log_names_the_keys_it_sends() {
+        let named = |b: &[u8]| name_records(b).join(" ");
+        assert_eq!(named(b"\x1b[66;48;98;1;2;1_"), "Alt+b");
+        assert_eq!(named(&char_record('b', Mods { alt: true, ..Default::default() }).unwrap()), "Alt+b", "what filer sends");
+        assert_eq!(named(&special_record(Special::Up, Mods::default())), "Up");
+        assert_eq!(named(&special_record(Special::Tab, Mods { shift: true, ..Default::default() })), "Shift+Tab");
+        assert_eq!(named(b"\x1b[67;46;3;1;8;1_"), "Ctrl+c", "the letter, not the control character");
+        assert_eq!(named(b"\x1b[66;48;66;1;16;1_"), "B", "a shifted character says itself");
+        assert_eq!(named(b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"), "Esc Esc up", "two records, a release");
+        assert_eq!(named(b"\x1b[112;59;0;1;0;1_"), "F1");
+        assert_eq!(named(b"ls\r"), "", "plain text names nothing");
+        assert_eq!(named(b"\x1b[A"), "", "nor does a VT sequence");
+
+        let dir = crate::util::test_dir("pty-log-keys");
+        let path = dir.join("pty.log");
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        let log: PtyLog = Some(Arc::new(Mutex::new(PtyLogFile { file, start: Instant::now() })));
+        log_pty(&log, "in key", b"\x1b[66;48;98;1;2;1_");
+        drop(log);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.trim_end().ends_with("\\e[66;48;98;1;2;1_  (Alt+b)"), "{text:?}");
+    }
+
     /// A path reaches the shell as one word -- in the form *that* shell reads.
     ///
     /// The single quote is the whole point. This test used to assert the POSIX

@@ -53,7 +53,75 @@ pub(crate) fn log_pty(log: &PtyLog, dir: &str, bytes: &[u8]) {
     let Some(log) = log else { return };
     let Ok(mut l) = log.lock() else { return };
     let ms = l.start.elapsed().as_millis();
-    let _ = writeln!(l.file, "{ms:>8} {dir:<9} {}", escape_bytes(bytes));
+    let names = name_records(bytes);
+    let names = if names.is_empty() { String::new() } else { format!("  ({})", names.join(" ")) };
+    let _ = writeln!(l.file, "{ms:>8} {dir:<9} {}{names}", escape_bytes(bytes));
+}
+
+/// The keys in a chunk of win32-input-mode records, in words: `\e[66;48;98;1;2;1_`
+/// is `Alt+b` (filer #243). Reading the six numbers by hand was the slow part
+/// of every look at a key that went wrong. Empty unless the whole chunk is
+/// records, which is how keys are sent; a release adds `up`.
+///
+/// The record is `CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _`: the virtual key, the
+/// scan code, the character, pressed (1) or released (0), the modifier state
+/// (`RIGHT_ALT` 0x1, `LEFT_ALT` 0x2, `RIGHT_CTRL` 0x4, `LEFT_CTRL` 0x8,
+/// `SHIFT` 0x10) and the repeat count.
+pub(crate) fn name_records(bytes: &[u8]) -> Vec<String> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let Some(body) = rest.strip_prefix("\x1b[") else { return Vec::new() };
+        let Some(end) = body.find('_') else { return Vec::new() };
+        let nums: Vec<u32> = match body[..end].split(';').map(str::parse).collect::<Result<_, _>>() {
+            Ok(n) => n,
+            Err(_) => return Vec::new(),
+        };
+        let [vk, _, uc, kd, cs, _] = nums[..] else { return Vec::new() };
+        out.push(name_key(vk, uc, kd, cs));
+        rest = &body[end + 1..];
+    }
+    out
+}
+
+fn name_key(vk: u32, uc: u32, kd: u32, cs: u32) -> String {
+    let mut name = String::new();
+    if cs & 0x0c != 0 {
+        name.push_str("Ctrl+");
+    }
+    if cs & 0x03 != 0 {
+        name.push_str("Alt+");
+    }
+    let key = match vk {
+        0x08 => "Backspace".to_owned(),
+        0x09 => "Tab".to_owned(),
+        0x0d => "Enter".to_owned(),
+        0x1b => "Esc".to_owned(),
+        0x20 => "Space".to_owned(),
+        0x21 => "PageUp".to_owned(),
+        0x22 => "PageDown".to_owned(),
+        0x23 => "End".to_owned(),
+        0x24 => "Home".to_owned(),
+        0x25 => "Left".to_owned(),
+        0x26 => "Up".to_owned(),
+        0x27 => "Right".to_owned(),
+        0x28 => "Down".to_owned(),
+        0x2d => "Insert".to_owned(),
+        0x2e => "Delete".to_owned(),
+        0x70..=0x87 => format!("F{}", vk - 0x6f),
+        // A character says itself, already shifted (`B`, `!`), so Shift is
+        // not named again for it.
+        _ => match char::from_u32(uc).filter(|c| !c.is_control()) {
+            Some(c) => return format!("{name}{c}{}", if kd == 0 { " up" } else { "" }),
+            // Ctrl turns a letter into a control character; the key is the letter.
+            None => char::from_u32(vk).filter(char::is_ascii_alphanumeric).map_or(format!("vk{vk}"), |c| c.to_ascii_lowercase().to_string()),
+        },
+    };
+    if cs & 0x10 != 0 {
+        name.push_str("Shift+");
+    }
+    format!("{name}{key}{}", if kd == 0 { " up" } else { "" })
 }
 
 /// Bytes as one readable line: `\e` for ESC, `\r` `\n` `\t`, `\xNN` for any
