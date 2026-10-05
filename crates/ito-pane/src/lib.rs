@@ -1,3 +1,38 @@
 //! A terminal pane, shared by filer and tsumugi.
 //!
-//! The plan and its stages are in `docs/pane-extraction.md`.
+//! `alacritty_terminal` does the parts that are a terminal emulator: it owns
+//! the PTY -- a real one on Unix, ConPTY on Windows -- reads it on a thread of
+//! its own, and parses the escape sequences into a grid. This crate adds what
+//! a pane in an app needs on top: starting the shell, turning key presses into
+//! the bytes a shell expects (win32-input-mode records for ConPTY), reading
+//! what the shell says outside the grid (OSC 7, OSC 133), and reading the grid
+//! back out to draw it.
+//!
+//! None of it knows about egui. What differs by OS is in `sys`.
+//! The plan this crate is being built by is `docs/pane-extraction.md`.
+
+mod grid;
+mod keys;
+mod log;
+mod osc;
+mod shell;
+mod sys;
+mod terminal;
+mod util;
+
+#[doc(hidden)]
+pub mod testing;
+
+#[cfg(test)]
+mod tests;
+
+/// The emulator underneath, for the types the API hands out (`Term`, `Scroll`,
+/// cell flags and colors), so a user needs no `alacritty_terminal` of its own.
+pub use alacritty_terminal;
+
+pub use grid::*;
+pub use keys::*;
+pub use log::escape_bytes;
+pub use shell::*;
+pub use sys::children;
+pub use terminal::*;
