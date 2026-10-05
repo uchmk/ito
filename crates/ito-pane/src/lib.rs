@@ -23,6 +23,8 @@ mod terminal;
 mod util;
 #[cfg(feature = "egui")]
 mod view;
+#[cfg(feature = "egui")]
+pub mod input;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
 
