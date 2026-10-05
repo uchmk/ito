@@ -13,6 +13,8 @@ default = []
 egui = ["dep:egui"]
 # Choosing wgpu's backends (`gpu`), through the wgpu that egui draws with.
 wgpu = ["dep:egui-wgpu"]
+# `Screen` and its cells as serde types, for the tsumugi server to send.
+serde = ["dep:serde", "alacritty_terminal/serde"]
 
 [dependencies]
 # Default features off: no clipboard or serde from it. The versions are filer's.
@@ -21,6 +23,7 @@ crossbeam-channel = "0.5"
 polling = "3"
 egui = { version = "0.36", optional = true }
 egui-wgpu = { version = "0.36", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }

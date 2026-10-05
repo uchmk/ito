@@ -90,6 +90,7 @@ pub fn app_cursor<T: EventListener>(term: &Term<T>) -> bool {
 /// encoding. nvim asks at startup (`\e[?1002h\e[?1006h`), as do htop, tmux and
 /// most other full-screen programs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MouseReport {
     #[default]
     Off,
@@ -192,6 +193,7 @@ pub fn snapshot<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
 
 /// One cell, copied out from under the lock.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CellView {
     pub c: char,
     pub fg: alacritty_terminal::vte::ansi::Color,

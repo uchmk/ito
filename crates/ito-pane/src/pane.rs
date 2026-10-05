@@ -9,6 +9,7 @@ use crate::{CellView, MouseReport, Size, Terminal};
 
 /// The visible screen, copied out at one moment.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Screen {
     pub rows: Vec<Vec<CellView>>,
     /// Column and line of the cursor.

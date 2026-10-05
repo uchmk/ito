@@ -22,7 +22,8 @@ use crossbeam_channel::{Receiver, Sender};
 use crate::{grid::*, keys::*, log::*, osc::*, shell::*};
 
 /// The grid's shape, which is all `Term` needs to know about the window.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Size {
     pub cols: usize,
     pub lines: usize,
