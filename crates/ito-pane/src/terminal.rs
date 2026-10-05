@@ -613,6 +613,10 @@ impl Drop for Terminal {
         if let Some(pid) = self.shell_pid.filter(|_| !self.exited) {
             crate::sys::hang_up_children(pid);
         }
+        #[cfg(unix)]
+        if let Some(pid) = self.shell_pid.filter(|_| !self.exited) {
+            crate::sys::end_shell(pid);
+        }
         let _ = self.sender.send(Msg::Shutdown);
         let Some(io) = self.io.take() else { return };
         let deadline = Instant::now() + std::time::Duration::from_secs(2);

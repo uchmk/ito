@@ -44,3 +44,40 @@ pub fn hang_up_children(pid: u32) {
         let _ = std::process::Command::new("/bin/kill").args(["-HUP", &child.to_string()]).status();
     }
 }
+
+/// End the shell: hang it up, as a terminal closing does, and if it is still
+/// there half a second later, kill it. alacritty's PTY hangs up the shell
+/// as it is dropped and then *waits* for it; a bash that took the hangup and
+/// went on reading left that wait, and the tsumugi server's lock with it,
+/// hanging for good (seen under Xvfb, 2026-10-06).
+pub fn end_shell(pid: u32) {
+    let pid_s = pid.to_string();
+    let _ = std::process::Command::new("kill").args(["-HUP", &pid_s]).status();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while alive(pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if alive(pid) {
+        let _ = std::process::Command::new("kill").args(["-KILL", &pid_s]).status();
+    }
+}
+
+/// Whether `pid` is running: not gone, and not a zombie waiting to be reaped
+/// (which is what a shell that has exited is until the PTY waits for it).
+fn alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| stat.rsplit_once(')').and_then(|(_, rest)| rest.trim_start().chars().next()))
+            .is_some_and(|state| state != 'Z' && state != 'X')
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .is_ok_and(|s| !s.is_empty() && !s.starts_with('Z'))
+    }
+}
