@@ -16,3 +16,7 @@ pub use unix::*;
 pub fn children(_pid: u32) -> Vec<u32> {
     Vec::new()
 }
+
+/// Nothing to restrict off Windows: there `conpty.dll` is not a thing.
+#[cfg(not(windows))]
+pub fn restrict_dll_search() {}

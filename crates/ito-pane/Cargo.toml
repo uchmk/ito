@@ -7,11 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# The pane drawn with egui: `show`, `Palette`, `wheel_whole`.
+egui = ["dep:egui"]
+# Choosing wgpu's backends (`gpu`), through the wgpu that egui draws with.
+wgpu = ["dep:egui-wgpu"]
+
 [dependencies]
 # Default features off: no clipboard or serde from it. The versions are filer's.
 alacritty_terminal = { version = "0.26", default-features = false }
 crossbeam-channel = "0.5"
 polling = "3"
+egui = { version = "0.36", optional = true }
+egui-wgpu = { version = "0.36", optional = true }
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }

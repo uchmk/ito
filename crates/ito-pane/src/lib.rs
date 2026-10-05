@@ -8,7 +8,9 @@
 //! what the shell says outside the grid (OSC 7, OSC 133), and reading the grid
 //! back out to draw it.
 //!
-//! None of it knows about egui. What differs by OS is in `sys`.
+//! The core knows nothing of egui. Drawing the pane with egui is the `egui`
+//! feature ([`show`]), and choosing wgpu's backends is the `wgpu` feature
+//! ([`gpu`]). What differs by OS is in `sys`.
 //! The plan this crate is being built by is `docs/pane-extraction.md`.
 
 mod grid;
@@ -19,6 +21,10 @@ mod shell;
 mod sys;
 mod terminal;
 mod util;
+#[cfg(feature = "egui")]
+mod view;
+#[cfg(feature = "wgpu")]
+pub mod gpu;
 
 #[doc(hidden)]
 pub mod testing;
@@ -34,5 +40,7 @@ pub use grid::*;
 pub use keys::*;
 pub use log::escape_bytes;
 pub use shell::*;
-pub use sys::children;
+pub use sys::{children, restrict_dll_search};
 pub use terminal::*;
+#[cfg(feature = "egui")]
+pub use view::*;
