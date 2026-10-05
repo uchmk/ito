@@ -1,0 +1,14 @@
+[package]
+name = "tsumugi-layout"
+description = "Splitting a rectangle into panes: a tree of splits that knows nothing of what the panes hold"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
