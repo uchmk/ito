@@ -68,7 +68,10 @@ pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> 
         Some(Special::Escape) if cfg!(windows) => Some(crate::win32_key(0x1b, 1, 0x1b, mods)),
         Some(s) => Some(crate::encode(s, mods, term.screen().app_cursor)),
         // A letter with Ctrl held is a control code; egui sends no text for it.
-        None if mods.ctrl => key.name().chars().next().and_then(|c| crate::control_code(c.to_ascii_lowercase(), mods.alt)),
+        // By the key's character, never its name: egui sends Shift and Ctrl
+        // themselves as keys too, and `ShiftLeft` with Ctrl held went to the
+        // shell as Ctrl+S, which stops a terminal's output.
+        None if mods.ctrl => printable(key).and_then(|c| crate::control_code(c, mods.alt)),
         // Alt without Ctrl sends no text either: readline's `Alt-b` and
         // `Alt-f` are made here.
         None if mods.alt => printable(key).map(|c| crate::meta_char(if mods.shift { c.to_ascii_uppercase() } else { c })),
@@ -78,7 +81,7 @@ pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> 
     match (win32, special(key, mods.shift)) {
         (true, Some(s)) => Some(crate::special_record(s, mods)),
         (true, None) if mods.ctrl || mods.alt => {
-            printable(key).or_else(|| key.name().chars().next()).and_then(|c| crate::char_record(c, mods)).or(vt)
+            printable(key).and_then(|c| crate::char_record(c, mods)).or(vt)
         }
         _ => vt,
     }
@@ -168,6 +171,13 @@ mod tests {
         assert_eq!(printable(Key::Slash), Some('/'));
         assert_eq!(printable(Key::F1), None, "F1 is no character");
         assert_eq!(printable(Key::Enter), None);
+    }
+
+    /// egui 0.36 sends the modifier keys themselves; they type nothing.
+    #[test]
+    fn a_modifier_key_is_no_character() {
+        assert_eq!(printable(Key::ShiftLeft), None);
+        assert_eq!(printable(Key::ControlLeft), None);
     }
 
     #[test]

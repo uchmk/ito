@@ -176,3 +176,64 @@ pub(crate) fn percent_decode(s: &str) -> String {
     }
     String::from_utf8_lossy(&out).into_owned()
 }
+
+/// The notifications in `chunk`, carried on from `carry` as `scan_osc7`
+/// does: what a program asks the terminal to tell the user. Three forms are
+/// in use, and coding agents send them when they want a person (cmux reads
+/// the same three):
+///
+/// - OSC 9 (`ESC ] 9 ; text BEL`), iTerm2's -- but not `9;4;`, ConEmu's
+///   progress bar, which Windows Terminal also reads;
+/// - OSC 777 (`ESC ] 777 ; notify ; title ; body BEL`), rxvt's;
+/// - OSC 99 (`ESC ] 99 ; metadata ; payload ST`), kitty's.
+pub(crate) fn scan_notices(carry: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
+    const START: &[u8] = b"\x1b]";
+    let mut out = Vec::new();
+    carry.extend_from_slice(chunk);
+    let mut from = 0usize;
+    let keep;
+    loop {
+        let Some(rel) = find(&carry[from..], START) else {
+            keep = from.max(carry.len().saturating_sub(START.len() - 1));
+            break;
+        };
+        let at = from + rel;
+        let body = at + START.len();
+        match end_of_osc(&carry[body..]) {
+            Some((end, skip)) => {
+                if let Some(text) = notice(&carry[body..body + end]) {
+                    out.push(text);
+                }
+                from = body + end + skip;
+            }
+            None => {
+                keep = if carry.len() - at > MAX_OSC { carry.len() } else { at };
+                break;
+            }
+        }
+    }
+    carry.drain(..keep);
+    out
+}
+
+/// The text of one OSC body, when it is a notification.
+fn notice(body: &[u8]) -> Option<String> {
+    let s = String::from_utf8_lossy(body);
+    if let Some(rest) = s.strip_prefix("9;") {
+        return (!rest.starts_with("4;")).then(|| rest.to_owned());
+    }
+    if let Some(rest) = s.strip_prefix("777;notify;") {
+        let (title, body) = rest.split_once(';').unwrap_or((rest, ""));
+        return Some(match (title.is_empty(), body.is_empty()) {
+            (false, false) => format!("{title}: {body}"),
+            (true, _) => body.to_owned(),
+            (_, true) => title.to_owned(),
+        });
+    }
+    if let Some(rest) = s.strip_prefix("99;") {
+        let (_, payload) = rest.split_once(';')?;
+        return Some(payload.to_owned());
+    }
+    None
+}
+

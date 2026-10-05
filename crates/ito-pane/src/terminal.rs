@@ -97,6 +97,11 @@ pub(crate) struct Tapped {
     /// [`Terminal::prompt_seen`]. With the end of the last read, as above.
     prompt: Arc<AtomicBool>,
     prompt_tail: Vec<u8>,
+    /// When the shell last marked a prompt; see [`Terminal::last_prompt`].
+    prompt_at: Arc<Mutex<Option<Instant>>>,
+    /// OSC 9 / 99 / 777 notifications, and the end of the last read.
+    notices: Sender<String>,
+    notice_tail: Vec<u8>,
 }
 
 impl io::Read for Tapped {
@@ -114,6 +119,10 @@ impl io::Read for Tapped {
         }
         if scan_prompt_mark(&mut self.prompt_tail, &buf[..n]) {
             self.prompt.store(true, Ordering::Relaxed);
+            *self.prompt_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        }
+        for text in scan_notices(&mut self.notice_tail, &buf[..n]) {
+            let _ = self.notices.send(text);
         }
         Ok(n)
     }
@@ -221,6 +230,10 @@ pub struct Terminal {
     last_out: Arc<std::sync::Mutex<Option<Instant>>>,
     /// Whether the shell has marked a prompt (OSC 133), shared with the reader.
     prompt: Arc<AtomicBool>,
+    prompt_at: Arc<Mutex<Option<Instant>>>,
+    notices: Receiver<String>,
+    /// When a key or a paste was last sent; see [`Terminal::last_input`].
+    last_input: Mutex<Option<Instant>>,
     /// The reader thread. It hands the PTY back when it ends, and dropping
     /// that is what ends the shell -- so [`Drop`] waits for it.
     io: Option<std::thread::JoinHandle<(EventLoop<Tapped, Proxy>, alacritty_terminal::event_loop::State)>>,
@@ -266,6 +279,23 @@ impl Terminal {
         log: Option<&Path>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> io::Result<Self> {
+        Self::spawn_with_env(cwd, size, cell, shell, log, Vec::new(), wake)
+    }
+
+    /// [`spawn`](Self::spawn), with variables added to the shell's
+    /// environment (tsumugi's `TSUMUGI_SESSION`, which `tsumugi notify` reads).
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_with_env(
+        cwd: &Path,
+        size: Size,
+        cell: (u16, u16),
+        shell: Option<(String, Vec<String>)>,
+        log: Option<&Path>,
+        env: Vec<(String, String)>,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        let mut vars = pane_env();
+        vars.extend(env);
         let quoting = Quoting::for_shell(shell.as_ref().map(|(p, _)| p.as_str()));
         let options = tty::Options {
             // `None` is the platform default, which on Windows is
@@ -276,7 +306,7 @@ impl Terminal {
             shell: shell.map(|(program, args)| tty::Shell::new(program, args)),
             working_directory: Some(cwd.to_path_buf()),
             drain_on_exit: false,
-            env: pane_env(),
+            env: vars,
             #[cfg(target_os = "windows")]
             escape_args: true,
         };
@@ -294,6 +324,8 @@ impl Terminal {
         let win32 = Arc::new(AtomicBool::new(false));
         let last_out = Arc::new(std::sync::Mutex::new(None));
         let prompt = Arc::new(AtomicBool::new(false));
+        let prompt_at = Arc::new(Mutex::new(None));
+        let (notice_tx, notices) = crossbeam_channel::unbounded();
         let pty = Tapped {
             inner: pty,
             cwd: cwd_tx,
@@ -304,6 +336,9 @@ impl Terminal {
             last_out: last_out.clone(),
             prompt: prompt.clone(),
             prompt_tail: Vec::new(),
+            prompt_at: prompt_at.clone(),
+            notices: notice_tx,
+            notice_tail: Vec::new(),
         };
 
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -335,6 +370,9 @@ impl Terminal {
             win32,
             last_out,
             prompt,
+            prompt_at,
+            notices,
+            last_input: Mutex::new(None),
             io,
         })
     }
@@ -416,6 +454,9 @@ impl Terminal {
     /// `send`, labelled for the PTY log by where the bytes came from.
     fn send_as(&self, bytes: Vec<u8>, origin: &str) {
         log_pty(&self.log, origin, &bytes);
+        if origin != "in reply" {
+            *self.last_input.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        }
         // Typing is an answer to what is on screen, so the view comes back to
         // the bottom — every terminal does this, and a key that seemed to do
         // nothing because the view was in the scrollback is a bad surprise.
@@ -572,6 +613,28 @@ impl Terminal {
     /// guess from how long it has been quiet.
     pub fn prompt_seen(&self) -> bool {
         self.prompt.load(Ordering::Relaxed)
+    }
+
+    /// When the shell last marked its prompt (OSC 133 `A` or `B`).
+    pub fn last_prompt(&self) -> Option<Instant> {
+        *self.prompt_at.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// When the shell last wrote anything.
+    pub fn last_output(&self) -> Option<Instant> {
+        *self.last_out.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// When a key or a paste last went to the shell (not the terminal's own
+    /// replies to a program's questions).
+    pub fn last_input(&self) -> Option<Instant> {
+        *self.last_input.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The notifications (OSC 9 / 99 / 777) the shell's programs sent since
+    /// the last call.
+    pub fn take_notices(&self) -> Vec<String> {
+        self.notices.try_iter().collect()
     }
 
     pub fn quiet_for(&self, quiet: Duration) -> bool {

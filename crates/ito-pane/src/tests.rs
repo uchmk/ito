@@ -570,6 +570,20 @@ mod pane {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// OSC 9, 777 and 99 are notifications, whole or cut across reads;
+    /// ConEmu's progress (`9;4;`) and other OSCs are not.
+    #[test]
+    fn notifications_are_read_from_the_output() {
+        let mut carry = Vec::new();
+        assert_eq!(scan_notices(&mut carry, b"a\x1b]9;Claude needs you\x07b"), vec!["Claude needs you"]);
+        assert_eq!(scan_notices(&mut carry, b"\x1b]777;notify;Claude;Waiting for input\x1b\\"), vec!["Claude: Waiting for input"]);
+        assert_eq!(scan_notices(&mut carry, b"\x1b]99;i=1:d=0;Done\x07"), vec!["Done"]);
+        assert!(scan_notices(&mut carry, b"\x1b]9;4;1;50\x07").is_empty(), "a progress bar is no notification");
+        assert!(scan_notices(&mut carry, b"\x1b]0;title\x07\x1b]7;file:///tmp\x07").is_empty());
+        assert!(scan_notices(&mut carry, b"\x1b]9;spl").is_empty(), "not finished yet");
+        assert_eq!(scan_notices(&mut carry, b"it\x07"), vec!["split"], "finished in the next read");
+    }
+
     /// Only a console host that was not there before is a stray, whatever
     /// case Windows spells its name in.
     #[test]
