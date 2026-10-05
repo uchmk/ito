@@ -1,0 +1,10 @@
+[package]
+name = "tsumugi-pane"
+description = "A terminal pane: a shell on a PTY (ConPTY on Windows), its key encoding, and an egui view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
