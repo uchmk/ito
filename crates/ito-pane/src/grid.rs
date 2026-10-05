@@ -192,7 +192,7 @@ pub fn snapshot<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
 }
 
 /// One cell, copied out from under the lock.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CellView {
     pub c: char,
