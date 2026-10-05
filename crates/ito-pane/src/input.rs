@@ -5,12 +5,12 @@
 
 use egui::{Event, Key, Modifiers};
 
-use crate::{Mods, Special, Terminal};
+use crate::{Mods, Pane, Special};
 
 /// Hand this frame's `events` to `term`. `claim` sees every key press first
 /// and returns true for one the app keeps (a new tab, a split): that one goes
 /// no further, and neither does the text it would have typed.
-pub fn feed(term: &Terminal, events: &[Event], mut claim: impl FnMut(Key, Modifiers) -> bool) {
+pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(Key, Modifiers) -> bool) {
     // Windows sends a chord *and* the character it would have typed: `<A-b>`
     // arrives as a key with alt set and then as `Text("b")`. The chord has been
     // sent by the time the text turns up, so the text is dropped. Ctrl and Alt
@@ -41,7 +41,7 @@ pub fn feed(term: &Terminal, events: &[Event], mut claim: impl FnMut(Key, Modifi
     }
 }
 
-fn send_chord(term: &Terminal, key: Key, claim: &mut impl FnMut(Key, Modifiers) -> bool) {
+fn send_chord<P: Pane + ?Sized>(term: &P, key: Key, claim: &mut impl FnMut(Key, Modifiers) -> bool) {
     let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
     if !claim(key, ctrl) {
         if let Some(bytes) = key_bytes(term, key, ctrl) {
@@ -57,7 +57,7 @@ fn send_chord(term: &Terminal, key: Key, claim: &mut impl FnMut(Key, Modifiers) 
 /// starts), every key whose VT form begins with ESC goes as a key record, as
 /// Windows Terminal sends them: a tcell program then cannot mistake `<Esc>`
 /// and the key after it for one sequence (filer Q27, #99).
-pub fn key_bytes(term: &Terminal, key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
+pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
     let mods = Mods { ctrl: modifiers.command || modifiers.ctrl, alt: modifiers.alt, shift: modifiers.shift };
     let win32 = term.win32_input();
     let vt = match special(key, mods.shift) {
@@ -66,7 +66,7 @@ pub fn key_bytes(term: &Terminal, key: Key, modifiers: Modifiers) -> Option<Vec<
         // and the release turns the key into an Alt prefix in a tcell program,
         // so `Esc` did nothing in lazygit. See `win32_key`.
         Some(Special::Escape) if cfg!(windows) => Some(crate::win32_key(0x1b, 1, 0x1b, mods)),
-        Some(s) => Some(crate::encode(s, mods, term.with_grid(crate::app_cursor))),
+        Some(s) => Some(crate::encode(s, mods, term.screen().app_cursor)),
         // A letter with Ctrl held is a control code; egui sends no text for it.
         None if mods.ctrl => key.name().chars().next().and_then(|c| crate::control_code(c.to_ascii_lowercase(), mods.alt)),
         // Alt without Ctrl sends no text either: readline's `Alt-b` and

@@ -16,7 +16,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor};
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Stroke, Ui, Vec2};
 
-use crate::{Mods, MouseReport, Size, Special, Terminal};
+use crate::{Mods, MouseReport, Pane, Size, Special};
 
 /// The colors the pane is drawn in. The sixteen named ANSI colors other than
 /// these are the pane's own.
@@ -74,7 +74,7 @@ pub struct Shown {
     pub focus: bool,
     /// A selection was finished: put this on the clipboard.
     pub copy: Option<String>,
-    /// A right-click: read the clipboard and [`Terminal::paste`] it.
+    /// A right-click: read the clipboard and [`Pane::paste`] it.
     pub paste: bool,
 }
 
@@ -110,9 +110,9 @@ fn notches(events: &[egui::Event]) -> f32 {
 /// rows `row_h` apart, and handle the pointer over it: selecting, the wheel,
 /// right-click to paste. The grid is resized to fit.
 #[allow(clippy::too_many_arguments)]
-pub fn show(
+pub fn show<P: Pane + ?Sized>(
     ui: &mut Ui,
-    term: Option<&mut Terminal>,
+    term: Option<&mut P>,
     state: &mut ViewState,
     rect: Rect,
     f: &FontId,
@@ -156,15 +156,7 @@ pub fn show(
     let Some(term) = term else { return shown };
     term.resize(size, (cell_w.round() as u16, row_h.round() as u16));
     // Out from under the lock before any laying out happens.
-    let (rows, cursor, app_cursor, alt_screen, mouse) = term.with_grid(|t| {
-        (
-            crate::snapshot(t),
-            crate::cursor_cell(t),
-            crate::app_cursor(t),
-            crate::alt_screen(t),
-            crate::mouse_report(t),
-        )
-    });
+    let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
 
     for (y, row) in rows.iter().enumerate() {
         let top = inner.top() + y as f32 * row_h;

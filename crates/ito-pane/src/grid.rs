@@ -89,8 +89,9 @@ pub fn app_cursor<T: EventListener>(term: &Term<T>) -> bool {
 /// Whether the program has asked to be told about the mouse, and in which
 /// encoding. nvim asks at startup (`\e[?1002h\e[?1006h`), as do htop, tmux and
 /// most other full-screen programs.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MouseReport {
+    #[default]
     Off,
     /// `\e[<b;x;yM` (mode 1006): any column, and what everything current asks for.
     Sgr,
