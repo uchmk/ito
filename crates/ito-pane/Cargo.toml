@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = []
 # The pane drawn with egui: `show`, `Palette`, `wheel_whole`.
-egui = ["dep:egui", "dep:rustybuzz", "dep:ab_glyph"]
+egui = ["dep:egui", "dep:harfrust", "dep:skrifa", "dep:vello_cpu"]
 # Choosing wgpu's backends (`gpu`), through the wgpu that egui draws with.
 wgpu = ["dep:egui-wgpu"]
 # `Screen` and its cells as serde types, for the tsumugi server to send.
@@ -23,11 +23,14 @@ crossbeam-channel = "0.5"
 polling = "3"
 egui = { version = "0.36", optional = true }
 egui-wgpu = { version = "0.36", optional = true }
-# Ligatures (tsumugi's QUESTIONS.md Q8): rustybuzz shapes a run of cells,
-# ab_glyph (already built by egui) draws the glyphs it substitutes. Both
-# pure Rust, over the same ttf-parser.
-rustybuzz = { version = "0.20", optional = true }
-ab_glyph = { version = "0.2", optional = true }
+# Ligatures (tsumugi's QUESTIONS.md Q8 and Q10): harfrust shapes a run of
+# cells, skrifa reads the outlines of the glyphs it substitutes and vello_cpu
+# fills them. The three egui 0.36 draws its own text with, at its versions,
+# so nothing new is built; rustybuzz and ab_glyph, used before, are
+# unmaintained or carry ttf-parser, which is (RUSTSEC-2026-0206, -0192).
+harfrust = { version = "0.12", optional = true }
+skrifa = { version = "0.44", default-features = false, features = ["std"], optional = true }
+vello_cpu = { version = "0.1", default-features = false, features = ["std", "u8_pipeline"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [target."cfg(windows)".dependencies]
