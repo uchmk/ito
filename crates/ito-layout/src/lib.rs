@@ -139,6 +139,51 @@ impl<T: Clone + PartialEq> Node<T> {
         }
     }
 
+    /// Split the pane `at` in two with `new` on the side `toward` of it,
+    /// half each. False when there is no such pane.
+    pub fn split_toward(&mut self, at: &T, toward: Toward, new: T) -> bool {
+        match self {
+            Node::Leaf(x) if x == at => {
+                let (old, new) = (Box::new(Node::Leaf(x.clone())), Box::new(Node::Leaf(new)));
+                let (dir, first, second) = match toward {
+                    Toward::Left => (Dir::Right, new, old),
+                    Toward::Right => (Dir::Right, old, new),
+                    Toward::Up => (Dir::Down, new, old),
+                    Toward::Down => (Dir::Down, old, new),
+                };
+                *self = Node::Split { dir, ratio: 0.5, first, second };
+                true
+            }
+            Node::Leaf(_) => false,
+            Node::Split { first, second, .. } => first.split_toward(at, toward, new.clone()) || second.split_toward(at, toward, new),
+        }
+    }
+
+    /// Panes `a` and `b` trade places; the shape stays.
+    pub fn swap(&mut self, a: &T, b: &T) {
+        match self {
+            Node::Leaf(x) if x == a => *x = b.clone(),
+            Node::Leaf(x) if x == b => *x = a.clone(),
+            Node::Leaf(_) => {}
+            Node::Split { first, second, .. } => {
+                first.swap(a, b);
+                second.swap(a, b);
+            }
+        }
+    }
+
+    /// The tree with pane `moving` taken out and put on the side `toward`
+    /// of pane `target`, the two sharing what was `target`'s room. The tree
+    /// as it was when either is missing or they are the same.
+    pub fn moved(self, moving: &T, target: &T, toward: Toward) -> Node<T> {
+        if moving == target || !self.contains(moving) || !self.contains(target) {
+            return self;
+        }
+        let Some(mut rest) = self.clone().remove(moving) else { return self };
+        rest.split_toward(target, toward, moving.clone());
+        rest
+    }
+
     /// The tree with only the panes `keep` says yes to; a split left with one
     /// side gives way to that side. `None` when no pane is left.
     pub fn retain(self, keep: &impl Fn(&T) -> bool) -> Option<Node<T>> {
@@ -291,6 +336,23 @@ mod tests {
         assert_eq!(n.layout(AREA, 0.0)[1].1.h, 150.0);
         n.set_ratio(&[], 2.0);
         assert_eq!(n.layout(AREA, 0.0)[0].1.w, 950.0, "clamped to 1 - MIN_RATIO");
+    }
+
+    #[test]
+    fn a_pane_moves_beside_another_or_trades_places() {
+        // 1 | 2 over 3; 1 goes below 3: 2 over (3 over 1).
+        let n = three().moved(&1, &3, Toward::Down);
+        assert_eq!(n.leaves(), vec![2, 3, 1]);
+        let r = n.layout(AREA, 0.0);
+        assert_eq!(r[0].1, Rect::new(0.0, 0.0, 1000.0, 300.0), "2 takes the room 1 left");
+        assert_eq!(r[2].1, Rect::new(0.0, 450.0, 1000.0, 150.0), "1 has the lower half of 3's");
+        // 3 goes left of 2.
+        assert_eq!(three().moved(&3, &2, Toward::Left).leaves(), vec![1, 3, 2]);
+        assert_eq!(three().moved(&3, &3, Toward::Left), three(), "onto itself, nothing");
+        let mut n = three();
+        n.swap(&1, &3);
+        assert_eq!(n.leaves(), vec![3, 2, 1]);
+        assert_eq!(n.layout(AREA, 4.0)[0].1, three().layout(AREA, 4.0)[0].1, "the shape stays");
     }
 
     #[test]
