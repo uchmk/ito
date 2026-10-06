@@ -50,6 +50,49 @@ pub fn select_at<T: EventListener>(
     }
 }
 
+/// The lines of the whole buffer -- scrollback and screen -- holding
+/// `needle`, case aside: newest first, at most `max`. Each is its line (the
+/// scrollback above zero, as [`point_at`] has it), the cell the match starts
+/// at, and the line's text.
+pub fn find_lines<T: EventListener>(term: &Term<T>, needle: &str, max: usize) -> Vec<(i32, usize, String)> {
+    let want = needle.to_lowercase();
+    let mut out = Vec::new();
+    if want.is_empty() {
+        return out;
+    }
+    let grid = term.grid();
+    let top = -(grid.history_size() as i32);
+    let bottom = grid.screen_lines() as i32 - 1;
+    let cols = grid.columns();
+    for l in (top..=bottom).rev() {
+        let row = &grid[Line(l)];
+        // A wide character's spacer is a cell too, so a char is a cell.
+        let text: String = (0..cols).map(|c| row[Column(c)].c).collect();
+        let lower: String = text.chars().flat_map(char::to_lowercase).collect();
+        if let Some(byte) = lower.find(&want) {
+            out.push((l, lower[..byte].chars().count(), text.trim_end().to_owned()));
+            if out.len() >= max {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Put `line` on screen and select `len` cells of it from `col`: where a
+/// search across sessions found something.
+pub fn reveal<T: EventListener>(term: &mut Term<T>, line: i32, col: usize, len: usize) {
+    let grid = term.grid();
+    let line = line.clamp(-(grid.history_size() as i32), grid.screen_lines() as i32 - 1);
+    let want = (-line).max(0);
+    let now = grid.display_offset() as i32;
+    term.scroll_display(Scroll::Delta(want - now));
+    let last = (col + len.max(1) - 1).min(term.grid().columns() - 1);
+    let mut sel = Selection::new(SelectionType::Simple, Point::new(Line(line), Column(col)), Side::Left);
+    sel.update(Point::new(Line(line), Column(last)), Side::Right);
+    term.selection = Some(sel);
+}
+
 /// Where a search with nothing to carry on from begins.
 ///
 /// Backwards starts at the bottom right of what is on screen, so the visible

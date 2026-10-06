@@ -517,6 +517,18 @@ impl Terminal {
         search_in(&mut term, &mut self.found, needle, back)
     }
 
+    /// The lines holding `needle` anywhere in the buffer (see
+    /// [`find_lines`](crate::find_lines)).
+    pub fn find_lines(&self, needle: &str, max: usize) -> Vec<(i32, usize, String)> {
+        find_lines(&self.term.lock(), needle, max)
+    }
+
+    /// Put a found line on screen, its match selected.
+    pub fn reveal(&mut self, line: i32, col: usize, len: usize) {
+        self.found = None;
+        reveal(&mut self.term.lock(), line, col, len);
+    }
+
     /// Forget where a search got to, so the next one starts from the view.
     pub fn end_search(&mut self) {
         self.found = None;

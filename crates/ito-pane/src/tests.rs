@@ -79,6 +79,27 @@ mod pane {
         assert_eq!(line(&found), second, "and one more returns to where it was");
     }
 
+    /// A search across sessions reads the whole buffer: the newest line
+    /// first, the scrollback too, case aside; and showing one puts it on
+    /// screen with its match selected.
+    #[test]
+    fn lines_are_found_in_the_scrollback_and_shown() {
+        let mut t = term(40, 5);
+        for i in 0..30 {
+            feed(&mut t, &format!("line {i:02}{}\r\n", if i % 10 == 3 { " Needle here" } else { "" }));
+        }
+        let found = find_lines(&t, "needle", 10);
+        assert_eq!(found.iter().map(|f| f.2.as_str()).collect::<Vec<_>>(), ["line 23 Needle here", "line 13 Needle here", "line 03 Needle here"]);
+        assert_eq!(found[0].1, 8, "the cell the match starts at");
+        assert!(found[2].0 < 0, "the oldest is in the scrollback");
+        assert_eq!(find_lines(&t, "needle", 1).len(), 1, "at most as many as asked");
+        assert!(find_lines(&t, "", 10).is_empty());
+        let (line, col, _) = found[2].clone();
+        reveal(&mut t, line, col, 6);
+        assert_eq!(t.grid().display_offset() as i32, -line, "scrolled to it");
+        assert_eq!(t.selection_to_string().as_deref(), Some("Needle"));
+    }
+
     /// TESTING.md 1.9i — past the last match the search starts again from the
     /// other end, and says that it did (#98).
     #[test]
