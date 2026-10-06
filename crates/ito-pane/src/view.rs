@@ -121,11 +121,49 @@ pub struct Faces {
     pub bold_italic: Option<FontId>,
     /// The regular face's file, to draw its ligatures from; none, none.
     pub shaper: Option<std::sync::Arc<crate::liga::Shaper>>,
+    /// How the cursor of the pane with the keys is drawn.
+    pub cursor: CursorStyle,
 }
+
+/// The shape of the focused pane's cursor, and whether it blinks. A pane
+/// without the keys always shows an outlined block, so it reads as asleep.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CursorStyle {
+    pub shape: CursorShape,
+    pub blink: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+impl CursorStyle {
+    /// Read from a word such as `block`, `bar-blink` or `underline`; an
+    /// unknown shape is a block.
+    pub fn from_word(word: &str) -> Self {
+        let (shape, blink) = match word.strip_suffix("-blink") {
+            Some(s) => (s, true),
+            None => (word, false),
+        };
+        let shape = match shape {
+            "bar" => CursorShape::Bar,
+            "underline" => CursorShape::Underline,
+            _ => CursorShape::Block,
+        };
+        Self { shape, blink }
+    }
+}
+
+/// How long the cursor stays on, then off, while it blinks.
+const BLINK: f64 = 0.53;
 
 impl Faces {
     pub fn plain(regular: FontId) -> Self {
-        Self { regular, bold: None, italic: None, bold_italic: None, shaper: None }
+        Self { regular, bold: None, italic: None, bold_italic: None, shaper: None, cursor: CursorStyle::default() }
     }
 
     /// The face for a cell's flags.
@@ -310,13 +348,28 @@ pub fn show_faces<P: Pane + ?Sized>(
             egui::pos2(inner.left() + cx as f32 * cell_w, inner.top() + cy as f32 * row_h),
             Vec2::new(cell_w, row_h),
         );
-        if focused {
+        let style = faces.cursor;
+        let lit = !style.blink || {
+            let now = ui.input(|i| i.time);
+            let left = BLINK - now % BLINK;
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+            ((now / BLINK) as u64).is_multiple_of(2)
+        };
+        if focused && !lit {
+        } else if focused && style.shape == CursorShape::Block {
             painter.rect_filled(at, CornerRadius::ZERO, pal.cursor);
             if let Some(cell) = rows.get(cy).and_then(|r| r.get(cx)) {
                 if cell.c != ' ' {
                     painter.text(at.left_top(), Align2::LEFT_TOP, cell.c, f.clone(), pal.on_cursor);
                 }
             }
+        } else if focused {
+            let thick = (cell_w / 6.0).max(2.0).round();
+            let mark = match style.shape {
+                CursorShape::Bar => Rect::from_min_size(at.left_top(), Vec2::new(thick, at.height())),
+                _ => Rect::from_min_max(egui::pos2(at.left(), at.bottom() - thick), at.right_bottom()),
+            };
+            painter.rect_filled(mark, CornerRadius::ZERO, pal.cursor);
         } else {
             painter.rect_stroke(
                 at,
@@ -554,6 +607,14 @@ fn indexed(i: u8, pal: &Palette, is_bg: bool) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cursor_word_names_its_shape_and_blink() {
+        assert_eq!(CursorStyle::from_word("block-blink"), CursorStyle { shape: CursorShape::Block, blink: true });
+        assert_eq!(CursorStyle::from_word("bar"), CursorStyle { shape: CursorShape::Bar, blink: false });
+        assert_eq!(CursorStyle::from_word("underline-blink"), CursorStyle { shape: CursorShape::Underline, blink: true });
+        assert_eq!(CursorStyle::from_word("odd"), CursorStyle::default());
+    }
 
     #[test]
     fn the_color_cube_lands_where_xterm_puts_it() {

@@ -243,6 +243,40 @@ impl<T: Clone + PartialEq> Node<T> {
         }
     }
 
+    /// Move the nearest divider beside pane `at` toward `toward` by `step`
+    /// (a share of its split): `Right` with the pane on the left grows it,
+    /// with the pane on the right shrinks it. False when no split of that
+    /// way holds the pane.
+    pub fn nudge(&mut self, at: &T, toward: Toward, step: f32) -> bool {
+        let want = match toward {
+            Toward::Left | Toward::Right => Dir::Right,
+            Toward::Up | Toward::Down => Dir::Down,
+        };
+        let sign = if matches!(toward, Toward::Right | Toward::Down) { 1.0 } else { -1.0 };
+        self.nudge_in(at, want, sign * step)
+    }
+
+    fn nudge_in(&mut self, at: &T, want: Dir, by: f32) -> bool {
+        let Node::Split { dir, ratio, first, second } = self else { return false };
+        // The innermost split of that way that holds it moves first.
+        if first.contains(at) {
+            if first.nudge_in(at, want, by) {
+                return true;
+            }
+        } else if second.contains(at) {
+            if second.nudge_in(at, want, by) {
+                return true;
+            }
+        } else {
+            return false;
+        }
+        if *dir != want {
+            return false;
+        }
+        *ratio = (*ratio + by).clamp(MIN_RATIO, 1.0 - MIN_RATIO);
+        true
+    }
+
     /// Move the divider of the split at `path` (see [`Divider::path`]).
     pub fn set_ratio(&mut self, path: &[bool], ratio: f32) {
         match (self, path.split_first()) {
@@ -336,6 +370,20 @@ mod tests {
         assert_eq!(n.layout(AREA, 0.0)[1].1.h, 150.0);
         n.set_ratio(&[], 2.0);
         assert_eq!(n.layout(AREA, 0.0)[0].1.w, 950.0, "clamped to 1 - MIN_RATIO");
+    }
+
+    #[test]
+    fn a_key_moves_the_nearest_divider() {
+        // 1 | 2 over 3.
+        let mut n = three();
+        assert!(n.nudge(&1, Toward::Right, 0.1));
+        assert_eq!(n.layout(AREA, 0.0)[0].1.w, 600.0, "the left pane grows");
+        assert!(n.nudge(&3, Toward::Up, 0.1));
+        assert_eq!(n.layout(AREA, 0.0)[1].1.h, 240.0, "the divider above 3 rises");
+        assert!(n.nudge(&2, Toward::Left, 0.2));
+        assert_eq!(n.layout(AREA, 0.0)[0].1.w, 400.0, "2 is in the outer split's second half");
+        let mut one = Node::Leaf(1u32);
+        assert!(!one.nudge(&1, Toward::Left, 0.1), "no split");
     }
 
     #[test]

@@ -529,6 +529,12 @@ impl Terminal {
         reveal(&mut self.term.lock(), line, col, len);
     }
 
+    /// Keep `lines` of scrollback (alacritty's default is 10 000).
+    pub fn set_scrollback(&mut self, lines: usize) {
+        let config = alacritty_terminal::term::Config { scrolling_history: lines, ..Default::default() };
+        self.term.lock().set_options(config);
+    }
+
     /// Forget where a search got to, so the next one starts from the view.
     pub fn end_search(&mut self) {
         self.found = None;
