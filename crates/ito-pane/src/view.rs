@@ -110,6 +110,35 @@ fn notches(events: &[egui::Event]) -> f32 {
         .sum()
 }
 
+/// The faces a pane's text is drawn in: the regular one, and those for bold
+/// and italic text when the app has them (else the regular one stands in).
+/// All of the same width per cell.
+#[derive(Clone, Debug)]
+pub struct Faces {
+    pub regular: FontId,
+    pub bold: Option<FontId>,
+    pub italic: Option<FontId>,
+    pub bold_italic: Option<FontId>,
+}
+
+impl Faces {
+    pub fn plain(regular: FontId) -> Self {
+        Self { regular, bold: None, italic: None, bold_italic: None }
+    }
+
+    /// The face for a cell's flags.
+    fn pick(&self, flags: Flags) -> &FontId {
+        let (b, i) = (flags.contains(Flags::BOLD), flags.contains(Flags::ITALIC));
+        let face = match (b, i) {
+            (true, true) => self.bold_italic.as_ref().or(self.bold.as_ref()).or(self.italic.as_ref()),
+            (true, false) => self.bold.as_ref(),
+            (false, true) => self.italic.as_ref(),
+            (false, false) => None,
+        };
+        face.unwrap_or(&self.regular)
+    }
+}
+
 /// Draw `term` (or, with none, the empty pane) in `rect`, in font `f` with
 /// rows `row_h` apart, and handle the pointer over it: selecting, the wheel,
 /// right-click to paste. The grid is resized to fit.
@@ -124,6 +153,23 @@ pub fn show<P: Pane + ?Sized>(
     pal: &Palette,
     opts: ViewOptions,
 ) -> Shown {
+    show_faces(ui, term, state, rect, &Faces::plain(f.clone()), row_h, pal, opts)
+}
+
+/// [`show`] with bold and italic faces; rows taller than the font's own put
+/// the text in their middle.
+#[allow(clippy::too_many_arguments)]
+pub fn show_faces<P: Pane + ?Sized>(
+    ui: &mut Ui,
+    term: Option<&mut P>,
+    state: &mut ViewState,
+    rect: Rect,
+    faces: &Faces,
+    row_h: f32,
+    pal: &Palette,
+    opts: ViewOptions,
+) -> Shown {
+    let f = &faces.regular;
     let mut shown = Shown::default();
     let mut focused = opts.focused;
     let painter = ui.painter_at(rect);
@@ -162,6 +208,8 @@ pub fn show<P: Pane + ?Sized>(
     // Out from under the lock before any laying out happens.
     let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
 
+    // Rows taller than the font (a line height over 1): the text in the middle.
+    let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
     for (y, row) in rows.iter().enumerate() {
         let top = inner.top() + y as f32 * row_h;
         if top > inner.bottom() {
@@ -203,10 +251,10 @@ pub fn show<P: Pane + ?Sized>(
                 fg = color(cell.bg, pal, true);
             }
             painter.text(
-                egui::pos2(inner.left() + x as f32 * cell_w, top),
+                egui::pos2(inner.left() + x as f32 * cell_w, top + lift),
                 Align2::LEFT_TOP,
                 cell.c,
-                f.clone(),
+                faces.pick(cell.flags).clone(),
                 fg,
             );
         }
