@@ -119,11 +119,13 @@ pub struct Faces {
     pub bold: Option<FontId>,
     pub italic: Option<FontId>,
     pub bold_italic: Option<FontId>,
+    /// The regular face's file, to draw its ligatures from; none, none.
+    pub shaper: Option<std::sync::Arc<crate::liga::Shaper>>,
 }
 
 impl Faces {
     pub fn plain(regular: FontId) -> Self {
-        Self { regular, bold: None, italic: None, bold_italic: None }
+        Self { regular, bold: None, italic: None, bold_italic: None, shaper: None }
     }
 
     /// The face for a cell's flags.
@@ -210,6 +212,8 @@ pub fn show_faces<P: Pane + ?Sized>(
 
     // Rows taller than the font (a line height over 1): the text in the middle.
     let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
+    // Where egui puts the baseline in a row, for the ligatures drawn by hand.
+    let baseline = faces.shaper.as_ref().map(|_| painter.layout_no_wrap("M".into(), f.clone(), pal.fg).rows.first().and_then(|r| r.glyphs.first()).map_or(0.0, |g| g.pos.y));
     for (y, row) in rows.iter().enumerate() {
         let top = inner.top() + y as f32 * row_h;
         if top > inner.bottom() {
@@ -239,8 +243,41 @@ pub fn show_faces<P: Pane + ?Sized>(
             fill(&painter, inner, start, row.len(), top, cell_w, row_h, c, pal);
         }
 
+        // The row's ligatures: by cell, the glyph drawn there instead, and
+        // the cells a merged glyph covers, not drawn at all.
+        let mut liga: Vec<Option<crate::liga::Sub>> = Vec::new();
+        let mut hidden: Vec<bool> = Vec::new();
+        if let Some(shaper) = &faces.shaper {
+            liga = vec![None; row.len()];
+            hidden = vec![false; row.len()];
+            let plain = |c: &crate::CellView| c.c != ' ' && c.c != '\0' && !c.flags.intersects(Flags::BOLD | Flags::ITALIC | Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER);
+            let mut x = 0;
+            while x < row.len() {
+                if !plain(&row[x]) {
+                    x += 1;
+                    continue;
+                }
+                // A run: plain cells side by side in one colour.
+                let start = x;
+                while x < row.len() && plain(&row[x]) && row[x].fg == row[start].fg {
+                    x += 1;
+                }
+                let text: String = row[start..x].iter().map(|c| c.c).collect();
+                if crate::liga::worth_shaping(&text) {
+                    for s in shaper.subs(&text).iter() {
+                        let at = start + s.at;
+                        if at < row.len() {
+                            liga[at] = Some(*s);
+                            for h in hidden.iter_mut().take((at + s.covers).min(row.len())).skip(at + 1) {
+                                *h = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for (x, cell) in row.iter().enumerate() {
-            if cell.c == ' ' || cell.c == '\0' {
+            if cell.c == ' ' || cell.c == '\0' || hidden.get(x).copied().unwrap_or(false) {
                 continue;
             }
             let mut fg = color(cell.fg, pal, false);
@@ -249,6 +286,11 @@ pub fn show_faces<P: Pane + ?Sized>(
             }
             if cell.flags.contains(Flags::INVERSE) {
                 fg = color(cell.bg, pal, true);
+            }
+            if let (Some(Some(sub)), Some(shaper), Some(base)) = (liga.get(x), &faces.shaper, baseline) {
+                let pen = egui::pos2(inner.left() + x as f32 * cell_w, top + lift + base);
+                shaper.draw(ui.ctx(), &painter, sub, pen, cell_w, fg);
+                continue;
             }
             painter.text(
                 egui::pos2(inner.left() + x as f32 * cell_w, top + lift),

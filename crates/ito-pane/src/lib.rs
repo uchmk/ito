@@ -25,6 +25,8 @@ mod util;
 #[cfg(feature = "egui")]
 mod view;
 #[cfg(feature = "egui")]
+mod liga;
+#[cfg(feature = "egui")]
 pub mod input;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
@@ -48,3 +50,5 @@ pub use sys::{children, restrict_dll_search};
 pub use terminal::*;
 #[cfg(feature = "egui")]
 pub use view::*;
+#[cfg(feature = "egui")]
+pub use liga::Shaper;
