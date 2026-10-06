@@ -34,6 +34,9 @@ pub struct Palette {
     pub cursor: Color32,
     /// Text drawn on top of `cursor`.
     pub on_cursor: Color32,
+    /// The sixteen named colours (black, red, … bright white) a theme gives;
+    /// `None` keeps filer's.
+    pub ansi: Option<[Color32; 16]>,
 }
 
 /// filer's default theme, so a pane with no palette of its own still reads.
@@ -46,6 +49,7 @@ impl Default for Palette {
             selection: Color32::from_rgb(0x2f, 0x4a, 0x6b),
             cursor: Color32::from_rgb(0x6f, 0xd0, 0xd0),
             on_cursor: Color32::from_rgb(0x16, 0x18, 0x1d),
+            ansi: None,
         }
     }
 }
@@ -383,6 +387,14 @@ fn color(c: AnsiColor, pal: &Palette, is_bg: bool) -> Color32 {
 
 fn named(n: NamedColor, pal: &Palette, is_bg: bool) -> Color32 {
     use NamedColor::*;
+    if let Some(ansi) = &pal.ansi {
+        let at = [Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, BrightBlack, BrightRed, BrightGreen, BrightYellow, BrightBlue, BrightMagenta, BrightCyan, BrightWhite]
+            .iter()
+            .position(|x| *x == n);
+        if let Some(k) = at {
+            return ansi[k];
+        }
+    }
     match n {
         Background => pal.bg,
         Foreground => pal.fg,
@@ -466,6 +478,18 @@ mod tests {
         assert_eq!(indexed(255, &pal, false), Color32::from_gray(238));
         // The first sixteen come from the theme, so the pane matches.
         assert_eq!(indexed(7, &pal, false), pal.fg);
+    }
+
+    /// A theme's own sixteen colours take the named ones' place.
+    #[test]
+    fn a_theme_gives_the_named_colours() {
+        let mut ansi = [Color32::BLACK; 16];
+        ansi[1] = Color32::from_rgb(1, 2, 3);
+        ansi[15] = Color32::from_rgb(4, 5, 6);
+        let pal = Palette { ansi: Some(ansi), ..Palette::default() };
+        assert_eq!(named(NamedColor::Red, &pal, false), Color32::from_rgb(1, 2, 3));
+        assert_eq!(indexed(15, &pal, false), Color32::from_rgb(4, 5, 6));
+        assert_eq!(named(NamedColor::Foreground, &pal, false), pal.fg, "the default colours stay the palette's");
     }
 
     #[test]
