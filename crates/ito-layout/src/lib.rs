@@ -283,7 +283,8 @@ impl<T: Clone + PartialEq> Node<T> {
     /// Move the divider of the split at `path` (see [`Divider::path`]).
     pub fn set_ratio(&mut self, path: &[bool], ratio: f32) {
         match (self, path.split_first()) {
-            (Node::Split { ratio: r, .. }, None) => *r = ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO),
+            (Node::Split { ratio: r, .. }, None) if ratio.is_finite() => *r = ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO),
+            (Node::Split { .. }, None) => {}
             (Node::Split { first, second, .. }, Some((side, rest))) => {
                 if *side { second } else { first }.set_ratio(rest, ratio)
             }

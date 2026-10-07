@@ -64,9 +64,11 @@ pub fn dividers<T: Clone + PartialEq>(ui: &egui::Ui, id: egui::Id, layout: &Node
             l.set_ratio(&d.path, 0.5);
             out = Some(Moved::Halved(l));
         } else if let (true, Some(p)) = (resp.dragged(), resp.interact_pointer_pos()) {
+            // On the same base the split is laid out on (its room less the
+            // gap), so the divider stays under the pointer.
             let ratio = match d.dir {
-                Dir::Right => (p.x - d.area.x) / d.area.w.max(1.0),
-                Dir::Down => (p.y - d.area.y) / d.area.h.max(1.0),
+                Dir::Right => (p.x - d.area.x - look.gap / 2.0) / (d.area.w - look.gap).max(1.0),
+                Dir::Down => (p.y - d.area.y - look.gap / 2.0) / (d.area.h - look.gap).max(1.0),
             };
             let mut l = layout.clone();
             l.set_ratio(&d.path, ratio);

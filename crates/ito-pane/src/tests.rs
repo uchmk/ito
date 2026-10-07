@@ -982,4 +982,12 @@ mod processes {
         assert!(listening_ports(&[std::process::id()]).contains(&port), "port {port}");
         assert!(listening_ports(&[]).is_empty());
     }
+
+    /// A shell named in Japanese is no panic (four bytes from the end fell
+    /// inside a character; the source review, 2026-10-07).
+    #[test]
+    fn a_shell_named_in_japanese_is_read() {
+        assert!(!crate::shell::is_powershell_51("C:\\tools\\シェル"));
+        assert!(crate::shell::is_powershell_51("C:\\Windows\\powershell.exe"));
+    }
 }

@@ -67,7 +67,9 @@ pub(crate) fn name_shell(program: Option<&str>, windows: bool, env_shell: Option
 /// separator so the rule reads the same whichever platform runs the test.
 pub(crate) fn is_powershell_51(program: &str) -> bool {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    let stem = name.len().checked_sub(4).filter(|&i| name[i..].eq_ignore_ascii_case(".exe")).map_or(name, |i| &name[..i]);
+    // `get`, not a slice: four bytes from the end can be inside a
+    // character (`シェル`), which a slice panics on.
+    let stem = name.len().checked_sub(4).filter(|&i| name.get(i..).is_some_and(|e| e.eq_ignore_ascii_case(".exe"))).map_or(name, |i| &name[..i]);
     stem.eq_ignore_ascii_case("powershell")
 }
 
