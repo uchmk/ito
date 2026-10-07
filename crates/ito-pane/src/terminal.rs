@@ -184,6 +184,15 @@ impl alacritty_terminal::event::OnResize for Tapped {
 /// since has followed. They go on only when the program asked for them: a shell
 /// that did not ask would show them as `[200~` and then run the paste anyway,
 /// which is worse than not bracketing at all.
+/// What of a paste may reach the program: the controls go but Tab and
+/// Enter. An Esc inside could end the brackets early (`\x1b[201~`) and run
+/// the rest as typed -- a web page can put that on the clipboard (the source
+/// review, 2026-10-07); xterm and Windows Terminal drop them too. The C1
+/// controls (U+0080 to U+009F, a one-character CSI among them) go as well.
+pub(crate) fn pasteable(text: &str) -> String {
+    text.chars().filter(|c| matches!(c, '\t' | '\r') || !(c.is_control())).collect()
+}
+
 pub(crate) fn bracket(text: &str, wanted: bool) -> Vec<u8> {
     // Nothing to paste needs no markers; a bare pair would reach a shell that
     // does not strip them as `[200~[201~` on the command line.
@@ -589,7 +598,7 @@ impl Terminal {
     pub fn paste(&self, text: &str) {
         // Carriage returns are what a terminal calls Enter; a pasted `\n`
         // that stays a newline confuses a line editor.
-        let text = text.replace("\r\n", "\r").replace('\n', "\r");
+        let text = pasteable(&text.replace("\r\n", "\r").replace('\n', "\r"));
         self.send_as(bracket(&text, self.bracketed_paste()), "in paste");
     }
 

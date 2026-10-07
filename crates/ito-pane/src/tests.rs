@@ -546,6 +546,12 @@ mod pane {
         // shell that would print them.
         assert_eq!(bracket("", false), Vec::<u8>::new());
         assert_eq!(bracket("", true), Vec::<u8>::new());
+        // A paste that tries to end the brackets itself and run the rest:
+        // its Esc goes, so the fake end is only text (the source review,
+        // 2026-10-07). Tab and Enter stay; other controls and C1 go.
+        let evil = crate::terminal::pasteable("echo hi\x1b[201~rm -rf ~\r\tx\u{7}\u{9b}y");
+        assert_eq!(evil, "echo hi[201~rm -rf ~\r\txy");
+        assert_eq!(bracket(&evil, true), [b"\x1b[200~".as_slice(), evil.as_bytes(), b"\x1b[201~"].concat(), "one end marker only");
     }
 
     /// `Esc` as a win32-input-mode record: the fields tcell reads it by, and
