@@ -50,6 +50,74 @@ pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     out
 }
 
+/// Every process, from one snapshot; Windows does not give the arguments
+/// without reading the process's memory, so they are left empty.
+pub fn process_table() -> Vec<super::Proc> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let mut ok = unsafe { Process32FirstW(snap, &mut e) }.is_ok();
+    while ok {
+        let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+        let name = super::stem(&String::from_utf16_lossy(&e.szExeFile[..len]));
+        out.push(super::Proc { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, name, args: Vec::new() });
+        ok = unsafe { Process32NextW(snap, &mut e) }.is_ok();
+    }
+    let _ = unsafe { CloseHandle(snap) };
+    out
+}
+
+/// The TCP ports (IPv4 and IPv6) being listened on by any of `pids`, from
+/// the system's table of listeners with their owners. Sorted, each once.
+pub fn listening_ports(pids: &[u32]) -> Vec<u16> {
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    if pids.is_empty() {
+        return Vec::new();
+    }
+    // AF_INET and AF_INET6.
+    let mut ports = Vec::new();
+    for (family, row_size) in [(2u32, std::mem::size_of::<MIB_TCPROW_OWNER_PID>()), (23u32, std::mem::size_of::<MIB_TCP6ROW_OWNER_PID>())] {
+        let mut size = 0u32;
+        unsafe { GetExtendedTcpTable(None, &mut size, false, family, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+        if size == 0 {
+            continue;
+        }
+        // u32s, for the table's alignment.
+        let mut buf = vec![0u32; (size as usize).div_ceil(4) + 1];
+        if unsafe { GetExtendedTcpTable(Some(buf.as_mut_ptr().cast()), &mut size, false, family, TCP_TABLE_OWNER_PID_LISTENER, 0) } != 0 {
+            continue;
+        }
+        let count = buf[0] as usize;
+        let rows = unsafe { buf.as_ptr().add(1).cast::<u8>() };
+        for k in 0..count {
+            let at = unsafe { rows.add(k * row_size) };
+            let (port, pid) = if family == 2 {
+                let r = unsafe { &*at.cast::<MIB_TCPROW_OWNER_PID>() };
+                (r.dwLocalPort, r.dwOwningPid)
+            } else {
+                let r = unsafe { &*at.cast::<MIB_TCP6ROW_OWNER_PID>() };
+                (r.dwLocalPort, r.dwOwningPid)
+            };
+            if pids.contains(&pid) {
+                // The port is in network order in the low 16 bits.
+                ports.push(u16::from_be(port as u16));
+            }
+        }
+    }
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
 /// This process's console hosts as they are now: what [`end_new_consoles`]
 /// compares against after a pane failed to start.
 pub fn consoles() -> Vec<u32> {

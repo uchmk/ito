@@ -940,3 +940,40 @@ mod alt_screen_tests {
         assert_eq!(control_code('b', true).unwrap()[0], 0x1b);
     }
 }
+
+/// What runs under a pane, and what it listens on.
+mod processes {
+    use crate::sys::{descendants, listening_ports, stem, Proc};
+
+    fn p(pid: u32, ppid: u32, name: &str) -> Proc {
+        Proc { pid, ppid, name: name.into(), args: Vec::new() }
+    }
+
+    #[test]
+    fn the_tree_under_a_shell_is_found() {
+        let table = vec![p(1, 0, "init"), p(10, 1, "bash"), p(11, 10, "node"), p(12, 11, "codex-x86_64"), p(13, 1, "other"), p(14, 12, "git")];
+        let mut under: Vec<u32> = descendants(&table, 10).iter().map(|p| p.pid).collect();
+        under.sort_unstable();
+        assert_eq!(under, [11, 12, 14]);
+        assert!(descendants(&table, 99).is_empty());
+        assert_eq!((stem("/usr/local/bin/claude"), stem(r"C:\Tools\Codex.EXE"), stem("gemini")), ("claude".into(), "codex".into(), "gemini".into()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn listening_lines_are_read_by_their_sockets() {
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n   1: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 99 1\n   2: 0100007F:0050 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 4243 1\n";
+        let inodes: std::collections::HashSet<u64> = [4242, 4243].into_iter().collect();
+        assert_eq!(crate::sys::listening_in(table, &inodes), [3000], "a listener of ours; not another's, not a connection");
+    }
+
+    /// This very process listening is found, on the systems CI runs.
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn a_port_listened_on_is_found() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(listening_ports(&[std::process::id()]).contains(&port), "port {port}");
+        assert!(listening_ports(&[]).is_empty());
+    }
+}

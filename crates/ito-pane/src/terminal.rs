@@ -398,6 +398,11 @@ impl Terminal {
     /// "Something" is any child process of the shell. A shell that keeps a
     /// helper of its own alive would read as busy and be asked about when it
     /// need not be; that errs on the side of the question, which costs a key.
+    /// The shell's process, where the PTY said it.
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.shell_pid
+    }
+
     pub fn busy(&self) -> bool {
         !self.exited && self.shell_pid.is_some_and(|pid| !crate::sys::children(pid).is_empty())
     }

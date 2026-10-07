@@ -48,7 +48,7 @@ pub use keys::*;
 pub use log::escape_bytes;
 pub use pane::{Pane, Screen};
 pub use shell::*;
-pub use sys::{children, restrict_dll_search};
+pub use sys::{children, descendants, listening_ports, process_table, restrict_dll_search, stem, Proc};
 pub use terminal::*;
 #[cfg(feature = "egui")]
 pub use view::*;
