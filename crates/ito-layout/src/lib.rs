@@ -7,6 +7,9 @@
 //! pane beside another, and answers where the dividers are. filer can take it
 //! as it is (docs/v1-scope.md, 3).
 
+#[cfg(feature = "egui")]
+pub mod ui;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

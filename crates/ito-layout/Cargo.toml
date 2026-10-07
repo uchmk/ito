@@ -9,6 +9,9 @@ repository.workspace = true
 
 [features]
 serde = ["dep:serde"]
+# The dividers drawn and dragged in egui (`ui::dividers`).
+egui = ["dep:egui"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
+egui = { version = "0.36", optional = true }
