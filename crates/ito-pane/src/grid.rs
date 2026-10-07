@@ -101,9 +101,20 @@ pub fn find_lines<T: EventListener>(term: &Term<T>, needle: &str, max: usize) ->
         let row = &grid[Line(l)];
         // A wide character's spacer is a cell too, so a char is a cell.
         let text: String = (0..cols).map(|c| row[Column(c)].c).collect();
-        let lower: String = text.chars().flat_map(char::to_lowercase).collect();
+        // Lowered a cell at a time, each lowered character remembering its
+        // cell: a character that lowers to two (`İ`) would otherwise put
+        // every later column one off (the source review, 2026-10-07).
+        let mut lower = String::new();
+        let mut cell_of = Vec::new();
+        for (cell, c) in text.chars().enumerate() {
+            for l in c.to_lowercase() {
+                lower.push(l);
+                cell_of.push(cell);
+            }
+        }
         if let Some(byte) = lower.find(&want) {
-            out.push((l, lower[..byte].chars().count(), text.trim_end().to_owned()));
+            let col = cell_of.get(lower[..byte].chars().count()).copied().unwrap_or(0);
+            out.push((l, col, text.trim_end().to_owned()));
             if out.len() >= max {
                 break;
             }

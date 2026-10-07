@@ -60,8 +60,29 @@ impl Charset {
         let st = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let Some((enc, _)) = st.as_ref() else { return bytes };
         match std::str::from_utf8(&bytes) {
-            Ok(text) => enc.encode(text).0.into_owned(),
+            Ok(text) => encode_or_question(enc, text),
             Err(_) => bytes,
+        }
+    }
+}
+
+/// `text` in `enc`, a character it has no code for as `?`: encoding_rs's
+/// own `encode` writes `&#128512;` there, which a program reads as typed
+/// (the source review, 2026-10-07).
+fn encode_or_question(enc: &'static encoding_rs::Encoding, text: &str) -> Vec<u8> {
+    use encoding_rs::EncoderResult;
+    let mut encoder = enc.new_encoder();
+    let mut out = Vec::with_capacity(text.len() * 2 + 8);
+    let mut rest = text;
+    let mut buf = [0u8; 1024];
+    loop {
+        let (result, read, written) = encoder.encode_from_utf8_without_replacement(rest, &mut buf, true);
+        out.extend_from_slice(&buf[..written]);
+        rest = &rest[read..];
+        match result {
+            EncoderResult::InputEmpty => return out,
+            EncoderResult::OutputFull => {}
+            EncoderResult::Unmappable(_) => out.push(b'?'),
         }
     }
 }
@@ -94,6 +115,10 @@ mod tests {
         }
         assert_eq!(String::from_utf8(out).unwrap(), "日本語 ok\r\n");
         assert_eq!(c.encode("日本".as_bytes().to_vec()), encoding_rs::SHIFT_JIS.encode("日本").0.into_owned());
+        // A character Shift_JIS has no code for goes as ?, not &#128512;.
+        let mut want = encoding_rs::SHIFT_JIS.encode("日").0.into_owned();
+        want.extend_from_slice(b"?x");
+        assert_eq!(c.encode("日😀x".as_bytes().to_vec()), want);
         assert_eq!(c.encode(vec![0x1b, b'[', b'A']), vec![0x1b, b'[', b'A'], "keys stay as they are");
         assert!(c.set("UTF-8"));
         assert_eq!(c.encode("日本".as_bytes().to_vec()), "日本".as_bytes());

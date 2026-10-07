@@ -106,6 +106,10 @@ mod pane {
         assert!(found[2].0 < 0, "the oldest is in the scrollback");
         assert_eq!(find_lines(&t, "needle", 1).len(), 1, "at most as many as asked");
         assert!(find_lines(&t, "", 10).is_empty());
+        // A character that lowers to two does not move the column.
+        let mut u = term(40, 3);
+        feed(&mut u, "İİ hit\r\n");
+        assert_eq!(find_lines(&u, "hit", 1)[0].1, 3, "after İİ and a space");
         let (line, col, _) = found[2].clone();
         reveal(&mut t, line, col, 6);
         assert_eq!(t.grid().display_offset() as i32, -line, "scrolled to it");

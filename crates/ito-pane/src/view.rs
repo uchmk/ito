@@ -84,7 +84,9 @@ pub struct Shown {
 
 /// How many cells fit, given the space and the font.
 pub fn fit(rect: Rect, cell_w: f32, row_h: f32) -> Size {
-    Size::new((rect.width() / cell_w).floor() as usize, (rect.height() / row_h).floor() as usize)
+    // Both guarded: a row of no height would make `inf` rows (the source
+    // review, 2026-10-07).
+    Size::new((rect.width() / cell_w.max(1.0)).floor() as usize, (rect.height() / row_h.max(1.0)).floor() as usize)
 }
 
 /// How far the view travels for a pixel of wheel movement. One notch of a

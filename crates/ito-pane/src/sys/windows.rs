@@ -7,15 +7,24 @@ pub fn end_tree(pid: u32) {
     use windows::Win32::System::Threading::{
         OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     };
-    for child in children(pid) {
-        end_tree(child);
-    }
-    let Ok(h) = (unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, pid) }) else { return };
-    unsafe {
-        if TerminateProcess(h, 1).is_ok() {
-            WaitForSingleObject(h, 1000);
+    // One look at the table, walked by `descendants`, which visits each
+    // process once: a recursion by parent ids could loop for ever when an
+    // id was used again (a dead parent's id now a child's), and asked the
+    // table afresh at every level (the source review, 2026-10-07).
+    let table = process_table();
+    let mut all: Vec<u32> = super::descendants(&table, pid).into_iter().map(|p| p.pid).collect();
+    all.reverse();
+    all.push(pid);
+    for p in all {
+        let Ok(h) = (unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, p) }) else { continue };
+        unsafe {
+            // Only the shell itself is waited for, and not long: closing a
+            // pane must not hang the window on a deep tree.
+            if TerminateProcess(h, 1).is_ok() && p == pid {
+                WaitForSingleObject(h, 1000);
+            }
+            let _ = CloseHandle(h);
         }
-        let _ = CloseHandle(h);
     }
 }
 

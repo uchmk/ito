@@ -758,8 +758,9 @@ impl Drop for Terminal {
 
 pub(crate) fn window_size(size: Size, cell: (u16, u16)) -> WindowSize {
     WindowSize {
-        num_lines: size.lines as u16,
-        num_cols: size.cols as u16,
+        // At most what the PTY can be told, not wrapped round past it.
+        num_lines: size.lines.min(u16::MAX as usize) as u16,
+        num_cols: size.cols.min(u16::MAX as usize) as u16,
         cell_width: cell.0.max(1),
         cell_height: cell.1.max(1),
     }

@@ -16,7 +16,7 @@ pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(
     // sent by the time the text turns up, so the text is dropped. Ctrl and Alt
     // together is AltGr (`@` on a German keyboard), where the text is the point.
     let mut swallow_text = false;
-    for ev in events {
+    for (k, ev) in events.iter().enumerate() {
         match ev {
             Event::Key { key, pressed: true, modifiers, .. } => {
                 if claim(*key, *modifiers) {
@@ -24,6 +24,14 @@ pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(
                     continue;
                 }
                 swallow_text = modifiers.alt && !modifiers.ctrl;
+                // AltGr: Ctrl and Alt on a printable key that types text
+                // (the next event). The text is the key; its Ctrl+Alt chord
+                // as well sent `\x1b\x11` before an `@` (the source review,
+                // 2026-10-07). A Ctrl+Alt chord that types nothing still goes.
+                let altgr = modifiers.ctrl && modifiers.alt && special(*key, modifiers.shift).is_none() && matches!(events.get(k + 1), Some(Event::Text(t)) if !t.is_empty());
+                if altgr {
+                    continue;
+                }
                 if let Some(bytes) = key_bytes(term, *key, *modifiers) {
                     term.send(bytes);
                 }
@@ -161,6 +169,47 @@ pub fn printable(key: Key) -> Option<char> {
 
 #[cfg(test)]
 mod tests {
+    /// A pane that only records what is sent to it.
+    #[derive(Default)]
+    struct Sent(std::cell::RefCell<Vec<u8>>);
+
+    impl crate::Pane for Sent {
+        fn resize(&mut self, _: crate::Size, _: (u16, u16)) {}
+        fn screen(&self) -> crate::Screen {
+            crate::Screen::default()
+        }
+        fn scrolled_back(&self) -> usize {
+            0
+        }
+        fn scroll(&self, _: alacritty_terminal::grid::Scroll) {}
+        fn select(&self, _: (usize, usize), _: bool, _: bool) {}
+        fn select_word(&self, _: (usize, usize)) {}
+        fn clear_selection(&self) {}
+        fn selection(&self) -> Option<String> {
+            None
+        }
+        fn send(&self, bytes: Vec<u8>) {
+            self.0.borrow_mut().extend(bytes);
+        }
+        fn paste(&self, _: &str) {}
+        fn win32_input(&self) -> bool {
+            false
+        }
+    }
+
+    /// AltGr+Q on a German keyboard (Ctrl+Alt with `@` as its text) types
+    /// `@` alone; a Ctrl+Alt chord with no text still goes as the chord.
+    #[test]
+    fn altgr_types_its_character_only() {
+        let both = egui::Modifiers { ctrl: true, alt: true, ..Default::default() };
+        let key = |k| egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: both };
+        let p = Sent::default();
+        super::feed(&p, &[key(egui::Key::Q), egui::Event::Text("@".into())], |_, _| false);
+        assert_eq!(p.0.borrow().as_slice(), b"@");
+        let p = Sent::default();
+        super::feed(&p, &[key(egui::Key::X)], |_, _| false);
+        assert_eq!(p.0.borrow().as_slice(), b"\x1b\x18", "Ctrl+Alt+X as ESC Ctrl+X");
+    }
     use super::*;
 
     /// Letters and digits by name, punctuation by the table.
