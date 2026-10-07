@@ -79,6 +79,18 @@ mod pane {
         assert_eq!(line(&found), second, "and one more returns to where it was");
     }
 
+    /// The whole buffer comes out as the program wrote it: the scrollback
+    /// first, a wrapped line whole, the blank screen below cut.
+    #[test]
+    fn the_whole_buffer_is_read_as_written() {
+        let mut t = term(10, 4);
+        for i in 0..6 {
+            feed(&mut t, &format!("row {i}\r\n"));
+        }
+        feed(&mut t, "a line longer than ten\r\n");
+        assert_eq!(all_text(&t), "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\na line longer than ten\n");
+    }
+
     /// A search across sessions reads the whole buffer: the newest line
     /// first, the scrollback too, case aside; and showing one puts it on
     /// screen with its match selected.

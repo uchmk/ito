@@ -13,6 +13,7 @@
 //! ([`gpu`]). What differs by OS is in `sys`.
 //! The plan this crate is being built by is `docs/pane-extraction.md`.
 
+mod charset;
 mod grid;
 mod keys;
 mod log;
@@ -41,6 +42,7 @@ mod tests;
 /// cell flags and colors), so a user needs no `alacritty_terminal` of its own.
 pub use alacritty_terminal;
 
+pub use charset::{Charset, CHARSETS};
 pub use grid::*;
 pub use keys::*;
 pub use log::escape_bytes;

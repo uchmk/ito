@@ -80,6 +80,8 @@ impl EventListener for Proxy {
 /// it. Being its own reader is how the tap gets to keep its state.
 pub(crate) struct Tapped {
     inner: tty::Pty,
+    /// The pane's character set: read into UTF-8 here, before anything looks.
+    charset: crate::Charset,
     cwd: Sender<PathBuf>,
     /// Bytes of an OSC 7 that has begun but not ended, since a read can stop
     /// anywhere — including in the middle of one.
@@ -106,7 +108,8 @@ pub(crate) struct Tapped {
 
 impl io::Read for Tapped {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.inner.reader().read(buf)?;
+        let inner = &mut self.inner;
+        let n = self.charset.read(buf, |raw| inner.reader().read(raw))?;
         log_pty(&self.log, "out", &buf[..n]);
         for path in scan_osc7(&mut self.partial, &buf[..n]) {
             let _ = self.cwd.send(path);
@@ -234,6 +237,8 @@ pub struct Terminal {
     notices: Receiver<String>,
     /// When a key or a paste was last sent; see [`Terminal::last_input`].
     last_input: Mutex<Option<Instant>>,
+    /// The character set the program reads and writes; UTF-8 by default.
+    charset: crate::Charset,
     /// The reader thread. It hands the PTY back when it ends, and dropping
     /// that is what ends the shell -- so [`Drop`] waits for it.
     io: Option<std::thread::JoinHandle<(EventLoop<Tapped, Proxy>, alacritty_terminal::event_loop::State)>>,
@@ -326,8 +331,10 @@ impl Terminal {
         let prompt = Arc::new(AtomicBool::new(false));
         let prompt_at = Arc::new(Mutex::new(None));
         let (notice_tx, notices) = crossbeam_channel::unbounded();
+        let charset = crate::Charset::default();
         let pty = Tapped {
             inner: pty,
+            charset: charset.clone(),
             cwd: cwd_tx,
             partial: Vec::new(),
             log: log.clone(),
@@ -373,6 +380,7 @@ impl Terminal {
             prompt_at,
             notices,
             last_input: Mutex::new(None),
+            charset,
             io,
         })
     }
@@ -453,6 +461,7 @@ impl Terminal {
 
     /// `send`, labelled for the PTY log by where the bytes came from.
     fn send_as(&self, bytes: Vec<u8>, origin: &str) {
+        let bytes = self.charset.encode(bytes);
         log_pty(&self.log, origin, &bytes);
         if origin != "in reply" {
             *self.last_input.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
@@ -521,6 +530,23 @@ impl Terminal {
     /// [`find_lines`](crate::find_lines)).
     pub fn find_lines(&self, needle: &str, max: usize) -> Vec<(i32, usize, String)> {
         find_lines(&self.term.lock(), needle, max)
+    }
+
+    /// Read and write the program's bytes as `name` (one of
+    /// [`CHARSETS`](crate::CHARSETS)); `false` for a name not known.
+    pub fn set_charset(&self, name: &str) -> bool {
+        self.charset.set(name)
+    }
+
+    /// The character set in use: `UTF-8`, `Shift_JIS`.
+    pub fn charset(&self) -> &'static str {
+        self.charset.name()
+    }
+
+    /// The whole buffer as text, scrollback and screen (see
+    /// [`all_text`](crate::all_text)).
+    pub fn all_text(&self) -> String {
+        all_text(&self.term.lock())
     }
 
     /// Put a found line on screen, its match selected.

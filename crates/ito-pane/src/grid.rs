@@ -50,6 +50,39 @@ pub fn select_at<T: EventListener>(
     }
 }
 
+/// The whole buffer as text -- scrollback, then screen -- a line per line
+/// as the program wrote it: a row the terminal wrapped is joined to the
+/// next, a wide character's spacer left out, the blanks at a line's end and
+/// below the last line cut.
+pub fn all_text<T: EventListener>(term: &Term<T>) -> String {
+    use alacritty_terminal::term::cell::Flags;
+    let grid = term.grid();
+    let top = -(grid.history_size() as i32);
+    let bottom = grid.screen_lines() as i32 - 1;
+    let cols = grid.columns();
+    let mut out = String::new();
+    let mut line = String::new();
+    for l in top..=bottom {
+        let row = &grid[Line(l)];
+        for c in 0..cols {
+            let cell = &row[Column(c)];
+            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                line.push(cell.c);
+            }
+        }
+        if !row[Column(cols - 1)].flags.contains(Flags::WRAPLINE) {
+            out.push_str(line.trim_end());
+            out.push('\n');
+            line.clear();
+        }
+    }
+    out.push_str(line.trim_end());
+    let kept = out.trim_end().len();
+    out.truncate(kept);
+    out.push('\n');
+    out
+}
+
 /// The lines of the whole buffer -- scrollback and screen -- holding
 /// `needle`, case aside: newest first, at most `max`. Each is its line (the
 /// scrollback above zero, as [`point_at`] has it), the cell the match starts

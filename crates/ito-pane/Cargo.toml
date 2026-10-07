@@ -32,6 +32,11 @@ harfrust = { version = "0.12", optional = true }
 skrifa = { version = "0.44", default-features = false, features = ["std"], optional = true }
 vello_cpu = { version = "0.1", default-features = false, features = ["std", "u8_pipeline"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
+# A pane's character set other than UTF-8 (Shift_JIS, EUC-JP, ...): what the
+# program writes turned into UTF-8 for the parser, and what is typed back
+# (tsumugi's QUESTIONS.md Q11, the owner's yes on 2026-10-07). Pure Rust,
+# Firefox's, the WHATWG encodings.
+encoding_rs = "0.8"
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
