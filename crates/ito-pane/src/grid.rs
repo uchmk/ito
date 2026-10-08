@@ -293,6 +293,20 @@ pub struct CellView {
     pub selected: bool,
 }
 
+/// Plain text as a pattern for [`Terminal::search`](crate::Terminal::search):
+/// every character the regex syntax gives a meaning to escaped. Lower case
+/// matches either case, as alacritty's search has it (smart case).
+pub fn plain_pattern(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\.+*?()|[]{}^$#&-~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// One step of a scrollback search: the next match of `needle` from the last
 /// one, `found`, in the direction asked, selected and scrolled onto the screen.
 /// A free function over the grid so that the walk can be tested without a PTY.
@@ -329,4 +343,42 @@ pub(crate) fn search_in(term: &mut Term<Proxy>, found: &mut Option<(Point, Point
     }
     *found = Some((hit, *m.end()));
     Some(wrapped)
+}
+
+/// The buffer's lines where a prompt starts, oldest first: those whose
+/// cells carry the link [`PromptLinks`](crate::osc) puts after OSC 133 `A`.
+pub fn prompt_lines<T: EventListener>(term: &Term<T>) -> Vec<i32> {
+    let grid = term.grid();
+    let top = -(grid.history_size() as i32);
+    (top..grid.screen_lines() as i32)
+        .filter(|&line| {
+            let row = &grid[Line(line)];
+            (0..grid.columns()).any(|col| row[Column(col)].hyperlink().is_some_and(|h| h.uri() == crate::osc::PROMPT_LINK))
+        })
+        .collect()
+}
+
+/// Scroll to the prompt before the view's top line (`back`) or after it,
+/// putting it at the top; past the last one, down to the bottom. False when
+/// there was nowhere to go.
+pub fn jump_prompt<T: EventListener>(term: &mut Term<T>, back: bool) -> bool {
+    let lines = prompt_lines(term);
+    let grid = term.grid();
+    let now = grid.display_offset() as i32;
+    let top = -now;
+    let target = match back {
+        true => lines.iter().rev().find(|&&l| l < top).copied(),
+        false => lines.iter().find(|&&l| l > top).copied(),
+    };
+    // A line on the screen as it is at the bottom cannot go to the top.
+    let want = match target {
+        Some(line) => (-line).max(0),
+        None if back => return false,
+        None => 0,
+    };
+    if want == now {
+        return false;
+    }
+    term.scroll_display(Scroll::Delta(want - now));
+    true
 }

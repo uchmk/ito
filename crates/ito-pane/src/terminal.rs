@@ -104,12 +104,26 @@ pub(crate) struct Tapped {
     /// OSC 9 / 99 / 777 notifications, and the end of the last read.
     notices: Sender<String>,
     notice_tail: Vec<u8>,
+    /// The prompts' links put into what is read ([`PromptLinks`]), and what
+    /// did not fit in the buffer with them, handed over at the next read.
+    marks: PromptLinks,
+    held: Vec<u8>,
 }
+
+/// Room left in each read for the links put in after it.
+const ROOM: usize = 256;
 
 impl io::Read for Tapped {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if !self.held.is_empty() {
+            let n = self.held.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.held[..n]);
+            self.held.drain(..n);
+            return Ok(n);
+        }
         let inner = &mut self.inner;
-        let n = self.charset.read(buf, |raw| inner.reader().read(raw))?;
+        let room = if buf.len() > 2 * ROOM { buf.len() - ROOM } else { buf.len() };
+        let n = self.charset.read(&mut buf[..room], |raw| inner.reader().read(raw))?;
         log_pty(&self.log, "out", &buf[..n]);
         for path in scan_osc7(&mut self.partial, &buf[..n]) {
             let _ = self.cwd.send(path);
@@ -127,7 +141,15 @@ impl io::Read for Tapped {
         for text in scan_notices(&mut self.notice_tail, &buf[..n]) {
             let _ = self.notices.send(text);
         }
-        Ok(n)
+        match self.marks.feed(&buf[..n]) {
+            Some(out) => {
+                let fits = out.len().min(buf.len());
+                buf[..fits].copy_from_slice(&out[..fits]);
+                self.held.extend_from_slice(&out[fits..]);
+                Ok(fits)
+            }
+            None => Ok(n),
+        }
     }
 }
 
@@ -355,6 +377,8 @@ impl Terminal {
             prompt_at: prompt_at.clone(),
             notices: notice_tx,
             notice_tail: Vec::new(),
+            marks: PromptLinks::default(),
+            held: Vec::new(),
         };
 
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -538,6 +562,12 @@ impl Terminal {
     pub fn search(&mut self, needle: &str, back: bool) -> Option<bool> {
         let mut term = self.term.lock();
         search_in(&mut term, &mut self.found, needle, back)
+    }
+
+    /// Scroll to the prompt before the view's top, or after it (see
+    /// [`jump_prompt`](crate::jump_prompt)): false when there is none.
+    pub fn jump_prompt(&self, back: bool) -> bool {
+        jump_prompt(&mut self.term.lock(), back)
     }
 
     /// The lines holding `needle` anywhere in the buffer (see

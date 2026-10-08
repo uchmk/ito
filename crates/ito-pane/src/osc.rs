@@ -237,3 +237,94 @@ fn notice(body: &[u8]) -> Option<String> {
     None
 }
 
+
+/// The link a prompt's first row carries; see [`PromptLinks`].
+pub const PROMPT_LINK: &str = "tsumugi:prompt";
+
+/// Marks where each prompt is, in the grid itself. The bytes go to the
+/// parser on the reader thread with the grid locked, so this side never
+/// knows which row a mark lands on; but alacritty keeps an OSC 8 link on
+/// every cell written under it, scrolls it with the cell and rewraps it.
+/// So after each OSC 133 `A` an OSC 8 link to [`PROMPT_LINK`] is opened,
+/// and closed at the prompt's end (`B`, `C` or `D`) or its first newline,
+/// whichever is first: the prompt's first row is then found by its link
+/// ([`prompt_lines`](crate::prompt_lines)). Nothing is drawn for it.
+#[derive(Default)]
+pub(crate) struct PromptLinks {
+    /// Inside an OSC: the start of what it says, enough to tell `133;A`.
+    osc: Option<Vec<u8>>,
+    /// The last byte was ESC.
+    esc: bool,
+    /// The link is open.
+    open: bool,
+}
+
+const OPEN: &[u8] = b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\";
+const CLOSE: &[u8] = b"\x1b]8;;\x1b\\";
+
+impl PromptLinks {
+    /// `chunk` with the links put in, or `None` when it needs none.
+    pub(crate) fn feed(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {
+        let mut out: Option<Vec<u8>> = None;
+        for (i, &b) in chunk.iter().enumerate() {
+            let mut add: &[u8] = &[];
+            match self.osc.take() {
+                Some(mut said) => {
+                    let mut end = false;
+                    if self.esc {
+                        self.esc = false;
+                        match b {
+                            b'\\' => end = true,
+                            // Another sequence cut the OSC short.
+                            b']' => self.osc = Some(Vec::new()),
+                            0x1b => self.esc = true,
+                            _ => {}
+                        }
+                    } else if b == 0x07 {
+                        end = true;
+                    } else {
+                        if b == 0x1b {
+                            self.esc = true;
+                        } else if said.len() < 8 {
+                            said.push(b);
+                        }
+                        self.osc = Some(std::mem::take(&mut said));
+                    }
+                    if end {
+                        if said.starts_with(b"133;A") {
+                            add = OPEN;
+                            self.open = true;
+                        } else if said.starts_with(b"133;") && self.open {
+                            add = CLOSE;
+                            self.open = false;
+                        }
+                    }
+                }
+                None if self.esc => {
+                    self.esc = false;
+                    if b == b']' {
+                        self.osc = Some(Vec::new());
+                    } else if b == 0x1b {
+                        self.esc = true;
+                    }
+                }
+                None if b == 0x1b => self.esc = true,
+                None if b == b'\n' && self.open => {
+                    // Before the newline, so only the first row has it.
+                    self.open = false;
+                    let o = out.get_or_insert_with(|| chunk[..i].to_vec());
+                    o.extend_from_slice(CLOSE);
+                }
+                None => {}
+            }
+            if let Some(o) = out.as_mut() {
+                o.push(b);
+            }
+            if !add.is_empty() {
+                let o = out.get_or_insert_with(|| chunk[..=i].to_vec());
+                o.extend_from_slice(add);
+            }
+        }
+        out
+    }
+}

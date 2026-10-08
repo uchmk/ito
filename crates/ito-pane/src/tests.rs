@@ -79,6 +79,19 @@ mod pane {
         assert_eq!(line(&found), second, "and one more returns to where it was");
     }
 
+    /// Typed text is found as it reads, its regex characters plain, and
+    /// in either case while it is all lower case.
+    #[test]
+    fn plain_text_is_found_as_typed() {
+        let mut t = term(40, 5);
+        feed(&mut t, "cost (a+b) = $5\r\nOther Line\r\n");
+        let mut found = None;
+        assert_eq!(plain_pattern("(a+b)"), "\\(a\\+b\\)");
+        assert_eq!(search_in(&mut t, &mut found, &plain_pattern("(a+b) = $5"), true), Some(false));
+        assert_eq!(search_in(&mut t, &mut None, &plain_pattern("other"), true), Some(false));
+        assert_eq!(search_in(&mut t, &mut None, &plain_pattern("OTHER"), true), None);
+    }
+
     /// The whole buffer comes out as the program wrote it: the scrollback
     /// first, a wrapped line whole, the blank screen below cut.
     #[test]
@@ -993,5 +1006,72 @@ mod processes {
     fn a_shell_named_in_japanese_is_read() {
         assert!(!crate::shell::is_powershell_51("C:\\tools\\シェル"));
         assert!(crate::shell::is_powershell_51("C:\\Windows\\powershell.exe"));
+    }
+}
+
+mod prompt_marks {
+    use super::*;
+
+    /// What a shell writes through the links, fed as `reads` cuts it.
+    fn through(reads: &[&[u8]]) -> Vec<u8> {
+        let mut marks = PromptLinks::default();
+        reads.iter().flat_map(|r| marks.feed(r).unwrap_or_else(|| r.to_vec())).collect()
+    }
+
+    /// A link opens after `A` and closes at `B`, or at the first newline
+    /// when no `B` comes; other output passes as it was.
+    #[test]
+    fn a_prompt_is_linked_up_to_its_input() {
+        let mut marks = PromptLinks::default();
+        assert_eq!(marks.feed(b"plain output\r\n\x1b]7;file://h/tmp\x07"), None);
+        let out = through(&[b"\x1b]133;A\x07PS> \x1b]133;B\x07ls\r\n"]);
+        let want = [b"\x1b]133;A\x07".as_slice(), b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\", b"PS> \x1b]133;B\x07", b"\x1b]8;;\x1b\\", b"ls\r\n"].concat();
+        assert_eq!(out, want);
+        let out = through(&[b"\x1b]133;A\x1b\\$ \r", b"\nnext"]);
+        let want = [b"\x1b]133;A\x1b\\".as_slice(), b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\", b"$ \r", b"\x1b]8;;\x1b\\", b"\nnext"].concat();
+        assert_eq!(out, want);
+    }
+
+    /// Cut anywhere, the same bytes come out.
+    #[test]
+    fn a_mark_cut_across_reads_is_still_linked() {
+        let whole: &[u8] = b"out\r\n\x1b]133;A\x07user@host$ \x1b]133;B\x07";
+        let once = through(&[whole]);
+        for at in 1..whole.len() {
+            assert_eq!(through(&[&whole[..at], &whole[at..]]), once, "cut at {at}");
+        }
+    }
+
+    /// The prompts are found in the grid, and the keys go from one to the
+    /// one before and back down to the bottom.
+    #[test]
+    fn the_view_jumps_from_prompt_to_prompt() {
+        let mut t = testing::term(20, 4);
+        let mut marks = PromptLinks::default();
+        let mut text = Vec::new();
+        for n in 0..3 {
+            text.extend_from_slice(format!("\x1b]133;A\x07${n} \x1b]133;B\x07cmd\r\n").as_bytes());
+            for k in 0..5 {
+                text.extend_from_slice(format!("out {n}.{k}\r\n").as_bytes());
+            }
+        }
+        text.extend_from_slice(b"\x1b]133;A\x07$3 ");
+        let fed = marks.feed(&text).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        let lines = prompt_lines(&t);
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert_eq!(lines.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>(), [6, 6, 6]);
+        let top = |t: &Term<Proxy>| -(t.grid().display_offset() as i32);
+        assert!(jump_prompt(&mut t, true));
+        assert_eq!(top(&t), lines[2]);
+        assert!(jump_prompt(&mut t, true));
+        assert_eq!(top(&t), lines[1]);
+        assert!(jump_prompt(&mut t, false));
+        assert_eq!(top(&t), lines[2]);
+        assert!(jump_prompt(&mut t, false), "the last prompt is on the screen: to the bottom");
+        assert_eq!(t.grid().display_offset(), 0);
+        assert!(!jump_prompt(&mut t, false));
+        // The row reads as it was written: the link draws nothing.
+        assert!(all_text(&t).contains("$0 cmd"));
     }
 }
