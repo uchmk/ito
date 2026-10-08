@@ -332,7 +332,8 @@ pub fn show_faces<P: Pane + ?Sized>(
                 fg = fg.linear_multiply(0.6);
             }
             if cell.flags.contains(Flags::INVERSE) {
-                fg = color(cell.bg, pal, true);
+                // Solid even when the pane's colour is see-through.
+                fg = color(cell.bg, pal, true).to_opaque();
             }
             if let (Some(Some(sub)), Some(shaper), Some(base)) = (liga.get(x), &faces.shaper, baseline) {
                 let pen = egui::pos2(inner.left() + x as f32 * cell_w, top + lift + base);
