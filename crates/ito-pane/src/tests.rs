@@ -1050,10 +1050,10 @@ mod prompt_marks {
         let mut marks = PromptLinks::default();
         assert_eq!(marks.feed(b"plain output\r\n\x1b]7;file://h/tmp\x07"), None);
         let out = through(&[b"\x1b]133;A\x07PS> \x1b]133;B\x07ls\r\n"]);
-        let want = [b"\x1b]133;A\x07".as_slice(), b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\", b"PS> \x1b]133;B\x07", b"\x1b]8;;\x1b\\", b"ls\r\n"].concat();
+        let want = [b"\x1b]133;A\x07".as_slice(), b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\", b"PS> \x1b]133;B\x07", b"\x1b]8;;\x1b\\", b"ls\r\n"].concat();
         assert_eq!(out, want);
         let out = through(&[b"\x1b]133;A\x1b\\$ \r", b"\nnext"]);
-        let want = [b"\x1b]133;A\x1b\\".as_slice(), b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\", b"$ \r", b"\x1b]8;;\x1b\\", b"\nnext"].concat();
+        let want = [b"\x1b]133;A\x1b\\".as_slice(), b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\", b"$ \r", b"\x1b]8;;\x1b\\", b"\nnext"].concat();
         assert_eq!(out, want);
     }
 
@@ -1065,6 +1065,72 @@ mod prompt_marks {
         for at in 1..whole.len() {
             assert_eq!(through(&[&whole[..at], &whole[at..]]), once, "cut at {at}");
         }
+    }
+
+    /// `D;<code>` goes on the next prompt's link, and `C` opens a link on
+    /// the first row of the output.
+    #[test]
+    fn the_exit_code_and_the_output_are_marked() {
+        let out = through(&[b"\x1b]133;C\x07hi\r\n\x1b]133;D;2\x07\x1b]133;A\x07$ "]);
+        let want = [
+            b"\x1b]133;C\x07".as_slice(),
+            b"\x1b]8;id=tsumugi-mark;tsumugi:output\x1b\\",
+            b"hi\r",
+            b"\x1b]8;;\x1b\\",
+            b"\n\x1b]133;D;2\x07\x1b]133;A\x07",
+            b"\x1b]8;id=tsumugi-mark;tsumugi:prompt?exit=2\x1b\\",
+            b"$ ",
+        ]
+        .concat();
+        assert_eq!(out, want);
+        // A `D` with no code, or one with more after it.
+        assert!(through(&[b"\x1b]133;D\x07\x1b]133;A\x07"]).ends_with(b"tsumugi:prompt\x1b\\"));
+        assert!(through(&[b"\x1b]133;D;0;aid=1\x07\x1b]133;A\x07"]).ends_with(b"tsumugi:prompt?exit=0\x1b\\"));
+        assert_eq!(crate::osc::exit_of("tsumugi:prompt?exit=-1"), Some(-1));
+        assert_eq!(crate::osc::exit_of("tsumugi:prompt"), None);
+    }
+
+    /// Each command between two prompts is a block with its exit code; the
+    /// one still running is not; the last output is copied whole.
+    #[test]
+    fn the_commands_are_blocks_and_the_last_output_is_copied() {
+        let mut t = testing::term(20, 12);
+        let mut marks = PromptLinks::default();
+        let mut text = Vec::new();
+        for (n, code) in [(0, 0), (1, 1)] {
+            text.extend_from_slice(format!("\x1b]133;A\x07${n} \x1b]133;B\x07cmd\r\n\x1b]133;C\x07").as_bytes());
+            for k in 0..2 {
+                text.extend_from_slice(format!("out {n}.{k}\r\n").as_bytes());
+            }
+            text.extend_from_slice(format!("\x1b]133;D;{code}\x07").as_bytes());
+        }
+        text.extend_from_slice(b"\x1b]133;A\x07$2 \x1b]133;B\x07sleep\r\n\x1b]133;C\x07");
+        let fed = marks.feed(&text).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(blocks(&t), [Block { lines: 0..3, exit: 0 }, Block { lines: 3..6, exit: 1 }]);
+        // Nothing yet from the running one: the output of the one before.
+        assert_eq!(last_output(&t).as_deref(), Some("out 1.0\nout 1.1"));
+        testing::feed(&mut t, "zzz\r\n");
+        assert_eq!(last_output(&t).as_deref(), Some("zzz"));
+        let fed = marks.feed(b"\x1b]133;D;0\x07\x1b]133;A\x07$3 ").unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(blocks(&t).last(), Some(&Block { lines: 6..8, exit: 0 }));
+        // The marks are no program's links.
+        assert!(hyperlinks(&t).is_empty());
+        assert!(all_text(&t).contains("out 1.1"));
+    }
+
+    /// A shell that marks no output (pwsh): the rows after the prompt, and
+    /// an empty Enter's prompt is passed over.
+    #[test]
+    fn without_c_the_output_is_the_rows_after_the_prompt() {
+        let mut t = testing::term(20, 8);
+        let mut marks = PromptLinks::default();
+        let text = b"\x1b]133;D;0\x07\x1b]133;A\x07PS> dir\r\na\r\nb\r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> \r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> ";
+        let fed = marks.feed(text).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(last_output(&t).as_deref(), Some("a\nb"));
+        assert_eq!(blocks(&t), [Block { lines: 0..3, exit: 1 }, Block { lines: 3..4, exit: 1 }]);
     }
 
     /// The prompts are found in the grid, and the keys go from one to the

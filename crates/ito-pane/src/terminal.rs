@@ -606,6 +606,17 @@ impl Terminal {
         hyperlinks(&self.term.lock())
     }
 
+    /// The commands on the screen as shown that ended (see
+    /// [`blocks`](crate::blocks)).
+    pub fn blocks(&self) -> Vec<Block> {
+        blocks(&self.term.lock())
+    }
+
+    /// The last command's output (see [`last_output`](crate::last_output)).
+    pub fn command_output(&self) -> Option<String> {
+        last_output(&self.term.lock())
+    }
+
     /// The lines holding `needle` anywhere in the buffer (see
     /// [`find_lines`](crate::find_lines)).
     pub fn find_lines(&self, needle: &str, max: usize) -> Vec<(i32, usize, String)> {

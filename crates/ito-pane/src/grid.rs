@@ -350,12 +350,114 @@ pub(crate) fn search_in(term: &mut Term<Proxy>, found: &mut Option<(Point, Point
 pub fn prompt_lines<T: EventListener>(term: &Term<T>) -> Vec<i32> {
     let grid = term.grid();
     let top = -(grid.history_size() as i32);
-    (top..grid.screen_lines() as i32)
-        .filter(|&line| {
-            let row = &grid[Line(line)];
-            (0..grid.columns()).any(|col| row[Column(col)].hyperlink().is_some_and(|h| h.uri() == crate::osc::PROMPT_LINK))
-        })
+    (top..grid.screen_lines() as i32).filter(|&line| matches!(mark_on(term, line), Some(Mark::Prompt(_)))).collect()
+}
+
+/// What tsumugi marked a row as (see [`PromptLinks`](crate::osc)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    /// A prompt starts here, with the exit code of the command before it.
+    Prompt(Option<i32>),
+    /// A command's output starts here.
+    Output,
+}
+
+fn mark_on<T: EventListener>(term: &Term<T>, line: i32) -> Option<Mark> {
+    let grid = term.grid();
+    let row = &grid[Line(line)];
+    (0..grid.columns()).find_map(|col| {
+        let uri = row[Column(col)].hyperlink()?.uri().to_owned();
+        if uri.starts_with(crate::osc::PROMPT_LINK) {
+            Some(Mark::Prompt(crate::osc::exit_of(&uri)))
+        } else {
+            (uri == crate::osc::OUTPUT_LINK).then_some(Mark::Output)
+        }
+    })
+}
+
+/// A command and its output as the view shows it (a block, as Warp and
+/// iTerm2 have them): from its prompt's row to the row before the next
+/// prompt, on `lines` of the view (0 at its top), and how it ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Block {
+    pub lines: std::ops::Range<usize>,
+    pub exit: i32,
+}
+
+/// How far above the view a block's prompt is looked for: a block longer
+/// than this has no bar on the rows past it.
+const BLOCK_BACK: i32 = 2000;
+
+/// The commands on the screen as shown whose exit code the shell gave
+/// (OSC 133 `D;<code>`, read when the next prompt comes): a command still
+/// running, or one the shell said nothing of, is none of them.
+pub fn blocks<T: EventListener>(term: &Term<T>) -> Vec<Block> {
+    let grid = term.grid();
+    let offset = grid.display_offset() as i32;
+    let (top, bottom) = (-offset, grid.screen_lines() as i32 - offset);
+    let oldest = -(grid.history_size() as i32);
+    // The prompt the view's first block starts at, above it, if near.
+    let above = (oldest.max(top - BLOCK_BACK)..top).rev().find(|&l| matches!(mark_on(term, l), Some(Mark::Prompt(_))));
+    let mut starts: Vec<i32> = above.into_iter().collect();
+    let mut exits: Vec<Option<i32>> = Vec::new();
+    for line in top..grid.screen_lines() as i32 {
+        if let Some(Mark::Prompt(exit)) = mark_on(term, line) {
+            if !starts.is_empty() {
+                exits.push(exit);
+            }
+            starts.push(line);
+            if line >= bottom {
+                break;
+            }
+        }
+    }
+    let view = |l: i32| (l.clamp(top, bottom) - top) as usize;
+    starts
+        .windows(2)
+        .zip(exits)
+        .filter_map(|(w, exit)| Some(Block { lines: view(w[0])..view(w[1]), exit: exit? }))
+        .filter(|b| !b.lines.is_empty())
         .collect()
+}
+
+/// The output of the last command that has any: what a command still
+/// running has written so far (from its OSC 133 `C`), else what is between
+/// the last two prompts that have something between them -- from the `C`
+/// there, or the row after the prompt where the shell marks none (pwsh).
+/// Trailing blank lines are left out; `None` when there is nothing.
+pub fn last_output<T: EventListener>(term: &Term<T>) -> Option<String> {
+    let grid = term.grid();
+    let oldest = -(grid.history_size() as i32);
+    let last = grid.screen_lines() as i32 - 1;
+    let text = |from: i32, to: i32| {
+        if from > to {
+            return None;
+        }
+        let all = term.bounds_to_string(Point::new(Line(from), Column(0)), Point::new(Line(to), grid.last_column()));
+        let all = all.trim_end_matches(['\n', '\r', ' ']).to_owned();
+        (!all.is_empty()).then_some(all)
+    };
+    // Bottom up: the rows since the prompt below, and where an output began.
+    let (mut below, mut output) = (last + 1, None);
+    for line in (oldest..=last).rev() {
+        match mark_on(term, line) {
+            Some(Mark::Output) => output = Some(line),
+            Some(Mark::Prompt(_)) => {
+                let running = below > last;
+                let from = output.unwrap_or(line + 1);
+                // A prompt with nothing run after it yet is not a command.
+                if !(running && output.is_none()) {
+                    if let Some(t) = text(from, below - 1) {
+                        return Some(t);
+                    }
+                }
+                (below, output) = (line, None);
+            }
+            None => {}
+        }
+    }
+    None
 }
 
 /// A link a program put on the screen (OSC 8, as `ls --hyperlink` and
@@ -379,7 +481,7 @@ pub fn hyperlinks<T: EventListener>(term: &Term<T>) -> Vec<Hyperlink> {
         let row = &grid[Line(line as i32 - offset)];
         for col in 0..grid.columns() {
             let Some(link) = row[Column(col)].hyperlink() else { continue };
-            if link.uri() == crate::osc::PROMPT_LINK {
+            if crate::osc::is_mark(link.uri()) {
                 continue;
             }
             match out.last_mut() {

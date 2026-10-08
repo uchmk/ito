@@ -51,6 +51,11 @@ pub trait Pane {
     fn hyperlinks(&self) -> Vec<crate::Hyperlink> {
         Vec::new()
     }
+    /// The commands on the screen as shown that ended (OSC 133). None known
+    /// is none.
+    fn blocks(&self) -> Vec<crate::Block> {
+        Vec::new()
+    }
 }
 
 impl Pane for Terminal {
@@ -110,5 +115,9 @@ impl Pane for Terminal {
 
     fn hyperlinks(&self) -> Vec<crate::Hyperlink> {
         Terminal::hyperlinks(self)
+    }
+
+    fn blocks(&self) -> Vec<crate::Block> {
+        Terminal::blocks(self)
     }
 }

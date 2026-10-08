@@ -238,36 +238,60 @@ fn notice(body: &[u8]) -> Option<String> {
 }
 
 
-/// The link a prompt's first row carries; see [`PromptLinks`].
+/// The link a prompt's first row carries; see [`PromptLinks`]. After the
+/// first command it is followed by `?exit=` and the exit code the shell
+/// gave for the command before (OSC 133 `D`), when it gave one.
 pub const PROMPT_LINK: &str = "tsumugi:prompt";
+/// The link the first row of a command's output carries (after OSC 133 `C`).
+pub const OUTPUT_LINK: &str = "tsumugi:output";
 
-/// Marks where each prompt is, in the grid itself. The bytes go to the
-/// parser on the reader thread with the grid locked, so this side never
-/// knows which row a mark lands on; but alacritty keeps an OSC 8 link on
-/// every cell written under it, scrolls it with the cell and rewraps it.
-/// So after each OSC 133 `A` an OSC 8 link to [`PROMPT_LINK`] is opened,
-/// and closed at the prompt's end (`B`, `C` or `D`) or its first newline,
-/// whichever is first: the prompt's first row is then found by its link
-/// ([`prompt_lines`](crate::prompt_lines)). Nothing is drawn for it.
+/// A link tsumugi put on the grid, not a program: drawn as nothing.
+pub fn is_mark(uri: &str) -> bool {
+    uri.starts_with("tsumugi:")
+}
+
+/// The exit code of the command before a prompt, from its link's uri.
+pub fn exit_of(uri: &str) -> Option<i32> {
+    uri.strip_prefix(PROMPT_LINK)?.strip_prefix("?exit=")?.parse().ok()
+}
+
+/// Marks where each prompt and each command's output is, in the grid
+/// itself. The bytes go to the parser on the reader thread with the grid
+/// locked, so this side never knows which row a mark lands on; but
+/// alacritty keeps an OSC 8 link on every cell written under it, scrolls it
+/// with the cell and rewraps it. So after each OSC 133 `A` an OSC 8 link to
+/// [`PROMPT_LINK`] is opened (with the exit code the last `D` gave), and
+/// after each `C` one to [`OUTPUT_LINK`]; each is closed at the next OSC 133
+/// or its first newline, whichever is first. The rows are then found by
+/// their links ([`prompt_lines`](crate::prompt_lines),
+/// [`blocks`](crate::blocks)). Nothing is drawn for them.
 #[derive(Default)]
 pub(crate) struct PromptLinks {
-    /// Inside an OSC: the start of what it says, enough to tell `133;A`.
+    /// Inside an OSC: the start of what it says, enough to tell `133;A` and
+    /// read `133;D;<code>`.
     osc: Option<Vec<u8>>,
     /// The last byte was ESC.
     esc: bool,
-    /// The link is open.
+    /// A link is open.
     open: bool,
+    /// The exit code the last `133;D` gave, for the next prompt's link.
+    exit: Option<i32>,
 }
 
-const OPEN: &[u8] = b"\x1b]8;id=tsumugi-prompt;tsumugi:prompt\x1b\\";
 const CLOSE: &[u8] = b"\x1b]8;;\x1b\\";
+/// How much of an OSC is kept: `133;D;-2147483648` and a little.
+const KEEP: usize = 24;
+
+fn open(uri: &str) -> Vec<u8> {
+    format!("\x1b]8;id=tsumugi-mark;{uri}\x1b\\").into_bytes()
+}
 
 impl PromptLinks {
     /// `chunk` with the links put in, or `None` when it needs none.
     pub(crate) fn feed(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {
         let mut out: Option<Vec<u8>> = None;
         for (i, &b) in chunk.iter().enumerate() {
-            let mut add: &[u8] = &[];
+            let mut add: Vec<u8> = Vec::new();
             match self.osc.take() {
                 Some(mut said) => {
                     let mut end = false;
@@ -285,18 +309,30 @@ impl PromptLinks {
                     } else {
                         if b == 0x1b {
                             self.esc = true;
-                        } else if said.len() < 8 {
+                        } else if said.len() < KEEP {
                             said.push(b);
                         }
                         self.osc = Some(std::mem::take(&mut said));
                     }
-                    if end {
-                        if said.starts_with(b"133;A") {
-                            add = OPEN;
-                            self.open = true;
-                        } else if said.starts_with(b"133;") && self.open {
-                            add = CLOSE;
+                    if end && said.starts_with(b"133;") {
+                        if self.open {
+                            add.extend_from_slice(CLOSE);
                             self.open = false;
+                        }
+                        if said.starts_with(b"133;A") {
+                            let uri = match self.exit.take() {
+                                Some(code) => format!("{PROMPT_LINK}?exit={code}"),
+                                None => PROMPT_LINK.to_owned(),
+                            };
+                            add.extend(open(&uri));
+                            self.open = true;
+                        } else if said.starts_with(b"133;C") {
+                            add.extend(open(OUTPUT_LINK));
+                            self.open = true;
+                        } else if let Some(rest) = said.strip_prefix(b"133;D") {
+                            // `133;D;<code>`, maybe more after another `;`.
+                            let code = rest.strip_prefix(b";").and_then(|r| r.split(|&b| b == b';').next());
+                            self.exit = code.and_then(|c| std::str::from_utf8(c).ok()).and_then(|c| c.parse().ok());
                         }
                     }
                 }
@@ -322,7 +358,7 @@ impl PromptLinks {
             }
             if !add.is_empty() {
                 let o = out.get_or_insert_with(|| chunk[..=i].to_vec());
-                o.extend_from_slice(add);
+                o.extend_from_slice(&add);
             }
         }
         out

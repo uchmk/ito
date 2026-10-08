@@ -256,6 +256,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     // Out from under the lock before any laying out happens.
     let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
     let hyperlinks = term.hyperlinks();
+    let blocks = if alt_screen { Vec::new() } else { term.blocks() };
 
     // Rows taller than the font (a line height over 1): the text in the middle.
     let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
@@ -421,6 +422,18 @@ pub fn show_faces<P: Pane + ?Sized>(
     // line, as in Windows Terminal: its text need not look like one.
     let x = |c: usize| inner.left() + c as f32 * cell_w;
     let under = |line: usize| inner.top() + (line + 1) as f32 * row_h - 1.5;
+    // Each command that ended, a bar in the margin from its prompt to the
+    // next: green for success, red for a failure (Warp's and iTerm2's marks).
+    for b in &blocks {
+        let tint = match b.exit {
+            0 => named(NamedColor::Green, pal, false),
+            _ => named(NamedColor::Red, pal, false),
+        };
+        let (y0, y1) = (inner.top() + b.lines.start as f32 * row_h + 1.0, (inner.top() + b.lines.end as f32 * row_h - 1.0).min(inner.bottom()));
+        if y1 > y0 {
+            painter.rect_filled(Rect::from_min_max(egui::pos2(rect.left() + 2.0, y0), egui::pos2(rect.left() + 4.0, y1)), CornerRadius::same(1), tint.gamma_multiply(0.8));
+        }
+    }
     for h in &hyperlinks {
         let mut at = x(h.cells.start);
         while at < x(h.cells.end) {
