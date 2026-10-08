@@ -101,6 +101,27 @@ impl<T> Node<T> {
             }
         }
     }
+
+    /// Every split's divider where each pane gets the same room: three panes
+    /// side by side a third each, and not a half and two quarters (tmux's
+    /// `select-layout -E`, iTerm2's Arrange Panes Evenly).
+    pub fn equalize(&mut self) {
+        if let Node::Split { dir, ratio, first, second } = self {
+            let (a, b) = (first.across(*dir), second.across(*dir));
+            *ratio = (a as f32 / (a + b) as f32).clamp(MIN_RATIO, 1.0 - MIN_RATIO);
+            first.equalize();
+            second.equalize();
+        }
+    }
+
+    /// How many panes stand side by side in direction `dir`: through the
+    /// splits that way, one for a split the other way.
+    fn across(&self, dir: Dir) -> usize {
+        match self {
+            Node::Split { dir: d, first, second, .. } if *d == dir => first.across(dir) + second.across(dir),
+            _ => 1,
+        }
+    }
 }
 
 impl<T: Clone + PartialEq> Node<T> {
@@ -431,6 +452,21 @@ mod tests {
         let n = three().map(&mut |t| t * 10);
         assert_eq!(n.leaves(), vec![10, 20, 30]);
         assert_eq!(n.layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>(), three().layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn equalizing_gives_each_pane_the_same_room() {
+        // 1 | 2 | 3 made by splitting 2 again: a half and two quarters.
+        let mut n = Node::Leaf(1);
+        assert!(n.split(&1, Dir::Right, 2));
+        assert!(n.split(&2, Dir::Right, 3));
+        assert!(n.split(&3, Dir::Down, 4));
+        n.equalize();
+        let widths: Vec<f32> = n.layout(AREA, 0.0).iter().map(|(_, r)| r.w).collect();
+        assert!(widths.iter().all(|w| (w - 1000.0 / 3.0).abs() < 1.0), "the stack of 3 over 4 is one across: {widths:?}");
+        let heights: Vec<f32> = n.layout(AREA, 0.0).iter().map(|(_, r)| r.h).collect();
+        assert_eq!(heights, vec![600.0, 600.0, 300.0, 300.0]);
+        assert_eq!(n.leaves(), vec![1, 2, 3, 4], "the panes stay where they were");
     }
 
     #[test]
