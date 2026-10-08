@@ -108,6 +108,8 @@ pub(crate) struct Tapped {
     /// did not fit in the buffer with them, handed over at the next read.
     marks: PromptLinks,
     held: Vec<u8>,
+    /// The `.cast` recording, while one is being made; see [`Terminal::record`].
+    cast: crate::cast::Cast,
 }
 
 /// Room left in each read for the links put in after it.
@@ -125,6 +127,9 @@ impl io::Read for Tapped {
         let room = if buf.len() > 2 * ROOM { buf.len() - ROOM } else { buf.len() };
         let n = self.charset.read(&mut buf[..room], |raw| inner.reader().read(raw))?;
         log_pty(&self.log, "out", &buf[..n]);
+        if let Some(c) = self.cast.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            c.output(&buf[..n]);
+        }
         for path in scan_osc7(&mut self.partial, &buf[..n]) {
             let _ = self.cwd.send(path);
         }
@@ -257,6 +262,8 @@ pub struct Terminal {
     pub shell_cwd: Option<PathBuf>,
     /// The PTY log, when `spawn` was given one; see [`PtyLog`].
     log: PtyLog,
+    /// The `.cast` recording, shared with the reader.
+    cast: crate::cast::Cast,
     /// The shell's process, to ask whether it has started anything. `None`
     /// where the PTY did not say, which reads as "nothing running".
     pub(crate) shell_pid: Option<u32>,
@@ -363,6 +370,7 @@ impl Terminal {
         let prompt_at = Arc::new(Mutex::new(None));
         let (notice_tx, notices) = crossbeam_channel::unbounded();
         let charset = crate::Charset::default();
+        let cast = crate::cast::Cast::default();
         let pty = Tapped {
             inner: pty,
             charset: charset.clone(),
@@ -379,6 +387,7 @@ impl Terminal {
             notice_tail: Vec::new(),
             marks: PromptLinks::default(),
             held: Vec::new(),
+            cast: cast.clone(),
         };
 
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -406,6 +415,7 @@ impl Terminal {
             found: None,
             shell_cwd: None,
             log,
+            cast,
             shell_pid,
             win32,
             last_out,
@@ -491,6 +501,26 @@ impl Terminal {
         // is signalled so a full-screen program repaints itself.
         self.term.lock().resize(size);
         let _ = self.sender.send(Msg::Resize(window_size(size, cell)));
+        if let Some(c) = self.cast.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            c.resize(size.cols, size.lines);
+        }
+    }
+
+    /// Record what the shell writes from now on into an asciinema v2
+    /// `.cast` file at `path` (replacing a recording already going), until
+    /// [`stop_recording`](Self::stop_recording) or the pane ends.
+    pub fn record(&self, path: &Path) -> io::Result<()> {
+        let file = crate::cast::CastFile::create(path, self.size.cols, self.size.lines, &self.title)?;
+        *self.cast.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+        Ok(())
+    }
+
+    pub fn stop_recording(&self) {
+        self.cast.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+
+    pub fn recording(&self) -> bool {
+        self.cast.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
 
     pub fn send(&self, bytes: Vec<u8>) {

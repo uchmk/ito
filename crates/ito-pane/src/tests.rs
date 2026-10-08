@@ -208,6 +208,31 @@ mod pane {
         assert_eq!(String::from_utf8_lossy(&got), "\x1b]11;rgb:101", "{got:?}");
     }
 
+    /// A recording holds what the shell wrote after it began, as `.cast`
+    /// lines, and a resize.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_records_what_its_shell_writes() {
+        let dir = crate::util::test_dir("term-cast");
+        let cast = dir.join("a.cast");
+        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "sleep 0.3; printf 'cast-me\\n'; sleep 5".to_owned()]));
+        let mut t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
+        t.record(&cast).expect("the file is made");
+        assert!(t.recording());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !std::fs::read_to_string(&cast).unwrap_or_default().contains("cast-me") && Instant::now() < deadline {
+            t.drain();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        t.resize(Size::new(100, 30), (8, 16));
+        t.stop_recording();
+        assert!(!t.recording());
+        let text = std::fs::read_to_string(&cast).unwrap_or_default();
+        assert!(text.starts_with("{\"version\": 2, \"width\": 80, \"height\": 24"), "{text}");
+        assert!(text.contains("cast-me\\r\\n"), "{text}");
+        assert!(text.trim_end().ends_with(", \"r\", \"100x30\"]"), "{text}");
+    }
+
     /// `children` finds a process this one started: the question `<C-S-t>`
     /// asks of the shell before ending it (Q21). Asserted on the child's own
     /// pid rather than on "none before, one after", because tests running

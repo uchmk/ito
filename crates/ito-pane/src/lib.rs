@@ -13,6 +13,7 @@
 //! ([`gpu`]). What differs by OS is in `sys`.
 //! The plan this crate is being built by is `docs/pane-extraction.md`.
 
+mod cast;
 mod charset;
 mod grid;
 mod keys;
