@@ -80,6 +80,11 @@ pub struct Shown {
     pub copy: Option<String>,
     /// A right-click: read the clipboard and [`Pane::paste`] it.
     pub paste: bool,
+    /// A click with Ctrl (Cmd on a Mac) on a web address or a path: open it.
+    pub open: Option<crate::Link>,
+    /// Where the grid's first cell is, and a cell's size: for drawing over
+    /// a cell (a copy mode's cursor).
+    pub grid: Option<(egui::Pos2, Vec2)>,
 }
 
 /// How many cells fit, given the space and the font.
@@ -222,6 +227,7 @@ pub fn show_faces<P: Pane + ?Sized>(
 
     let inner = rect.shrink2(Vec2::new(6.0, 4.0));
     let size = fit(inner, cell_w, row_h);
+    shown.grid = Some((inner.min, Vec2::new(cell_w, row_h)));
 
     let id = ui.id().with("term-pane");
     let resp = ui.interact(rect, id, egui::Sense::click_and_drag());
@@ -406,6 +412,22 @@ pub fn show_faces<P: Pane + ?Sized>(
         let cell = (col as usize).min(size.cols.saturating_sub(1));
         (cell, line.min(size.lines.saturating_sub(1)), x - col >= 0.5)
     };
+    // Ctrl (Cmd on a Mac) over a web address or a path underlines it and
+    // shows a hand; a click opens it, as in VS Code's and Windows Terminal's
+    // panes.
+    let linking = over && ui.ctx().input(|i| i.modifiers.command);
+    if let Some(p) = hover.filter(|_| linking) {
+        let (col, line, _) = cell_at(p);
+        if let Some((cells, link)) = rows.get(line).and_then(|r| crate::link_at(r, col)) {
+            let y = inner.top() + (line + 1) as f32 * row_h - 1.5;
+            let x = |c: usize| inner.left() + c as f32 * cell_w;
+            painter.hline(x(cells.start)..=x(cells.end), y, Stroke::new(1.0, pal.cursor));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if resp.clicked() {
+                shown.open = Some(link);
+            }
+        }
+    }
     if let Some(p) = pointer {
         if resp.double_clicked() {
             let (col, line, _) = cell_at(p);

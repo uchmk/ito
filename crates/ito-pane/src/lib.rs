@@ -16,6 +16,7 @@
 mod charset;
 mod grid;
 mod keys;
+mod link;
 mod log;
 mod osc;
 mod pane;
@@ -45,6 +46,7 @@ pub use alacritty_terminal;
 pub use charset::{Charset, CHARSETS};
 pub use grid::*;
 pub use keys::*;
+pub use link::{link_at, Link};
 pub use log::escape_bytes;
 pub use pane::{Pane, Screen};
 pub use shell::*;
