@@ -1186,3 +1186,207 @@ mod prompt_marks {
         assert_eq!(back.iter().map(|h| h.line).collect::<Vec<_>>(), up.iter().map(|h| h.line + 1).filter(|l| *l < 4).collect::<Vec<_>>());
     }
 }
+
+mod pictures {
+    use super::*;
+    use crate::image::{base64, sixel, Catcher, Pictures};
+
+    fn catcher(cols: usize) -> (Catcher, Pictures) {
+        let store: Pictures = Default::default();
+        {
+            let mut s = store.lock().unwrap();
+            s.cell = (10, 20);
+            s.cols = cols;
+        }
+        (Catcher::new(store.clone()), store)
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for c in bytes.chunks(3) {
+            let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            for i in 0..=c.len() {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            }
+            for _ in c.len()..3 {
+                out.push('=');
+            }
+        }
+        out
+    }
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 128, 255, 255]));
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        out
+    }
+
+    /// The key the cells carry, from what the catcher put in.
+    fn key_of(out: &[u8]) -> u64 {
+        let s = String::from_utf8_lossy(out);
+        let at = s.find(crate::IMAGE_LINK).expect("a picture's cell") + crate::IMAGE_LINK.len();
+        s[at..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap()
+    }
+
+    #[test]
+    fn base64_with_or_without_padding_and_breaks() {
+        assert_eq!(base64(b"aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(base64(b"aGVs\nbG8").unwrap(), b"hello");
+        assert_eq!(base64(b"").unwrap(), b"");
+        assert!(base64(b"a*b").is_none());
+        assert_eq!(base64(b64(&[0, 255, 7, 9]).as_bytes()).unwrap(), [0, 255, 7, 9]);
+    }
+
+    /// Colors by RGB percent and by DEC's HLS, repeats, and the next band.
+    #[test]
+    fn a_sixel_is_painted() {
+        let p = sixel(b"0;1;0\"1;1;3;12#1;2;100;0;0#1!3~-#2;1;120;50;100!2~").unwrap();
+        assert_eq!((p.width, p.height), (3, 12));
+        let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        assert_eq!(px(2, 5), [255, 0, 0, 255]);
+        // HLS 120 is red, in DEC's.
+        assert_eq!(px(1, 6), [255, 0, 0, 255]);
+        // Not set, so clear.
+        assert_eq!(px(2, 6), [0, 0, 0, 0]);
+        assert!(sixel(b"#1;2;0;0;0").is_none());
+    }
+
+    /// Sixel: the sequence is taken out, and in its place one cell with the
+    /// picture's link and the cursor below it, the text around untouched.
+    #[test]
+    fn a_sixel_becomes_a_cell_with_a_link() {
+        let (mut c, store) = catcher(80);
+        let out = c.feed(b"a\x1bPq#0;2;0;100;0!20~-!20~\x1b\\b").unwrap();
+        let key = key_of(&out);
+        let shown = store.lock().unwrap().get(key).unwrap();
+        // 20 x 12 pixels in cells of 10 x 20.
+        assert_eq!((shown.cols, shown.rows), (2, 1));
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.starts_with("a\x1b]8;"), "{s:?}");
+        assert!(s.ends_with("\x08\nb"), "{s:?}");
+        assert!(!s.contains("\x1bP"));
+    }
+
+    /// What is not a picture goes on as it was, even cut between reads.
+    #[test]
+    fn other_sequences_pass_through_split_anywhere() {
+        let text: &[u8] = b"\x1b[31mred\x1bP$qm\x1b\\\x1b]0;title\x07\x1b]1337;SetUserVar=a=b\x07\x1b_Xother\x1b\\end\x1b\x1b[0m";
+        for cut in 0..text.len() {
+            let (mut c, _) = catcher(80);
+            let mut out = Vec::new();
+            for part in [&text[..cut], &text[cut..]] {
+                match c.feed(part) {
+                    Some(o) => out.extend(o),
+                    None => out.extend_from_slice(part),
+                }
+            }
+            assert_eq!(out, text, "cut at {cut}");
+        }
+    }
+
+    /// Kitty: a picture sent and placed at once, answered unless quiet; one
+    /// sent in chunks; one sent, then placed by its id; and deleted.
+    #[test]
+    fn kitty_pictures_are_answered_and_placed() {
+        let (mut c, store) = catcher(80);
+        let rgb = b64(&[255, 0, 0, 0, 255, 0]);
+        let out = c.feed(format!("\x1b_Ga=T,f=24,s=2,v=1,i=5;{rgb}\x1b\\").as_bytes()).unwrap();
+        assert_eq!(c.replies, [b"\x1b_Gi=5;OK\x1b\\".to_vec()]);
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        assert_eq!((shown.picture.width, shown.picture.rgba[4..8].to_vec()), (2, vec![0, 255, 0, 255]));
+        c.replies.clear();
+        // Quiet, in two chunks, of a PNG, in a size asked for.
+        let data = b64(&png(40, 40));
+        let (a, b) = data.split_at(data.len() / 2);
+        assert!(c.feed(format!("\x1b_Ga=T,f=100,q=1,c=4,r=2,m=1;{a}\x1b\\").as_bytes()).unwrap().is_empty());
+        let out = c.feed(format!("\x1b_Gm=0;{b}\x1b\\").as_bytes()).unwrap();
+        assert!(c.replies.is_empty());
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        assert_eq!((shown.cols, shown.rows), (4, 2));
+        // Beside: down a row and on past it.
+        assert!(String::from_utf8_lossy(&out).ends_with("\n\x1b[3C"));
+        // Sent, then placed; a place of nothing is an error.
+        assert!(c.feed(format!("\x1b_Gf=24,s=2,v=1,i=9;{rgb}\x1b\\").as_bytes()).unwrap().is_empty());
+        let out = c.feed(b"\x1b_Ga=p,i=9,p=2,C=1\x1b\\").unwrap();
+        assert!(String::from_utf8_lossy(&out).ends_with("\x1b]8;;\x1b\\\x08"));
+        // The answer says which placement.
+        assert_eq!(c.replies.last().unwrap(), b"\x1b_Gi=9,p=2;OK\x1b\\".as_slice());
+        c.feed(b"\x1b_Ga=p,i=77\x1b\\");
+        assert!(String::from_utf8_lossy(c.replies.last().unwrap()).contains("ENOENT"));
+        // Deleting image 9's placements leaves image 5's.
+        let nine = key_of(&out);
+        c.feed(b"\x1b_Ga=d,d=i,i=9\x1b\\");
+        assert!(store.lock().unwrap().get(nine).is_none());
+        assert!(store.lock().unwrap().tallest() > 0);
+        c.feed(b"\x1b_Ga=d\x1b\\");
+        assert_eq!(store.lock().unwrap().tallest(), 0);
+    }
+
+    /// iTerm2: a file shown inline, sized in cells; one not inline is not
+    /// shown, and the multipart form.
+    #[test]
+    fn iterm_files_are_shown_inline() {
+        let (mut c, store) = catcher(80);
+        let data = b64(&png(30, 30));
+        let out = c.feed(format!("\x1b]1337;File=name=eA==;inline=1;width=6;height=3:{data}\x07").as_bytes()).unwrap();
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        // Shape kept: 6 x 3 cells is 60 x 60 pixels.
+        assert_eq!((shown.cols, shown.rows), (6, 3));
+        let out = c.feed(format!("\x1b]1337;File=inline=0:{data}\x07").as_bytes()).unwrap();
+        assert!(out.is_empty());
+        assert!(c.feed(b"\x1b]1337;MultipartFile=inline=1\x07").unwrap().is_empty());
+        let (a, b) = data.split_at(8);
+        c.feed(format!("\x1b]1337;FilePart={a}\x07").as_bytes());
+        c.feed(format!("\x1b]1337;FilePart={b}\x07").as_bytes());
+        let out = c.feed(b"\x1b]1337;FileEnd\x1b\\").unwrap();
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        // 30 x 30 pixels in cells of 10 x 20.
+        assert_eq!((shown.cols, shown.rows), (3, 2));
+    }
+
+    /// A picture wider than the pane is made to fit it.
+    #[test]
+    fn a_wide_picture_fits_the_pane() {
+        let (mut c, store) = catcher(10);
+        let out = c.feed(format!("\x1b_Ga=T,f=100;{}\x1b\\", b64(&png(400, 100))).as_bytes()).unwrap();
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        assert_eq!((shown.cols, shown.rows), (10, 2));
+        assert!(shown.picture.width <= 200);
+    }
+
+    /// Fed a byte at a time, the same picture comes out.
+    #[test]
+    fn a_picture_cut_into_bytes_comes_out_whole() {
+        let (mut c, store) = catcher(80);
+        let text = format!("x\x1b_Ga=T,f=24,s=1,v=1;{}\x1b\\y", b64(&[1, 2, 3]));
+        let mut out = Vec::new();
+        for b in text.as_bytes() {
+            match c.feed(std::slice::from_ref(b)) {
+                Some(o) => out.extend(o),
+                None => out.push(*b),
+            }
+        }
+        let shown = store.lock().unwrap().get(key_of(&out)).unwrap();
+        assert_eq!(shown.picture.rgba, [1, 2, 3, 255]);
+        assert!(out.starts_with(b"x\x1b]8;") && out.ends_with(b"y"));
+    }
+
+    /// In the grid, the cell is found where the picture went, and scrolls.
+    #[test]
+    fn the_cell_is_found_in_the_grid() {
+        let (mut c, _) = catcher(20);
+        let mut t = testing::term(20, 4);
+        let out = c.feed(format!("ab\x1b_Ga=T,f=24,s=1,v=1,c=2,r=2;{}\x1b\\z", b64(&[1, 2, 3])).as_bytes()).unwrap();
+        let key = key_of(&out);
+        testing::feed(&mut t, std::str::from_utf8(&out).unwrap());
+        assert_eq!(placements(&t, 0), [(key, 0, 2)]);
+        // The picture's link is no program's.
+        assert!(hyperlinks(&t).is_empty());
+        // Up off the top: found only when looked for above.
+        testing::feed(&mut t, "\r\n\r\n\r\n\r\n");
+        assert!(placements(&t, 0).is_empty());
+        assert_eq!(placements(&t, 3), [(key, -2, 2)]);
+    }
+}

@@ -37,6 +37,11 @@ serde = { version = "1", features = ["derive"], optional = true }
 # (tsumugi's QUESTIONS.md Q11, the owner's yes on 2026-10-07). Pure Rust,
 # Firefox's, the WHATWG encodings.
 encoding_rs = "0.8"
+# Pictures in the pane (sixel, kitty's graphics, iTerm2's inline images):
+# the PNG, JPEG and GIF they send, decoded, and kitty's zlib. Pure Rust,
+# and filer builds both already.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+miniz_oxide = "0.8"
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }

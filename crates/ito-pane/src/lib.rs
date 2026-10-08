@@ -16,6 +16,7 @@
 mod cast;
 mod charset;
 mod grid;
+mod image;
 mod keys;
 mod link;
 mod log;
@@ -46,6 +47,7 @@ pub use alacritty_terminal;
 
 pub use charset::{Charset, CHARSETS};
 pub use grid::*;
+pub use image::{Picture, Placement, IMAGE_LINK};
 pub use keys::*;
 pub use link::{link_at, Link};
 pub use log::escape_bytes;

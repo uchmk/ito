@@ -203,6 +203,33 @@ pub fn show<P: Pane + ?Sized>(
     show_faces(ui, term, state, rect, &Faces::plain(f.clone()), row_h, pal, opts)
 }
 
+/// The pictures' textures, by key, and when each was last drawn; one not
+/// drawn for a minute is let go.
+type Textures = std::collections::HashMap<u64, (egui::TextureHandle, f64)>;
+
+/// A picture's texture, made the first time it is drawn.
+fn texture<P: Pane + ?Sized>(ctx: &egui::Context, term: &P, key: u64) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new("tsumugi-pane-pictures");
+    let now = ctx.input(|i| i.time);
+    let mut cache: Textures = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let found = match cache.get_mut(&key) {
+        Some((t, used)) => {
+            *used = now;
+            Some(t.clone())
+        }
+        // Pixels that do not add up (from across the wire) are not drawn.
+        None => term.picture(key).filter(|p| p.rgba.len() == p.width as usize * p.height as usize * 4).map(|p| {
+            let image = egui::ColorImage::from_rgba_unmultiplied([p.width as usize, p.height as usize], &p.rgba);
+            let t = ctx.load_texture(format!("tsumugi-picture-{key}"), image, egui::TextureOptions::LINEAR);
+            cache.insert(key, (t.clone(), now));
+            t
+        }),
+    };
+    cache.retain(|_, (_, used)| now - *used < 60.0);
+    ctx.data_mut(|d| d.insert_temp(id, cache));
+    found
+}
+
 /// [`show`] with bold and italic faces; rows taller than the font's own put
 /// the text in their middle.
 #[allow(clippy::too_many_arguments)]
@@ -257,6 +284,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
     let hyperlinks = term.hyperlinks();
     let blocks = if alt_screen { Vec::new() } else { term.blocks() };
+    let pictures = term.pictures();
 
     // Rows taller than the font (a line height over 1): the text in the middle.
     let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
@@ -348,6 +376,24 @@ pub fn show_faces<P: Pane + ?Sized>(
                 faces.pick(cell.flags).clone(),
                 fg,
             );
+        }
+    }
+
+    // The pictures, over the text as kitty draws them, each over the cells
+    // from its top left one.
+    if !pictures.is_empty() {
+        let clip = painter.with_clip_rect(inner);
+        for p in &pictures {
+            let Some(texture) = texture(ui.ctx(), &*term, p.key) else { continue };
+            let at = Rect::from_min_size(
+                egui::pos2(inner.left() + p.col as f32 * cell_w, inner.top() + p.line as f32 * row_h),
+                Vec2::new(p.cols as f32 * cell_w, p.rows as f32 * row_h),
+            );
+            // The picture keeps its shape inside its cells, from their top left.
+            let [w, h] = texture.size().map(|v| v.max(1) as f32);
+            let scale = (at.width() / w).min(at.height() / h);
+            let at = Rect::from_min_size(at.min, Vec2::new(w * scale, h * scale));
+            clip.image(texture.id(), at, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
 

@@ -56,6 +56,17 @@ pub trait Pane {
     fn blocks(&self) -> Vec<crate::Block> {
         Vec::new()
     }
+    /// The pictures on the screen as shown (sixel, kitty, iTerm2). None
+    /// known is none.
+    fn pictures(&self) -> Vec<crate::Placement> {
+        Vec::new()
+    }
+    /// A picture's pixels, by its placement's key; `None` while they are
+    /// not to hand (a pane across a process boundary may fetch them and ask
+    /// for a repaint when they come).
+    fn picture(&self, _key: u64) -> Option<std::sync::Arc<crate::Picture>> {
+        None
+    }
 }
 
 impl Pane for Terminal {
@@ -119,5 +130,13 @@ impl Pane for Terminal {
 
     fn blocks(&self) -> Vec<crate::Block> {
         Terminal::blocks(self)
+    }
+
+    fn pictures(&self) -> Vec<crate::Placement> {
+        Terminal::pictures(self)
+    }
+
+    fn picture(&self, key: u64) -> Option<std::sync::Arc<crate::Picture>> {
+        Terminal::picture(self, key)
     }
 }

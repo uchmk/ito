@@ -1,7 +1,7 @@
 //! The pane itself: a shell on a PTY, the tap that reads what it says on the
 //! way past, and the grid `alacritty_terminal` parses it into.
 
-use std::io::{self};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,8 @@ use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::tty::{self, EventedReadWrite};
 
 use crossbeam_channel::{Receiver, Sender};
+
+use crate::image::{Picture, Placement};
 
 #[allow(unused_imports)]
 use crate::{grid::*, keys::*, log::*, osc::*, shell::*};
@@ -108,8 +110,14 @@ pub(crate) struct Tapped {
     /// did not fit in the buffer with them, handed over at the next read.
     marks: PromptLinks,
     held: Vec<u8>,
+    /// The pictures taken out of what is read; see [`crate::image`].
+    pictures: crate::image::Catcher,
+    /// What the pictures' cells pushed past the end of a read.
+    unmarked: Vec<u8>,
     /// The `.cast` recording, while one is being made; see [`Terminal::record`].
     cast: crate::cast::Cast,
+    /// The PTY has said it is at its end (a read of nothing).
+    ended: bool,
 }
 
 /// Room left in each read for the links put in after it.
@@ -123,9 +131,32 @@ impl io::Read for Tapped {
             self.held.drain(..n);
             return Ok(n);
         }
-        let inner = &mut self.inner;
+        loop {
+            let n = self.read_some(buf)?;
+            // Zero is the end of the shell, so a read that was all picture
+            // (or a sequence held for the next) reads again instead.
+            if n > 0 || self.ended {
+                return Ok(n);
+            }
+        }
+    }
+}
+
+impl Tapped {
+    fn read_some(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let room = if buf.len() > 2 * ROOM { buf.len() - ROOM } else { buf.len() };
+        if !self.unmarked.is_empty() {
+            let n = self.unmarked.len().min(room);
+            buf[..n].copy_from_slice(&self.unmarked[..n]);
+            self.unmarked.drain(..n);
+            return Ok(self.mark(buf, n));
+        }
+        let inner = &mut self.inner;
         let n = self.charset.read(&mut buf[..room], |raw| inner.reader().read(raw))?;
+        if n == 0 {
+            self.ended = true;
+            return Ok(0);
+        }
         log_pty(&self.log, "out", &buf[..n]);
         if let Some(c) = self.cast.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             c.output(&buf[..n]);
@@ -146,14 +177,34 @@ impl io::Read for Tapped {
         for text in scan_notices(&mut self.notice_tail, &buf[..n]) {
             let _ = self.notices.send(text);
         }
+        let taken = self.pictures.feed(&buf[..n]);
+        if !self.pictures.replies.is_empty() {
+            crate::image::answer(self.inner.writer(), &mut self.pictures.replies);
+        }
+        let n = match taken {
+            Some(out) => {
+                // Only a picture's cells make it longer; what does not fit
+                // in the room is read next time, through the marks.
+                let fits = out.len().min(room);
+                buf[..fits].copy_from_slice(&out[..fits]);
+                self.unmarked.extend_from_slice(&out[fits..]);
+                fits
+            }
+            None => n,
+        };
+        Ok(self.mark(buf, n))
+    }
+
+    /// Put the prompts' links into the `n` bytes read into `buf`.
+    fn mark(&mut self, buf: &mut [u8], n: usize) -> usize {
         match self.marks.feed(&buf[..n]) {
             Some(out) => {
                 let fits = out.len().min(buf.len());
                 buf[..fits].copy_from_slice(&out[..fits]);
                 self.held.extend_from_slice(&out[fits..]);
-                Ok(fits)
+                fits
             }
-            None => Ok(n),
+            None => n,
         }
     }
 }
@@ -277,6 +328,10 @@ pub struct Terminal {
     last_input: Mutex<Option<Instant>>,
     /// The character set the program reads and writes; UTF-8 by default.
     charset: crate::Charset,
+    /// The pictures shown in the pane, shared with the reader.
+    pictures: crate::image::Pictures,
+    /// The cell's size in pixels, as last resized.
+    cell: (u16, u16),
     /// The reader thread. It hands the PTY back when it ends, and dropping
     /// that is what ends the shell -- so [`Drop`] waits for it.
     io: Option<std::thread::JoinHandle<(EventLoop<Tapped, Proxy>, alacritty_terminal::event_loop::State)>>,
@@ -371,6 +426,12 @@ impl Terminal {
         let (notice_tx, notices) = crossbeam_channel::unbounded();
         let charset = crate::Charset::default();
         let cast = crate::cast::Cast::default();
+        let pictures: crate::image::Pictures = Default::default();
+        {
+            let mut p = pictures.lock().unwrap_or_else(|e| e.into_inner());
+            p.cell = cell;
+            p.cols = size.cols;
+        }
         let pty = Tapped {
             inner: pty,
             charset: charset.clone(),
@@ -387,6 +448,9 @@ impl Terminal {
             notice_tail: Vec::new(),
             marks: PromptLinks::default(),
             held: Vec::new(),
+            pictures: crate::image::Catcher::new(pictures.clone()),
+            unmarked: Vec::new(),
+            ended: false,
             cast: cast.clone(),
         };
 
@@ -424,6 +488,8 @@ impl Terminal {
             notices,
             last_input: Mutex::new(None),
             charset,
+            pictures,
+            cell,
             io,
         })
     }
@@ -483,7 +549,19 @@ impl Terminal {
                 // pipe it would if the user had typed it.
                 PtyEvent::PtyWrite(text) => {
                     let text = answer_win32_query(text, self.win32_input());
+                    // The primary device attributes say sixel (4) as well:
+                    // img2sixel and chafa ask before they draw.
+                    let text = if text == "\x1b[?6c" { "\x1b[?62;4;22c".to_owned() } else { text };
                     self.send_as(text.into_bytes(), "in reply")
+                }
+                // CSI 14 t: the pane's size in pixels, for a program sizing
+                // a picture to it. Multiplied in `u16`, so not past that.
+                PtyEvent::TextAreaSizeRequest(format) => {
+                    let w = window_size(self.size, self.cell);
+                    let fits = |n: u16, c: u16| (n as u32) * (c as u32) <= u16::MAX as u32;
+                    if fits(w.num_lines, w.cell_height) && fits(w.num_cols, w.cell_width) {
+                        self.send_as(format(w).into_bytes(), "in reply");
+                    }
                 }
                 PtyEvent::Exit | PtyEvent::ChildExit(_) => self.exited = true,
                 _ => {}
@@ -493,6 +571,12 @@ impl Terminal {
     }
 
     pub fn resize(&mut self, size: Size, cell: (u16, u16)) {
+        self.cell = cell;
+        {
+            let mut p = self.pictures.lock().unwrap_or_else(|e| e.into_inner());
+            p.cell = cell;
+            p.cols = size.cols;
+        }
         if size.cols == self.size.cols && size.lines == self.size.lines {
             return;
         }
@@ -610,6 +694,29 @@ impl Terminal {
     /// [`blocks`](crate::blocks)).
     pub fn blocks(&self) -> Vec<Block> {
         blocks(&self.term.lock())
+    }
+
+    /// The pictures on the screen as shown, where they are and how many
+    /// cells they cover; [`picture`](Self::picture) has their pixels.
+    pub fn pictures(&self) -> Vec<Placement> {
+        let store = self.pictures.lock().unwrap_or_else(|e| e.into_inner());
+        let tallest = store.tallest();
+        if tallest == 0 {
+            return Vec::new();
+        }
+        let lines = self.size.lines as i32;
+        placements(&self.term.lock(), tallest)
+            .into_iter()
+            .filter_map(|(key, line, col)| {
+                let s = store.get(key)?;
+                (line + s.rows as i32 > 0 && line < lines).then_some(Placement { key, line, col, cols: s.cols, rows: s.rows })
+            })
+            .collect()
+    }
+
+    /// A picture's pixels, by the key a [`Placement`] has.
+    pub fn picture(&self, key: u64) -> Option<Arc<Picture>> {
+        self.pictures.lock().unwrap_or_else(|e| e.into_inner()).get(key).map(|s| s.picture)
     }
 
     /// The last command's output (see [`last_output`](crate::last_output)).

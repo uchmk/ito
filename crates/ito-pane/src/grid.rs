@@ -493,6 +493,26 @@ pub fn hyperlinks<T: EventListener>(term: &Term<T>) -> Vec<Hyperlink> {
     out
 }
 
+/// The pictures' top left cells ([`IMAGE_LINK`](crate::IMAGE_LINK)) on
+/// the view and up to `above` lines over it: each picture's key, its line
+/// (0 the view's top, less above it) and its column.
+pub fn placements<T: EventListener>(term: &Term<T>, above: usize) -> Vec<(u64, i32, usize)> {
+    let grid = term.grid();
+    let offset = grid.display_offset() as i32;
+    let oldest = -(grid.history_size() as i32);
+    let mut out = Vec::new();
+    for line in (-(above as i32)).max(oldest + offset)..grid.screen_lines() as i32 {
+        let row = &grid[Line(line - offset)];
+        for col in 0..grid.columns() {
+            let Some(link) = row[Column(col)].hyperlink() else { continue };
+            if let Some(key) = link.uri().strip_prefix(crate::image::IMAGE_LINK).and_then(|k| k.parse().ok()) {
+                out.push((key, line, col));
+            }
+        }
+    }
+    out
+}
+
 /// Scroll to the prompt before the view's top line (`back`) or after it,
 /// putting it at the top; past the last one, down to the bottom. False when
 /// there was nowhere to go.
