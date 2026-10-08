@@ -42,6 +42,11 @@ pub trait Pane {
     fn paste(&self, text: &str);
     /// Keys go as win32-input-mode records (the other end asked).
     fn win32_input(&self) -> bool;
+    /// The program asked for bracketed paste: a paste of several lines is
+    /// held as one, not run line by line. Unknown is no.
+    fn bracketed_paste(&self) -> bool {
+        false
+    }
 }
 
 impl Pane for Terminal {
@@ -93,5 +98,9 @@ impl Pane for Terminal {
 
     fn win32_input(&self) -> bool {
         Terminal::win32_input(self)
+    }
+
+    fn bracketed_paste(&self) -> bool {
+        Terminal::bracketed_paste(self)
     }
 }

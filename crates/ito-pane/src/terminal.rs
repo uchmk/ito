@@ -633,7 +633,7 @@ impl Terminal {
     }
 
     /// Whether the program on the other end asked for bracketed paste.
-    fn bracketed_paste(&self) -> bool {
+    pub fn bracketed_paste(&self) -> bool {
         use alacritty_terminal::term::TermMode;
         self.term.lock().mode().contains(TermMode::BRACKETED_PASTE)
     }
