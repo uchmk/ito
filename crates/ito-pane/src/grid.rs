@@ -358,6 +358,39 @@ pub fn prompt_lines<T: EventListener>(term: &Term<T>) -> Vec<i32> {
         .collect()
 }
 
+/// A link a program put on the screen (OSC 8, as `ls --hyperlink` and
+/// `gcc` do): on `line` of the view (0 at its top), over `cells`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Hyperlink {
+    pub line: usize,
+    pub cells: std::ops::Range<usize>,
+    pub uri: String,
+}
+
+/// The OSC 8 links on the screen as it is shown, row by row; the marks
+/// tsumugi puts on prompts are none of them. A link broken by other cells
+/// is one for each piece.
+pub fn hyperlinks<T: EventListener>(term: &Term<T>) -> Vec<Hyperlink> {
+    let grid = term.grid();
+    let offset = grid.display_offset() as i32;
+    let mut out: Vec<Hyperlink> = Vec::new();
+    for line in 0..grid.screen_lines() {
+        let row = &grid[Line(line as i32 - offset)];
+        for col in 0..grid.columns() {
+            let Some(link) = row[Column(col)].hyperlink() else { continue };
+            if link.uri() == crate::osc::PROMPT_LINK {
+                continue;
+            }
+            match out.last_mut() {
+                Some(last) if last.line == line && last.cells.end == col && last.uri == link.uri() => last.cells.end = col + 1,
+                _ => out.push(Hyperlink { line, cells: col..col + 1, uri: link.uri().to_string() }),
+            }
+        }
+    }
+    out
+}
+
 /// Scroll to the prompt before the view's top line (`back`) or after it,
 /// putting it at the top; past the last one, down to the bottom. False when
 /// there was nowhere to go.

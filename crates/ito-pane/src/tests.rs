@@ -1074,4 +1074,24 @@ mod prompt_marks {
         // The row reads as it was written: the link draws nothing.
         assert!(all_text(&t).contains("$0 cmd"));
     }
+
+    /// A program's OSC 8 links are found where they are on the view, piece
+    /// by piece; the prompt's mark is not one of them.
+    #[test]
+    fn the_links_a_program_wrote_are_found_on_the_view() {
+        let mut t = testing::term(20, 4);
+        let mut marks = PromptLinks::default();
+        let text = b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\nsee \x1b]8;;https://a.example/\x1b\\here\x1b]8;;\x1b\\ ok\r\n\x1b]8;id=f;file:///tmp/x\x07x\x1b]8;;\x07";
+        let fed = marks.feed(text).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        let found = hyperlinks(&t);
+        assert_eq!(found, [Hyperlink { line: 1, cells: 4..8, uri: "https://a.example/".into() }, Hyperlink { line: 2, cells: 0..1, uri: "file:///tmp/x".into() }]);
+        // Scrolled back a line, the same links a line lower.
+        testing::feed(&mut t, "\r\n\r\n");
+        let up = hyperlinks(&t);
+        assert_eq!(up.len(), 2);
+        t.scroll_display(alacritty_terminal::grid::Scroll::Delta(1));
+        let back = hyperlinks(&t);
+        assert_eq!(back.iter().map(|h| h.line).collect::<Vec<_>>(), up.iter().map(|h| h.line + 1).filter(|l| *l < 4).collect::<Vec<_>>());
+    }
 }

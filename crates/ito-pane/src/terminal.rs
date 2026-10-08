@@ -570,6 +570,12 @@ impl Terminal {
         jump_prompt(&mut self.term.lock(), back)
     }
 
+    /// The OSC 8 links on the screen as shown (see
+    /// [`hyperlinks`](crate::hyperlinks)).
+    pub fn hyperlinks(&self) -> Vec<Hyperlink> {
+        hyperlinks(&self.term.lock())
+    }
+
     /// The lines holding `needle` anywhere in the buffer (see
     /// [`find_lines`](crate::find_lines)).
     pub fn find_lines(&self, needle: &str, max: usize) -> Vec<(i32, usize, String)> {

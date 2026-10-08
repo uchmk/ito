@@ -255,6 +255,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     term.resize(size, (cell_w.round() as u16, row_h.round() as u16));
     // Out from under the lock before any laying out happens.
     let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
+    let hyperlinks = term.hyperlinks();
 
     // Rows taller than the font (a line height over 1): the text in the middle.
     let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
@@ -415,13 +416,23 @@ pub fn show_faces<P: Pane + ?Sized>(
     // Ctrl (Cmd on a Mac) over a web address or a path underlines it and
     // shows a hand; a click opens it, as in VS Code's and Windows Terminal's
     // panes.
+    // A link a program put there (OSC 8) is always marked, with a dotted
+    // line, as in Windows Terminal: its text need not look like one.
+    let x = |c: usize| inner.left() + c as f32 * cell_w;
+    let under = |line: usize| inner.top() + (line + 1) as f32 * row_h - 1.5;
+    for h in &hyperlinks {
+        let mut at = x(h.cells.start);
+        while at < x(h.cells.end) {
+            painter.hline(at..=(at + 2.0).min(x(h.cells.end)), under(h.line), Stroke::new(1.0, pal.fg_dim));
+            at += 4.0;
+        }
+    }
     let linking = over && ui.ctx().input(|i| i.modifiers.command);
     if let Some(p) = hover.filter(|_| linking) {
         let (col, line, _) = cell_at(p);
-        if let Some((cells, link)) = rows.get(line).and_then(|r| crate::link_at(r, col)) {
-            let y = inner.top() + (line + 1) as f32 * row_h - 1.5;
-            let x = |c: usize| inner.left() + c as f32 * cell_w;
-            painter.hline(x(cells.start)..=x(cells.end), y, Stroke::new(1.0, pal.cursor));
+        let program = hyperlinks.iter().find(|h| h.line == line && h.cells.contains(&col)).map(|h| (h.cells.clone(), crate::Link::Url(h.uri.clone())));
+        if let Some((cells, link)) = program.or_else(|| rows.get(line).and_then(|r| crate::link_at(r, col))) {
+            painter.hline(x(cells.start)..=x(cells.end), under(line), Stroke::new(1.0, pal.cursor));
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if resp.clicked() {
                 shown.open = Some(link);

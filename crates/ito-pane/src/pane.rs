@@ -47,6 +47,10 @@ pub trait Pane {
     fn bracketed_paste(&self) -> bool {
         false
     }
+    /// The OSC 8 links on the screen as shown. None known is none.
+    fn hyperlinks(&self) -> Vec<crate::Hyperlink> {
+        Vec::new()
+    }
 }
 
 impl Pane for Terminal {
@@ -102,5 +106,9 @@ impl Pane for Terminal {
 
     fn bracketed_paste(&self) -> bool {
         Terminal::bracketed_paste(self)
+    }
+
+    fn hyperlinks(&self) -> Vec<crate::Hyperlink> {
+        Terminal::hyperlinks(self)
     }
 }
