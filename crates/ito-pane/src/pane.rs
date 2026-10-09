@@ -23,6 +23,8 @@ pub struct Screen {
     /// The program asked to hear when the pane gains and loses the keys
     /// (`\e[?1004h`).
     pub focus_report: bool,
+    /// The kitty keyboard enhancements the program asked for (`kitty::*`).
+    pub kitty: u8,
 }
 
 pub trait Pane {
@@ -54,6 +56,11 @@ pub trait Pane {
     /// (DECSET 1004). Unknown is no.
     fn focus_report(&self) -> bool {
         false
+    }
+    /// The kitty keyboard enhancements in force (`kitty::DISAMBIGUATE` and
+    /// the rest). Unknown is none.
+    fn kitty_flags(&self) -> u8 {
+        0
     }
     /// The pane gained the keys (`true`) or lost them: told to the program
     /// when it asked to hear, and to nobody otherwise.
@@ -97,6 +104,7 @@ impl Pane for Terminal {
             alt_screen: crate::alt_screen(t),
             mouse: crate::mouse_report(t),
             focus_report: crate::focus_report(t),
+            kitty: crate::kitty_flags(t),
         })
     }
 
@@ -142,6 +150,10 @@ impl Pane for Terminal {
 
     fn focus_report(&self) -> bool {
         self.with_grid(crate::focus_report)
+    }
+
+    fn kitty_flags(&self) -> u8 {
+        self.with_grid(crate::kitty_flags)
     }
 
     fn hyperlinks(&self) -> Vec<crate::Hyperlink> {

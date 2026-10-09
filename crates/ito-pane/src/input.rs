@@ -3,9 +3,20 @@
 //! keymap. An app takes the chords that are its own first (`claim`), and the
 //! rest goes to the shell.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use egui::{Event, Key, Modifiers};
 
+use crate::kitty::{self, KeyEvent, KittyKey};
 use crate::{Mods, Pane, Special};
+
+thread_local! {
+    /// The keys whose press went to a pane as a kitty escape code, by pane:
+    /// only those have their release told, so a chord the app kept (a new
+    /// tab) does not reach the program as a release with no press.
+    static HELD: RefCell<HashSet<(usize, Key)>> = RefCell::new(HashSet::new());
+}
 
 /// Hand this frame's `events` to `term`. `claim` sees every key press first
 /// and returns true for one the app keeps (a new tab, a split): that one goes
@@ -16,9 +27,18 @@ pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(
     // sent by the time the text turns up, so the text is dropped. Ctrl and Alt
     // together is AltGr (`@` on a German keyboard), where the text is the point.
     let mut swallow_text = false;
+    let flags = if term.win32_input() { 0 } else { term.kitty_flags() };
+    let me = term as *const P as *const () as usize;
     for (k, ev) in events.iter().enumerate() {
         match ev {
-            Event::Key { key, pressed: true, modifiers, .. } => {
+            Event::Key { key, pressed: false, modifiers, .. } if flags != 0 => {
+                if HELD.with(|h| h.borrow_mut().remove(&(me, *key))) {
+                    if let Some(bytes) = kitty_bytes(*key, *modifiers, KeyEvent::Release, None, flags).filter(|b| !b.is_empty()) {
+                        term.send(bytes);
+                    }
+                }
+            }
+            Event::Key { key, pressed: true, repeat, modifiers, .. } => {
                 if claim(*key, *modifiers) {
                     swallow_text = true;
                     continue;
@@ -31,6 +51,23 @@ pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(
                 let altgr = modifiers.ctrl && modifiers.alt && special(*key, modifiers.shift).is_none() && matches!(events.get(k + 1), Some(Event::Text(t)) if !t.is_empty());
                 if altgr {
                     continue;
+                }
+                // A program that asked for kitty's keys gets them so, the
+                // text the key typed going with it rather than after it.
+                if flags != 0 {
+                    let text = match events.get(k + 1) {
+                        Some(Event::Text(t)) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    let event = if *repeat { KeyEvent::Repeat } else { KeyEvent::Press };
+                    if let Some(bytes) = kitty_bytes(*key, *modifiers, event, text, flags) {
+                        swallow_text = text.is_some();
+                        if !bytes.is_empty() {
+                            HELD.with(|h| h.borrow_mut().insert((me, *key)));
+                            term.send(bytes);
+                        }
+                        continue;
+                    }
                 }
                 if let Some(bytes) = key_bytes(term, *key, *modifiers) {
                     term.send(bytes);
@@ -58,6 +95,18 @@ fn send_chord<P: Pane + ?Sized>(term: &P, key: Key, claim: &mut impl FnMut(Key, 
     }
 }
 
+/// A key under kitty's keyboard protocol (`kitty::encode`): `None` when it
+/// goes the legacy way.
+fn kitty_bytes(key: Key, modifiers: Modifiers, event: KeyEvent, text: Option<&str>, flags: u8) -> Option<Vec<u8>> {
+    let mods = Mods { ctrl: modifiers.command || modifiers.ctrl, alt: modifiers.alt, shift: modifiers.shift };
+    let modifier = [Key::ShiftLeft, Key::ControlLeft, Key::AltLeft, Key::SuperLeft, Key::ShiftRight, Key::ControlRight, Key::AltRight, Key::SuperRight]
+        .iter()
+        .position(|m| *m == key)
+        .map(|i| KittyKey::Modifier(kitty::MODIFIER_KEYS[i]));
+    let kk = modifier.or_else(|| special(key, mods.shift).map(KittyKey::Special)).or_else(|| printable(key).map(KittyKey::Char))?;
+    kitty::encode(kk, mods, event, text, flags)
+}
+
 /// The bytes for one key press, or `None` for a key that is text (it arrives
 /// as its own event) or nothing a shell wants.
 ///
@@ -68,6 +117,12 @@ fn send_chord<P: Pane + ?Sized>(term: &P, key: Key, claim: &mut impl FnMut(Key, 
 pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
     let mods = Mods { ctrl: modifiers.command || modifiers.ctrl, alt: modifiers.alt, shift: modifiers.shift };
     let win32 = term.win32_input();
+    let flags = if win32 { 0 } else { term.kitty_flags() };
+    if flags != 0 {
+        if let Some(bytes) = kitty_bytes(key, modifiers, KeyEvent::Press, None, flags) {
+            return (!bytes.is_empty()).then_some(bytes);
+        }
+    }
     let vt = match special(key, mods.shift) {
         // On Windows `Esc` goes as one win32-input-mode key press, not as a
         // plain ESC: ConPTY makes a press *and a release* out of a plain ESC,
@@ -171,7 +226,7 @@ pub fn printable(key: Key) -> Option<char> {
 mod tests {
     /// A pane that only records what is sent to it.
     #[derive(Default)]
-    struct Sent(std::cell::RefCell<Vec<u8>>);
+    struct Sent(std::cell::RefCell<Vec<u8>>, u8);
 
     impl crate::Pane for Sent {
         fn resize(&mut self, _: crate::Size, _: (u16, u16)) {}
@@ -195,6 +250,50 @@ mod tests {
         fn win32_input(&self) -> bool {
             false
         }
+        fn kitty_flags(&self) -> u8 {
+            self.1
+        }
+    }
+
+    fn key(k: egui::Key, modifiers: egui::Modifiers, pressed: bool) -> egui::Event {
+        egui::Event::Key { key: k, physical_key: None, pressed, repeat: false, modifiers }
+    }
+
+    fn sent(p: &Sent) -> String {
+        String::from_utf8(p.0.borrow().clone()).unwrap()
+    }
+
+    /// Once a program asked to have keys told apart, Shift+Enter is its own
+    /// key; text and AltGr still type as text, and Ctrl+C (which egui turns
+    /// into a copy) goes as a code too.
+    #[test]
+    fn kitty_keys_when_a_program_asked() {
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        let p = Sent(Default::default(), crate::kitty::DISAMBIGUATE);
+        super::feed(&p, &[key(egui::Key::Enter, shift, true), key(egui::Key::Enter, shift, false)], |_, _| false);
+        super::feed(&p, &[key(egui::Key::A, shift, true), egui::Event::Text("A".into())], |_, _| false);
+        let altgr = egui::Modifiers { ctrl: true, alt: true, ..Default::default() };
+        super::feed(&p, &[key(egui::Key::Q, altgr, true), egui::Event::Text("@".into())], |_, _| false);
+        super::feed(&p, &[egui::Event::Copy], |_, _| false);
+        assert_eq!(sent(&p), "\x1b[13;2uA@\x1b[99;5u");
+        let p = Sent::default();
+        super::feed(&p, &[key(egui::Key::Enter, shift, true)], |_, _| false);
+        assert_eq!(sent(&p), "\r", "nobody asked: as before");
+    }
+
+    /// Releases go for the keys whose press went, and not for a chord the
+    /// app kept; with every key asked for, the text rides in the code.
+    #[test]
+    fn kitty_releases_and_text() {
+        let none = egui::Modifiers::default();
+        let ctrl = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let p = Sent(Default::default(), crate::kitty::DISAMBIGUATE | crate::kitty::EVENT_TYPES);
+        super::feed(&p, &[key(egui::Key::Escape, none, true), key(egui::Key::Escape, none, false)], |_, _| false);
+        super::feed(&p, &[key(egui::Key::T, ctrl, true), key(egui::Key::T, ctrl, false)], |k, _| k == egui::Key::T);
+        assert_eq!(sent(&p), "\x1b[27u\x1b[27;1:3u");
+        let p = Sent(Default::default(), 31);
+        super::feed(&p, &[key(egui::Key::A, none, true), egui::Event::Text("a".into())], |_, _| false);
+        assert_eq!(sent(&p), "\x1b[97;1;97u");
     }
 
     /// A pane whose program did not ask hears nothing of the keys coming

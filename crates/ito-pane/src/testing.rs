@@ -11,7 +11,7 @@ use crate::*;
 pub fn term(cols: usize, lines: usize) -> Term<Proxy> {
     let (tx, _rx) = crossbeam_channel::unbounded();
     let proxy = Proxy { tx, wake: Arc::new(|| {}) };
-    let cfg = Config { scrolling_history: 200, ..Default::default() };
+    let cfg = Config { scrolling_history: 200, kitty_keyboard: true, ..Default::default() };
     Term::new(cfg, &Size::new(cols, lines), proxy)
 }
 

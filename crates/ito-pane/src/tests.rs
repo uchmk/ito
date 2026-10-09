@@ -1442,7 +1442,7 @@ mod identity_tests {
     /// `text` fed in one go (so a synchronized update can stay open).
     fn replies(text: &str) -> (Term<Proxy>, Vec<String>) {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let mut t = Term::new(Config::default(), &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
+        let mut t = Term::new(Config { kitty_keyboard: true, ..Default::default() }, &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
         let mut parser = Processor::<StdSyncHandler>::default();
         parser.advance(&mut t, text.as_bytes());
         let said = rx.try_iter().filter_map(|e| if let Event::PtyWrite(s) = e { Some(answer_query(s, false)) } else { None }).collect();
@@ -1454,6 +1454,22 @@ mod identity_tests {
         assert_eq!(replies("\x1b[c").1, ["\x1b[?62;4;22c"]);
         let (_, da2) = replies("\x1b[>c");
         assert!(da2[0].starts_with("\x1b[>0;") && da2[0].ends_with(";1c"), "{da2:?}");
+    }
+
+    /// kitty's keyboard flags: pushed, asked after, and popped again (the
+    /// pane turns the protocol on; `kitty.rs` spells the keys).
+    #[test]
+    fn kitty_keyboard_flags_are_kept_and_answered() {
+        let (t, said) = replies("\x1b[>1u\x1b[?u");
+        assert_eq!(crate::kitty_flags(&t), crate::kitty::DISAMBIGUATE);
+        assert_eq!(said, ["\x1b[?1u"]);
+        let (t, _) = replies("\x1b[>1u\x1b[>31u");
+        assert_eq!(crate::kitty_flags(&t), 31);
+        let (t, said) = replies("\x1b[>1u\x1b[>31u\x1b[<u\x1b[?u");
+        assert_eq!(crate::kitty_flags(&t), 1, "popped back to the first");
+        assert_eq!(said, ["\x1b[?1u"]);
+        let (t, _) = replies("\x1b[>1u\x1b[<u");
+        assert_eq!(crate::kitty_flags(&t), 0);
     }
 
     #[test]

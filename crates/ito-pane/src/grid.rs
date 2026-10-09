@@ -182,6 +182,18 @@ pub fn focus_report<T: EventListener>(term: &Term<T>) -> bool {
     term.mode().contains(TermMode::FOCUS_IN_OUT)
 }
 
+/// The kitty keyboard enhancements in force (`kitty::DISAMBIGUATE` and the
+/// rest), 0 while the program asked for none.
+pub fn kitty_flags<T: EventListener>(term: &Term<T>) -> u8 {
+    use alacritty_terminal::term::TermMode as M;
+    let mode = term.mode();
+    [M::DISAMBIGUATE_ESC_CODES, M::REPORT_EVENT_TYPES, M::REPORT_ALTERNATE_KEYS, M::REPORT_ALL_KEYS_AS_ESC, M::REPORT_ASSOCIATED_TEXT]
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| mode.contains(**m))
+        .fold(0, |acc, (i, _)| acc | 1 << i)
+}
+
 /// The bytes that tell the program the pane gained (`true`) or lost the keys.
 pub fn focus_bytes(gained: bool) -> Vec<u8> {
     if gained { b"\x1b[I".to_vec() } else { b"\x1b[O".to_vec() }

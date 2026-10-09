@@ -18,6 +18,7 @@ mod charset;
 mod grid;
 mod image;
 mod keys;
+pub mod kitty;
 mod link;
 mod log;
 mod osc;

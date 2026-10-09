@@ -467,7 +467,9 @@ impl Terminal {
 
         let (tx, rx) = crossbeam_channel::unbounded();
         let proxy = Proxy { tx, wake: Arc::new(wake) };
-        let term = Term::new(Config::default(), &size, proxy.clone());
+        // kitty's keyboard protocol on: a program that pushes its flags gets
+        // them kept and answered (`kitty.rs`); one that does not sees no change.
+        let term = Term::new(Config { kitty_keyboard: true, ..Default::default() }, &size, proxy.clone());
         let term = Arc::new(FairMutex::new(term));
 
         let event_loop = EventLoop::new(term.clone(), proxy, pty, false, false)?;
@@ -763,7 +765,7 @@ impl Terminal {
 
     /// Keep `lines` of scrollback (alacritty's default is 10 000).
     pub fn set_scrollback(&mut self, lines: usize) {
-        let config = alacritty_terminal::term::Config { scrolling_history: lines, ..Default::default() };
+        let config = alacritty_terminal::term::Config { scrolling_history: lines, kitty_keyboard: true, ..Default::default() };
         self.term.lock().set_options(config);
     }
 
