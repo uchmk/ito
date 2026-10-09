@@ -108,6 +108,11 @@ pub(crate) struct Tapped {
     /// OSC 9 / 99 / 777 notifications, and the end of the last read.
     notices: Sender<String>,
     notice_tail: Vec<u8>,
+    /// The triggers to tell of ([`Terminal::set_triggers`]), the output as
+    /// lines for them, and where the matches go.
+    triggers: crate::trigger::Set,
+    lines: crate::trigger::Lines,
+    triggered: Sender<crate::Triggered>,
     /// The prompts' links put into what is read ([`PromptLinks`]), and what
     /// did not fit in the buffer with them, handed over at the next read.
     marks: PromptLinks,
@@ -186,6 +191,9 @@ impl Tapped {
         }
         for text in scan_notices(&mut self.notice_tail, &buf[..n]) {
             let _ = self.notices.send(text);
+        }
+        for hit in crate::trigger::scan(&mut self.lines, &self.triggers, &buf[..n]) {
+            let _ = self.triggered.send(hit);
         }
         let taken = self.pictures.feed(&buf[..n]);
         if !self.pictures.replies.is_empty() {
@@ -334,6 +342,9 @@ pub struct Terminal {
     prompt: Arc<AtomicBool>,
     prompt_at: Arc<Mutex<Option<Instant>>>,
     notices: Receiver<String>,
+    /// The triggers the reader tells of, shared with it, and what it told.
+    triggers: crate::trigger::Set,
+    triggered: Receiver<crate::Triggered>,
     /// When a key or a paste was last sent; see [`Terminal::last_input`].
     last_input: Mutex<Option<Instant>>,
     /// The character set the program reads and writes; UTF-8 by default.
@@ -434,6 +445,8 @@ impl Terminal {
         let prompt = Arc::new(AtomicBool::new(false));
         let prompt_at = Arc::new(Mutex::new(None));
         let (notice_tx, notices) = crossbeam_channel::unbounded();
+        let (triggered_tx, triggered) = crossbeam_channel::unbounded();
+        let triggers = crate::trigger::Set::default();
         let charset = crate::Charset::default();
         let cast = crate::cast::Cast::default();
         let pictures: crate::image::Pictures = Default::default();
@@ -457,6 +470,9 @@ impl Terminal {
             prompt_at: prompt_at.clone(),
             notices: notice_tx,
             notice_tail: Vec::new(),
+            triggers: triggers.clone(),
+            lines: Default::default(),
+            triggered: triggered_tx,
             marks: PromptLinks::default(),
             held: Vec::new(),
             pictures: crate::image::Catcher::new(pictures.clone()),
@@ -499,6 +515,8 @@ impl Terminal {
             prompt,
             prompt_at,
             notices,
+            triggers,
+            triggered,
             last_input: Mutex::new(None),
             charset,
             pictures,
@@ -899,6 +917,17 @@ impl Terminal {
     /// the last call.
     pub fn take_notices(&self) -> Vec<String> {
         self.notices.try_iter().collect()
+    }
+
+    /// The regular expressions each line of the output is matched against
+    /// as it is written ([`Terminal::take_triggered`]); `None` stops it.
+    pub fn set_triggers(&self, set: Option<regex::RegexSet>) {
+        *self.triggers.lock().unwrap_or_else(|e| e.into_inner()) = set;
+    }
+
+    /// The lines the triggers matched since last asked.
+    pub fn take_triggered(&self) -> Vec<crate::Triggered> {
+        self.triggered.try_iter().collect()
     }
 
     pub fn quiet_for(&self, quiet: Duration) -> bool {

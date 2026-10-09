@@ -42,6 +42,9 @@ encoding_rs = "0.8"
 # and filer builds both already.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 miniz_oxide = "0.8"
+# Triggers (iTerm2's): a regular expression matched against the output.
+# Pure Rust, and alacritty_terminal's search builds its automata already.
+regex = "1"
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }

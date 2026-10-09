@@ -26,6 +26,7 @@ mod pane;
 mod shell;
 mod sys;
 mod terminal;
+mod trigger;
 mod util;
 #[cfg(feature = "egui")]
 mod view;
@@ -56,6 +57,9 @@ pub use pane::{Pane, Screen};
 pub use shell::*;
 pub use sys::{children, descendants, listening_ports, process_table, restrict_dll_search, stem, Proc};
 pub use terminal::*;
+pub use trigger::{highlight_row, rgb, Highlight, Paint, Triggered};
+/// The regular expressions triggers are written in, for an app to make them.
+pub use regex;
 #[cfg(feature = "egui")]
 pub use view::*;
 #[cfg(feature = "egui")]

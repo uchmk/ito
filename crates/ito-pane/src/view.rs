@@ -63,7 +63,7 @@ pub struct ViewState {
 
 /// How the pane is to be drawn this frame.
 #[derive(Clone, Copy, Debug)]
-pub struct ViewOptions {
+pub struct ViewOptions<'a> {
     /// The pane has the keys: the cursor is filled rather than outlined.
     pub focused: bool,
     /// The wheel is the pane's when the pointer is over it. An app turns this
@@ -72,6 +72,9 @@ pub struct ViewOptions {
     /// Letting go of a selection puts it on the clipboard ([`Shown::copy`]);
     /// off, it stays selected until a key copies it.
     pub copy_on_select: bool,
+    /// What the triggers colour on the screen ([`crate::highlight_row`]);
+    /// none, nothing.
+    pub highlights: &'a [crate::Highlight],
 }
 
 /// What happened in the pane that the app has to act on.
@@ -207,7 +210,7 @@ pub fn show<P: Pane + ?Sized>(
     f: &FontId,
     row_h: f32,
     pal: &Palette,
-    opts: ViewOptions,
+    opts: ViewOptions<'_>,
 ) -> Shown {
     show_faces(ui, term, state, rect, &Faces::plain(f.clone()), row_h, pal, opts)
 }
@@ -250,7 +253,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     faces: &Faces,
     row_h: f32,
     pal: &Palette,
-    opts: ViewOptions,
+    opts: ViewOptions<'_>,
 ) -> Shown {
     let f = &faces.regular;
     let mut shown = Shown::default();
@@ -308,14 +311,18 @@ pub fn show_faces<P: Pane + ?Sized>(
         }
         // Backgrounds first, run by run: one rectangle for a stretch of the
         // same color beats one per cell.
+        // What the triggers colour in the row, by cell.
+        let paint = crate::highlight_row(row, opts.highlights);
+        let painted = |x: usize| paint.get(x).copied().flatten();
         let mut run: Option<(usize, Color32)> = None;
         for (x, cell) in row.iter().enumerate() {
             // A selected cell takes the same background the list gives the row
             // under the cursor: already proven to carry text in this palette,
             // and already the colour that means "this one" everywhere else.
-            let bg = match cell.selected {
-                true => pal.selection,
-                false => color(cell.bg, pal, true),
+            let bg = match (cell.selected, painted(x).and_then(|p| p.1)) {
+                (true, _) => pal.selection,
+                (false, Some([r, g, b])) => Color32::from_rgb(r, g, b),
+                (false, None) => color(cell.bg, pal, true),
             };
             match run {
                 Some((_, c)) if c == bg => {}
@@ -368,7 +375,10 @@ pub fn show_faces<P: Pane + ?Sized>(
             if cell.flags.contains(Flags::HIDDEN) {
                 continue;
             }
-            let fg = ink(cell, pal);
+            let fg = match painted(x).and_then(|p| p.0) {
+                Some([r, g, b]) => Color32::from_rgb(r, g, b),
+                None => ink(cell, pal),
+            };
             // The lines go under spaces too: an underlined gap is still one.
             if cell.flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT) {
                 let ul = cell.ul.map_or(fg, |c| color(c, pal, false));

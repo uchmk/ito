@@ -233,6 +233,24 @@ mod pane {
         assert!(text.trim_end().ends_with(", \"r\", \"100x30\"]"), "{text}");
     }
 
+    /// The lines a trigger matches come out of the pane, as plain text.
+    #[cfg(unix)]
+    #[test]
+    fn a_trigger_hears_the_lines_it_matches() {
+        let dir = crate::util::test_dir("term-trigger");
+        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "sleep 0.3; printf 'ok\\n\\033[31mBUILD FAILED\\033[0m now\\n'; sleep 5".to_owned()]));
+        let mut t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
+        t.set_triggers(Some(regex::RegexSet::new(["FAILED", "never"]).unwrap()));
+        let mut got = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while got.is_empty() && Instant::now() < deadline {
+            t.drain();
+            got.extend(t.take_triggered());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(got, vec![crate::Triggered { rules: vec![0], line: "BUILD FAILED now".into() }]);
+    }
+
     /// `children` finds a process this one started: the question `<C-S-t>`
     /// asks of the shell before ending it (Q21). Asserted on the child's own
     /// pid rather than on "none before, one after", because tests running
