@@ -339,6 +339,10 @@ pub struct Terminal {
     log: PtyLog,
     /// The `.cast` recording, shared with the reader.
     cast: crate::cast::Cast,
+    /// The work log, while one is being written; see [`Terminal::log_text`].
+    worklog: Option<crate::worklog::WorkLog>,
+    /// The scrollback's length, as last set.
+    scrollback: usize,
     /// The shell's process, to ask whether it has started anything. `None`
     /// where the PTY did not say, which reads as "nothing running".
     pub(crate) shell_pid: Option<u32>,
@@ -516,6 +520,8 @@ impl Terminal {
             shell_cwd: None,
             log,
             cast,
+            worklog: None,
+            scrollback: 10_000,
             shell_pid,
             win32,
             last_out,
@@ -640,6 +646,39 @@ impl Terminal {
 
     pub fn recording(&self) -> bool {
         self.cast.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// Write the pane's text to a plain-text file at `path` as it goes (see
+    /// the `worklog` module): the scrollback there now at once, then each
+    /// line as it scrolls off the screen, call [`log_step`](Self::log_step)
+    /// often for that; the screen when the log stops or the pane ends.
+    /// A log already going is finished first.
+    pub fn log_text(&mut self, path: &Path) -> io::Result<()> {
+        self.stop_log();
+        self.worklog = Some(crate::worklog::WorkLog::create(path)?);
+        self.log_step();
+        Ok(())
+    }
+
+    /// Write what has scrolled off since the last time, when it is time to
+    /// look again (twice a second at most). Nothing without a log.
+    pub fn log_step(&mut self) {
+        let Some(log) = self.worklog.as_mut() else { return };
+        let lines = log.due(&self.term.lock(), self.scrollback);
+        log.write(&lines);
+    }
+
+    /// Finish the log: the rest of the scrollback and the screen. Its path.
+    pub fn stop_log(&mut self) -> Option<PathBuf> {
+        let mut log = self.worklog.take()?;
+        let lines = log.last_lines(&self.term.lock(), self.scrollback);
+        log.write(&lines);
+        Some(log.path().to_owned())
+    }
+
+    /// Where the work log goes, while there is one.
+    pub fn logging(&self) -> Option<&Path> {
+        self.worklog.as_ref().map(|l| l.path())
     }
 
     pub fn send(&self, bytes: Vec<u8>) {
@@ -801,6 +840,7 @@ impl Terminal {
 
     /// Keep `lines` of scrollback (alacritty's default is 10 000).
     pub fn set_scrollback(&mut self, lines: usize) {
+        self.scrollback = lines;
         let config = alacritty_terminal::term::Config { scrolling_history: lines, kitty_keyboard: true, ..Default::default() };
         self.term.lock().set_options(config);
     }
@@ -973,6 +1013,7 @@ impl Drop for Terminal {
     /// filer it is the window freezing as the pane closes. So the shell under
     /// `login` is hung up first, as a terminal closing would.
     fn drop(&mut self) {
+        self.stop_log();
         #[cfg(windows)]
         if let Some(pid) = self.shell_pid.filter(|_| !self.exited) {
             crate::sys::end_tree(pid);

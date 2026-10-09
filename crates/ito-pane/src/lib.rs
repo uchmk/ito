@@ -28,6 +28,7 @@ mod sys;
 mod terminal;
 mod trigger;
 mod util;
+mod worklog;
 #[cfg(feature = "egui")]
 mod view;
 #[cfg(feature = "egui")]
