@@ -121,6 +121,25 @@ pub fn feed_as<P: Pane + ?Sized>(term: &P, id: u64, events: &[Event], mut claim:
     }
 }
 
+/// egui-winit turns Ctrl+C and Ctrl+X into `Copy` and `Cut` *with Shift held
+/// too*, and the event carries no modifiers: Ctrl+Shift+X reached `claim` as
+/// Ctrl+X, so an app's chord on it never ran (the real machine, 2.37). With
+/// the modifiers held this frame (`i.modifiers`), they are key presses again.
+/// Shift+Delete (a `Cut` with no Ctrl) stays as it is.
+pub fn chords_back(events: &mut [Event], modifiers: Modifiers) {
+    if !modifiers.command {
+        return;
+    }
+    for e in events {
+        let key = match e {
+            Event::Copy => Key::C,
+            Event::Cut => Key::X,
+            _ => continue,
+        };
+        *e = Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers };
+    }
+}
+
 fn send_chord<P: Pane + ?Sized>(term: &P, key: Key, claim: &mut impl FnMut(Key, Modifiers) -> bool) {
     let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
     if !claim(key, ctrl) {
@@ -169,19 +188,55 @@ pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> 
         // By the key's character, never its name: egui sends Shift and Ctrl
         // themselves as keys too, and `ShiftLeft` with Ctrl held went to the
         // shell as Ctrl+S, which stops a terminal's output.
-        None if mods.ctrl => printable(key).and_then(|c| crate::control_code(c, mods.alt)),
+        // With Shift, the character it types shifted: Ctrl+Shift+- is
+        // readline's undo `Ctrl+_` (0x1f), which went as nothing (the real
+        // machine, 2.24).
+        None if mods.ctrl => printable(key).and_then(|c| crate::control_code(shifted(c, mods.shift), mods.alt)),
         // Alt without Ctrl sends no text either: readline's `Alt-b` and
         // `Alt-f` are made here.
-        None if mods.alt => printable(key).map(|c| crate::meta_char(if mods.shift { c.to_ascii_uppercase() } else { c })),
+        None if mods.alt => printable(key).map(|c| crate::meta_char(shifted(c, mods.shift))),
         None => None,
     };
     // A chord with no record form (`Ctrl+[`, `Ctrl+Space`) keeps its VT bytes.
+    // So does Ctrl+C: ConPTY raises the console's Ctrl+C event for a plain
+    // ETX, and a press record alone stopped nothing (`Start-Sleep` ran on,
+    // the real machine, 2.58).
+    let interrupt = mods.ctrl && !mods.alt && printable(key) == Some('c');
+    // Shift+Enter, though, goes as CSI-u once a program behind ConPTY asked
+    // for keys told apart: ConPTY made its record a plain `\r`, and Claude
+    // Code's new line was a send (the real machine, 2.55).
+    let told_apart = win32 && key == Key::Enter && mods.shift && !mods.ctrl && !mods.alt && term.kitty_flags() != 0;
     match (win32, special(key, mods.shift)) {
+        (true, Some(_)) if told_apart => Some(b"\x1b[13;2u".to_vec()),
         (true, Some(s)) => Some(crate::special_record(s, mods)),
+        (true, None) if interrupt => vt,
         (true, None) if mods.ctrl || mods.alt => {
             printable(key).and_then(|c| crate::char_record(c, mods)).or(vt)
         }
         _ => vt,
+    }
+}
+
+/// `c` as Shift makes it on a US layout, the one [`printable`] reads keys by.
+fn shifted(c: char, shift: bool) -> char {
+    if !shift {
+        return c;
+    }
+    match c {
+        '-' => '_',
+        '=' => '+',
+        '2' => '@',
+        '6' => '^',
+        '/' => '?',
+        '[' => '{',
+        ']' => '}',
+        '\\' => '|',
+        ';' => ':',
+        '\'' => '"',
+        ',' => '<',
+        '.' => '>',
+        '`' => '~',
+        c => c.to_ascii_uppercase(),
     }
 }
 
@@ -259,9 +314,12 @@ pub fn printable(key: Key) -> Option<char> {
 
 #[cfg(test)]
 mod tests {
-    /// A pane that only records what is sent to it.
+    /// A pane that only records what is sent to it, with the kitty flags it
+    /// asked for, or [`WIN32`] for win32-input-mode.
     #[derive(Default)]
     struct Sent(std::cell::RefCell<Vec<u8>>, u8);
+
+    const WIN32: u8 = 0x80;
 
     impl crate::Pane for Sent {
         fn resize(&mut self, _: crate::Size, _: (u16, u16)) {}
@@ -283,10 +341,10 @@ mod tests {
         }
         fn paste(&self, _: &str) {}
         fn win32_input(&self) -> bool {
-            false
+            self.1 & WIN32 != 0
         }
         fn kitty_flags(&self) -> u8 {
-            self.1
+            self.1 & !WIN32
         }
     }
 
@@ -314,6 +372,19 @@ mod tests {
         let p = Sent::default();
         super::feed(&p, &[key(egui::Key::Enter, shift, true)], |_, _| false);
         assert_eq!(sent(&p), "\r", "nobody asked: as before");
+    }
+
+    /// Behind ConPTY, Shift+Enter goes as CSI-u once a program asked for it,
+    /// and as a key record before.
+    #[test]
+    fn shift_enter_under_win32_input() {
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        let p = Sent(Default::default(), WIN32 | crate::kitty::DISAMBIGUATE);
+        super::feed(&p, &[key(egui::Key::Enter, shift, true)], |_, _| false);
+        assert_eq!(sent(&p), "\x1b[13;2u");
+        let p = Sent(Default::default(), WIN32);
+        super::feed(&p, &[key(egui::Key::Enter, shift, true)], |_, _| false);
+        assert!(sent(&p).starts_with("\x1b[13;"), "a record: {:?}", sent(&p));
     }
 
     /// Releases go for the keys whose press went, and not for a chord the
@@ -357,6 +428,39 @@ mod tests {
         let p = Sent::default();
         crate::Pane::focus(&p, true);
         assert!(p.0.borrow().is_empty());
+    }
+
+    /// Ctrl+Shift+- is readline's undo, Ctrl+_; Ctrl+Shift+X put back
+    /// from egui's `Cut` reaches the app's chords with its Shift.
+    #[test]
+    fn shifted_chords_keep_their_shift() {
+        let ctrl_shift = egui::Modifiers { ctrl: true, shift: true, command: true, ..Default::default() };
+        let p = Sent::default();
+        super::feed(&p, &[key(egui::Key::Minus, ctrl_shift, true)], |_, _| false);
+        assert_eq!(p.0.borrow().as_slice(), b"\x1f");
+        let mut events = vec![egui::Event::Cut, egui::Event::Copy];
+        super::chords_back(&mut events, ctrl_shift);
+        let p = Sent::default();
+        let mut claimed = Vec::new();
+        super::feed(&p, &events, |k, m| {
+            claimed.push((k, m.shift));
+            k == egui::Key::X
+        });
+        assert_eq!(claimed, [(egui::Key::X, true), (egui::Key::C, true)]);
+        assert_eq!(p.0.borrow().as_slice(), b"\x03", "Ctrl+Shift+C with nothing selected is still Ctrl+C");
+    }
+
+    /// Under win32-input-mode a chord goes as a key record, but Ctrl+C goes
+    /// as ETX, which is what makes ConPTY stop the command (2.58).
+    #[test]
+    fn ctrl_c_is_etx_under_win32_input() {
+        let ctrl = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let p = Sent(Default::default(), WIN32);
+        super::feed(&p, &[key(egui::Key::C, ctrl, true)], |_, _| false);
+        assert_eq!(p.0.borrow().as_slice(), b"\x03");
+        let p = Sent(Default::default(), WIN32);
+        super::feed(&p, &[key(egui::Key::D, ctrl, true)], |_, _| false);
+        assert_eq!(sent(&p), "\x1b[68;32;4;1;8;1_");
     }
 
     /// AltGr+Q on a German keyboard (Ctrl+Alt with `@` as its text) types

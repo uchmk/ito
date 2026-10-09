@@ -390,6 +390,25 @@ mod pane {
         assert!(row[7].flags.is_empty() && row[7].ul.is_none(), "SGR 0 ends them all");
     }
 
+    /// The line the real-machine row prints, cell by cell: each style on
+    /// its word and nothing on the gaps after `SGR 0`.
+    #[test]
+    fn the_testing_row_styles_its_words_and_not_the_gaps() {
+        use alacritty_terminal::term::cell::Flags;
+
+        let mut t = term(60, 2);
+        feed(&mut t, "a \x1b[4mu\x1b[0m \x1b[4:2mdd\x1b[0m \x1b[4:3;58;2;255;0;0mcurl\x1b[0m \x1b[4:4mdots\x1b[0m \x1b[4:5mdash\x1b[0m \x1b[9mstrike\x1b[0m [\x1b[8mhid\x1b[0m]");
+        let row = &snapshot(&t)[0];
+        let text: String = row.iter().map(|c| c.c).collect();
+        let at = |word: &str| text.find(word).unwrap();
+        let styled = [("u", Flags::UNDERLINE), ("dd", Flags::DOUBLE_UNDERLINE), ("curl", Flags::UNDERCURL), ("dots", Flags::DOTTED_UNDERLINE), ("dash", Flags::DASHED_UNDERLINE), ("strike", Flags::STRIKEOUT), ("hid", Flags::HIDDEN)];
+        for (word, flag) in styled {
+            let x = at(word);
+            assert!(row[x..x + word.len()].iter().all(|c| c.flags.contains(flag)), "{word}");
+            assert!(row[x + word.len()].flags.is_empty() && row[x + word.len()].ul.is_none(), "after {word}");
+        }
+    }
+
     /// DECSET 1004 on and off, as vim sends it on the way in and out.
     #[test]
     fn focus_reports_are_asked_for_and_given_up() {
@@ -647,6 +666,19 @@ mod pane {
         // Anything that is not a file URL is not a directory.
         assert_eq!(from_file_url(b"http://example.com/"), None);
         assert_eq!(from_file_url(b"nonsense"), None);
+    }
+
+    /// 2.28: Git Bash's `/c/dev` is `C:/dev`; a longer first name is not a
+    /// drive.
+    #[test]
+    fn an_msys_drive_names_the_windows_one() {
+        assert_eq!(crate::osc::msys_drive("/c/dev/filer").as_deref(), Some("C:/dev/filer"));
+        assert_eq!(crate::osc::msys_drive("/d").as_deref(), Some("D:/"));
+        assert_eq!(crate::osc::msys_drive("/cd/x"), None);
+        assert_eq!(crate::osc::msys_drive("/1/x"), None);
+        assert_eq!(crate::osc::msys_drive("c/x"), None);
+        #[cfg(windows)]
+        assert_eq!(from_file_url(b"file://host/c/dev"), Some(crate::util::normalize(Path::new("C:/dev"))));
     }
 
     /// 29.4 / #101: a share comes back as a share, however many slashes the
@@ -1146,6 +1178,17 @@ mod prompt_marks {
         assert_eq!(out, want);
     }
 
+    /// A prompt that begins with a blank line (Starship's) is marked on the
+    /// row it writes, and colours before it write nothing.
+    #[test]
+    fn a_prompt_after_a_blank_line_is_marked_where_it_writes() {
+        let mut t = testing::term(20, 6);
+        let mut marks = PromptLinks::default();
+        let fed = marks.feed(b"out\r\n\x1b]133;A\x07\x1b[0m\r\n\x1b[1;32m~\x1b[0m\r\n> \x1b]133;B\x07").unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(prompt_lines(&t), [2]);
+    }
+
     /// Cut anywhere, the same bytes come out.
     #[test]
     fn a_mark_cut_across_reads_is_still_linked() {
@@ -1490,7 +1533,7 @@ mod identity_tests {
     use alacritty_terminal::term::{Config, Term};
     use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
-    use crate::osc::{answer_query, scan_xtversion, xtversion};
+    use crate::osc::{answer_query, cell_size, scan_cell_size, scan_xtversion, xtversion};
     use crate::{Proxy, Size};
 
     /// The replies the parser wrote back, as the pane would send them, for
@@ -1525,6 +1568,18 @@ mod identity_tests {
         assert_eq!(said, ["\x1b[?1u"]);
         let (t, _) = replies("\x1b[>1u\x1b[<u");
         assert_eq!(crate::kitty_flags(&t), 0);
+    }
+
+    /// `\e[16t` asks the cell's size in pixels (2.48).
+    #[test]
+    fn the_cell_size_is_found_and_answered() {
+        let mut tail = Vec::new();
+        assert_eq!(scan_cell_size(&mut tail, b"\x1b[14t\x1b[16t\x1b[18t"), 1);
+        assert_eq!(scan_cell_size(&mut tail, b"\x1b[1"), 0);
+        assert_eq!(scan_cell_size(&mut tail, b"6t"), 1, "across two reads");
+        assert_eq!(scan_cell_size(&mut tail, b"\x1b[161t"), 0);
+        assert_eq!(cell_size((9, 19)), b"\x1b[6;19;9t");
+        assert_eq!(cell_size((0, 0)), b"\x1b[6;1;1t", "never a zero to divide by");
     }
 
     #[test]

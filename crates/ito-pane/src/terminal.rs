@@ -95,8 +95,9 @@ pub(crate) struct Tapped {
     win32: Arc<AtomicBool>,
     /// The end of the last read, in case the request was cut in two.
     mode_tail: Vec<u8>,
-    /// The same for XTVERSION.
+    /// The same for XTVERSION, and for the cell size (`\e[16t`).
     version_tail: Vec<u8>,
+    cell_tail: Vec<u8>,
     /// When the shell last wrote anything; see [`Terminal::quiet_for`].
     last_out: Arc<std::sync::Mutex<Option<Instant>>>,
     /// The shell has drawn a prompt and said so (OSC 133); see
@@ -179,6 +180,11 @@ impl Tapped {
         // goes the long way round (the UI thread), so this one comes first.
         for _ in 0..scan_xtversion(&mut self.version_tail, &buf[..n]) {
             let reply = crate::osc::xtversion();
+            log_pty(&self.log, "in reply", &reply);
+            crate::image::answer(self.inner.writer(), &mut vec![reply]);
+        }
+        for _ in 0..crate::osc::scan_cell_size(&mut self.cell_tail, &buf[..n]) {
+            let reply = crate::osc::cell_size(self.pictures.cell());
             log_pty(&self.log, "in reply", &reply);
             crate::image::answer(self.inner.writer(), &mut vec![reply]);
         }
@@ -464,6 +470,7 @@ impl Terminal {
             win32: win32.clone(),
             mode_tail: Vec::new(),
             version_tail: Vec::new(),
+            cell_tail: Vec::new(),
             last_out: last_out.clone(),
             prompt: prompt.clone(),
             prompt_tail: Vec::new(),

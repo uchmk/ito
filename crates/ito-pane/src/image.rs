@@ -167,6 +167,11 @@ impl Catcher {
         Self { state: State::Ground, store, kitty: HashMap::new(), kitty_order: VecDeque::new(), chunks: None, parts: None, replies: Vec::new() }
     }
 
+    /// The cell's size in pixels, width then height, as last resized.
+    pub(crate) fn cell(&self) -> (u16, u16) {
+        self.store.lock().unwrap_or_else(|e| e.into_inner()).cell
+    }
+
     /// `chunk` with the pictures taken out and their cells put in, or
     /// `None` when there was nothing to take.
     pub(crate) fn feed(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {

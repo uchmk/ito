@@ -93,10 +93,14 @@ mod tests {
         let area = Rect::new(0.0, 0.0, 400.0, 200.0);
         let look = Look { gap: 8.0, grab: 12.0, line: egui::Color32::WHITE };
         let mut said = Vec::new();
+        let mut held_at_release = None;
         let mut frame = |events: Vec<egui::Event>| {
             let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))), events, ..Default::default() };
             let mut out = ctx.run_ui(input, |ui| {
                 if let Some(m) = dividers(ui, egui::Id::new("t"), &layout, area, look) {
+                    if m == Moved::Released {
+                        held_at_release = Some(ui.input(|i| i.pointer.primary_down()));
+                    }
                     said.push(m);
                 }
             });
@@ -118,5 +122,8 @@ mod tests {
         });
         assert!(last.is_some_and(|r| (r - 0.75).abs() < 0.02), "{said:?}");
         assert!(said.contains(&Moved::Released), "{said:?}");
+        // The caller must not drop the dragged layout for a button that is
+        // up: on the frame of the release it already is (tsumugi, 2.3).
+        assert_eq!(held_at_release, Some(false));
     }
 }

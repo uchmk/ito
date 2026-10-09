@@ -79,6 +79,34 @@ pub(crate) fn scan_xtversion(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
     found
 }
 
+/// How many times `chunk`, carried on from `tail`, asks the size of a cell
+/// in pixels (`\e[16t`). alacritty answers `14 t` and `18 t` but not this
+/// one, and `wezterm imgcat` divided by the zero it took for no answer
+/// (2.48). A read can stop inside one.
+pub(crate) fn scan_cell_size(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
+    const ASK: &[u8] = b"\x1b[16t";
+    tail.extend_from_slice(chunk);
+    let (mut found, mut seen) = (0, 0);
+    let mut i = 0;
+    while i < tail.len() {
+        if tail[i..].starts_with(ASK) {
+            found += 1;
+            i += ASK.len();
+            seen = i;
+        } else {
+            i += 1;
+        }
+    }
+    let keep = tail.len().saturating_sub(ASK.len() - 1).max(seen);
+    tail.drain(..keep);
+    found
+}
+
+/// The answer to `\e[16t`, as xterm gives it: `\e[6;` height `;` width `t`.
+pub(crate) fn cell_size((w, h): (u16, u16)) -> Vec<u8> {
+    format!("\x1b[6;{};{}t", h.max(1), w.max(1)).into_bytes()
+}
+
 /// The answer to XTVERSION, in the form xterm, kitty and WezTerm give it:
 /// a DCS `>|` with the name and version.
 pub(crate) fn xtversion() -> Vec<u8> {
@@ -198,7 +226,26 @@ pub(crate) fn from_file_url(bytes: &[u8]) -> Option<PathBuf> {
         [b'/', c, b':', ..] if c.is_ascii_alphabetic() => &decoded[1..],
         _ => decoded,
     };
+    // Git Bash and MSYS2 say `/c/dir` for `C:\dir`, a path nothing else on
+    // Windows can open.
+    #[cfg(windows)]
+    if let Some(drive) = msys_drive(trimmed) {
+        return Some(crate::util::normalize(Path::new(&drive)));
+    }
     Some(crate::util::normalize(Path::new(trimmed)))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+/// `/c/dir` as `C:/dir` (and `/c` as `C:/`): the drive an MSYS shell names
+/// by its letter alone at the root.
+pub(crate) fn msys_drive(path: &str) -> Option<String> {
+    let rest = path.strip_prefix('/')?;
+    let (letter, after) = rest.split_at_checked(1)?;
+    let c = letter.chars().next().filter(char::is_ascii_alphabetic)?;
+    if !(after.is_empty() || after.starts_with('/')) {
+        return None;
+    }
+    Some(format!("{}:/{}", c.to_ascii_uppercase(), after.trim_start_matches('/')))
 }
 
 pub(crate) fn percent_decode(s: &str) -> String {
@@ -305,7 +352,9 @@ pub fn exit_of(uri: &str) -> Option<i32> {
 /// with the cell and rewraps it. So after each OSC 133 `A` an OSC 8 link to
 /// [`PROMPT_LINK`] is opened (with the exit code the last `D` gave), and
 /// after each `C` one to [`OUTPUT_LINK`]; each is closed at the next OSC 133
-/// or its first newline, whichever is first. The rows are then found by
+/// or the first newline after it has written a cell, whichever is first (a
+/// prompt that begins with a blank line, as Starship's does, is marked on
+/// the row it writes on). The rows are then found by
 /// their links ([`prompt_lines`](crate::prompt_lines),
 /// [`blocks`](crate::blocks)). Nothing is drawn for them.
 #[derive(Default)]
@@ -317,6 +366,10 @@ pub(crate) struct PromptLinks {
     esc: bool,
     /// A link is open.
     open: bool,
+    /// Something was written under the open link: a newline closes it.
+    written: bool,
+    /// Inside a CSI (`ESC [` up to its final byte), which writes nothing.
+    csi: bool,
     /// The exit code the last `133;D` gave, for the next prompt's link.
     exit: Option<i32>,
 }
@@ -368,10 +421,10 @@ impl PromptLinks {
                                 None => PROMPT_LINK.to_owned(),
                             };
                             add.extend(open(&uri));
-                            self.open = true;
+                            (self.open, self.written) = (true, false);
                         } else if said.starts_with(b"133;C") {
                             add.extend(open(OUTPUT_LINK));
-                            self.open = true;
+                            (self.open, self.written) = (true, false);
                         } else if let Some(rest) = said.strip_prefix(b"133;D") {
                             // `133;D;<code>`, maybe more after another `;`.
                             let code = rest.strip_prefix(b";").and_then(|r| r.split(|&b| b == b';').next());
@@ -383,18 +436,21 @@ impl PromptLinks {
                     self.esc = false;
                     if b == b']' {
                         self.osc = Some(Vec::new());
+                    } else if b == b'[' {
+                        self.csi = true;
                     } else if b == 0x1b {
                         self.esc = true;
                     }
                 }
-                None if b == 0x1b => self.esc = true,
-                None if b == b'\n' && self.open => {
+                None if b == 0x1b => (self.esc, self.csi) = (true, false),
+                None if self.csi => self.csi = !(0x40..=0x7e).contains(&b),
+                None if b == b'\n' && self.open && self.written => {
                     // Before the newline, so only the first row has it.
                     self.open = false;
                     let o = out.get_or_insert_with(|| chunk[..i].to_vec());
                     o.extend_from_slice(CLOSE);
                 }
-                None => {}
+                None => self.written |= b >= 0x20 && b != 0x7f,
             }
             if let Some(o) = out.as_mut() {
                 o.push(b);
