@@ -649,10 +649,10 @@ impl Terminal {
     }
 
     /// Write the pane's text to a plain-text file at `path` as it goes (see
-    /// the `worklog` module): the scrollback there now at once, then each
-    /// line as it scrolls off the screen, call [`log_step`](Self::log_step)
-    /// often for that; the screen when the log stops or the pane ends.
-    /// A log already going is finished first.
+    /// the `worklog` module): the scrollback and screen there now at once,
+    /// then the file is kept up to the pane, call [`log_step`](Self::log_step)
+    /// often for that, until the log stops or the pane ends. A log already
+    /// going is finished first.
     pub fn log_text(&mut self, path: &Path) -> io::Result<()> {
         self.stop_log();
         self.worklog = Some(crate::worklog::WorkLog::create(path)?);
@@ -660,19 +660,17 @@ impl Terminal {
         Ok(())
     }
 
-    /// Write what has scrolled off since the last time, when it is time to
-    /// look again (twice a second at most). Nothing without a log.
+    /// Bring the log up to the pane, when it is time to look again (twice a
+    /// second at most). Nothing without a log.
     pub fn log_step(&mut self) {
         let Some(log) = self.worklog.as_mut() else { return };
-        let lines = log.due(&self.term.lock(), self.scrollback);
-        log.write(&lines);
+        log.due(&self.term.lock(), self.scrollback);
     }
 
-    /// Finish the log: the rest of the scrollback and the screen. Its path.
+    /// Finish the log, up to the pane as it is now. Its path.
     pub fn stop_log(&mut self) -> Option<PathBuf> {
         let mut log = self.worklog.take()?;
-        let lines = log.last_lines(&self.term.lock(), self.scrollback);
-        log.write(&lines);
+        log.finish(&self.term.lock(), self.scrollback);
         Some(log.path().to_owned())
     }
 
