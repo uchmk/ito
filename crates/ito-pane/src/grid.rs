@@ -270,6 +270,7 @@ pub fn snapshot<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
                 fg: cell.fg,
                 bg: cell.bg,
                 flags: cell.flags,
+                ul: cell.underline_color(),
                 selected: sel.is_some_and(|r| r.contains(at)),
             });
         }
@@ -286,6 +287,9 @@ pub struct CellView {
     pub fg: alacritty_terminal::vte::ansi::Color,
     pub bg: alacritty_terminal::vte::ansi::Color,
     pub flags: alacritty_terminal::term::cell::Flags,
+    /// The colour of the cell's underline (SGR 58), when a program gave it
+    /// one; without, the line takes the text's colour.
+    pub ul: Option<alacritty_terminal::vte::ansi::Color>,
     /// Inside the drag, or inside what a search just found. Both set the same
     /// selection, so both are drawn the same way, and until v0.20.4 neither
     /// was drawn at all -- a drag copied text with no sign of what it took,

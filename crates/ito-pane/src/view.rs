@@ -287,7 +287,8 @@ pub fn show_faces<P: Pane + ?Sized>(
     let pictures = term.pictures();
 
     // Rows taller than the font (a line height over 1): the text in the middle.
-    let lift = ((row_h - ui.fonts_mut(|x| x.row_height(f))) / 2.0).max(0.0).floor();
+    let font_h = ui.fonts_mut(|x| x.row_height(f));
+    let lift = ((row_h - font_h) / 2.0).max(0.0).floor();
     // Where egui puts the baseline in a row, for the ligatures drawn by hand.
     let baseline = faces.shaper.as_ref().map(|_| painter.layout_no_wrap("M".into(), f.clone(), pal.fg).rows.first().and_then(|r| r.glyphs.first()).map_or(0.0, |g| g.pos.y));
     for (y, row) in rows.iter().enumerate() {
@@ -353,16 +354,21 @@ pub fn show_faces<P: Pane + ?Sized>(
             }
         }
         for (x, cell) in row.iter().enumerate() {
-            if cell.c == ' ' || cell.c == '\0' || hidden.get(x).copied().unwrap_or(false) {
+            // Concealed text (SGR 8) is there to be copied, not seen.
+            if cell.flags.contains(Flags::HIDDEN) {
                 continue;
             }
-            let mut fg = color(cell.fg, pal, false);
-            if cell.flags.contains(Flags::DIM) {
-                fg = fg.linear_multiply(0.6);
+            let fg = ink(cell, pal);
+            // The lines go under spaces too: an underlined gap is still one.
+            if cell.flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT) {
+                let ul = cell.ul.map_or(fg, |c| color(c, pal, false));
+                let left = inner.left() + x as f32 * cell_w;
+                for shape in decorations(cell.flags, left, cell_w, top + lift, font_h, fg, ul) {
+                    painter.add(shape);
+                }
             }
-            if cell.flags.contains(Flags::INVERSE) {
-                // Solid even when the pane's colour is see-through.
-                fg = color(cell.bg, pal, true).to_opaque();
+            if cell.c == ' ' || cell.c == '\0' || hidden.get(x).copied().unwrap_or(false) {
+                continue;
             }
             if let (Some(Some(sub)), Some(shaper), Some(base)) = (liga.get(x), &faces.shaper, baseline) {
                 let pen = egui::pos2(inner.left() + x as f32 * cell_w, top + lift + base);
@@ -610,6 +616,79 @@ fn fill(
     );
 }
 
+/// The colour a cell's text is drawn in: its own, dimmed (SGR 2), or its
+/// background's when reversed (SGR 7).
+fn ink(cell: &crate::CellView, pal: &Palette) -> Color32 {
+    if cell.flags.contains(Flags::INVERSE) {
+        // Solid even when the pane's colour is see-through.
+        return color(cell.bg, pal, true).to_opaque();
+    }
+    let fg = color(cell.fg, pal, false);
+    match cell.flags.contains(Flags::DIM) {
+        true => fg.linear_multiply(0.6),
+        false => fg,
+    }
+}
+
+/// The lines a cell's flags put across it, in a cell `w` wide from `left`,
+/// whose text is `font_h` high from `top`: the five underlines (SGR 4, 4:2 to
+/// 4:5) in `ul` and the strike (SGR 9) in `fg`. The curl, dots and dashes
+/// are placed by where they are on the row, not in the cell, so a run of
+/// cells draws one unbroken line instead of a pattern restarting at each.
+fn decorations(flags: Flags, left: f32, w: f32, top: f32, font_h: f32, fg: Color32, ul: Color32) -> Vec<egui::Shape> {
+    let thick = (font_h / 14.0).round().max(1.0);
+    let y = top + font_h - thick;
+    let right = left + w;
+    let line = |y: f32, c: Color32| egui::Shape::hline(left..=right, y, Stroke::new(thick, c));
+    let mut out = Vec::new();
+    if flags.contains(Flags::UNDERLINE) {
+        out.push(line(y, ul));
+    }
+    if flags.contains(Flags::DOUBLE_UNDERLINE) {
+        out.push(line(y, ul));
+        out.push(line(y - 2.0 * thick, ul));
+    }
+    if flags.contains(Flags::UNDERCURL) {
+        // One wave per cell width, as kitty and WezTerm draw it.
+        let amp = thick.max(1.5);
+        let steps = 8;
+        let points = (0..=steps)
+            .map(|i| {
+                let px = left + w * i as f32 / steps as f32;
+                egui::pos2(px, y - amp + amp * (std::f32::consts::TAU * px / w.max(1.0)).sin())
+            })
+            .collect();
+        out.push(egui::Shape::line(points, Stroke::new(thick, ul)));
+    }
+    if flags.contains(Flags::DOTTED_UNDERLINE) {
+        // Squares two points across at least: anything smaller is all
+        // anti-aliasing and does not show.
+        let size = thick.max(2.0);
+        let step = 2.0 * size;
+        let mut at = (left / step).ceil() * step;
+        while at < right {
+            let dot = Rect::from_min_max(egui::pos2(at, y - size / 2.0), egui::pos2((at + size).min(right), y + size / 2.0));
+            out.push(egui::Shape::rect_filled(dot, CornerRadius::ZERO, ul));
+            at += step;
+        }
+    }
+    if flags.contains(Flags::DASHED_UNDERLINE) {
+        let (dash, step) = (3.0 * thick, 5.0 * thick);
+        let mut at = (left / step).floor() * step;
+        while at < right {
+            let (a, b) = (at.max(left), (at + dash).min(right));
+            if b > a {
+                out.push(egui::Shape::hline(a..=b, y, Stroke::new(thick, ul)));
+            }
+            at += step;
+        }
+    }
+    if flags.contains(Flags::STRIKEOUT) {
+        out.push(line((top + font_h * 0.55).round(), fg));
+    }
+    out
+}
+
 /// An ANSI color as something to paint with.
 ///
 /// The sixteen named colors come from the palette so the pane matches the rest
@@ -736,6 +815,68 @@ mod tests {
         assert_eq!(named(NamedColor::Red, &pal, false), Color32::from_rgb(1, 2, 3));
         assert_eq!(indexed(15, &pal, false), Color32::from_rgb(4, 5, 6));
         assert_eq!(named(NamedColor::Foreground, &pal, false), pal.fg, "the default colours stay the palette's");
+    }
+
+    /// The strokes of a cell's lines: where each sits and in what colour.
+    fn strokes(flags: Flags, left: f32) -> Vec<(f32, f32, f32, Color32)> {
+        let (fg, ul) = (Color32::RED, Color32::BLUE);
+        decorations(flags, left, 10.0, 100.0, 28.0, fg, ul)
+            .into_iter()
+            .map(|s| match s {
+                egui::Shape::LineSegment { points: [a, b], stroke } => (a.x, b.x, a.y, stroke.color),
+                egui::Shape::Path(p) => (p.points[0].x, p.points[p.points.len() - 1].x, p.points[0].y, match p.stroke.color { egui::epaint::ColorMode::Solid(c) => c, _ => panic!("a curl in one colour") }),
+                egui::Shape::Rect(r) => (r.rect.left(), r.rect.right(), r.rect.center().y, r.fill),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// Each style draws what it says, under the text, in the underline's
+    /// colour; the strike goes through the middle in the text's.
+    #[test]
+    fn each_line_style_draws_its_own_strokes() {
+        assert!(strokes(Flags::empty(), 0.0).is_empty());
+        // 28 high: two points thick, so the line sits at 100 + 28 - 2.
+        assert_eq!(strokes(Flags::UNDERLINE, 0.0), vec![(0.0, 10.0, 126.0, Color32::BLUE)]);
+        let double = strokes(Flags::DOUBLE_UNDERLINE, 0.0);
+        assert_eq!(double.iter().map(|s| s.2).collect::<Vec<_>>(), [126.0, 122.0], "two lines, apart");
+        let curl = strokes(Flags::UNDERCURL, 0.0);
+        assert_eq!(curl.len(), 1, "one wave across the cell");
+        assert_eq!((curl[0].0, curl[0].1, curl[0].3), (0.0, 10.0, Color32::BLUE));
+        let strike = strokes(Flags::STRIKEOUT, 0.0);
+        assert_eq!(strike, vec![(0.0, 10.0, (100.0_f32 + 28.0 * 0.55).round(), Color32::RED)]);
+        assert!(strike[0].2 < 126.0 && strike[0].2 > 100.0, "through the text, not under it");
+        let both = strokes(Flags::UNDERLINE | Flags::STRIKEOUT, 0.0);
+        assert_eq!(both.len(), 2, "flags add up");
+    }
+
+    /// The dots and the dashes stay inside their cell, and fall on the row's
+    /// grid rather than restarting at each cell, so a run reads as one line.
+    #[test]
+    fn dots_and_dashes_keep_to_the_row() {
+        for flags in [Flags::DOTTED_UNDERLINE, Flags::DASHED_UNDERLINE] {
+            for left in [0.0, 10.0, 30.0] {
+                let s = strokes(flags, left);
+                assert!(!s.is_empty(), "{flags:?} at {left} draws something");
+                assert!(s.iter().all(|(a, b, _, _)| *a >= left && *b <= left + 10.0 && b > a), "{flags:?} at {left}: {s:?}");
+            }
+        }
+        // Dots are every four points (2 thick, 2 apart) wherever the cell is.
+        let starts: Vec<f32> = [0.0, 10.0].iter().flat_map(|l| strokes(Flags::DOTTED_UNDERLINE, *l)).map(|s| s.0).collect();
+        assert!(starts.iter().all(|x| x % 4.0 == 0.0), "{starts:?}");
+    }
+
+    /// The curl's phase comes from where it is on the row: one cell's end is
+    /// the next one's start.
+    #[test]
+    fn the_curl_runs_on_from_cell_to_cell() {
+        let ends = |left: f32| match &decorations(Flags::UNDERCURL, left, 10.0, 0.0, 28.0, Color32::RED, Color32::BLUE)[0] {
+            egui::Shape::Path(p) => (p.points[0], p.points[p.points.len() - 1]),
+            other => panic!("{other:?}"),
+        };
+        let (_, end) = ends(0.0);
+        let (start, _) = ends(10.0);
+        assert!((end.y - start.y).abs() < 0.01 && (end.x - start.x).abs() < 0.01, "{end:?} then {start:?}");
     }
 
     #[test]

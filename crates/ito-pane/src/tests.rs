@@ -327,6 +327,27 @@ mod pane {
         assert!(rows[1].iter().all(|c| !c.selected), "and nothing on other rows");
     }
 
+    /// The underline styles, their colour and the strike reach the cells,
+    /// so the view has something to draw them from.
+    #[test]
+    fn underlines_and_their_colour_reach_the_cells() {
+        use alacritty_terminal::term::cell::Flags;
+        use alacritty_terminal::vte::ansi::{Color, Rgb};
+
+        let mut t = term(20, 4);
+        feed(&mut t, "\x1b[4ma\x1b[4:3;58;2;1;2;3mb\x1b[0;9mc\x1b[4:4md\x1b[4:5me\x1b[4:2mf\x1b[0;8mg\x1b[0mh");
+        let row = &snapshot(&t)[0];
+        assert!(row[0].flags.contains(Flags::UNDERLINE) && row[0].ul.is_none(), "a plain underline in the text's colour");
+        assert!(row[1].flags.contains(Flags::UNDERCURL), "4:3 is the curl");
+        assert_eq!(row[1].ul, Some(Color::Spec(Rgb { r: 1, g: 2, b: 3 })), "58 gives its colour");
+        assert!(row[2].flags.contains(Flags::STRIKEOUT));
+        assert!(row[3].flags.contains(Flags::DOTTED_UNDERLINE));
+        assert!(row[4].flags.contains(Flags::DASHED_UNDERLINE));
+        assert!(row[5].flags.contains(Flags::DOUBLE_UNDERLINE));
+        assert!(row[6].flags.contains(Flags::HIDDEN));
+        assert!(row[7].flags.is_empty() && row[7].ul.is_none(), "SGR 0 ends them all");
+    }
+
     /// Which match a search lands on first.
     ///
     /// Alacritty wraps, so a backwards search finds *something* from anywhere;

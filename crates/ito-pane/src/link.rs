@@ -138,7 +138,7 @@ mod tests {
     use alacritty_terminal::vte::ansi::{Color, NamedColor};
 
     fn row(text: &str) -> Vec<CellView> {
-        let cell = |c| CellView { c, fg: Color::Named(NamedColor::Foreground), bg: Color::Named(NamedColor::Background), flags: Flags::empty(), selected: false };
+        let cell = |c| CellView { c, fg: Color::Named(NamedColor::Foreground), bg: Color::Named(NamedColor::Background), flags: Flags::empty(), ul: None, selected: false };
         let mut out = Vec::new();
         for c in text.chars() {
             if unicode_width(c) {
