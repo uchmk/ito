@@ -4,7 +4,7 @@
 //! rest goes to the shell.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use egui::{Event, Key, Modifiers};
 
@@ -12,28 +12,63 @@ use crate::kitty::{self, KeyEvent, KittyKey};
 use crate::{Mods, Pane, Special};
 
 thread_local! {
-    /// The keys whose press went to a pane as a kitty escape code, by pane:
-    /// only those have their release told, so a chord the app kept (a new
-    /// tab) does not reach the program as a release with no press.
-    static HELD: RefCell<HashSet<(usize, Key)>> = RefCell::new(HashSet::new());
+    /// The keys whose press went to a pane as a kitty escape code, by pane,
+    /// with the modifiers they were pressed with: only those have their
+    /// release told, so a chord the app kept (a new tab) does not reach the
+    /// program as a release with no press.
+    static HELD: RefCell<HashMap<(u64, Key), Modifiers>> = RefCell::new(HashMap::new());
 }
 
 /// Hand this frame's `events` to `term`. `claim` sees every key press first
 /// and returns true for one the app keeps (a new tab, a split): that one goes
-/// no further, and neither does the text it would have typed.
-pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(Key, Modifiers) -> bool) {
+/// no further, and neither does the text it would have typed. The pane is
+/// told apart by where it is in memory; an app whose panes move (in a map
+/// that grows) names them with [`feed_as`].
+pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], claim: impl FnMut(Key, Modifiers) -> bool) {
+    feed_as(term, term as *const P as *const () as usize as u64, events, claim)
+}
+
+/// The keys `id` holds down as a program asking for their releases saw
+/// them pressed, let go: told to `term` as released, and forgotten. For
+/// when the keys go elsewhere (another pane, another window) before they are
+/// let go, which this pane would otherwise never hear of.
+pub fn let_go<P: Pane + ?Sized>(term: &P, id: u64) {
+    let flags = if term.win32_input() { 0 } else { term.kitty_flags() };
+    for (key, mods) in forget(id) {
+        if flags != 0 {
+            if let Some(bytes) = kitty_bytes(key, mods, KeyEvent::Release, None, flags).filter(|b| !b.is_empty()) {
+                term.send(bytes);
+            }
+        }
+    }
+}
+
+/// Forget the keys `id` holds (a pane that has gone), returning them.
+pub fn forget(id: u64) -> Vec<(Key, Modifiers)> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let keys: Vec<(Key, Modifiers)> = h.iter().filter(|((of, _), _)| *of == id).map(|((_, k), m)| (*k, *m)).collect();
+        h.retain(|(of, _), _| *of != id);
+        keys
+    })
+}
+
+/// [`feed`], the pane named `id` (a session's id) for the keys it holds.
+pub fn feed_as<P: Pane + ?Sized>(term: &P, id: u64, events: &[Event], mut claim: impl FnMut(Key, Modifiers) -> bool) {
     // Windows sends a chord *and* the character it would have typed: `<A-b>`
     // arrives as a key with alt set and then as `Text("b")`. The chord has been
     // sent by the time the text turns up, so the text is dropped. Ctrl and Alt
     // together is AltGr (`@` on a German keyboard), where the text is the point.
     let mut swallow_text = false;
     let flags = if term.win32_input() { 0 } else { term.kitty_flags() };
-    let me = term as *const P as *const () as usize;
     for (k, ev) in events.iter().enumerate() {
         match ev {
             Event::Key { key, pressed: false, modifiers, .. } if flags != 0 => {
-                if HELD.with(|h| h.borrow_mut().remove(&(me, *key))) {
-                    if let Some(bytes) = kitty_bytes(*key, *modifiers, KeyEvent::Release, None, flags).filter(|b| !b.is_empty()) {
+                if let Some(pressed) = HELD.with(|h| h.borrow_mut().remove(&(id, *key))) {
+                    // A modifier let go first (Ctrl before `c`) can leave the
+                    // key one that tells no release alone: then as pressed.
+                    let bytes = kitty_bytes(*key, *modifiers, KeyEvent::Release, None, flags).filter(|b| !b.is_empty());
+                    if let Some(bytes) = bytes.or_else(|| kitty_bytes(*key, pressed, KeyEvent::Release, None, flags).filter(|b| !b.is_empty())) {
                         term.send(bytes);
                     }
                 }
@@ -63,7 +98,7 @@ pub fn feed<P: Pane + ?Sized>(term: &P, events: &[Event], mut claim: impl FnMut(
                     if let Some(bytes) = kitty_bytes(*key, *modifiers, event, text, flags) {
                         swallow_text = text.is_some();
                         if !bytes.is_empty() {
-                            HELD.with(|h| h.borrow_mut().insert((me, *key)));
+                            HELD.with(|h| h.borrow_mut().insert((id, *key), *modifiers));
                             term.send(bytes);
                         }
                         continue;
@@ -294,6 +329,25 @@ mod tests {
         let p = Sent(Default::default(), 31);
         super::feed(&p, &[key(egui::Key::A, none, true), egui::Event::Text("a".into())], |_, _| false);
         assert_eq!(sent(&p), "\x1b[97;1;97u");
+    }
+
+    /// Ctrl let go before `c` still tells `c`'s release (as it was pressed),
+    /// and a key held while the keys went elsewhere is let go by `let_go`,
+    /// once; another pane's held keys are its own.
+    #[test]
+    fn a_held_key_is_always_let_go() {
+        let none = egui::Modifiers::default();
+        let ctrl = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let p = Sent(Default::default(), crate::kitty::DISAMBIGUATE | crate::kitty::EVENT_TYPES);
+        super::feed_as(&p, 901, &[key(egui::Key::C, ctrl, true), key(egui::Key::C, none, false)], |_, _| false);
+        assert_eq!(sent(&p), "\x1b[99;5u\x1b[99;5:3u");
+        p.0.borrow_mut().clear();
+        super::feed_as(&p, 901, &[key(egui::Key::Escape, none, true)], |_, _| false);
+        super::feed_as(&p, 902, &[key(egui::Key::Escape, none, true)], |_, _| false);
+        super::let_go(&p, 901);
+        super::let_go(&p, 901);
+        assert_eq!(sent(&p), "\x1b[27u\x1b[27u\x1b[27;1:3u");
+        assert_eq!(super::forget(902), vec![(egui::Key::Escape, none)]);
     }
 
     /// A pane whose program did not ask hears nothing of the keys coming

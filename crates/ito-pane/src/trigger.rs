@@ -41,6 +41,11 @@ pub(crate) struct Lines {
     /// A `\r` has come and nothing after it yet: a `\n` ends the line, and
     /// anything else writes over it from the start.
     cr: bool,
+    /// A CSI's parameters so far (`?1049` and the like), kept short.
+    params: Vec<u8>,
+    /// A full-screen program is on the alternate screen: what it draws
+    /// there is not lines of output, and is not read.
+    alt: bool,
 }
 
 impl Lines {
@@ -48,6 +53,11 @@ impl Lines {
     pub(crate) fn feed(&mut self, chunk: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         for &b in chunk {
+            // CAN and SUB cut a sequence short, whatever it has got to.
+            if matches!(b, 0x18 | 0x1a) {
+                self.state = State::Text;
+                continue;
+            }
             self.state = match self.state {
                 State::Text => match b {
                     0x1b => State::Esc,
@@ -80,7 +90,15 @@ impl Lines {
                     _ => State::Text,
                 },
                 State::Esc => match b {
-                    b'[' => State::Csi,
+                    b'[' => {
+                        self.params.clear();
+                        State::Csi
+                    }
+                    // A line ended by a sequence that did not finish.
+                    b'\n' => {
+                        self.end(&mut out);
+                        State::Text
+                    }
                     b']' => State::Osc,
                     b'P' | b'_' | b'^' | b'X' => State::Str,
                     // `ESC ( B` and its kind: the intermediate, then one more.
@@ -89,9 +107,19 @@ impl Lines {
                     _ => State::Text,
                 },
                 State::Csi => match b {
-                    0x40..=0x7e => State::Text,
+                    0x40..=0x7e => {
+                        if matches!(b, b'h' | b'l') {
+                            self.mode(b == b'h');
+                        }
+                        State::Text
+                    }
                     0x1b => State::Esc,
-                    _ => State::Csi,
+                    _ => {
+                        if self.params.len() < 32 {
+                            self.params.push(b);
+                        }
+                        State::Csi
+                    }
                 },
                 State::Osc => match b {
                     0x07 => State::Text,
@@ -115,11 +143,23 @@ impl Lines {
         out
     }
 
+    /// A private mode set (`h`) or reset (`l`): the alternate screen's
+    /// (`?1049`, `?1047`, `?47`) is the one followed. Going either way, the
+    /// line begun is left behind.
+    fn mode(&mut self, on: bool) {
+        let Some(list) = self.params.strip_prefix(b"?") else { return };
+        if list.split(|b| *b == b';').any(|m| matches!(m, b"1049" | b"1047" | b"47")) {
+            self.alt = on;
+            self.line.clear();
+            self.cr = false;
+        }
+    }
+
     fn end(&mut self, out: &mut Vec<String>) {
         self.cr = false;
         let text = String::from_utf8_lossy(&self.line);
         let text = text.trim();
-        if !text.is_empty() {
+        if !text.is_empty() && !self.alt {
             out.push(text.to_owned());
         }
         self.line.clear();
@@ -199,17 +239,21 @@ pub fn highlight_row(row: &[CellView], rules: &[Highlight]) -> Vec<Option<Paint>
         text.push(ch);
         cell_of.extend(std::iter::repeat_n(x, ch.len_utf8()));
     }
+    // Matched as the line a trigger that tells hears it: without the
+    // blanks either side, so `^` and `$` mean the same to both.
+    let from = text.len() - text.trim_start().len();
+    let line = text.trim();
     let mut out = Vec::new();
     for rule in rules {
-        for m in rule.regex.find_iter(&text) {
+        for m in rule.regex.find_iter(line) {
             if m.is_empty() {
                 continue;
             }
             if out.is_empty() {
                 out = vec![None; row.len()];
             }
-            let first = cell_of[m.start()];
-            let last = cell_of[m.end() - 1];
+            let first = cell_of[from + m.start()];
+            let last = cell_of[from + m.end() - 1];
             // A wide character's spacer goes with it.
             let last = if row.get(last).is_some_and(|c| c.flags.contains(Flags::WIDE_CHAR)) { last + 1 } else { last };
             for slot in out.iter_mut().take((last + 1).min(row.len())).skip(first) {
@@ -256,6 +300,15 @@ mod tests {
         assert_eq!(l.feed(b" line\n"), vec!["next line"]);
         // An OSC ended by BEL and by ST; a DCS; a charset choice.
         assert_eq!(l.feed(b"\x1b]0;title\x07a\x1b]8;;http://x\x1b\\b\x1bPq#0\x1b\\c\x1b(Bd\n"), vec!["abcd"]);
+    }
+
+    #[test]
+    fn the_alternate_screen_is_not_read_and_a_cut_sequence_ends() {
+        let mut l = Lines::default();
+        assert_eq!(l.feed(b"before\n\x1b[?1049hdrawn\nmore\n\x1b[?1049lafter\n"), vec!["before", "after"]);
+        assert_eq!(l.feed(b"\x1b[?1;47hx\n\x1b[?47l"), Vec::<String>::new());
+        // ESC then a newline: the line ends. CAN cuts a CSI short.
+        assert_eq!(l.feed(b"one\x1b\ntwo\x1b[12\x18three\n"), vec!["one", "twothree"]);
     }
 
     #[test]
@@ -322,5 +375,14 @@ mod tests {
         assert_eq!(got.iter().map(Option::is_some).collect::<Vec<_>>(), [false, false, false, true, true, false]);
         // A pattern that can match nothing never colours anything.
         assert!(highlight_row(&row, &[rule("x*", red, None)]).is_empty());
+    }
+
+    #[test]
+    fn highlight_row_matches_the_line_without_its_blanks() {
+        let red = Some([255, 0, 0]);
+        // The row as the screen has it, padded to the pane's width.
+        let row = cells("  done   ");
+        let got = highlight_row(&row, &[rule("^done$", red, None)]);
+        assert_eq!(got.iter().map(Option::is_some).collect::<Vec<_>>(), [false, false, true, true, true, true, false, false, false]);
     }
 }
