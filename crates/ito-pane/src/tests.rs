@@ -251,6 +251,30 @@ mod pane {
         assert_eq!(got, vec![crate::Triggered { rules: vec![0], line: "BUILD FAILED now".into() }]);
     }
 
+    /// A selection scrolled off the screen is still a selection: no cell
+    /// shown carries it, but Ctrl+Shift+C copies it all the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_selection_scrolled_off_the_screen_is_still_had() {
+        let dir = crate::util::test_dir("term-has-selection");
+        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "seq 30; sleep 5".to_owned()]));
+        let mut t = Terminal::spawn(&dir, Size::new(20, 4), (8, 16), shell, None, || {}).expect("the terminal starts");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !t.screen_text().contains("30") && Instant::now() < deadline {
+            t.drain();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!t.has_selection());
+        t.select((0, 0), false, true);
+        t.select((1, 0), true, false);
+        assert!(t.has_selection());
+        t.scroll(Scroll::Delta(10));
+        assert!(crate::Pane::screen(&t).rows.iter().flatten().all(|c| !c.selected), "none of it on the screen");
+        assert!(t.has_selection() && crate::Pane::has_selection(&t));
+        t.clear_selection();
+        assert!(!t.has_selection());
+    }
+
     /// `children` finds a process this one started: the question `<C-S-t>`
     /// asks of the shell before ending it (Q21). Asserted on the child's own
     /// pid rather than on "none before, one after", because tests running

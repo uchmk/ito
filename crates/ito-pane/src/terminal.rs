@@ -694,6 +694,11 @@ impl Terminal {
         term.selection = Some(Selection::new(SelectionType::Semantic, point, Side::Left));
     }
 
+    /// Something is selected, on the screen or scrolled off it.
+    pub fn has_selection(&self) -> bool {
+        self.term.lock().selection.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
     pub fn clear_selection(&self) {
         self.term.lock().selection = None;
     }

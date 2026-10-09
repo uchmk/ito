@@ -46,6 +46,11 @@ pub trait Pane {
     /// The selected text, when the pane has it to hand. A pane across a
     /// process boundary may answer later through its own channel instead.
     fn selection(&self) -> Option<String>;
+    /// Something is selected, scrolled off the screen or not. A pane that
+    /// cannot tell goes by the cells it shows.
+    fn has_selection(&self) -> bool {
+        self.screen().rows.iter().flatten().any(|c| c.selected)
+    }
     /// Bytes for the shell, as typed.
     fn send(&self, bytes: Vec<u8>);
     /// Text for the shell, as a paste (bracketed when the program asked).
@@ -139,6 +144,10 @@ impl Pane for Terminal {
 
     fn selection(&self) -> Option<String> {
         Terminal::selection(self)
+    }
+
+    fn has_selection(&self) -> bool {
+        Terminal::has_selection(self)
     }
 
     fn send(&self, bytes: Vec<u8>) {
