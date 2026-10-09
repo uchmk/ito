@@ -1,0 +1,21 @@
+[package]
+name = "tsumugi-ipc"
+description = "A per-user local door into a running app (Unix socket / named pipe) and length-framed serde messages over it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = "1"
+# Pure Rust, with a documented and stable wire format (1.0). bincode was the
+# first choice and is unmaintained since 2025 (its 3.0.0 is only a notice);
+# QUESTIONS.md Q4.
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Threading"] }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
