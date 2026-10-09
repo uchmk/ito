@@ -95,6 +95,8 @@ pub(crate) struct Tapped {
     win32: Arc<AtomicBool>,
     /// The end of the last read, in case the request was cut in two.
     mode_tail: Vec<u8>,
+    /// The same for XTVERSION.
+    version_tail: Vec<u8>,
     /// When the shell last wrote anything; see [`Terminal::quiet_for`].
     last_out: Arc<std::sync::Mutex<Option<Instant>>>,
     /// The shell has drawn a prompt and said so (OSC 133); see
@@ -166,6 +168,14 @@ impl Tapped {
         }
         if let Some(on) = scan_win32_mode(&mut self.mode_tail, &buf[..n]) {
             self.win32.store(on, Ordering::Relaxed);
+        }
+        // Answered here, ahead of the parser: a program sends the device
+        // attributes after it as the end of its questions, and that answer
+        // goes the long way round (the UI thread), so this one comes first.
+        for _ in 0..scan_xtversion(&mut self.version_tail, &buf[..n]) {
+            let reply = crate::osc::xtversion();
+            log_pty(&self.log, "in reply", &reply);
+            crate::image::answer(self.inner.writer(), &mut vec![reply]);
         }
         if n > 0 {
             *self.last_out.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
@@ -440,6 +450,7 @@ impl Terminal {
             log: log.clone(),
             win32: win32.clone(),
             mode_tail: Vec::new(),
+            version_tail: Vec::new(),
             last_out: last_out.clone(),
             prompt: prompt.clone(),
             prompt_tail: Vec::new(),
@@ -548,10 +559,7 @@ impl Terminal {
                 // A program answering a query writes back through the same
                 // pipe it would if the user had typed it.
                 PtyEvent::PtyWrite(text) => {
-                    let text = answer_win32_query(text, self.win32_input());
-                    // The primary device attributes say sixel (4) as well:
-                    // img2sixel and chafa ask before they draw.
-                    let text = if text == "\x1b[?6c" { "\x1b[?62;4;22c".to_owned() } else { text };
+                    let text = answer_query(text, self.win32_input());
                     self.send_as(text.into_bytes(), "in reply")
                 }
                 // CSI 14 t: the pane's size in pixels, for a program sizing

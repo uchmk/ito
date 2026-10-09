@@ -53,6 +53,49 @@ pub(crate) fn scan_win32_mode(tail: &mut Vec<u8>, chunk: &[u8]) -> Option<bool> 
     last
 }
 
+/// How many times `chunk`, carried on from `tail`, asks the terminal its name
+/// and version (XTVERSION: `\e[>q`, or `\e[>0q`). alacritty's parser does not
+/// know the question and would let it pass unanswered; neovim, tmux, notcurses
+/// and yazi ask it first and wait a moment for an answer. A read can stop
+/// inside one.
+pub(crate) fn scan_xtversion(tail: &mut Vec<u8>, chunk: &[u8]) -> usize {
+    const ASKS: [&[u8]; 2] = [b"\x1b[>q", b"\x1b[>0q"];
+    tail.extend_from_slice(chunk);
+    let (mut found, mut seen) = (0, 0);
+    let mut i = 0;
+    while i < tail.len() {
+        match ASKS.iter().find(|a| tail[i..].starts_with(a)) {
+            Some(a) => {
+                found += 1;
+                i += a.len();
+                seen = i;
+            }
+            None => i += 1,
+        }
+    }
+    // A question counted is not carried on, to be counted again.
+    let keep = tail.len().saturating_sub(ASKS[1].len() - 1).max(seen);
+    tail.drain(..keep);
+    found
+}
+
+/// The answer to XTVERSION, in the form xterm, kitty and WezTerm give it:
+/// a DCS `>|` with the name and version.
+pub(crate) fn xtversion() -> Vec<u8> {
+    format!("\x1bP>|tsumugi {}\x1b\\", env!("CARGO_PKG_VERSION")).into_bytes()
+}
+
+/// What goes back for a query alacritty answered, put right where it says
+/// less than the pane does: win32-input-mode (below), and the primary device
+/// attributes, which say sixel (4) as well as VT220 (62) and colour (22) --
+/// img2sixel, chafa and lsix ask before they draw.
+pub(crate) fn answer_query(reply: String, win32_on: bool) -> String {
+    match reply.as_str() {
+        "\x1b[?6c" => "\x1b[?62;4;22c".to_owned(),
+        _ => answer_win32_query(reply, win32_on),
+    }
+}
+
 /// The terminal's answer to a program asking whether win32-input-mode is on
 /// (`\e[?9001$p`). alacritty does not know the mode and says so (`0`, not
 /// recognised), which told lazygit the mode did not exist while `<Esc>` was

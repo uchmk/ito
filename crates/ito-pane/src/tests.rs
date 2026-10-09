@@ -1424,3 +1424,69 @@ mod pictures {
         assert_eq!(placements(&t, 3), [(key, -2, 2)]);
     }
 }
+
+/// What the pane says when a program asks what terminal it is talking to:
+/// the questions neovim, tmux, notcurses and yazi send before they decide
+/// what to draw.
+mod identity_tests {
+    use std::sync::Arc;
+
+    use alacritty_terminal::event::Event;
+    use alacritty_terminal::term::{Config, Term};
+    use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+
+    use crate::osc::{answer_query, scan_xtversion, xtversion};
+    use crate::{Proxy, Size};
+
+    /// The replies the parser wrote back, as the pane would send them, for
+    /// `text` fed in one go (so a synchronized update can stay open).
+    fn replies(text: &str) -> (Term<Proxy>, Vec<String>) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut t = Term::new(Config::default(), &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
+        let mut parser = Processor::<StdSyncHandler>::default();
+        parser.advance(&mut t, text.as_bytes());
+        let said = rx.try_iter().filter_map(|e| if let Event::PtyWrite(s) = e { Some(answer_query(s, false)) } else { None }).collect();
+        (t, said)
+    }
+
+    #[test]
+    fn device_attributes_say_vt220_with_sixel() {
+        assert_eq!(replies("\x1b[c").1, ["\x1b[?62;4;22c"]);
+        let (_, da2) = replies("\x1b[>c");
+        assert!(da2[0].starts_with("\x1b[>0;") && da2[0].ends_with(";1c"), "{da2:?}");
+    }
+
+    #[test]
+    fn xtversion_is_found_and_answered() {
+        let mut tail = Vec::new();
+        assert_eq!(scan_xtversion(&mut tail, b"\x1b[>q"), 1);
+        assert_eq!(scan_xtversion(&mut tail, b"a\x1b[>"), 0);
+        assert_eq!(scan_xtversion(&mut tail, b"0q\x1b[c"), 1, "across two reads");
+        assert_eq!(scan_xtversion(&mut tail, b"\x1b[>4;2m\x1b[>1q"), 0, "other CSI > are not this");
+        assert!(tail.len() < 5);
+        let reply = String::from_utf8(xtversion()).unwrap();
+        assert_eq!(reply, format!("\x1bP>|tsumugi {}\x1b\\", env!("CARGO_PKG_VERSION")));
+    }
+
+    /// DECRQM: set (1), reset (2), and 0 only for what is not known at all.
+    #[test]
+    fn modes_are_reported_as_they_are() {
+        let (_, said) = replies("\x1b[?1004h\x1b[?1004$p\x1b[?2004$p\x1b[?2026$p\x1b[?1049$p\x1b[?7777$p");
+        assert_eq!(said, ["\x1b[?1004;1$y", "\x1b[?2004;2$y", "\x1b[?2026;2$y", "\x1b[?1049;2$y", "\x1b[?7777;0$y"]);
+    }
+
+    /// DECSET 2026: what comes between the start and the end of an update is
+    /// held by the parser and lands at once, so a program redrawing the whole
+    /// screen is never seen half done.
+    #[test]
+    fn a_synchronized_update_lands_whole() {
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let mut t = Term::new(Config::default(), &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
+        let mut parser = Processor::<StdSyncHandler>::default();
+        let first = |t: &Term<Proxy>| crate::snapshot(t)[0].iter().map(|c| c.c).collect::<String>().trim_end().to_owned();
+        parser.advance(&mut t, b"\x1b[?2026hhalf");
+        assert_eq!(first(&t), "", "held while the update is open");
+        parser.advance(&mut t, b" done\x1b[?2026l");
+        assert_eq!(first(&t), "half done");
+    }
+}
