@@ -50,7 +50,7 @@ pub use charset::{Charset, CHARSETS};
 pub use grid::*;
 pub use image::{Picture, Placement, IMAGE_LINK};
 pub use keys::*;
-pub use link::{link_at, Link};
+pub use link::{hints, link_at, Hint, Link};
 pub use log::escape_bytes;
 pub use pane::{Pane, Screen};
 pub use shell::*;

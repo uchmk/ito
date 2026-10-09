@@ -41,6 +41,63 @@ pub fn link_at(row: &[CellView], col: usize) -> Option<(std::ops::Range<usize>, 
     Some((cells, link))
 }
 
+/// Something in a row worth copying with a key (quick-select): a link, a
+/// commit's hash, a UUID, an IPv4 address or a number of four digits or more.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hint {
+    /// The cells it covers.
+    pub cells: std::ops::Range<usize>,
+    /// The text as written.
+    pub text: String,
+    /// What opening it means, for a link.
+    pub link: Option<Link>,
+}
+
+/// Everything in `row` that quick-select marks, left to right.
+pub fn hints(row: &[CellView]) -> Vec<Hint> {
+    let chars: Vec<(char, usize)> = row.iter().enumerate().filter(|(_, c)| !c.flags.contains(Flags::WIDE_CHAR_SPACER)).map(|(x, c)| (if c.c == '\0' { ' ' } else { c.c }, x)).collect();
+    let text: Vec<char> = chars.iter().map(|(c, _)| *c).collect();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < text.len() {
+        let Some((start, end)) = token(&text, at) else {
+            at += 1;
+            continue;
+        };
+        at = end;
+        let word: String = text[start..end].iter().collect();
+        let found = parse(&word).map(|(skip, len, link)| (skip, len, Some(link))).or_else(|| plain(&word).map(|(skip, len)| (skip, len, None)));
+        let Some((skip, len, link)) = found else { continue };
+        let (first, last) = (start + skip, start + skip + len);
+        let cells = chars[first].1..chars[last - 1].1 + 1;
+        let cells = match row.get(cells.end).is_some_and(|c| c.flags.contains(Flags::WIDE_CHAR_SPACER)) {
+            true => cells.start..cells.end + 1,
+            false => cells,
+        };
+        out.push(Hint { cells, text: text[first..last].iter().collect(), link });
+    }
+    out
+}
+
+/// A hash, a UUID, an address or a number in a word that is no link: where
+/// it starts in the word and how many characters. Marks before it (`#1234`,
+/// `=abc1234`) and the sentence's after it are left out.
+fn plain(word: &str) -> Option<(usize, usize)> {
+    let chars: Vec<char> = word.chars().collect();
+    let skip = chars.iter().position(|c| c.is_ascii_alphanumeric())?;
+    let len = trim_end(&chars[skip..]);
+    let body: String = chars[skip..skip + len].iter().collect();
+    let hex = |s: &str| s.chars().all(|c| c.is_ascii_hexdigit());
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    let number = body.len() >= 4 && digits(&body);
+    // A commit's short hash is seven: `added` or `decade` are words.
+    let hash = (7..=64).contains(&body.len()) && hex(&body) && body.chars().any(|c| c.is_ascii_digit());
+    let uuid = body.len() == 36 && body.split('-').map(str::len).eq([8, 4, 4, 4, 12]) && hex(&body.replace('-', ""));
+    let (host, port) = body.split_once(':').unwrap_or((&body, ""));
+    let ipv4 = host.split('.').count() == 4 && host.split('.').all(|n| digits(n) && n.len() <= 3 && n.parse::<u16>().is_ok_and(|n| n < 256)) && (port.is_empty() || digits(port));
+    (number || hash || uuid || ipv4).then_some((skip, len))
+}
+
 /// What ends a word a link can be in: spaces, quotes, brackets and the
 /// lines boxes are drawn with.
 fn stops(c: char) -> bool {
@@ -204,5 +261,26 @@ mod tests {
         assert_eq!(at(text, 1), None);
         // A path with a wide character in it covers its last spacer.
         assert_eq!(at("docs/仕様.md", 2).map(|x| x.0), Some(0..12));
+    }
+
+    #[test]
+    fn hints_in_a_row() {
+        let found = |text: &str| hints(&row(text)).into_iter().map(|h| (h.cells, h.text, h.link.is_some())).collect::<Vec<_>>();
+        assert_eq!(found("5e9ef2a v0.71.0: see https://x.dev/a, src/a.rs:3."), vec![
+            (0..7, "5e9ef2a".into(), false),
+            (21..36, "https://x.dev/a".into(), true),
+            (38..48, "src/a.rs:3".into(), true),
+        ]);
+        assert_eq!(found("listening on 127.0.0.1:8080 (pid 12345) #4021"), vec![
+            (13..27, "127.0.0.1:8080".into(), false),
+            (33..38, "12345".into(), false),
+            (41..45, "4021".into(), false),
+        ]);
+        assert_eq!(found("id 0b7c6e3a-1f2d-4c5b-9a8e-7d6c5b4a3f21."), vec![(3..39, "0b7c6e3a-1f2d-4c5b-9a8e-7d6c5b4a3f21".into(), false)]);
+        for text in ["added a decade ago", "deadbeef", "v0.53.8 is 1.5", "999 of 300.1.2.3", "256.1.1.1"] {
+            assert_eq!(found(text), vec![], "{text}");
+        }
+        // After a wide character, the cells and not the characters count.
+        assert_eq!(found("日本 1234"), vec![(5..9, "1234".into(), false)]);
     }
 }
