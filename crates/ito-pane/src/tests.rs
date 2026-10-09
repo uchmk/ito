@@ -456,6 +456,19 @@ mod pane {
         assert_eq!(selected(&t), "ello", "the cell the drag started past is not in it");
     }
 
+    /// Alt+drag: the rectangle between the corners, and copied a row a line.
+    #[test]
+    fn a_block_selection_is_the_rectangle() {
+        let mut t = term(20, 4);
+        feed(&mut t, "abcdef\r\nghijkl\r\nmnopqr");
+        crate::grid::select_kind(&mut t, (1, 0), false, Some(alacritty_terminal::selection::SelectionType::Block));
+        select_at(&mut t, (3, 2), true, false);
+        let rows: Vec<String> = snapshot(&t).iter().map(|r| r.iter().filter(|c| c.selected).map(|c| c.c).collect()).collect();
+        assert_eq!(rows[..3], ["bcd", "hij", "nop"]);
+        let text = t.selection_to_string().unwrap_or_default();
+        assert_eq!(text.lines().collect::<Vec<_>>(), ["bcd", "hij", "nop"]);
+    }
+
     fn s(bytes: Vec<u8>) -> String {
         String::from_utf8(bytes).unwrap().replace('\x1b', "<ESC>")
     }

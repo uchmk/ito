@@ -69,6 +69,9 @@ pub struct ViewOptions {
     /// The wheel is the pane's when the pointer is over it. An app turns this
     /// off while a panel over the pane owns the wheel.
     pub wheel: bool,
+    /// Letting go of a selection puts it on the clipboard ([`Shown::copy`]);
+    /// off, it stays selected until a key copies it.
+    pub copy_on_select: bool,
 }
 
 /// What happened in the pane that the app has to act on.
@@ -78,8 +81,14 @@ pub struct Shown {
     pub focus: bool,
     /// A selection was finished: put this on the clipboard.
     pub copy: Option<String>,
+    /// A selection was finished, copied or not: what Linux calls the
+    /// primary selection, for a middle-click to paste.
+    pub selected: bool,
     /// A right-click: read the clipboard and [`Pane::paste`] it.
     pub paste: bool,
+    /// A middle-click: paste the primary selection (Linux), or the
+    /// clipboard where there is none.
+    pub middle: bool,
     /// A click with Ctrl (Cmd on a Mac) on a web address or a path: open it.
     pub open: Option<crate::Link>,
     /// Where the grid's first cell is, and a cell's size: for drawing over
@@ -271,9 +280,10 @@ pub fn show_faces<P: Pane + ?Sized>(
     // the bracketed-paste markers go on. Where they do, a multi-line clipboard
     // waits in the line editor instead of running itself.
     shown.paste = resp.secondary_clicked();
+    shown.middle = resp.middle_clicked();
     let press = ui.ctx().input(|i| i.pointer.press_origin());
     let hover = ui.ctx().input(|i| i.pointer.hover_pos());
-    if resp.clicked() || resp.drag_started() || resp.secondary_clicked() {
+    if resp.clicked() || resp.drag_started() || resp.secondary_clicked() || resp.middle_clicked() {
         focused = true;
         shown.focus = true;
     }
@@ -518,7 +528,12 @@ pub fn show_faces<P: Pane + ?Sized>(
             // had to be begun slightly to its left to keep it.
             let from = press.unwrap_or(p);
             let (col, line, right) = cell_at(from);
-            term.select((col, line), right, true);
+            // Alt (Option on a Mac) makes it a block: the rectangle between
+            // the corners, a column of a table rather than whole lines.
+            match ui.ctx().input(|i| i.modifiers.alt) {
+                true => term.select_block((col, line), right),
+                false => term.select((col, line), right, true),
+            }
         } else if resp.dragged() {
             let (col, line, right) = cell_at(p);
             term.select((col, line), right, false);
@@ -529,9 +544,12 @@ pub fn show_faces<P: Pane + ?Sized>(
         }
     }
     // Letting go of a selection copies it, which is what a terminal means by
-    // selecting: there is no other step.
+    // selecting: there is no other step -- unless the app turned that off.
     if resp.drag_stopped() || resp.double_clicked() {
-        shown.copy = term.selection();
+        shown.selected = true;
+        if opts.copy_on_select {
+            shown.copy = term.selection();
+        }
     }
     // The wheel walks the scrollback rather than the file list under it --
     // except where a program is the thing being scrolled. One that asked for

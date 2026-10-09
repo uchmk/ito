@@ -663,6 +663,12 @@ impl Terminal {
         select_at(&mut self.term.lock(), cell, right_half, start);
     }
 
+    /// Begin a block selection at a cell: the rectangle from here to where
+    /// the drag goes on ([`Terminal::select`] carries it).
+    pub fn select_block(&self, cell: (usize, usize), right_half: bool) {
+        select_kind(&mut self.term.lock(), cell, right_half, Some(SelectionType::Block));
+    }
+
     /// Select the word under a cell — what a double-click means everywhere.
     pub fn select_word(&self, cell: (usize, usize)) {
         let point = self.point(cell);

@@ -38,11 +38,24 @@ pub fn select_at<T: EventListener>(
     right_half: bool,
     start: bool,
 ) {
+    select_kind(term, cell, right_half, start.then_some(SelectionType::Simple));
+}
+
+/// [`select_at`] with the kind of selection a press begins (`Some`): a
+/// block is the rectangle between the two corners, as Alt+drag makes in
+/// every terminal. `None` carries the selection there is on, whatever its
+/// kind.
+pub fn select_kind<T: EventListener>(
+    term: &mut Term<T>,
+    cell: (usize, usize),
+    right_half: bool,
+    start: Option<SelectionType>,
+) {
     let point = point_at(term, cell);
     let side = if right_half { Side::Right } else { Side::Left };
     match start {
-        true => term.selection = Some(Selection::new(SelectionType::Simple, point, side)),
-        false => {
+        Some(kind) => term.selection = Some(Selection::new(kind, point, side)),
+        None => {
             if let Some(sel) = term.selection.as_mut() {
                 sel.update(point, side);
             }

@@ -36,6 +36,11 @@ pub trait Pane {
     fn scroll(&self, by: Scroll);
     /// Begin a selection at a cell (`start`), or carry one on to it.
     fn select(&self, cell: (usize, usize), right_half: bool, start: bool);
+    /// Begin a block selection (a rectangle, Alt+drag) at a cell; `select`
+    /// carries it on. A pane that has none begins a plain one.
+    fn select_block(&self, cell: (usize, usize), right_half: bool) {
+        self.select(cell, right_half, true)
+    }
     fn select_word(&self, cell: (usize, usize));
     fn clear_selection(&self);
     /// The selected text, when the pane has it to hand. A pane across a
@@ -118,6 +123,10 @@ impl Pane for Terminal {
 
     fn select(&self, cell: (usize, usize), right_half: bool, start: bool) {
         Terminal::select(self, cell, right_half, start)
+    }
+
+    fn select_block(&self, cell: (usize, usize), right_half: bool) {
+        Terminal::select_block(self, cell, right_half)
     }
 
     fn select_word(&self, cell: (usize, usize)) {
