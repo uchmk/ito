@@ -173,6 +173,20 @@ pub fn app_cursor<T: EventListener>(term: &Term<T>) -> bool {
     term.mode().contains(TermMode::APP_CURSOR)
 }
 
+/// Whether the program asked to hear when the pane gains and loses the keys
+/// (DECSET 1004): `\e[I` and `\e[O`. vim and nvim ask, to reread files changed
+/// meanwhile and to drop the cursor's shape; so do tmux and the TUIs that
+/// dim themselves when not in use.
+pub fn focus_report<T: EventListener>(term: &Term<T>) -> bool {
+    use alacritty_terminal::term::TermMode;
+    term.mode().contains(TermMode::FOCUS_IN_OUT)
+}
+
+/// The bytes that tell the program the pane gained (`true`) or lost the keys.
+pub fn focus_bytes(gained: bool) -> Vec<u8> {
+    if gained { b"\x1b[I".to_vec() } else { b"\x1b[O".to_vec() }
+}
+
 /// Whether the program has asked to be told about the mouse, and in which
 /// encoding. nvim asks at startup (`\e[?1002h\e[?1006h`), as do htop, tmux and
 /// most other full-screen programs.

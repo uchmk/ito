@@ -197,6 +197,15 @@ mod tests {
         }
     }
 
+    /// A pane whose program did not ask hears nothing of the keys coming
+    /// and going (the fake answers no, as every pane does by default).
+    #[test]
+    fn focus_is_told_only_when_asked() {
+        let p = Sent::default();
+        crate::Pane::focus(&p, true);
+        assert!(p.0.borrow().is_empty());
+    }
+
     /// AltGr+Q on a German keyboard (Ctrl+Alt with `@` as its text) types
     /// `@` alone; a Ctrl+Alt chord with no text still goes as the chord.
     #[test]

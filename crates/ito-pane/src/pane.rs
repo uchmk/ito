@@ -20,6 +20,9 @@ pub struct Screen {
     pub alt_screen: bool,
     /// How the program wants the mouse reported, if at all.
     pub mouse: MouseReport,
+    /// The program asked to hear when the pane gains and loses the keys
+    /// (`\e[?1004h`).
+    pub focus_report: bool,
 }
 
 pub trait Pane {
@@ -46,6 +49,18 @@ pub trait Pane {
     /// held as one, not run line by line. Unknown is no.
     fn bracketed_paste(&self) -> bool {
         false
+    }
+    /// The program asked to hear when the pane gains and loses the keys
+    /// (DECSET 1004). Unknown is no.
+    fn focus_report(&self) -> bool {
+        false
+    }
+    /// The pane gained the keys (`true`) or lost them: told to the program
+    /// when it asked to hear, and to nobody otherwise.
+    fn focus(&self, gained: bool) {
+        if self.focus_report() {
+            self.send(crate::focus_bytes(gained));
+        }
     }
     /// The OSC 8 links on the screen as shown. None known is none.
     fn hyperlinks(&self) -> Vec<crate::Hyperlink> {
@@ -81,6 +96,7 @@ impl Pane for Terminal {
             app_cursor: crate::app_cursor(t),
             alt_screen: crate::alt_screen(t),
             mouse: crate::mouse_report(t),
+            focus_report: crate::focus_report(t),
         })
     }
 
@@ -122,6 +138,10 @@ impl Pane for Terminal {
 
     fn bracketed_paste(&self) -> bool {
         Terminal::bracketed_paste(self)
+    }
+
+    fn focus_report(&self) -> bool {
+        self.with_grid(crate::focus_report)
     }
 
     fn hyperlinks(&self) -> Vec<crate::Hyperlink> {

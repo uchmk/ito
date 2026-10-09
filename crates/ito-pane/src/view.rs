@@ -281,7 +281,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     let Some(term) = term else { return shown };
     term.resize(size, (cell_w.round() as u16, row_h.round() as u16));
     // Out from under the lock before any laying out happens.
-    let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse } = term.screen();
+    let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse, .. } = term.screen();
     let hyperlinks = term.hyperlinks();
     let blocks = if alt_screen { Vec::new() } else { term.blocks() };
     let pictures = term.pictures();

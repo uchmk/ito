@@ -348,6 +348,19 @@ mod pane {
         assert!(row[7].flags.is_empty() && row[7].ul.is_none(), "SGR 0 ends them all");
     }
 
+    /// DECSET 1004 on and off, as vim sends it on the way in and out.
+    #[test]
+    fn focus_reports_are_asked_for_and_given_up() {
+        let mut t = term(20, 4);
+        assert!(!crate::focus_report(&t), "nobody asked yet");
+        feed(&mut t, "\x1b[?1004h");
+        assert!(crate::focus_report(&t));
+        feed(&mut t, "\x1b[?1004l");
+        assert!(!crate::focus_report(&t));
+        assert_eq!(crate::focus_bytes(true), b"\x1b[I");
+        assert_eq!(crate::focus_bytes(false), b"\x1b[O");
+    }
+
     /// Which match a search lands on first.
     ///
     /// Alacritty wraps, so a backwards search finds *something* from anywhere;
