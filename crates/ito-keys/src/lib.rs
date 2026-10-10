@@ -1,6 +1,6 @@
 //! yazi's key notation: `a`, `Z`, `<C-a>`, `<Enter>`, `<F5>`, `<A-S-Up>` …,
-//! shared by uchmk's apps that read a yazi-style `keymap.toml` (mimamori;
-//! filer's `config/keys.rs` is where it started).
+//! shared by uchmk's apps that read a yazi-style `keymap.toml` (yagura;
+//! kura's `config/keys.rs` is where it started).
 //!
 //! On top of yazi's: `P-` is the primary modifier, Cmd on macOS and Ctrl
 //! elsewhere, so one default keymap reads naturally on every OS (`<P-S-e>` is

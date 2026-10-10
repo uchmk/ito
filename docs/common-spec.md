@@ -1,6 +1,6 @@
 # uchmk のアプリの共通仕様
 
-tsumugi・mimamori・filer、これから作る uchmk のアプリが揃えるもの（2026-10-10、持ち主の依頼で決めた）。
+tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uchmk のアプリが揃えるもの（2026-10-10、持ち主の依頼で決めた）。
 **common.toml を変えれば、uchmk のアプリが一括で変わる**ようにする。コードは ito の共有のクレートにあり、
 どのアプリも `Cargo.toml` の `rev` で固定して読む（直すときは ito で直して push し、使う側の `rev` を上げる）。
 2026-10-11 に tsumugi の `docs/common-spec.md` からここに移した。
@@ -21,7 +21,7 @@ tsumugi・mimamori・filer、これから作る uchmk のアプリが揃える�
 | ファイル | 中身 |
 | --- | --- |
 | `<config>/uchmk/common.toml` | 全部のアプリが読む共通の設定（下） |
-| `<config>/uchmk/<app>/config.toml` | アプリごとの設定（mimamori・filer）。tsumugi だけは前からの `<config>/tsumugi/settings.toml` |
+| `<config>/uchmk/<app>/config.toml` | アプリごとの設定（yagura・kura）。tsumugi だけは前からの `<config>/tsumugi/settings.toml` |
 | `<config>/uchmk/themes/*.toml` | 自分で作ったテーマ。どのアプリの一覧にも出る |
 
 ## common.toml

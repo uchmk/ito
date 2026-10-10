@@ -5,8 +5,8 @@
 //!
 //! Which language: the app's own setting, else `language` in the
 //! `common.toml` every uchmk app reads ([`base_dir`]), else the OS's
-//! ([`os_language`]); `auto` passes the choice on ([`resolve`]). mimamori,
-//! tsumugi and filer read the same file, so a person sets it once.
+//! ([`os_language`]); `auto` passes the choice on ([`resolve`]). yagura,
+//! tsumugi and kura read the same file, so a person sets it once.
 //!
 //! ```text
 //! <config dir>/uchmk/common.toml   language = "auto" | "en" | "ja"

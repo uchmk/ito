@@ -1,4 +1,4 @@
-//! A terminal pane, shared by filer and tsumugi.
+//! A terminal pane, shared by kura (formerly filer) and tsumugi.
 //!
 //! `alacritty_terminal` does the parts that are a terminal emulator: it owns
 //! the PTY -- a real one on Unix, ConPTY on Windows -- reads it on a thread of

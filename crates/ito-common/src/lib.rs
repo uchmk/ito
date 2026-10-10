@@ -1,4 +1,4 @@
-//! What every uchmk app (tsumugi, mimamori, filer and those to come) shares
+//! What every uchmk app (tsumugi, yagura, kura and those to come) shares
 //! (docs/common-spec.md): where the settings live, `common.toml` -- the
 //! language, the theme and the clock, so changing that one file changes
 //! every app at once -- and editing a TOML file one key at a time with what
