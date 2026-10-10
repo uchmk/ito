@@ -1,0 +1,13 @@
+[package]
+name = "tsumugi-match"
+description = "How a search query matches text: a regular expression with smart case, or fzf-style fuzzy letters, both giving the places to highlight"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Backtracking, so a runaway pattern is cut off and counts as no match. The
+# version is filer's (kept in step with syntect there).
+fancy-regex = "0.16"
