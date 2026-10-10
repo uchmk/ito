@@ -30,7 +30,7 @@ pub fn base_dir() -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         var("HOME")?.join("Library").join("Application Support")
     } else {
-        var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
+        xdg("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
     };
     Some(dir.join("uchmk"))
 }
@@ -39,6 +39,11 @@ pub fn base_dir() -> Option<PathBuf> {
 /// is empty (an exported but blank variable means unset, not `/`).
 pub fn env_dir(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// An XDG folder variable; a relative one is ignored, as the XDG spec says.
+fn xdg(var: &str) -> Option<PathBuf> {
+    env_dir(var).filter(|d| d.is_absolute())
 }
 
 /// The folder of `app`'s own settings (`config.toml`, `keymap.toml` …):
@@ -63,7 +68,7 @@ pub fn state_dir(app: &str) -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         var("HOME")?.join("Library").join("Application Support").join("uchmk").join(app).join("state")
     } else {
-        var("XDG_STATE_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("state")))?.join("uchmk").join(app)
+        xdg("XDG_STATE_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("state")))?.join("uchmk").join(app)
     })
 }
 
