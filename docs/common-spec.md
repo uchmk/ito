@@ -3,8 +3,13 @@
 tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uchmk のアプリが揃えるもの（2026-10-10、持ち主の依頼で決めた）。
 **common.toml を変えれば、uchmk のアプリが一括で変わる**ようにする。コードは ito の共有のクレートにあり、
 どのアプリも `Cargo.toml` の `rev` で固定して読む（直すときは ito で直して push し、使う側の `rev` を上げる）。
-2026-10-11 に tsumugi の `docs/common-spec.md` からここに移した。同じ日に倍率・標準のキー・置き場所・環境変数・CLI を揃えた（ito 0.3.0）。
-**新しいアプリはこの文書を既定にする。**
+2026-10-11 に tsumugi の `docs/common-spec.md` からここに移した。同じ日に倍率・標準のキー・置き場所・環境変数・CLI・字体・窓を揃えた
+（ito 0.3.0〜0.6.0、kura 0.99・yagura 0.39・tsumugi 0.87）。
+**新しいアプリはこの文書を既定にする。**どこまで揃ったかは末尾の「各アプリの対応」。
+
+- 仕様を変えるときは、この文書と ito の CHANGELOG を同じコミットで直す。追いつく作業は各アプリの TODO.md に書き、
+  「各アプリの対応」の表を直す。
+- 「〜する」は全部のアプリが守ること、「〜してよい」はアプリが選べること。
 
 | クレート | 持つもの |
 | --- | --- |
@@ -111,7 +116,7 @@ prepend_keymap = [
   - 組み込みの keymap.toml と、アプリが作る雛形の頭に上の 2 行のコメントを置く。
   - 画面（ヘルプ・パレット・設定・ステータスバー）には OS の名前（`Ctrl+,`・`⌘,`）で出す（`Key::human`）。
   - ito 0.5 の `<C-…>`・`<primary-…>` も `C` と同じに読む。
-- tsumugi の settings.toml の `[keys]`（`"Ctrl+Shift+T"` の形）は古い形。keymap.toml に移す（tsumugi の TODO）。
+- tsumugi の config.toml の `[keys]`（`"Ctrl+Shift+T"` の形）は古い形。keymap.toml に移す（tsumugi の TODO）。
 
 | 役割 | キー | 補足 |
 | --- | --- | --- |
@@ -140,7 +145,43 @@ prepend_keymap = [
 | --- | --- |
 | `--version`・`-V` | `<app> X.Y.Z` を 1 行出して終わる |
 | `--help`・`-h` | 使い方を出して終わる |
-| `--keys "<script>"` | 実機のテスト用。起動したあと、アプリの中でキーを順に押す（kura・yagura の `keyscript.rs` の書き方）。終わったら `<APP>_KEYS_DONE` のファイルに状態を書く |
+| `--keys "<script>"` | 実機のテスト用。起動したあと、アプリの中でキーを順に押す（下の「キーの台本」）。終わったら `<APP>_KEYS_DONE` のファイルに状態を書く |
+
+### キーの台本（`--keys`）
+
+人の手を使わずに、窓を開いたままキーとクリックを送り、画面と状態を残す。実機のテストのセッション（Agent）がこれで確かめる。
+キーは egui の入力の前（`raw_input_hook`）に egui のイベントとして入れるので、本物のキーと同じ道を通る。
+
+台本は空白で区切った語の並び。**全部のアプリが受ける語**:
+
+| 語 | 動き |
+| --- | --- |
+| `j`・`<C-,>`・`<A-S-Up>`・`<Enter>` | キー 1 つ（yazi の書き方。上の「キー」の `C` もそのまま） |
+| `<…>*N` | 直前のキーを N 回 |
+| `<Wait:ms>` | ms ミリ秒待つ（描画が追いつくのを待つ） |
+| `<Shot:name>` | 窓の画像を `name.png` に書く |
+| `<State:name>` | その時の状態を `name.txt` に書く（形は下） |
+| `<Click:x,y>` | 窓の中の点をクリックする。`x`・`y` は窓の幅と高さに対する 0〜1 の割合 |
+| `<Drag:x,y-x,y>` | 1 つ目の点から 2 つ目の点へ引きずる（割合は同じ） |
+| `<Quit>` | アプリを閉じる |
+
+- `name` は英数字と `-`・`_` だけ。ファイルは `<APP>_KEYS_DONE` のファイルと同じフォルダに書く。
+- 台本が終わったとき（`<Quit>` の前）にも `<APP>_KEYS_DONE` に状態を書く。テストはこのファイルができるのを待つ。
+- アプリが足してよい語（kura が持つ）: `<Now>`（待たずに次へ）、`<RClick:x,y>`、修飾キー付きのクリック（`<Click:C-x,y>`）、
+  `<Hover:x,y>`、`<Wheel:n@x,y>`、`<Paste>`・`<Paste:text>`、`<PaneText:name>`（ペインの文字を書く）など。
+  足すときは名前の形（`<Word:引数>`）を守り、そのアプリの README に書く。
+
+**状態のファイル**は UTF-8 の `key: value` の行（1 行に 1 つ、順は自由）:
+
+```text
+focus: list           # キーが届いている所（アプリが決める名前）。全部のアプリが書く
+overlay: none         # 開いている重ね物（settings・help・palette など、無ければ none）
+scale: 100%           # 書くなら倍率を % で
+```
+
+- `focus:` は全部のアプリが書く。`overlay:`・`scale:` は持つアプリが書く（新しいアプリは書く）。
+- そのほかの行（yagura の `screen:`・`sort:`、kura の `sel:` など）はアプリが足してよい。テストは知らない行を読み飛ばす。
+- 値の中の改行は `\n` と書く。
 
 使うアプリだけが持つ下位のコマンド（必須ではない。持つならこの名前にする）:
 
@@ -195,4 +236,40 @@ prepend_keymap = [
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
 8. `--version`・`--help`・`--keys "<script>"` を受ける。
-9. README とその CLAUDE.md から、この文書を指す。
+9. `scripts/verify.sh`・`release.yml`・`release-sums.yml` を kura か yagura から写す（下の「版とリリース」）。
+10. README とその CLAUDE.md から、この文書を指す。下の「各アプリの対応」に行を足す。
+
+## 版とリリース
+
+- 版はルートの `Cargo.toml`（workspace なら `[workspace.package]`）の `version` が正。版の繰り上げと CHANGELOG.md は同じコミットにする。
+- CHANGELOG.md は日本語、[Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) の形、日付は JST。
+- 版のコミットの題は `vX.Y.Z: <英語のひとこと>`。本文の最初の段落は英語で、それだけで意味が通るように書く（リリースのノートになる）。
+- push の前に `scripts/verify.sh` を回し、最後の行が `ALL OK: …` になってから push する（test と clippy `-D warnings` を
+  Linux と `x86_64-pc-windows-msvc` の両方で）。マージは merge コミット（rebase・squash を使わない）。
+- リリースは `.github/workflows/release.yml` を `workflow_dispatch` で回し、`tag` に `vX.Y.Z` を渡す（タグが無ければ作る。
+  `Cargo.toml` の版と違えば落ちる）。前のタグのリリースができてから次を投げる。
+  - 成果物は 6 つ: x86_64 と aarch64 の Windows・macOS・Linux。Windows は `.zip`（ConPTY を使うアプリは同梱する）、ほかは `.tar.gz`。
+  - ノートは前のタグからの `vX.Y.Z:` のコミットの最初の段落から作る。最後に `release-sums.yml` が SHA-256 の表を足す。
+- ito 自身はバイナリを出さないので、版と CHANGELOG とタグ（`vX.Y.Z`）だけ。使う側は `rev` で固定する。
+
+## 各アプリの対応
+
+2026-10-11 の時点（kura 0.100・yagura 0.39・tsumugi 0.87）。○ は揃った、△ は一部、× はまだ（各アプリの TODO にある）。
+
+| 項目 | kura | yagura | tsumugi |
+| --- | --- | --- | --- |
+| 置き場所 `uchmk/<app>/config.toml`・古い場所から移す | ○ | ○ | ○ |
+| `<APP>_CONFIG_HOME`・`<APP>_STATE_HOME` | ○ | ○ | ○（古い名前も読む） |
+| common.toml の言語・テーマ・時計 | ○ | ○ | ○ |
+| 倍率（common.toml の `scale`・`scale_row`） | ○ | ○ | △（読んで当てるだけ。キーは字の大きさ） |
+| 自分の設定の自動の読み直し | ○ | ○ | ○ |
+| keymap.toml（yazi の形） | ○ | ○ | ×（config.toml の `[keys]`） |
+| `<C-,>`・`<F1>`・`<C-q>` | ○ | ○ | △（`<C-q>` はシェルに渡す） |
+| コマンドパレット `<C-S-p>` | ○ | × | × |
+| 設定の画面（`ito_prefs`） | ○ | ○ | ○ |
+| 字体の並び（`ito_common::fonts`） | ○ | ○ | ○ |
+| 窓 1280×800 | ○（config で変えられる） | ○ | ○ |
+| 窓の位置と大きさを覚える | × | × | × |
+| `--version`・`--help` | ○ | ○ | ○ |
+| `--keys` | ○ | ○ | × |
+| `mcp`・`shell-hook` | ○ | — | ○ |
