@@ -1,0 +1,15 @@
+[package]
+name = "tsumugi-keys"
+description = "yazi's key notation (`<C-a>`, `<A-S-Up>`, `<P-e>` …): parsing, printing, and egui's key events in the same terms"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# `from_egui` and `printable`: egui's key events as `Key`.
+egui = ["dep:egui"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
