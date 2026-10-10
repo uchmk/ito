@@ -329,6 +329,12 @@ fn notice(body: &[u8]) -> Option<String> {
 /// first command it is followed by `?exit=` and the exit code the shell
 /// gave for the command before (OSC 133 `D`), when it gave one.
 pub const PROMPT_LINK: &str = "tsumugi:prompt";
+/// The link a prompt's other rows carry, once the shell has said where its
+/// input starts (OSC 133 `B`): a prompt of two lines and more, as Starship's.
+/// A prompt row the window wrapped is one of them too, without it.
+pub const PROMPT_REST_LINK: &str = "tsumugi:prompt-rest";
+/// The link the row a command is typed on carries (after OSC 133 `B`).
+pub const INPUT_LINK: &str = "tsumugi:input";
 /// The link the first row of a command's output carries (after OSC 133 `C`).
 pub const OUTPUT_LINK: &str = "tsumugi:output";
 
@@ -347,11 +353,15 @@ pub fn exit_of(uri: &str) -> Option<i32> {
 /// locked, so this side never knows which row a mark lands on; but
 /// alacritty keeps an OSC 8 link on every cell written under it, scrolls it
 /// with the cell and rewraps it. So after each OSC 133 `A` an OSC 8 link to
-/// [`PROMPT_LINK`] is opened (with the exit code the last `D` gave), and
-/// after each `C` one to [`OUTPUT_LINK`]; each is closed at the next OSC 133
-/// or the first newline after it has written a cell, whichever is first (a
-/// prompt that begins with a blank line, as Starship's does, is marked on
-/// the row it writes on). The rows are then found by
+/// [`PROMPT_LINK`] is opened (with the exit code the last `D` gave), after
+/// each `B` one to [`INPUT_LINK`] and after each `C` one to [`OUTPUT_LINK`];
+/// each is closed at the next OSC 133 or the first newline after it has
+/// written a cell, whichever is first (a prompt that begins with a blank
+/// line, as Starship's does, is marked on the row it writes on). Once the
+/// shell has sent a `B`, a prompt's rows after its first carry
+/// [`PROMPT_REST_LINK`] up to the `B` (at most [`REST_ROWS`] of them), so a
+/// prompt of two lines is one prompt whose input is on its last row, and an
+/// empty command leaves no row that reads as output. The rows are then found by
 /// their links ([`prompt_lines`](crate::prompt_lines),
 /// [`blocks`](crate::blocks)). Nothing is drawn for them.
 #[derive(Default)]
@@ -369,7 +379,15 @@ pub(crate) struct PromptLinks {
     csi: bool,
     /// The exit code the last `133;D` gave, for the next prompt's link.
     exit: Option<i32>,
+    /// The shell has sent a `133;B`: it says where a prompt ends.
+    says_input: bool,
+    /// How many more rows the open prompt link goes on to.
+    rest: usize,
 }
+
+/// The most rows after its first a prompt is taken to have, in case a
+/// shell that once sent `133;B` stops (another shell started in it).
+pub const REST_ROWS: usize = 4;
 
 const CLOSE: &[u8] = b"\x1b]8;;\x1b\\";
 /// How much of an OSC is kept: `133;D;-2147483648` and a little.
@@ -412,6 +430,7 @@ impl PromptLinks {
                             add.extend_from_slice(CLOSE);
                             self.open = false;
                         }
+                        self.rest = 0;
                         if said.starts_with(b"133;A") {
                             let uri = match self.exit.take() {
                                 Some(code) => format!("{PROMPT_LINK}?exit={code}"),
@@ -419,6 +438,10 @@ impl PromptLinks {
                             };
                             add.extend(open(&uri));
                             (self.open, self.written) = (true, false);
+                            self.rest = if self.says_input { REST_ROWS } else { 0 };
+                        } else if said.starts_with(b"133;B") {
+                            add.extend(open(INPUT_LINK));
+                            (self.open, self.written, self.says_input) = (true, false, true);
                         } else if said.starts_with(b"133;C") {
                             add.extend(open(OUTPUT_LINK));
                             (self.open, self.written) = (true, false);
@@ -446,6 +469,12 @@ impl PromptLinks {
                     self.open = false;
                     let o = out.get_or_insert_with(|| chunk[..i].to_vec());
                     o.extend_from_slice(CLOSE);
+                    // A prompt goes on to the next row, until its `B`.
+                    if self.rest > 0 {
+                        self.rest -= 1;
+                        add.extend(open(PROMPT_REST_LINK));
+                        (self.open, self.written) = (true, false);
+                    }
                 }
                 None => self.written |= b >= 0x20 && b != 0x7f,
             }

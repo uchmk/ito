@@ -1147,7 +1147,8 @@ mod prompt_marks {
     }
 
     /// A link opens after `A` and closes at `B`, or at the first newline
-    /// when no `B` comes; other output passes as it was.
+    /// when no `B` comes; after `B` one marks the input up to the newline;
+    /// other output passes as it was.
     #[test]
     fn a_prompt_is_linked_up_to_its_input() {
         let mut marks = PromptLinks::default();
@@ -1158,7 +1159,10 @@ mod prompt_marks {
             b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\",
             b"PS> \x1b]133;B\x07",
             b"\x1b]8;;\x1b\\",
-            b"ls\r\n",
+            b"\x1b]8;id=tsumugi-mark;tsumugi:input\x1b\\",
+            b"ls\r",
+            b"\x1b]8;;\x1b\\",
+            b"\n",
         ]
         .concat();
         assert_eq!(out, want);
@@ -1254,6 +1258,57 @@ mod prompt_marks {
         testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
         assert_eq!(last_output(&t).as_deref(), Some("a\nb"));
         assert_eq!(blocks(&t), [Block { lines: 0..3, exit: 1 }, Block { lines: 3..4, exit: 1 }]);
+    }
+
+    /// A prompt of two lines (Starship on pwsh: `B`, no `C`): once the shell
+    /// has said where its input starts, the second line is the prompt's too.
+    /// The output is what is under the command, and an empty Enter has none.
+    #[test]
+    fn a_prompt_of_two_lines_is_one_prompt() {
+        let mut t = testing::term(20, 12);
+        let mut marks = PromptLinks::default();
+        let prompt = |code: i32| format!("\x1b]133;D;{code}\x07\x1b]133;A\x07\r\n~ on main\r\n> \x1b]133;B\x07");
+        let mut text = prompt(0);
+        text.push_str("dir\r\na\r\nb\r\n");
+        text.push_str(&prompt(0));
+        text.push_str("ls\r\nc\r\n");
+        text.push_str(&prompt(0));
+        let fed = marks.feed(text.as_bytes()).unwrap();
+        // The second prompt's second line: `B` was seen at the first.
+        assert!(fed.windows(19).any(|w| w == b"tsumugi:prompt-rest"));
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(prompt_lines(&t), [1, 6, 10]);
+        assert_eq!(last_output(&t).as_deref(), Some("c"));
+        // An empty Enter: the copy is still the last command's output.
+        let fed = marks.feed(format!("\r\n{}", prompt(0)).as_bytes()).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(last_output(&t).as_deref(), Some("c"));
+        // The first prompt, before any `B`: the input row is passed over too.
+        let mut t = testing::term(20, 8);
+        let fed = PromptLinks::default().feed(format!("{}dir\r\na\r\n{}", prompt(0), prompt(0)).as_bytes()).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(last_output(&t).as_deref(), Some("a"));
+    }
+
+    /// A prompt longer than the window is wide wraps: it is one prompt, and
+    /// a command that wraps is passed over whole.
+    #[test]
+    fn a_wrapped_prompt_is_one_prompt() {
+        let mut t = testing::term(10, 10);
+        let mut marks = PromptLinks::default();
+        let long = "\x1b]133;D;0\x07\x1b]133;A\x07PS C:\\a\\long\\path> \x1b]133;B\x07";
+        let text = format!("{long}echo one two three\r\nout\r\n{long}");
+        let fed = marks.feed(text.as_bytes()).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        let lines = prompt_lines(&t);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(last_output(&t).as_deref(), Some("out"));
+        // Without `B` (pwsh before v0.84.0 of tsumugi), the same.
+        let mut t = testing::term(10, 10);
+        let fed = PromptLinks::default().feed(text.replace("\x1b]133;B\x07", "").as_bytes()).unwrap();
+        testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
+        assert_eq!(prompt_lines(&t).len(), 2);
+        assert_eq!(last_output(&t).as_deref(), Some("out"));
     }
 
     /// The prompts are found in the grid, and the keys go from one to the

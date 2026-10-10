@@ -378,7 +378,8 @@ pub(crate) fn search_in(term: &mut Term<Proxy>, found: &mut Option<(Point, Point
 }
 
 /// The buffer's lines where a prompt starts, oldest first: those whose
-/// cells carry the link [`PromptLinks`](crate::osc) puts after OSC 133 `A`.
+/// cells carry the link [`PromptLinks`](crate::osc) puts after OSC 133 `A`,
+/// and that do not go on from a row the window wrapped.
 pub fn prompt_lines<T: EventListener>(term: &Term<T>) -> Vec<i32> {
     let grid = term.grid();
     let top = -(grid.history_size() as i32);
@@ -390,21 +391,37 @@ pub fn prompt_lines<T: EventListener>(term: &Term<T>) -> Vec<i32> {
 enum Mark {
     /// A prompt starts here, with the exit code of the command before it.
     Prompt(Option<i32>),
+    /// A prompt goes on here: its second row and on, or its first row
+    /// going on past the window's edge.
+    PromptRest,
+    /// The command is typed here (after OSC 133 `B`).
+    Input,
     /// A command's output starts here.
     Output,
 }
 
 fn mark_on<T: EventListener>(term: &Term<T>, line: i32) -> Option<Mark> {
+    use crate::osc::{INPUT_LINK, OUTPUT_LINK, PROMPT_LINK, PROMPT_REST_LINK};
     let grid = term.grid();
     let row = &grid[Line(line)];
-    (0..grid.columns()).find_map(|col| {
+    let mark = (0..grid.columns()).find_map(|col| {
         let uri = row[Column(col)].hyperlink()?.uri().to_owned();
-        if uri.starts_with(crate::osc::PROMPT_LINK) {
-            Some(Mark::Prompt(crate::osc::exit_of(&uri)))
-        } else {
-            (uri == crate::osc::OUTPUT_LINK).then_some(Mark::Output)
+        match uri.as_str() {
+            PROMPT_REST_LINK => Some(Mark::PromptRest),
+            INPUT_LINK => Some(Mark::Input),
+            OUTPUT_LINK => Some(Mark::Output),
+            _ => uri.starts_with(PROMPT_LINK).then(|| Mark::Prompt(crate::osc::exit_of(&uri))),
         }
-    })
+    })?;
+    // A prompt's row the window wrapped carries its link on to the next row.
+    Some(if matches!(mark, Mark::Prompt(_)) && wraps(term, line - 1) { Mark::PromptRest } else { mark })
+}
+
+/// The row `line` goes on to the next one: the window wrapped it.
+fn wraps<T: EventListener>(term: &Term<T>, line: i32) -> bool {
+    use alacritty_terminal::term::cell::Flags;
+    let grid = term.grid();
+    line >= -(grid.history_size() as i32) && grid[Line(line)][grid.last_column()].flags.contains(Flags::WRAPLINE)
 }
 
 /// A command and its output as the view shows it (a block, as Warp and
@@ -456,7 +473,8 @@ pub fn blocks<T: EventListener>(term: &Term<T>) -> Vec<Block> {
 /// The output of the last command that has any: what a command still
 /// running has written so far (from its OSC 133 `C`), else what is between
 /// the last two prompts that have something between them -- from the `C`
-/// there, or the row after the prompt where the shell marks none (pwsh).
+/// there, or where the shell marks none (pwsh), the row after the prompt
+/// and the command (the last row of a prompt of two lines, after a `B`).
 /// Trailing blank lines are left out; `None` when there is nothing.
 pub fn last_output<T: EventListener>(term: &Term<T>) -> Option<String> {
     let grid = term.grid();
@@ -470,21 +488,31 @@ pub fn last_output<T: EventListener>(term: &Term<T>) -> Option<String> {
         let all = all.trim_end_matches(['\n', '\r', ' ']).to_owned();
         (!all.is_empty()).then_some(all)
     };
-    // Bottom up: the rows since the prompt below, and where an output began.
-    let (mut below, mut output) = (last + 1, None);
+    // The row after `line` and the rows the window wrapped it on to.
+    let after = |line: i32| {
+        let mut next = line + 1;
+        while next <= last && wraps(term, next - 1) {
+            next += 1;
+        }
+        next
+    };
+    // Bottom up: the rows since the prompt below, where an output began, and
+    // the last row of the prompt and the command.
+    let (mut below, mut output, mut head) = (last + 1, None, None);
     for line in (oldest..=last).rev() {
         match mark_on(term, line) {
             Some(Mark::Output) => output = Some(line),
+            Some(Mark::PromptRest | Mark::Input) => head = head.or(Some(line)),
             Some(Mark::Prompt(_)) => {
                 let running = below > last;
-                let from = output.unwrap_or(line + 1);
+                let from = output.unwrap_or_else(|| after(head.unwrap_or(line)));
                 // A prompt with nothing run after it yet is not a command.
                 if !(running && output.is_none()) {
                     if let Some(t) = text(from, below - 1) {
                         return Some(t);
                     }
                 }
-                (below, output) = (line, None);
+                (below, output, head) = (line, None, None);
             }
             None => {}
         }

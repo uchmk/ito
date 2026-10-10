@@ -124,8 +124,9 @@ pub(crate) struct Tapped {
     unmarked: Vec<u8>,
     /// The `.cast` recording, while one is being made; see [`Terminal::record`].
     cast: crate::cast::Cast,
-    /// The PTY has said it is at its end (a read of nothing).
-    ended: bool,
+    /// The last read of the PTY gave nothing: the shell's end, or, on
+    /// Windows, nothing more yet (its pipe reads 0 when empty).
+    dry: bool,
 }
 
 /// Room left in each read for the links put in after it.
@@ -139,11 +140,15 @@ impl io::Read for Tapped {
             self.held.drain(..n);
             return Ok(n);
         }
+        // Zero is the end of the shell, or on Windows the end of what is
+        // there, so a read that was all picture (or a sequence held for the
+        // next) reads again instead, until the PTY itself gives nothing. A
+        // zero for anything else stops alacritty's loop until the next wake,
+        // and a large picture then came in one read per wake (seconds).
+        self.dry = false;
         loop {
             let n = self.read_some(buf)?;
-            // Zero is the end of the shell, so a read that was all picture
-            // (or a sequence held for the next) reads again instead.
-            if n > 0 || self.ended {
+            if n > 0 || self.dry {
                 return Ok(n);
             }
         }
@@ -162,7 +167,7 @@ impl Tapped {
         let inner = &mut self.inner;
         let n = self.charset.read(&mut buf[..room], |raw| inner.reader().read(raw))?;
         if n == 0 {
-            self.ended = true;
+            self.dry = true;
             return Ok(0);
         }
         log_pty(&self.log, "out", &buf[..n]);
@@ -478,7 +483,7 @@ impl Terminal {
             held: Vec::new(),
             pictures: crate::image::Catcher::new(pictures.clone()),
             unmarked: Vec::new(),
-            ended: false,
+            dry: false,
             cast: cast.clone(),
         };
 
