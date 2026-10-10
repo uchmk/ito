@@ -1,0 +1,20 @@
+[package]
+name = "tsumugi-i18n"
+description = "The words on screen by key, and the language setting uchmk's apps share (common.toml)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Writing `language` into common.toml with its comments kept (a settings
+# screen); reading needs only `toml`.
+edit = ["dep:toml_edit"]
+
+[dependencies]
+toml = "1.1"
+# The OS's language for `auto`: Pure Rust on every OS (Win32, CoreFoundation
+# and the environment), no C to build.
+sys-locale = "0.3"
+toml_edit = { version = "0.23", optional = true }
