@@ -626,11 +626,16 @@ impl Terminal {
         }
     }
 
-    /// Record what the shell writes from now on into an asciinema v2
-    /// `.cast` file at `path` (replacing a recording already going), until
-    /// [`stop_recording`](Self::stop_recording) or the pane ends.
+    /// Record the screen as it is and what the shell writes from now on
+    /// into an asciinema v2 `.cast` file at `path` (replacing a recording
+    /// already going), until [`stop_recording`](Self::stop_recording) or the
+    /// pane ends.
     pub fn record(&self, path: &Path) -> io::Result<()> {
-        let file = crate::cast::CastFile::create(path, self.size.cols, self.size.lines, &self.title)?;
+        // The grid stays locked until the file takes the output, so the
+        // parser draws nothing in between: nothing is in both. Output read
+        // but not yet drawn at that moment (a read's worth) is in neither.
+        let term = self.term.lock();
+        let file = crate::cast::CastFile::create(path, self.size.cols, self.size.lines, &self.title, &crate::cast::screen(&term))?;
         *self.cast.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
         Ok(())
     }

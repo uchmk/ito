@@ -211,8 +211,8 @@ mod pane {
         assert_eq!(String::from_utf8_lossy(&got), "\x1b]11;rgb:101", "{got:?}");
     }
 
-    /// A recording holds what the shell wrote after it began, as `.cast`
-    /// lines, and a resize.
+    /// A recording holds the screen as it began, what the shell wrote after,
+    /// as `.cast` lines, and a resize.
     #[cfg(unix)]
     #[test]
     fn a_pane_records_what_its_shell_writes() {
@@ -232,6 +232,7 @@ mod pane {
         assert!(!t.recording());
         let text = std::fs::read_to_string(&cast).unwrap_or_default();
         assert!(text.starts_with("{\"version\": 2, \"width\": 80, \"height\": 24"), "{text}");
+        assert!(text.lines().nth(1).is_some_and(|l| l.starts_with("[0.000000, \"o\", \"\\u001b[0m\\u001b[2J")), "{text}");
         assert!(text.contains("cast-me\\r\\n"), "{text}");
         assert!(text.trim_end().ends_with(", \"r\", \"100x30\"]"), "{text}");
     }

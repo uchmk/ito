@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "ito-common"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "serde",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "ito-i18n"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ito-common",
  "toml",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "ito-ipc"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "postcard",
  "serde",
@@ -814,14 +814,14 @@ dependencies = [
 
 [[package]]
 name = "ito-keys"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-layout"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "egui",
  "serde",
@@ -829,21 +829,21 @@ dependencies = [
 
 [[package]]
 name = "ito-match"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "fancy-regex",
 ]
 
 [[package]]
 name = "ito-mcp"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ito-pane"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "ito-prefs"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "egui",
  "ito-common",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "ito-theme"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "egui",
  "ito-pane",
