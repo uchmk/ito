@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 # Writing one key with the file's comments and layout kept; Pure Rust, the
 # toml crate's own.
-toml_edit = "0.23"
+toml_edit = "0.25"
 # The OS's language for `auto`: Pure Rust on every OS (Win32, CoreFoundation
 # and the environment), no C to build.
 sys-locale = "0.3"

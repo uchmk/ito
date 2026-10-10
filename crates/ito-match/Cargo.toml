@@ -10,4 +10,4 @@ repository.workspace = true
 [dependencies]
 # Backtracking, so a runaway pattern is cut off and counts as no match. The
 # version is filer's (kept in step with syntect there).
-fancy-regex = "0.16"
+fancy-regex = "0.19"
