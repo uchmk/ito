@@ -221,7 +221,7 @@ type Textures = std::collections::HashMap<u64, (egui::TextureHandle, f64)>;
 
 /// A picture's texture, made the first time it is drawn.
 fn texture<P: Pane + ?Sized>(ctx: &egui::Context, term: &P, key: u64) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new("tsumugi-pane-pictures");
+    let id = egui::Id::new("ito-pane-pictures");
     let now = ctx.input(|i| i.time);
     let mut cache: Textures = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
     let found = match cache.get_mut(&key) {

@@ -1,5 +1,5 @@
 [package]
-name = "tsumugi-mcp"
+name = "ito-mcp"
 description = "A small MCP (Model Context Protocol) server over stdio: JSON-RPC, tools/list and tools/call, without an async runtime"
 version.workspace = true
 edition.workspace = true

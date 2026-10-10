@@ -1,0 +1,7 @@
+# The hand-formatted style of kura and tsumugi (`Self { a, b, c }` on one
+# line), written down so `cargo fmt` keeps it instead of fighting it -- the
+# same settings as yagura. The crates came from tsumugi hand-formatted; they
+# were run through rustfmt once (see .git-blame-ignore-revs), and CI checks it
+# from then on (`cargo fmt --check`).
+max_width = 140
+use_small_heuristics = "Max"

@@ -157,7 +157,7 @@ pub fn test_dir(what: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-const TEST_DIR_PREFIX: &str = "tsumugi-pane-test-";
+const TEST_DIR_PREFIX: &str = "ito-pane-test-";
 
 #[cfg(test)]
 extern "C" fn remove_own_test_dirs() {

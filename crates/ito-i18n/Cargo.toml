@@ -1,5 +1,5 @@
 [package]
-name = "tsumugi-i18n"
+name = "ito-i18n"
 description = "The words on screen by key, and the language setting uchmk's apps share (common.toml)"
 version.workspace = true
 edition.workspace = true

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+# One version for the workspace: it is what CHANGELOG.md and the tags follow.
+# The apps read these crates by git rev, not by this version.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/uchmk/ito"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+debug = false

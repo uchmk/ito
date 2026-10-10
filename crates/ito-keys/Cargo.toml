@@ -1,5 +1,5 @@
 [package]
-name = "tsumugi-keys"
+name = "ito-keys"
 description = "yazi's key notation (`<C-a>`, `<A-S-Up>`, `<P-e>` …): parsing, printing, and egui's key events in the same terms"
 version.workspace = true
 edition.workspace = true

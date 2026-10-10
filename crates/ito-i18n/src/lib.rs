@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(common_language("# nothing\n"), Ok(None));
         assert!(common_language("language = 1\n").is_err());
         assert!(common_language("language = \n").is_err());
-        let dir = std::env::temp_dir().join(format!("tsumugi-i18n-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ito-i18n-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(read_common_language(&dir), Ok(None), "no folder, no file");
         std::fs::create_dir_all(&dir).unwrap();
