@@ -306,9 +306,7 @@ impl<T: Clone + PartialEq> Node<T> {
         match (self, path.split_first()) {
             (Node::Split { ratio: r, .. }, None) if ratio.is_finite() => *r = ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO),
             (Node::Split { .. }, None) => {}
-            (Node::Split { first, second, .. }, Some((side, rest))) => {
-                if *side { second } else { first }.set_ratio(rest, ratio)
-            }
+            (Node::Split { first, second, .. }, Some((side, rest))) => if *side { second } else { first }.set_ratio(rest, ratio),
             (Node::Leaf(_), _) => {}
         }
     }
@@ -325,10 +323,18 @@ impl<T: Clone + PartialEq> Node<T> {
             .filter(|(t, _)| t != from)
             .filter_map(|(t, r)| {
                 let (beyond, overlap, distance, offset) = match toward {
-                    Toward::Left => (r.right() <= here.x + eps, span(here.y, here.bottom(), r.y, r.bottom()), here.x - r.right(), (r.y - here.y).abs()),
-                    Toward::Right => (r.x >= here.right() - eps, span(here.y, here.bottom(), r.y, r.bottom()), r.x - here.right(), (r.y - here.y).abs()),
-                    Toward::Up => (r.bottom() <= here.y + eps, span(here.x, here.right(), r.x, r.right()), here.y - r.bottom(), (r.x - here.x).abs()),
-                    Toward::Down => (r.y >= here.bottom() - eps, span(here.x, here.right(), r.x, r.right()), r.y - here.bottom(), (r.x - here.x).abs()),
+                    Toward::Left => {
+                        (r.right() <= here.x + eps, span(here.y, here.bottom(), r.y, r.bottom()), here.x - r.right(), (r.y - here.y).abs())
+                    }
+                    Toward::Right => {
+                        (r.x >= here.right() - eps, span(here.y, here.bottom(), r.y, r.bottom()), r.x - here.right(), (r.y - here.y).abs())
+                    }
+                    Toward::Up => {
+                        (r.bottom() <= here.y + eps, span(here.x, here.right(), r.x, r.right()), here.y - r.bottom(), (r.x - here.x).abs())
+                    }
+                    Toward::Down => {
+                        (r.y >= here.bottom() - eps, span(here.x, here.right(), r.x, r.right()), r.y - here.bottom(), (r.x - here.x).abs())
+                    }
                 };
                 (beyond && overlap > 0.0).then_some((t, distance, offset))
             })
@@ -451,7 +457,10 @@ mod tests {
     fn the_shape_survives_a_map() {
         let n = three().map(&mut |t| t * 10);
         assert_eq!(n.leaves(), vec![10, 20, 30]);
-        assert_eq!(n.layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>(), three().layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>());
+        assert_eq!(
+            n.layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>(),
+            three().layout(AREA, 4.0).iter().map(|(_, r)| *r).collect::<Vec<_>>()
+        );
     }
 
     #[test]

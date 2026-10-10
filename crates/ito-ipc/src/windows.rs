@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, LocalFree, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
-    GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
+    CloseHandle, LocalFree, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ,
+    GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
 };
 use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
 use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
@@ -136,15 +136,7 @@ pub fn connect(at: &Address) -> io::Result<Conn> {
     let name = HSTRING::from(at.0.as_os_str());
     for _ in 0..10 {
         let opened = unsafe {
-            CreateFileW(
-                &name,
-                (GENERIC_READ | GENERIC_WRITE).0,
-                FILE_SHARE_NONE,
-                None,
-                OPEN_EXISTING,
-                FILE_FLAG_OVERLAPPED,
-                None,
-            )
+            CreateFileW(&name, (GENERIC_READ | GENERIC_WRITE).0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, None)
         };
         match opened {
             Ok(h) => return Ok(Conn(Arc::new(Owned(h)))),

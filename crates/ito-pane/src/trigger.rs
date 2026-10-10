@@ -272,7 +272,14 @@ mod tests {
     use alacritty_terminal::vte::ansi::{Color, NamedColor};
 
     fn cells(s: &str) -> Vec<CellView> {
-        let cell = |c, flags| CellView { c, fg: Color::Named(NamedColor::Foreground), bg: Color::Named(NamedColor::Background), flags, ul: None, selected: false };
+        let cell = |c, flags| CellView {
+            c,
+            fg: Color::Named(NamedColor::Foreground),
+            bg: Color::Named(NamedColor::Background),
+            flags,
+            ul: None,
+            selected: false,
+        };
         let mut out = Vec::new();
         for c in s.chars() {
             if unicode_wide(c) {
@@ -333,10 +340,10 @@ mod tests {
         assert!(scan(&mut l, &set, b"error: half").is_empty());
         *set.lock().unwrap() = Some(regex::RegexSet::new(["error", "warn"]).unwrap());
         // What came while no set was given is not kept.
-        assert_eq!(scan(&mut l, &set, b" line\nerror and warn\nfine\nwarn\n"), vec![
-            Triggered { rules: vec![0, 1], line: "error and warn".into() },
-            Triggered { rules: vec![1], line: "warn".into() },
-        ]);
+        assert_eq!(
+            scan(&mut l, &set, b" line\nerror and warn\nfine\nwarn\n"),
+            vec![Triggered { rules: vec![0, 1], line: "error and warn".into() }, Triggered { rules: vec![1], line: "warn".into() },]
+        );
     }
 
     #[test]

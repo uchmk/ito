@@ -13,9 +13,7 @@ pub fn children(pid: u32) -> Vec<u32> {
                 // `pid (comm) state ppid ...`; the name may hold spaces and
                 // parentheses, so the fields are counted from the last `)`.
                 std::fs::read_to_string(format!("/proc/{child}/stat")).ok().is_some_and(|stat| {
-                    stat.rsplit_once(')')
-                        .and_then(|(_, rest)| rest.split_whitespace().nth(1)?.parse::<u32>().ok())
-                        == Some(pid)
+                    stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(1)?.parse::<u32>().ok()) == Some(pid)
                 })
             })
             .collect()
@@ -47,7 +45,9 @@ pub fn process_table() -> Vec<super::Proc> {
                 let (head, rest) = stat.rsplit_once(')')?;
                 let name = head.split_once('(').map_or("", |(_, n)| n).to_owned();
                 let ppid = rest.split_whitespace().nth(1)?.parse().ok()?;
-                let args = std::fs::read(format!("/proc/{pid}/cmdline")).map(|b| b.split(|c| *c == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect()).unwrap_or_default();
+                let args = std::fs::read(format!("/proc/{pid}/cmdline"))
+                    .map(|b| b.split(|c| *c == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
+                    .unwrap_or_default();
                 Some(super::Proc { pid, ppid, name, args })
             })
             .collect()
@@ -86,12 +86,19 @@ pub fn listening_ports(pids: &[u32]) -> Vec<u16> {
         for pid in pids {
             let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { continue };
             for fd in fds.flatten() {
-                if let Some(n) = std::fs::read_link(fd.path()).ok().and_then(|l| l.to_str()?.strip_prefix("socket:[")?.strip_suffix(']')?.parse::<u64>().ok()) {
+                if let Some(n) = std::fs::read_link(fd.path())
+                    .ok()
+                    .and_then(|l| l.to_str()?.strip_prefix("socket:[")?.strip_suffix(']')?.parse::<u64>().ok())
+                {
                     inodes.insert(n);
                 }
             }
         }
-        let mut ports: Vec<u16> = ["/proc/net/tcp", "/proc/net/tcp6"].iter().filter_map(|f| std::fs::read_to_string(f).ok()).flat_map(|t| listening_in(&t, &inodes)).collect();
+        let mut ports: Vec<u16> = ["/proc/net/tcp", "/proc/net/tcp6"]
+            .iter()
+            .filter_map(|f| std::fs::read_to_string(f).ok())
+            .flat_map(|t| listening_in(&t, &inodes))
+            .collect();
         ports.sort_unstable();
         ports.dedup();
         ports
@@ -99,8 +106,13 @@ pub fn listening_ports(pids: &[u32]) -> Vec<u16> {
     #[cfg(target_os = "macos")]
     {
         let list: Vec<String> = pids.iter().map(u32::to_string).collect();
-        let Ok(out) = std::process::Command::new("lsof").args(["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-Fn", "-p", &list.join(",")]).output() else { return Vec::new() };
-        let mut ports: Vec<u16> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.strip_prefix('n')?.rsplit(':').next()?.parse().ok()).collect();
+        let Ok(out) =
+            std::process::Command::new("lsof").args(["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-Fn", "-p", &list.join(",")]).output()
+        else {
+            return Vec::new();
+        };
+        let mut ports: Vec<u16> =
+            String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.strip_prefix('n')?.rsplit(':').next()?.parse().ok()).collect();
         ports.sort_unstable();
         ports.dedup();
         ports

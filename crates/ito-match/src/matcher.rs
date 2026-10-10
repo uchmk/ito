@@ -16,7 +16,10 @@ use crate::fuzzy;
 enum Kind {
     Regex(Regex),
     /// `F`: the letters in order, line by line (`core::fuzzy`).
-    Fuzzy { needle: String, case_sensitive: bool },
+    Fuzzy {
+        needle: String,
+        case_sensitive: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -198,14 +201,23 @@ mod tests {
     #[test]
     fn fuzzy_marks_the_letters_line_by_line() {
         let m = Matcher::fuzzy("ab");
-        assert!(m.is_match("xx
+        assert!(m.is_match(
+            "xx
 axxb
-"));
-        assert!(!m.is_match("ba
-xx"));
-        assert_eq!(m.ranges("xx
+"
+        ));
+        assert!(!m.is_match(
+            "ba
+xx"
+        ));
+        assert_eq!(
+            m.ranges(
+                "xx
 axxb
-"), vec![3..4, 6..7]);
+"
+            ),
+            vec![3..4, 6..7]
+        );
         assert_eq!(m.positions("a-b"), vec![0, 2]);
         assert!(m.score("ab").unwrap() > m.score("a--------b").unwrap());
         assert!(Matcher::fuzzy("").score("ab").is_none());

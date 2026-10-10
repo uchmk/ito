@@ -12,9 +12,7 @@ pub fn locate(exe: &str) -> Option<std::path::PathBuf> {
         return raw.is_file().then(|| raw.to_path_buf());
     }
     let exts: Vec<String> = match std::env::var("PATHEXT") {
-        Ok(v) => std::iter::once(String::new())
-            .chain(v.split(';').map(|e| e.to_ascii_lowercase()))
-            .collect(),
+        Ok(v) => std::iter::once(String::new()).chain(v.split(';').map(|e| e.to_ascii_lowercase())).collect(),
         Err(_) => vec![String::new()],
     };
     for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
@@ -145,11 +143,8 @@ pub fn test_dir(what: &str) -> PathBuf {
         }
         unsafe { atexit(remove_own_test_dirs) };
     });
-    let who = std::thread::current()
-        .name()
-        .unwrap_or("main")
-        .replace("::", "-")
-        .replace(|c: char| !c.is_ascii_alphanumeric() && c != '-', "_");
+    let who =
+        std::thread::current().name().unwrap_or("main").replace("::", "-").replace(|c: char| !c.is_ascii_alphanumeric() && c != '-', "_");
     let dir = std::env::temp_dir().join(format!("{TEST_DIR_PREFIX}{what}-{who}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a temp directory for the test");

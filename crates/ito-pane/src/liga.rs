@@ -84,7 +84,13 @@ impl Shaper {
         let font = harfrust::FontRef::from_index(&data, index).ok()?;
         font.outline_glyphs().get(font.charmap().map('M')?)?;
         let shaping = harfrust::ShaperData::new(&font);
-        Some(Arc::new(Shaper { data: Arc::new(data), index, shaping, runs: Mutex::new(HashMap::new()), glyphs: Mutex::new(HashMap::new()) }))
+        Some(Arc::new(Shaper {
+            data: Arc::new(data),
+            index,
+            shaping,
+            runs: Mutex::new(HashMap::new()),
+            glyphs: Mutex::new(HashMap::new()),
+        }))
     }
 
     fn font(&self) -> Option<harfrust::FontRef<'_>> {
@@ -187,7 +193,8 @@ fn raster(ctx: &egui::Context, font: &harfrust::FontRef, glyph: u16, px_unit: f3
     let mut out = vello_cpu::Pixmap::new(w, h);
     fill.render(&mut out, &mut vello_cpu::Resources::new());
     // White, so each pixel's coverage is its alpha.
-    let pixels = out.data_as_u8_slice().as_chunks::<4>().0.iter().map(|&[_, _, _, a]| Color32::from_rgba_premultiplied(a, a, a, a)).collect();
+    let pixels =
+        out.data_as_u8_slice().as_chunks::<4>().0.iter().map(|&[_, _, _, a]| Color32::from_rgba_premultiplied(a, a, a, a)).collect();
     let image = ColorImage::new([usize::from(w), usize::from(h)], pixels);
     let tex = ctx.load_texture(format!("liga-{glyph}-{px_unit}"), image, TextureOptions::LINEAR);
     Some(Drawn { tex, offset: Vec2::new(b.x0 as f32, b.y0 as f32), size: Vec2::new(f32::from(w), f32::from(h)) })
@@ -238,7 +245,9 @@ mod tests {
     /// it is not.
     #[test]
     fn a_ligature_is_found_and_its_characters_hidden() {
-        let path = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"].into_iter().find(|p| std::path::Path::new(p).exists());
+        let path = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists());
         let Some(path) = path else { return };
         let shaper = Shaper::new(std::fs::read(path).unwrap(), 0).expect("the font reads");
         let subs = shaper.subs("a fine fish");

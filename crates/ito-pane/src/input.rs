@@ -68,7 +68,9 @@ pub fn feed_as<P: Pane + ?Sized>(term: &P, id: u64, events: &[Event], mut claim:
                     // A modifier let go first (Ctrl before `c`) can leave the
                     // key one that tells no release alone: then as pressed.
                     let bytes = kitty_bytes(*key, *modifiers, KeyEvent::Release, None, flags).filter(|b| !b.is_empty());
-                    if let Some(bytes) = bytes.or_else(|| kitty_bytes(*key, pressed, KeyEvent::Release, None, flags).filter(|b| !b.is_empty())) {
+                    if let Some(bytes) =
+                        bytes.or_else(|| kitty_bytes(*key, pressed, KeyEvent::Release, None, flags).filter(|b| !b.is_empty()))
+                    {
                         term.send(bytes);
                     }
                 }
@@ -83,7 +85,10 @@ pub fn feed_as<P: Pane + ?Sized>(term: &P, id: u64, events: &[Event], mut claim:
                 // (the next event). The text is the key; its Ctrl+Alt chord
                 // as well sent `\x1b\x11` before an `@` (the source review,
                 // 2026-10-07). A Ctrl+Alt chord that types nothing still goes.
-                let altgr = modifiers.ctrl && modifiers.alt && special(*key, modifiers.shift).is_none() && matches!(events.get(k + 1), Some(Event::Text(t)) if !t.is_empty());
+                let altgr = modifiers.ctrl
+                    && modifiers.alt
+                    && special(*key, modifiers.shift).is_none()
+                    && matches!(events.get(k + 1), Some(Event::Text(t)) if !t.is_empty());
                 if altgr {
                     continue;
                 }
@@ -153,10 +158,19 @@ fn send_chord<P: Pane + ?Sized>(term: &P, key: Key, claim: &mut impl FnMut(Key, 
 /// goes the legacy way.
 fn kitty_bytes(key: Key, modifiers: Modifiers, event: KeyEvent, text: Option<&str>, flags: u8) -> Option<Vec<u8>> {
     let mods = Mods { ctrl: modifiers.command || modifiers.ctrl, alt: modifiers.alt, shift: modifiers.shift };
-    let modifier = [Key::ShiftLeft, Key::ControlLeft, Key::AltLeft, Key::SuperLeft, Key::ShiftRight, Key::ControlRight, Key::AltRight, Key::SuperRight]
-        .iter()
-        .position(|m| *m == key)
-        .map(|i| KittyKey::Modifier(kitty::MODIFIER_KEYS[i]));
+    let modifier = [
+        Key::ShiftLeft,
+        Key::ControlLeft,
+        Key::AltLeft,
+        Key::SuperLeft,
+        Key::ShiftRight,
+        Key::ControlRight,
+        Key::AltRight,
+        Key::SuperRight,
+    ]
+    .iter()
+    .position(|m| *m == key)
+    .map(|i| KittyKey::Modifier(kitty::MODIFIER_KEYS[i]));
     let kk = modifier.or_else(|| special(key, mods.shift).map(KittyKey::Special)).or_else(|| printable(key).map(KittyKey::Char))?;
     kitty::encode(kk, mods, event, text, flags)
 }
@@ -210,9 +224,7 @@ pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> 
         (true, Some(_)) if told_apart => Some(b"\x1b[13;2u".to_vec()),
         (true, Some(s)) => Some(crate::special_record(s, mods)),
         (true, None) if interrupt => vt,
-        (true, None) if mods.ctrl || mods.alt => {
-            printable(key).and_then(|c| crate::char_record(c, mods)).or(vt)
-        }
+        (true, None) if mods.ctrl || mods.alt => printable(key).and_then(|c| crate::char_record(c, mods)).or(vt),
         _ => vt,
     }
 }

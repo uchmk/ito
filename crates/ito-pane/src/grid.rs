@@ -1,13 +1,11 @@
 //! Reading the grid: cells, the cursor, modes, selection and search.
 
-
 use alacritty_terminal::event::EventListener;
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::search::RegexSearch;
 use alacritty_terminal::term::Term;
-
 
 #[allow(unused_imports)]
 use crate::{keys::*, log::*, osc::*, shell::*, terminal::*};
@@ -32,12 +30,7 @@ pub fn point_at<T: EventListener>(term: &Term<T>, (col, line): (usize, usize)) -
 /// Taking the side from the pointer is what every terminal does, and it comes
 /// out right both ways round: the outer half of whichever cell the drag began
 /// on faces away from the selection, and so does the one it ended on.
-pub fn select_at<T: EventListener>(
-    term: &mut Term<T>,
-    cell: (usize, usize),
-    right_half: bool,
-    start: bool,
-) {
+pub fn select_at<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), right_half: bool, start: bool) {
     select_kind(term, cell, right_half, start.then_some(SelectionType::Simple));
 }
 
@@ -45,12 +38,7 @@ pub fn select_at<T: EventListener>(
 /// block is the rectangle between the two corners, as Alt+drag makes in
 /// every terminal. `None` carries the selection there is on, whatever its
 /// kind.
-pub fn select_kind<T: EventListener>(
-    term: &mut Term<T>,
-    cell: (usize, usize),
-    right_half: bool,
-    start: Option<SelectionType>,
-) {
+pub fn select_kind<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), right_half: bool, start: Option<SelectionType>) {
     let point = point_at(term, cell);
     let side = if right_half { Side::Right } else { Side::Left };
     match start {
@@ -161,10 +149,7 @@ pub fn search_origin<T: EventListener>(term: &Term<T>, back: bool) -> Point {
     let grid = term.grid();
     let offset = grid.display_offset() as i32;
     match back {
-        true => Point::new(
-            Line(grid.screen_lines() as i32 - 1 - offset),
-            Column(grid.columns().saturating_sub(1)),
-        ),
+        true => Point::new(Line(grid.screen_lines() as i32 - 1 - offset), Column(grid.columns().saturating_sub(1))),
         false => Point::new(Line(-offset), Column(0)),
     }
 }
@@ -209,7 +194,11 @@ pub fn kitty_flags<T: EventListener>(term: &Term<T>) -> u8 {
 
 /// The bytes that tell the program the pane gained (`true`) or lost the keys.
 pub fn focus_bytes(gained: bool) -> Vec<u8> {
-    if gained { b"\x1b[I".to_vec() } else { b"\x1b[O".to_vec() }
+    if gained {
+        b"\x1b[I".to_vec()
+    } else {
+        b"\x1b[O".to_vec()
+    }
 }
 
 /// Whether the program has asked to be told about the mouse, and in which

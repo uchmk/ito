@@ -2,8 +2,6 @@
 
 use std::path::Path;
 
-
-
 #[allow(unused_imports)]
 use crate::{grid::*, keys::*, log::*, osc::*, terminal::*};
 
@@ -69,7 +67,8 @@ pub(crate) fn is_powershell_51(program: &str) -> bool {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
     // `get`, not a slice: four bytes from the end can be inside a
     // character (`シェル`), which a slice panics on.
-    let stem = name.len().checked_sub(4).filter(|&i| name.get(i..).is_some_and(|e| e.eq_ignore_ascii_case(".exe"))).map_or(name, |i| &name[..i]);
+    let stem =
+        name.len().checked_sub(4).filter(|&i| name.get(i..).is_some_and(|e| e.eq_ignore_ascii_case(".exe"))).map_or(name, |i| &name[..i]);
     stem.eq_ignore_ascii_case("powershell")
 }
 
@@ -108,11 +107,7 @@ impl Quoting {
         // component on Linux, and this string comes out of a config file that
         // may name either shape.
         let name = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
-        let name = [".exe", ".cmd", ".bat"]
-            .iter()
-            .find_map(|x| name.strip_suffix(x))
-            .unwrap_or(&name)
-            .to_owned();
+        let name = [".exe", ".cmd", ".bat"].iter().find_map(|x| name.strip_suffix(x)).unwrap_or(&name).to_owned();
         match name.as_str() {
             "powershell" | "pwsh" => Self::PowerShell,
             "cmd" => Self::Cmd,

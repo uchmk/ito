@@ -13,13 +13,13 @@ pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant};
 
 #[allow(unused_imports)]
+pub(crate) use crate::{grid::*, keys::*, log::*, osc::*, shell::*, sys::*, terminal::*, testing};
+#[allow(unused_imports)]
 pub(crate) use alacritty_terminal::grid::{Dimensions, Scroll};
 #[allow(unused_imports)]
 pub(crate) use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 #[allow(unused_imports)]
 pub(crate) use alacritty_terminal::term::{Config, Term};
-#[allow(unused_imports)]
-pub(crate) use crate::{grid::*, keys::*, log::*, osc::*, shell::*, sys::*, terminal::*, testing};
 
 mod pane {
     use super::pane_env;
@@ -114,7 +114,10 @@ mod pane {
             feed(&mut t, &format!("line {i:02}{}\r\n", if i % 10 == 3 { " Needle here" } else { "" }));
         }
         let found = find_lines(&t, "needle", 10);
-        assert_eq!(found.iter().map(|f| f.2.as_str()).collect::<Vec<_>>(), ["line 23 Needle here", "line 13 Needle here", "line 03 Needle here"]);
+        assert_eq!(
+            found.iter().map(|f| f.2.as_str()).collect::<Vec<_>>(),
+            ["line 23 Needle here", "line 13 Needle here", "line 03 Needle here"]
+        );
         assert_eq!(found[0].1, 8, "the cell the match starts at");
         assert!(found[2].0 < 0, "the oldest is in the scrollback");
         assert_eq!(find_lines(&t, "needle", 1).len(), 1, "at most as many as asked");
@@ -238,7 +241,10 @@ mod pane {
     #[test]
     fn a_trigger_hears_the_lines_it_matches() {
         let dir = crate::util::test_dir("term-trigger");
-        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "sleep 0.3; printf 'ok\\n\\033[31mBUILD FAILED\\033[0m now\\n'; sleep 5".to_owned()]));
+        let shell = Some((
+            "sh".to_owned(),
+            vec!["-c".to_owned(), "sleep 0.3; printf 'ok\\n\\033[31mBUILD FAILED\\033[0m now\\n'; sleep 5".to_owned()],
+        ));
         let mut t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
         t.set_triggers(Some(regex::RegexSet::new(["FAILED", "never"]).unwrap()));
         let mut got = Vec::new();
@@ -305,9 +311,7 @@ mod pane {
         for i in 0..20 {
             feed(&mut t, &format!("line{i}\r\n"));
         }
-        let row = |t: &Term<Proxy>, n: usize| -> String {
-            snapshot(t)[n].iter().map(|c| c.c).collect::<String>().trim_end().to_string()
-        };
+        let row = |t: &Term<Proxy>, n: usize| -> String { snapshot(t)[n].iter().map(|c| c.c).collect::<String>().trim_end().to_string() };
 
         // The cursor sits on a fresh line below `line19`, so the top of a
         // four-line screen is `line17`, not `line16`.
@@ -351,20 +355,12 @@ mod pane {
         let mut t = term(20, 4);
         feed(&mut t, "hello world\r\n");
         let row = 0;
-        let mut sel = Selection::new(
-            SelectionType::Simple,
-            Point::new(Line(row), Column(0)),
-            Side::Left,
-        );
+        let mut sel = Selection::new(SelectionType::Simple, Point::new(Line(row), Column(0)), Side::Left);
         sel.update(Point::new(Line(row), Column(4)), Side::Right);
         t.selection = Some(sel);
 
         let rows = snapshot(&t);
-        let marked: String = rows[row as usize]
-            .iter()
-            .filter(|c| c.selected)
-            .map(|c| c.c)
-            .collect();
+        let marked: String = rows[row as usize].iter().filter(|c| c.selected).map(|c| c.c).collect();
         assert_eq!(marked, "hello", "exactly the dragged cells");
         assert!(rows[1].iter().all(|c| !c.selected), "and nothing on other rows");
     }
@@ -401,7 +397,15 @@ mod pane {
         let row = &snapshot(&t)[0];
         let text: String = row.iter().map(|c| c.c).collect();
         let at = |word: &str| text.find(word).unwrap();
-        let styled = [("u", Flags::UNDERLINE), ("dd", Flags::DOUBLE_UNDERLINE), ("curl", Flags::UNDERCURL), ("dots", Flags::DOTTED_UNDERLINE), ("dash", Flags::DASHED_UNDERLINE), ("strike", Flags::STRIKEOUT), ("hid", Flags::HIDDEN)];
+        let styled = [
+            ("u", Flags::UNDERLINE),
+            ("dd", Flags::DOUBLE_UNDERLINE),
+            ("curl", Flags::UNDERCURL),
+            ("dots", Flags::DOTTED_UNDERLINE),
+            ("dash", Flags::DASHED_UNDERLINE),
+            ("strike", Flags::STRIKEOUT),
+            ("hid", Flags::HIDDEN),
+        ];
         for (word, flag) in styled {
             let x = at(word);
             assert!(row[x..x + word.len()].iter().all(|c| c.flags.contains(flag)), "{word}");
@@ -445,15 +449,11 @@ mod pane {
         assert_eq!(origin.line, Line(3), "the bottom row of the view, not the top");
 
         let mut re = RegexSearch::new("target").unwrap();
-        let near = t
-            .search_next(&mut re, origin, Direction::Left, Side::Left, None)
-            .expect("there are two of them");
+        let near = t.search_next(&mut re, origin, Direction::Left, Side::Left, None).expect("there are two of them");
         assert_eq!(near.start().line, Line(2), "the one on screen, just above the origin");
 
         let from_top = Point::new(Line(0), Column(0));
-        let far = t
-            .search_next(&mut re, from_top, Direction::Left, Side::Left, None)
-            .expect("wrapping means this finds one too");
+        let far = t.search_next(&mut re, from_top, Direction::Left, Side::Left, None).expect("wrapping means this finds one too");
         assert!(far.start().line < Line(0), "but the old one, up in the history");
     }
 
@@ -481,9 +481,7 @@ mod pane {
     /// line refusing to be copied.
     #[test]
     fn a_drag_selects_the_same_text_in_either_direction() {
-        let selected = |t: &Term<Proxy>| -> String {
-            snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect()
-        };
+        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
         // The pointer is on the outer half of each end: the left half of the
         // cell the drag starts from and the right half of the one it ends on,
         // whichever way round those are.
@@ -504,9 +502,7 @@ mod pane {
     /// The half the pointer is in is what makes that work, so it has to count.
     #[test]
     fn the_half_of_the_cell_decides_what_is_included() {
-        let selected = |t: &Term<Proxy>| -> String {
-            snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect()
-        };
+        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
         let mut t = term(20, 4);
         feed(&mut t, "hello world");
 
@@ -598,10 +594,7 @@ mod pane {
     #[test]
     fn a_shell_saying_where_it_is_is_understood() {
         let mut partial = Vec::new();
-        assert_eq!(
-            scan_osc7(&mut partial, &osc7("/home/user/src")),
-            vec![PathBuf::from("/home/user/src")]
-        );
+        assert_eq!(scan_osc7(&mut partial, &osc7("/home/user/src")), vec![PathBuf::from("/home/user/src")]);
         // Terminated by ST rather than BEL, which is equally correct.
         let st = b"\x1b]7;file:///tmp\x1b\\";
         assert_eq!(scan_osc7(&mut partial, st), vec![PathBuf::from("/tmp")]);
@@ -638,10 +631,7 @@ mod pane {
         let mut chunk = osc7("/one");
         chunk.extend_from_slice(b"some output\n");
         chunk.extend_from_slice(&osc7("/two"));
-        assert_eq!(
-            scan_osc7(&mut partial, &chunk),
-            vec![PathBuf::from("/one"), PathBuf::from("/two")]
-        );
+        assert_eq!(scan_osc7(&mut partial, &chunk), vec![PathBuf::from("/one"), PathBuf::from("/two")]);
     }
 
     /// A sequence that never terminates must not grow the buffer for ever.
@@ -701,10 +691,7 @@ mod pane {
         assert_eq!(bracket("ls -l", true), b"\x1b[200~ls -l\x1b[201~".to_vec());
         // The case the brackets exist for: without them these are two commands
         // the shell runs, with them two lines it holds.
-        assert_eq!(
-            bracket("one\rtwo", true),
-            b"\x1b[200~one\rtwo\x1b[201~".to_vec()
-        );
+        assert_eq!(bracket("one\rtwo", true), b"\x1b[200~one\rtwo\x1b[201~".to_vec());
         // Nothing to paste stays nothing, not a pair of bare markers going to a
         // shell that would print them.
         assert_eq!(bracket("", false), Vec::<u8>::new());
@@ -790,7 +777,8 @@ mod pane {
     /// case Windows spells its name in.
     #[test]
     fn only_a_new_console_host_is_a_stray() {
-        let now = [(1, "OpenConsole.exe".to_owned()), (2, "conhost.exe".to_owned()), (3, "git.exe".to_owned()), (4, "CONHOST.EXE".to_owned())];
+        let now =
+            [(1, "OpenConsole.exe".to_owned()), (2, "conhost.exe".to_owned()), (3, "git.exe".to_owned()), (4, "CONHOST.EXE".to_owned())];
         assert_eq!(strays(&[2], &now), vec![1, 4]);
         assert_eq!(strays(&[1, 2, 4], &now), Vec::<u32>::new());
     }
@@ -896,7 +884,6 @@ mod pane {
         assert_eq!(pick_default_shell(false, true), None, "a pwsh on Linux is not the login shell");
     }
 
-
     /// What `[term] shell` names decides the convention, and the fallback is
     /// the platform's rather than one convention for everybody.
     #[test]
@@ -953,10 +940,7 @@ mod readme_snippet {
     #[test]
     fn the_readme_hook_is_understood() {
         let mut carry = Vec::new();
-        assert_eq!(
-            scan_osc7(&mut carry, &as_powershell_writes_it("C:/dev/filer")),
-            vec![as_the_shell_names_it("C:/dev/filer")],
-        );
+        assert_eq!(scan_osc7(&mut carry, &as_powershell_writes_it("C:/dev/filer")), vec![as_the_shell_names_it("C:/dev/filer")],);
     }
 
     /// The README says spaces and non-ASCII need no escaping. That is a promise
@@ -964,10 +948,7 @@ mod readme_snippet {
     #[test]
     fn spaces_and_japanese_need_no_escaping() {
         let mut carry = Vec::new();
-        assert_eq!(
-            scan_osc7(&mut carry, &as_powershell_writes_it("C:/my docs/報告書")),
-            vec![as_the_shell_names_it("C:/my docs/報告書")],
-        );
+        assert_eq!(scan_osc7(&mut carry, &as_powershell_writes_it("C:/my docs/報告書")), vec![as_the_shell_names_it("C:/my docs/報告書")],);
     }
 
     /// And escaped anyway, since the README calls that optional rather than
@@ -975,10 +956,7 @@ mod readme_snippet {
     #[test]
     fn percent_escaped_is_accepted_too() {
         let mut carry = Vec::new();
-        assert_eq!(
-            scan_osc7(&mut carry, &as_powershell_writes_it("C:/my%20docs")),
-            vec![as_the_shell_names_it("C:/my docs")],
-        );
+        assert_eq!(scan_osc7(&mut carry, &as_powershell_writes_it("C:/my%20docs")), vec![as_the_shell_names_it("C:/my docs")],);
     }
 }
 
@@ -1120,12 +1098,16 @@ mod processes {
 
     #[test]
     fn the_tree_under_a_shell_is_found() {
-        let table = vec![p(1, 0, "init"), p(10, 1, "bash"), p(11, 10, "node"), p(12, 11, "codex-x86_64"), p(13, 1, "other"), p(14, 12, "git")];
+        let table =
+            vec![p(1, 0, "init"), p(10, 1, "bash"), p(11, 10, "node"), p(12, 11, "codex-x86_64"), p(13, 1, "other"), p(14, 12, "git")];
         let mut under: Vec<u32> = descendants(&table, 10).iter().map(|p| p.pid).collect();
         under.sort_unstable();
         assert_eq!(under, [11, 12, 14]);
         assert!(descendants(&table, 99).is_empty());
-        assert_eq!((stem("/usr/local/bin/claude"), stem(r"C:\Tools\Codex.EXE"), stem("gemini")), ("claude".into(), "codex".into(), "gemini".into()));
+        assert_eq!(
+            (stem("/usr/local/bin/claude"), stem(r"C:\Tools\Codex.EXE"), stem("gemini")),
+            ("claude".into(), "codex".into(), "gemini".into())
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -1171,10 +1153,18 @@ mod prompt_marks {
         let mut marks = PromptLinks::default();
         assert_eq!(marks.feed(b"plain output\r\n\x1b]7;file://h/tmp\x07"), None);
         let out = through(&[b"\x1b]133;A\x07PS> \x1b]133;B\x07ls\r\n"]);
-        let want = [b"\x1b]133;A\x07".as_slice(), b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\", b"PS> \x1b]133;B\x07", b"\x1b]8;;\x1b\\", b"ls\r\n"].concat();
+        let want = [
+            b"\x1b]133;A\x07".as_slice(),
+            b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\",
+            b"PS> \x1b]133;B\x07",
+            b"\x1b]8;;\x1b\\",
+            b"ls\r\n",
+        ]
+        .concat();
         assert_eq!(out, want);
         let out = through(&[b"\x1b]133;A\x1b\\$ \r", b"\nnext"]);
-        let want = [b"\x1b]133;A\x1b\\".as_slice(), b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\", b"$ \r", b"\x1b]8;;\x1b\\", b"\nnext"].concat();
+        let want = [b"\x1b]133;A\x1b\\".as_slice(), b"\x1b]8;id=tsumugi-mark;tsumugi:prompt\x1b\\", b"$ \r", b"\x1b]8;;\x1b\\", b"\nnext"]
+            .concat();
         assert_eq!(out, want);
     }
 
@@ -1258,7 +1248,8 @@ mod prompt_marks {
     fn without_c_the_output_is_the_rows_after_the_prompt() {
         let mut t = testing::term(20, 8);
         let mut marks = PromptLinks::default();
-        let text = b"\x1b]133;D;0\x07\x1b]133;A\x07PS> dir\r\na\r\nb\r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> \r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> ";
+        let text =
+            b"\x1b]133;D;0\x07\x1b]133;A\x07PS> dir\r\na\r\nb\r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> \r\n\x1b]133;D;1\x07\x1b]133;A\x07PS> ";
         let fed = marks.feed(text).unwrap();
         testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
         assert_eq!(last_output(&t).as_deref(), Some("a\nb"));
@@ -1308,7 +1299,13 @@ mod prompt_marks {
         let fed = marks.feed(text).unwrap();
         testing::feed(&mut t, std::str::from_utf8(&fed).unwrap());
         let found = hyperlinks(&t);
-        assert_eq!(found, [Hyperlink { line: 1, cells: 4..8, uri: "https://a.example/".into() }, Hyperlink { line: 2, cells: 0..1, uri: "file:///tmp/x".into() }]);
+        assert_eq!(
+            found,
+            [
+                Hyperlink { line: 1, cells: 4..8, uri: "https://a.example/".into() },
+                Hyperlink { line: 2, cells: 0..1, uri: "file:///tmp/x".into() }
+            ]
+        );
         // Scrolled back a line, the same links a line lower.
         testing::feed(&mut t, "\r\n\r\n");
         let up = hyperlinks(&t);
@@ -1540,7 +1537,8 @@ mod identity_tests {
     /// `text` fed in one go (so a synchronized update can stay open).
     fn replies(text: &str) -> (Term<Proxy>, Vec<String>) {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let mut t = Term::new(Config { kitty_keyboard: true, ..Default::default() }, &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
+        let mut t =
+            Term::new(Config { kitty_keyboard: true, ..Default::default() }, &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
         let mut parser = Processor::<StdSyncHandler>::default();
         parser.advance(&mut t, text.as_bytes());
         let said = rx.try_iter().filter_map(|e| if let Event::PtyWrite(s) = e { Some(answer_query(s, false)) } else { None }).collect();

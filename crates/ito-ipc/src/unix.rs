@@ -32,7 +32,10 @@ impl Listener {
             // A server that is still there answers; a file left by one that
             // died does not, and is in the way.
             if UnixStream::connect(path).is_ok() {
-                return Err(io::Error::new(io::ErrorKind::AddrInUse, format!("another program is already listening at {}", path.display())));
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!("another program is already listening at {}", path.display()),
+                ));
             }
             std::fs::remove_file(path)?;
         }

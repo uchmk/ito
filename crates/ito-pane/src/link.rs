@@ -21,7 +21,12 @@ pub enum Link {
 pub fn link_at(row: &[CellView], col: usize) -> Option<(std::ops::Range<usize>, Link)> {
     // The text with the cell each character is in; the right half of a wide
     // character is no character of its own.
-    let chars: Vec<(char, usize)> = row.iter().enumerate().filter(|(_, c)| !c.flags.contains(Flags::WIDE_CHAR_SPACER)).map(|(x, c)| (if c.c == '\0' { ' ' } else { c.c }, x)).collect();
+    let chars: Vec<(char, usize)> = row
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.flags.contains(Flags::WIDE_CHAR_SPACER))
+        .map(|(x, c)| (if c.c == '\0' { ' ' } else { c.c }, x))
+        .collect();
     let at = chars.iter().rposition(|(_, x)| *x <= col)?;
     let text: Vec<char> = chars.iter().map(|(c, _)| *c).collect();
     let (start, end) = token(&text, at)?;
@@ -55,7 +60,12 @@ pub struct Hint {
 
 /// Everything in `row` that quick-select marks, left to right.
 pub fn hints(row: &[CellView]) -> Vec<Hint> {
-    let chars: Vec<(char, usize)> = row.iter().enumerate().filter(|(_, c)| !c.flags.contains(Flags::WIDE_CHAR_SPACER)).map(|(x, c)| (if c.c == '\0' { ' ' } else { c.c }, x)).collect();
+    let chars: Vec<(char, usize)> = row
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.flags.contains(Flags::WIDE_CHAR_SPACER))
+        .map(|(x, c)| (if c.c == '\0' { ' ' } else { c.c }, x))
+        .collect();
     let text: Vec<char> = chars.iter().map(|(c, _)| *c).collect();
     let mut out = Vec::new();
     let mut at = 0;
@@ -66,7 +76,8 @@ pub fn hints(row: &[CellView]) -> Vec<Hint> {
         };
         at = end;
         let word: String = text[start..end].iter().collect();
-        let found = parse(&word).map(|(skip, len, link)| (skip, len, Some(link))).or_else(|| plain(&word).map(|(skip, len)| (skip, len, None)));
+        let found =
+            parse(&word).map(|(skip, len, link)| (skip, len, Some(link))).or_else(|| plain(&word).map(|(skip, len)| (skip, len, None)));
         let Some((skip, len, link)) = found else { continue };
         let (first, last) = (start + skip, start + skip + len);
         let cells = chars[first].1..chars[last - 1].1 + 1;
@@ -94,7 +105,9 @@ fn plain(word: &str) -> Option<(usize, usize)> {
     let hash = (7..=64).contains(&body.len()) && hex(&body) && body.chars().any(|c| c.is_ascii_digit());
     let uuid = body.len() == 36 && body.split('-').map(str::len).eq([8, 4, 4, 4, 12]) && hex(&body.replace('-', ""));
     let (host, port) = body.split_once(':').unwrap_or((&body, ""));
-    let ipv4 = host.split('.').count() == 4 && host.split('.').all(|n| digits(n) && n.len() <= 3 && n.parse::<u16>().is_ok_and(|n| n < 256)) && (port.is_empty() || digits(port));
+    let ipv4 = host.split('.').count() == 4
+        && host.split('.').all(|n| digits(n) && n.len() <= 3 && n.parse::<u16>().is_ok_and(|n| n < 256))
+        && (port.is_empty() || digits(port));
     (number || hash || uuid || ipv4).then_some((skip, len))
 }
 
@@ -195,7 +208,14 @@ mod tests {
     use alacritty_terminal::vte::ansi::{Color, NamedColor};
 
     fn row(text: &str) -> Vec<CellView> {
-        let cell = |c| CellView { c, fg: Color::Named(NamedColor::Foreground), bg: Color::Named(NamedColor::Background), flags: Flags::empty(), ul: None, selected: false };
+        let cell = |c| CellView {
+            c,
+            fg: Color::Named(NamedColor::Foreground),
+            bg: Color::Named(NamedColor::Background),
+            flags: Flags::empty(),
+            ul: None,
+            selected: false,
+        };
         let mut out = Vec::new();
         for c in text.chars() {
             if unicode_width(c) {
@@ -266,16 +286,14 @@ mod tests {
     #[test]
     fn hints_in_a_row() {
         let found = |text: &str| hints(&row(text)).into_iter().map(|h| (h.cells, h.text, h.link.is_some())).collect::<Vec<_>>();
-        assert_eq!(found("5e9ef2a v0.71.0: see https://x.dev/a, src/a.rs:3."), vec![
-            (0..7, "5e9ef2a".into(), false),
-            (21..36, "https://x.dev/a".into(), true),
-            (38..48, "src/a.rs:3".into(), true),
-        ]);
-        assert_eq!(found("listening on 127.0.0.1:8080 (pid 12345) #4021"), vec![
-            (13..27, "127.0.0.1:8080".into(), false),
-            (33..38, "12345".into(), false),
-            (41..45, "4021".into(), false),
-        ]);
+        assert_eq!(
+            found("5e9ef2a v0.71.0: see https://x.dev/a, src/a.rs:3."),
+            vec![(0..7, "5e9ef2a".into(), false), (21..36, "https://x.dev/a".into(), true), (38..48, "src/a.rs:3".into(), true),]
+        );
+        assert_eq!(
+            found("listening on 127.0.0.1:8080 (pid 12345) #4021"),
+            vec![(13..27, "127.0.0.1:8080".into(), false), (33..38, "12345".into(), false), (41..45, "4021".into(), false),]
+        );
         assert_eq!(found("id 0b7c6e3a-1f2d-4c5b-9a8e-7d6c5b4a3f21."), vec![(3..39, "0b7c6e3a-1f2d-4c5b-9a8e-7d6c5b4a3f21".into(), false)]);
         for text in ["added a decade ago", "deadbeef", "v0.53.8 is 1.5", "999 of 300.1.2.3", "256.1.1.1"] {
             assert_eq!(found(text), vec![], "{text}");

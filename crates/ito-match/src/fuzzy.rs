@@ -175,10 +175,7 @@ pub fn find_substring(needle: &str, text: &str, case_sensitive: bool) -> Option<
     }
     for start in 0..=(hay.len() - pat.len()) {
         if (0..pat.len()).all(|i| eq(hay[start + i], pat[i], case_sensitive)) {
-            return Some(Hit {
-                score: 1000 - start as i32,
-                positions: (start..start + pat.len()).collect(),
-            });
+            return Some(Hit { score: 1000 - start as i32, positions: (start..start + pat.len()).collect() });
         }
     }
     None

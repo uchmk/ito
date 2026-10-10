@@ -216,7 +216,9 @@ pub mod check {
         let mut bad = Vec::new();
         for (code, src) in tables.iter().filter(|(l, _)| *l != "en") {
             let Ok(t) = own(src) else { continue };
-            bad.extend(descs.iter().filter(|d| !t.contains_key(&format!("keydesc.{d}"))).map(|d| format!("{code}.toml [keydesc] lacks {d:?}")));
+            bad.extend(
+                descs.iter().filter(|d| !t.contains_key(&format!("keydesc.{d}"))).map(|d| format!("{code}.toml [keydesc] lacks {d:?}")),
+            );
         }
         bad
     }
@@ -342,7 +344,10 @@ mod tests {
     fn the_checks_find_what_is_wrong() {
         assert_eq!(check::translations(TABLES), vec!["ja.toml: missing status.only".to_owned()]);
         let bad = [("en", EN), ("ja", "[status]\npaused = \"a\"\nleft = \"b\"\nonly = \"c\"\ntypo = \"d\"\n")];
-        assert_eq!(check::translations(&bad), vec!["ja.toml: not in English: status.typo".to_owned(), "ja.toml: status.left: [0] vs []".to_owned()]);
+        assert_eq!(
+            check::translations(&bad),
+            vec!["ja.toml: not in English: status.typo".to_owned(), "ja.toml: status.left: [0] vs []".to_owned()]
+        );
         assert_eq!(check::key_descriptions(TABLES, &["Quit", "Help"]), vec!["ja.toml [keydesc] lacks \"Help\"".to_owned()]);
         let src = "tr(\"a.b\"); trf(\"c\", &[]); x.tr(\"no\"); attr(\"no\");";
         assert_eq!(check::keys_in(src), vec!["a.b", "c"]);

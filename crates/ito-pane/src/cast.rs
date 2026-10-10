@@ -99,7 +99,10 @@ mod tests {
     #[test]
     fn events_are_json_lines() {
         assert_eq!(event(1.5, "o", "a\"b\\\x1b[0m\r\n"), "[1.500000, \"o\", \"a\\\"b\\\\\\u001b[0m\\r\\n\"]\n");
-        assert_eq!(header(80, 24, 7, ""), "{\"version\": 2, \"width\": 80, \"height\": 24, \"timestamp\": 7, \"env\": {\"TERM\": \"xterm-256color\"}}\n");
+        assert_eq!(
+            header(80, 24, 7, ""),
+            "{\"version\": 2, \"width\": 80, \"height\": 24, \"timestamp\": 7, \"env\": {\"TERM\": \"xterm-256color\"}}\n"
+        );
         assert!(header(80, 24, 7, "pwsh").contains(", \"title\": \"pwsh\","));
     }
 

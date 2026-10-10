@@ -4,9 +4,7 @@
 /// re-parented, and wait briefly for each to be gone.
 pub fn end_tree(pid: u32) {
     use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{
-        OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-    };
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
     // One look at the table, walked by `descendants`, which visits each
     // process once: a recursion by parent ids could loop for ever when an
     // id was used again (a dead parent's id now a child's), and asked the
@@ -39,8 +37,7 @@ pub fn children(pid: u32) -> Vec<u32> {
 pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
     let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
         return Vec::new();
@@ -64,8 +61,7 @@ pub fn named_children(pid: u32) -> Vec<(u32, String)> {
 pub fn process_table() -> Vec<super::Proc> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
     let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
         return Vec::new();

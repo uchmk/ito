@@ -103,11 +103,13 @@ mod tests {
         let mut out = Vec::new();
         let mut buf = [0u8; 64];
         loop {
-            let n = c.read(&mut buf, |raw| {
-                let Some(next) = chunks.next() else { return Ok(0) };
-                raw[..next.len()].copy_from_slice(&next);
-                Ok(next.len())
-            }).unwrap();
+            let n = c
+                .read(&mut buf, |raw| {
+                    let Some(next) = chunks.next() else { return Ok(0) };
+                    raw[..next.len()].copy_from_slice(&next);
+                    Ok(next.len())
+                })
+                .unwrap();
             if n == 0 {
                 break;
             }

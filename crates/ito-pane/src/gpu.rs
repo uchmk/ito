@@ -12,11 +12,7 @@ use egui_wgpu::wgpu::{self, Backends};
 /// with `auto`'s choice when this machine has no adapter for the named one --
 /// the app says so in its own words. Falling back to `auto` rather than to
 /// wgpu's pick matters: a typo put the spinning core back (filer #243, #244).
-pub fn pick_backends(
-    name: Option<&str>,
-    windows: bool,
-    has: impl Fn(Backends) -> bool,
-) -> Result<Option<Backends>, Option<Backends>> {
+pub fn pick_backends(name: Option<&str>, windows: bool, has: impl Fn(Backends) -> bool) -> Result<Option<Backends>, Option<Backends>> {
     let auto = || auto_backends(windows, || has(Backends::GL));
     let Some(name) = name else { return Ok(auto()) };
     let backends = Backends::from_comma_list(name);
@@ -38,10 +34,7 @@ pub fn auto_backends(windows: bool, gl_ok: impl FnOnce() -> bool) -> Option<Back
 /// backend, and one still pending is taken as a yes rather than waited on.
 pub fn has_adapter(backends: Backends) -> bool {
     use std::future::Future as _;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends,
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() });
     let mut probe = std::pin::pin!(instance.enumerate_adapters(backends));
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     match probe.as_mut().poll(&mut cx) {

@@ -237,21 +237,11 @@ impl tty::EventedReadWrite for Tapped {
     type Reader = Self;
     type Writer = <tty::Pty as tty::EventedReadWrite>::Writer;
 
-    unsafe fn register(
-        &mut self,
-        poller: &Arc<polling::Poller>,
-        interest: polling::Event,
-        mode: polling::PollMode,
-    ) -> io::Result<()> {
+    unsafe fn register(&mut self, poller: &Arc<polling::Poller>, interest: polling::Event, mode: polling::PollMode) -> io::Result<()> {
         unsafe { self.inner.register(poller, interest, mode) }
     }
 
-    fn reregister(
-        &mut self,
-        poller: &Arc<polling::Poller>,
-        interest: polling::Event,
-        mode: polling::PollMode,
-    ) -> io::Result<()> {
+    fn reregister(&mut self, poller: &Arc<polling::Poller>, interest: polling::Event, mode: polling::PollMode) -> io::Result<()> {
         self.inner.reregister(poller, interest, mode)
     }
 
@@ -987,7 +977,6 @@ impl Terminal {
     pub fn has_drawn(&self) -> bool {
         self.with_grid(|t| snapshot(t).iter().flatten().any(|c| !matches!(c.c, ' ' | '\0')))
     }
-
 }
 
 impl Drop for Terminal {

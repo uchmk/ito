@@ -17,9 +17,7 @@ pub fn term(cols: usize, lines: usize) -> Term<Proxy> {
 
 /// Feed `text` through the parser, as the PTY reader thread would.
 pub fn feed(t: &mut Term<Proxy>, text: &str) {
-    let mut parser = alacritty_terminal::vte::ansi::Processor::<
-        alacritty_terminal::vte::ansi::StdSyncHandler,
-    >::default();
+    let mut parser = alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::default();
     for b in text.as_bytes() {
         parser.advance(t, &[*b]);
     }

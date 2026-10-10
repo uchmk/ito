@@ -3,8 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-
-
 #[allow(unused_imports)]
 use crate::{grid::*, keys::*, log::*, shell::*, terminal::*};
 
@@ -326,7 +324,6 @@ fn notice(body: &[u8]) -> Option<String> {
     }
     None
 }
-
 
 /// The link a prompt's first row carries; see [`PromptLinks`]. After the
 /// first command it is followed by `?exit=` and the exit code the shell

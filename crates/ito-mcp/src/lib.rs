@@ -205,7 +205,10 @@ mod tests {
     #[test]
     fn initialize_names_the_server_and_a_version_it_speaks() {
         let s = server();
-        let a = ask(&s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}"#);
+        let a = ask(
+            &s,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}"#,
+        );
         assert_eq!(a["id"], 1);
         assert_eq!(a["result"]["protocolVersion"], "2025-06-18", "the one asked for, when known");
         assert_eq!(a["result"]["serverInfo"]["name"], "test");

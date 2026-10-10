@@ -303,7 +303,9 @@ pub fn show_faces<P: Pane + ?Sized>(
     let font_h = ui.fonts_mut(|x| x.row_height(f));
     let lift = ((row_h - font_h) / 2.0).max(0.0).floor();
     // Where egui puts the baseline in a row, for the ligatures drawn by hand.
-    let baseline = faces.shaper.as_ref().map(|_| painter.layout_no_wrap("M".into(), f.clone(), pal.fg).rows.first().and_then(|r| r.glyphs.first()).map_or(0.0, |g| g.pos.y));
+    let baseline = faces.shaper.as_ref().map(|_| {
+        painter.layout_no_wrap("M".into(), f.clone(), pal.fg).rows.first().and_then(|r| r.glyphs.first()).map_or(0.0, |g| g.pos.y)
+    });
     for (y, row) in rows.iter().enumerate() {
         let top = inner.top() + y as f32 * row_h;
         if top > inner.bottom() {
@@ -344,7 +346,9 @@ pub fn show_faces<P: Pane + ?Sized>(
         if let Some(shaper) = &faces.shaper {
             liga = vec![None; row.len()];
             hidden = vec![false; row.len()];
-            let plain = |c: &crate::CellView| c.c != ' ' && c.c != '\0' && !c.flags.intersects(Flags::BOLD | Flags::ITALIC | Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER);
+            let plain = |c: &crate::CellView| {
+                c.c != ' ' && c.c != '\0' && !c.flags.intersects(Flags::BOLD | Flags::ITALIC | Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER)
+            };
             let mut x = 0;
             while x < row.len() {
                 if !plain(&row[x]) {
@@ -427,10 +431,8 @@ pub fn show_faces<P: Pane + ?Sized>(
     // not, which is the same language the split panes use.
     let (cx, cy) = cursor;
     if cy < size.lines && cx < size.cols {
-        let at = Rect::from_min_size(
-            egui::pos2(inner.left() + cx as f32 * cell_w, inner.top() + cy as f32 * row_h),
-            Vec2::new(cell_w, row_h),
-        );
+        let at =
+            Rect::from_min_size(egui::pos2(inner.left() + cx as f32 * cell_w, inner.top() + cy as f32 * row_h), Vec2::new(cell_w, row_h));
         let style = faces.cursor;
         let lit = !style.blink || {
             let now = ui.input(|i| i.time);
@@ -454,12 +456,7 @@ pub fn show_faces<P: Pane + ?Sized>(
             };
             painter.rect_filled(mark, CornerRadius::ZERO, pal.cursor);
         } else {
-            painter.rect_stroke(
-                at,
-                CornerRadius::ZERO,
-                Stroke::new(1.0, pal.fg_dim),
-                egui::StrokeKind::Inside,
-            );
+            painter.rect_stroke(at, CornerRadius::ZERO, Stroke::new(1.0, pal.fg_dim), egui::StrokeKind::Inside);
         }
     }
 
@@ -469,11 +466,7 @@ pub fn show_faces<P: Pane + ?Sized>(
         let note = format!(" {back} lines back — <S-End> to return ");
         let g = painter.layout_no_wrap(note, f.clone(), pal.on_cursor);
         let at = egui::pos2(inner.right() - g.size().x - 6.0, inner.top() + 2.0);
-        painter.rect_filled(
-            Rect::from_min_size(at, g.size()),
-            CornerRadius::same(3),
-            pal.cursor,
-        );
+        painter.rect_filled(Rect::from_min_size(at, g.size()), CornerRadius::same(3), pal.cursor);
         painter.galley(at, g, pal.on_cursor);
     }
 
@@ -501,9 +494,14 @@ pub fn show_faces<P: Pane + ?Sized>(
             0 => named(NamedColor::Green, pal, false),
             _ => named(NamedColor::Red, pal, false),
         };
-        let (y0, y1) = (inner.top() + b.lines.start as f32 * row_h + 1.0, (inner.top() + b.lines.end as f32 * row_h - 1.0).min(inner.bottom()));
+        let (y0, y1) =
+            (inner.top() + b.lines.start as f32 * row_h + 1.0, (inner.top() + b.lines.end as f32 * row_h - 1.0).min(inner.bottom()));
         if y1 > y0 {
-            painter.rect_filled(Rect::from_min_max(egui::pos2(rect.left() + 2.0, y0), egui::pos2(rect.left() + 4.0, y1)), CornerRadius::same(1), tint.gamma_multiply(0.8));
+            painter.rect_filled(
+                Rect::from_min_max(egui::pos2(rect.left() + 2.0, y0), egui::pos2(rect.left() + 4.0, y1)),
+                CornerRadius::same(1),
+                tint.gamma_multiply(0.8),
+            );
         }
     }
     for h in &hyperlinks {
@@ -516,7 +514,10 @@ pub fn show_faces<P: Pane + ?Sized>(
     let linking = over && ui.ctx().input(|i| i.modifiers.command);
     if let Some(p) = hover.filter(|_| linking) {
         let (col, line, _) = cell_at(p);
-        let program = hyperlinks.iter().find(|h| h.line == line && h.cells.contains(&col)).map(|h| (h.cells.clone(), crate::Link::Url(h.uri.clone())));
+        let program = hyperlinks
+            .iter()
+            .find(|h| h.line == line && h.cells.contains(&col))
+            .map(|h| (h.cells.clone(), crate::Link::Url(h.uri.clone())));
         if let Some((cells, link)) = program.or_else(|| rows.get(line).and_then(|r| crate::link_at(r, col))) {
             painter.hline(x(cells.start)..=x(cells.end), under(line), Stroke::new(1.0, pal.cursor));
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -656,25 +657,12 @@ pub fn wheel_whole(acc: &mut f32, rows: f32) -> i64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn fill(
-    painter: &egui::Painter,
-    inner: Rect,
-    from: usize,
-    to: usize,
-    top: f32,
-    cell_w: f32,
-    row_h: f32,
-    c: Color32,
-    pal: &Palette,
-) {
+fn fill(painter: &egui::Painter, inner: Rect, from: usize, to: usize, top: f32, cell_w: f32, row_h: f32, c: Color32, pal: &Palette) {
     if c == pal.bg || to <= from {
         return;
     }
     painter.rect_filled(
-        Rect::from_min_size(
-            egui::pos2(inner.left() + from as f32 * cell_w, top),
-            Vec2::new((to - from) as f32 * cell_w, row_h),
-        ),
+        Rect::from_min_size(egui::pos2(inner.left() + from as f32 * cell_w, top), Vec2::new((to - from) as f32 * cell_w, row_h)),
         CornerRadius::ZERO,
         c,
     );
@@ -769,9 +757,26 @@ fn color(c: AnsiColor, pal: &Palette, is_bg: bool) -> Color32 {
 fn named(n: NamedColor, pal: &Palette, is_bg: bool) -> Color32 {
     use NamedColor::*;
     if let Some(ansi) = &pal.ansi {
-        let at = [Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, BrightBlack, BrightRed, BrightGreen, BrightYellow, BrightBlue, BrightMagenta, BrightCyan, BrightWhite]
-            .iter()
-            .position(|x| *x == n);
+        let at = [
+            Black,
+            Red,
+            Green,
+            Yellow,
+            Blue,
+            Magenta,
+            Cyan,
+            White,
+            BrightBlack,
+            BrightRed,
+            BrightGreen,
+            BrightYellow,
+            BrightBlue,
+            BrightMagenta,
+            BrightCyan,
+            BrightWhite,
+        ]
+        .iter()
+        .position(|x| *x == n);
         if let Some(k) = at {
             return ansi[k];
         }
@@ -905,7 +910,15 @@ mod tests {
             .into_iter()
             .map(|s| match s {
                 egui::Shape::LineSegment { points: [a, b], stroke } => (a.x, b.x, a.y, stroke.color),
-                egui::Shape::Path(p) => (p.points[0].x, p.points[p.points.len() - 1].x, p.points[0].y, match p.stroke.color { egui::epaint::ColorMode::Solid(c) => c, _ => panic!("a curl in one colour") }),
+                egui::Shape::Path(p) => (
+                    p.points[0].x,
+                    p.points[p.points.len() - 1].x,
+                    p.points[0].y,
+                    match p.stroke.color {
+                        egui::epaint::ColorMode::Solid(c) => c,
+                        _ => panic!("a curl in one colour"),
+                    },
+                ),
                 egui::Shape::Rect(r) => (r.rect.left(), r.rect.right(), r.rect.center().y, r.fill),
                 other => panic!("{other:?}"),
             })

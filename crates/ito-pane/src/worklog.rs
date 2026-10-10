@@ -138,12 +138,7 @@ impl Places {
         // count from the oldest. A clear and as much output again within one
         // look would fool that, so the last line written must be where the
         // count says.
-        let counted = !self.fresh
-            && cols == self.cols
-            && rows == self.rows
-            && h >= self.history
-            && h < cap
-            && self.still_there(term, h);
+        let counted = !self.fresh && cols == self.cols && rows == self.rows && h >= self.history && h < cap && self.still_there(term, h);
         let new = if counted {
             let new = lines(term, self.seen as i32 - h as i32, -1);
             self.lines_seen += new.len();
@@ -213,9 +208,7 @@ impl Places {
             // Nothing has fallen off the top, so the lines are counted from
             // the same one as before.
             let got = all();
-            let at = (n..=got.len())
-                .filter(|&i| ends_tail(&got, i))
-                .min_by_key(|&i| (i.abs_diff(self.lines_seen), Reverse(i)));
+            let at = (n..=got.len()).filter(|&i| ends_tail(&got, i)).min_by_key(|&i| (i.abs_diff(self.lines_seen), Reverse(i)));
             return cut(got, at);
         }
         // Full: the count is off by however many lines fell off, so look

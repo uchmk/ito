@@ -95,7 +95,11 @@ mod tests {
         let mut said = Vec::new();
         let mut held_at_release = None;
         let mut frame = |events: Vec<egui::Event>| {
-            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))), events, ..Default::default() };
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))),
+                events,
+                ..Default::default()
+            };
             let mut out = ctx.run_ui(input, |ui| {
                 if let Some(m) = dividers(ui, egui::Id::new("t"), &layout, area, look) {
                     if m == Moved::Released {
@@ -107,7 +111,12 @@ mod tests {
             out.textures_delta.clear();
         };
         let at = |x: f32| egui::pos2(x, 100.0);
-        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
         frame(vec![egui::Event::PointerMoved(at(10.0))]);
         frame(vec![egui::Event::PointerMoved(at(200.0))]);
         frame(vec![button(at(200.0), true)]);

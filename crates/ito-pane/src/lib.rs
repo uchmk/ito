@@ -15,10 +15,16 @@
 
 mod cast;
 mod charset;
+#[cfg(feature = "wgpu")]
+pub mod gpu;
 mod grid;
 mod image;
+#[cfg(feature = "egui")]
+pub mod input;
 mod keys;
 pub mod kitty;
+#[cfg(feature = "egui")]
+mod liga;
 mod link;
 mod log;
 mod osc;
@@ -28,15 +34,9 @@ mod sys;
 mod terminal;
 mod trigger;
 mod util;
-mod worklog;
 #[cfg(feature = "egui")]
 mod view;
-#[cfg(feature = "egui")]
-mod liga;
-#[cfg(feature = "egui")]
-pub mod input;
-#[cfg(feature = "wgpu")]
-pub mod gpu;
+mod worklog;
 
 #[doc(hidden)]
 pub mod testing;
@@ -52,16 +52,16 @@ pub use charset::{Charset, CHARSETS};
 pub use grid::*;
 pub use image::{Picture, Placement, IMAGE_LINK};
 pub use keys::*;
+#[cfg(feature = "egui")]
+pub use liga::Shaper;
 pub use link::{hints, link_at, Hint, Link};
 pub use log::escape_bytes;
 pub use pane::{Pane, Screen};
+/// The regular expressions triggers are written in, for an app to make them.
+pub use regex;
 pub use shell::*;
 pub use sys::{children, descendants, listening_ports, process_table, restrict_dll_search, stem, Proc};
 pub use terminal::*;
 pub use trigger::{highlight_row, rgb, Highlight, Paint, Triggered};
-/// The regular expressions triggers are written in, for an app to make them.
-pub use regex;
 #[cfg(feature = "egui")]
 pub use view::*;
-#[cfg(feature = "egui")]
-pub use liga::Shaper;

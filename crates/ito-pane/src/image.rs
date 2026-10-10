@@ -164,7 +164,15 @@ const KITTY_MAX: usize = 64;
 
 impl Catcher {
     pub(crate) fn new(store: Pictures) -> Self {
-        Self { state: State::Ground, store, kitty: HashMap::new(), kitty_order: VecDeque::new(), chunks: None, parts: None, replies: Vec::new() }
+        Self {
+            state: State::Ground,
+            store,
+            kitty: HashMap::new(),
+            kitty_order: VecDeque::new(),
+            chunks: None,
+            parts: None,
+            replies: Vec::new(),
+        }
     }
 
     /// The cell's size in pixels, width then height, as last resized.
@@ -282,12 +290,10 @@ impl Catcher {
         match kind {
             // The body starts with the parameters, digits and `;`, which
             // the decoder passes over.
-            Kind::Sixel => {
-                match sixel(&body) {
-                    Some(p) => self.show(p, None, None, None, After::Below),
-                    None => Vec::new(),
-                }
-            }
+            Kind::Sixel => match sixel(&body) {
+                Some(p) => self.show(p, None, None, None, After::Below),
+                None => Vec::new(),
+            },
             Kind::Kitty => self.kitty(&body),
             Kind::ITerm => self.iterm(&body),
         }
@@ -601,7 +607,8 @@ fn kitty_picture(keys: &Keys, payload: &[u8]) -> Result<Picture, &'static str> {
         // the protocol says, so nothing else is ever deleted).
         b'f' | b't' => {
             let path = String::from_utf8(data).map_err(|_| "EINVAL:bad path")?;
-            let read = std::fs::metadata(&path).ok().filter(|m| m.is_file() && m.len() <= BODY_MAX as u64).and_then(|_| std::fs::read(&path).ok());
+            let read =
+                std::fs::metadata(&path).ok().filter(|m| m.is_file() && m.len() <= BODY_MAX as u64).and_then(|_| std::fs::read(&path).ok());
             if keys.medium == b't' && path.contains("tty-graphics-protocol") {
                 let _ = std::fs::remove_file(&path);
             }
@@ -609,7 +616,11 @@ fn kitty_picture(keys: &Keys, payload: &[u8]) -> Result<Picture, &'static str> {
         }
         _ => return Err("EINVAL:shared memory is not supported"),
     };
-    let data = if keys.compressed { miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data, BODY_MAX * 4).map_err(|_| "EINVAL:bad zlib data")? } else { data };
+    let data = if keys.compressed {
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data, BODY_MAX * 4).map_err(|_| "EINVAL:bad zlib data")?
+    } else {
+        data
+    };
     match keys.format {
         100 => decode(&data).ok_or("EBADPNG:cannot read the PNG"),
         24 | 32 => {
@@ -618,7 +629,11 @@ fn kitty_picture(keys: &Keys, payload: &[u8]) -> Result<Picture, &'static str> {
             if w == 0 || h == 0 || w > SIDE_MAX * 4 || h > SIDE_MAX * 4 || data.len() < (w * h) as usize * per {
                 return Err("EINVAL:bad size");
             }
-            let rgba = if per == 4 { data[..(w * h) as usize * 4].to_vec() } else { data.as_chunks::<3>().0.iter().take((w * h) as usize).flat_map(|&[r, g, b]| [r, g, b, 255]).collect() };
+            let rgba = if per == 4 {
+                data[..(w * h) as usize * 4].to_vec()
+            } else {
+                data.as_chunks::<3>().0.iter().take((w * h) as usize).flat_map(|&[r, g, b]| [r, g, b, 255]).collect()
+            };
             Ok(Picture { width: w, height: h, rgba })
         }
         _ => Err("EINVAL:unknown format"),
@@ -732,7 +747,9 @@ pub(crate) fn sixel(data: &[u8]) -> Option<Picture> {
             }
             canvas = vec![0; (size.0 * size.1 * 4) as usize];
         }
-        let mut palette: Vec<[u8; 3]> = (0..256).map(|i| VT340.get(i).map_or([0, 0, 0], |&(r, g, b)| [percent(r as u32), percent(g as u32), percent(b as u32)])).collect();
+        let mut palette: Vec<[u8; 3]> = (0..256)
+            .map(|i| VT340.get(i).map_or([0, 0, 0], |&(r, g, b)| [percent(r as u32), percent(g as u32), percent(b as u32)]))
+            .collect();
         let mut color = palette[0];
         let (mut x, mut y) = (0u32, 0u32);
         let mut i = 0;
