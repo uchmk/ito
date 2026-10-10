@@ -545,6 +545,23 @@ pub fn show_faces<P: Pane + ?Sized>(
                 false => term.select((col, line), right, true),
             }
         } else if resp.dragged() {
+            // Held past the top or the bottom, the view runs on that way and
+            // the selection with it, as in every terminal: without it a drag
+            // could not reach what is scrolled off the screen. The view moves
+            // first so the cell below is read against where it ends up.
+            let speed = edge_speed(p.y, inner.top(), inner.bottom(), row_h);
+            if speed != 0.0 {
+                let dt = ui.ctx().input(|i| i.stable_dt).min(0.1);
+                let acc_id = id.with("edge-scroll");
+                let mut acc: f32 = ui.ctx().data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
+                let whole = wheel_whole(&mut acc, speed * dt);
+                ui.ctx().data_mut(|d| d.insert_temp(acc_id, acc));
+                if whole != 0 {
+                    term.scroll(Scroll::Delta(whole as i32));
+                }
+                // The pointer holds still, so no event would bring the next frame.
+                ui.ctx().request_repaint();
+            }
             let (col, line, right) = cell_at(p);
             term.select((col, line), right, false);
         } else if resp.clicked() {
@@ -594,6 +611,25 @@ pub fn show_faces<P: Pane + ?Sized>(
         }
     }
     shown
+}
+
+/// Rows a second the view runs while a selection is dragged past an edge, at
+/// the edge itself and for each row of the pane the pointer is beyond it; the
+/// most it ever runs is `EDGE_MAX`.
+const EDGE_BASE: f32 = 6.0;
+const EDGE_PER_ROW: f32 = 8.0;
+const EDGE_MAX: f32 = 80.0;
+
+/// How fast the view runs for a drag whose pointer is at `y`, in rows a second:
+/// positive into the older lines (the pointer is above `top`), negative
+/// towards the newest (below `bottom`), nothing between the two.
+fn edge_speed(y: f32, top: f32, bottom: f32, row_h: f32) -> f32 {
+    let (past, sign) = match y {
+        y if y < top => ((top - y) / row_h, 1.0),
+        y if y > bottom => ((y - bottom) / row_h, -1.0),
+        _ => return 0.0,
+    };
+    sign * (EDGE_BASE + past * EDGE_PER_ROW).min(EDGE_MAX)
 }
 
 /// Turn wheel movement, measured in rows, into whole rows — keeping the part
@@ -816,6 +852,23 @@ mod tests {
         assert_eq!(CursorStyle::from_word("bar"), CursorStyle { shape: CursorShape::Bar, blink: false });
         assert_eq!(CursorStyle::from_word("underline-blink"), CursorStyle { shape: CursorShape::Underline, blink: true });
         assert_eq!(CursorStyle::from_word("odd"), CursorStyle::default());
+    }
+
+    /// A drag held past an edge runs the view that way, faster the further out
+    /// the pointer is, and never past the cap; inside the pane it does not run.
+    #[test]
+    fn a_drag_past_an_edge_runs_the_view_that_way() {
+        let (top, bottom, row_h) = (100.0, 500.0, 20.0);
+        assert_eq!(edge_speed(300.0, top, bottom, row_h), 0.0);
+        assert_eq!(edge_speed(top, top, bottom, row_h), 0.0, "on the edge is still inside");
+        assert_eq!(edge_speed(bottom, top, bottom, row_h), 0.0);
+        let above = edge_speed(90.0, top, bottom, row_h);
+        let further = edge_speed(40.0, top, bottom, row_h);
+        assert!(above > 0.0, "above runs into the older lines");
+        assert!(further > above);
+        assert!(edge_speed(510.0, top, bottom, row_h) < 0.0, "below runs towards the newest");
+        assert_eq!(edge_speed(-5000.0, top, bottom, row_h), EDGE_MAX);
+        assert_eq!(edge_speed(9000.0, top, bottom, row_h), -EDGE_MAX);
     }
 
     #[test]
