@@ -12,8 +12,15 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし） | tsumugi、kura |
+| `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`） | tsumugi、yagura |
+| `ito-theme` | 組み込みの 13 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
+| `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
 
-2026-10-11 に tsumugi（34e5cd2、v0.80.0）から履歴ごと切り出した（`git filter-repo`）。それより前のペインの履歴は kura にある。
+**uchmk のアプリの共通仕様**（common.toml・設定の画面・テーマ・時計）は [docs/common-spec.md](docs/common-spec.md)。全部のアプリがこれに従う。
+仕様を変えたらこの文書も直す。
+
+2026-10-11 に tsumugi（34e5cd2、v0.80.0）から履歴ごと切り出した（`git filter-repo`）。`ito-common`・`ito-theme`・`ito-prefs` と
+`ito-i18n` の直しは、その後の tsumugi v0.81.0（a26aefd）から写した（0.2.0）。それより前のペインの履歴は kura にある。
 
 - Cargo の workspace。クレートは `crates/` の下に置く。版はルートの `Cargo.toml` の `[workspace.package]` で 1 つ。
 - **push の前に `scripts/verify.sh` を 1 回回す。**最後の行が `ALL OK: …` なら push してよい（`cargo fmt --check`、build `--locked`、test、clippy を Linux と `x86_64-pc-windows-msvc` の両方で `-D warnings`）。

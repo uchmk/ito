@@ -1,0 +1,17 @@
+[package]
+name = "ito-prefs"
+description = "uchmk's settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = { version = "0.36", default-features = false }
+ito-common = { path = "../ito-common" }
+ito-i18n = { path = "../ito-i18n" }
+ito-theme = { path = "../ito-theme" }
+
+[dev-dependencies]
+egui = { version = "0.36", default-features = false, features = ["default_fonts"] }

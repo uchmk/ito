@@ -1,0 +1,17 @@
+[package]
+name = "ito-theme"
+description = "uchmk's themes: the thirteen built in, a theme file's colours, and the one in force"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The terminal pane's colours from a theme (`Colors::palette`).
+pane = ["dep:ito-pane", "ito-pane/egui"]
+
+[dependencies]
+egui = { version = "0.36", default-features = false }
+toml = "1.1"
+ito-pane = { path = "../ito-pane", optional = true }

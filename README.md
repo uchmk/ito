@@ -2,8 +2,8 @@
 
 The shared crates of uchmk's apps, the thread (糸, *ito*) that runs through
 them: the terminal pane, splitting a window into panes, the words on screen,
-key notation, search matching, a local door into a running app, and a small
-MCP server. Rust, Windows first, with macOS and Linux on x86_64 and ARM64.
+key notation, search matching, a local door into a running app, a small
+MCP server, and the settings, themes and clock every app shares. Rust, Windows first, with macOS and Linux on x86_64 and ARM64.
 
 | Crate | What it is |
 |---|---|
@@ -14,6 +14,12 @@ MCP server. Rust, Windows first, with macOS and Linux on x86_64 and ARM64.
 | `ito-match` | How a search query matches text: a regular expression with smart case, or fzf-style fuzzy letters |
 | `ito-ipc` | A per-user local door into a running app (Unix socket / named pipe) and framed serde messages |
 | `ito-mcp` | A small MCP server over stdio: JSON-RPC, `tools/list` and `tools/call`, without an async runtime |
+| `ito-common` | What every app shares: the config folder, `common.toml` (language, theme, clock), editing a TOML file in place and watching it |
+| `ito-theme` | The themes: the thirteen built in, a theme file's colours, and the one in force |
+| `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares |
+
+What the apps keep the same (`common.toml`, the settings screen, the themes,
+the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
 
 ## The apps
 

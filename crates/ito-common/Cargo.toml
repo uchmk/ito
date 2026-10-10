@@ -1,0 +1,24 @@
+[package]
+name = "ito-common"
+description = "What every uchmk app shares: the config folder, common.toml (language, theme, clock), editing a TOML file in place and watching it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The clock's words for now (`Clock::text`), with chrono; reading the
+# settings needs none of it.
+clock = ["dep:chrono"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+# Writing one key with the file's comments and layout kept; Pure Rust, the
+# toml crate's own.
+toml_edit = "0.23"
+# The OS's language for `auto`: Pure Rust on every OS (Win32, CoreFoundation
+# and the environment), no C to build.
+sys-locale = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"], optional = true }

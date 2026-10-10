@@ -15,34 +15,16 @@
 //! [`check`] has what an app's tests run over its own tables and source.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The values `language` takes in common.toml, with their names as a
 /// settings screen lists them (each in its own language).
 pub const LANGUAGES: &[(&str, &str)] = &[("auto", "Auto (system)"), ("en", "English"), ("ja", "日本語")];
 
-/// The `uchmk` folder: `UCHMK_CONFIG_DIR` when set; else `%APPDATA%\uchmk`
-/// on Windows, `~/Library/Application Support/uchmk` on macOS,
-/// `$XDG_CONFIG_HOME/uchmk` (or `~/.config/uchmk`) elsewhere.
-pub fn base_dir() -> Option<PathBuf> {
-    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    if let Some(d) = var("UCHMK_CONFIG_DIR") {
-        return Some(d);
-    }
-    let dir = if cfg!(windows) {
-        var("APPDATA")?
-    } else if cfg!(target_os = "macos") {
-        var("HOME")?.join("Library").join("Application Support")
-    } else {
-        var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
-    };
-    Some(dir.join("uchmk"))
-}
-
-/// `common.toml` in the `uchmk` folder `base`.
-pub fn common_path(base: &Path) -> PathBuf {
-    base.join("common.toml")
-}
+// Where the files are and the OS's language live in `ito-common` with the
+// rest of common.toml; they are here too so an app that only wants words
+// needs nothing more.
+pub use ito_common::{base_dir, common_path, os_language};
 
 /// `language` from common.toml's text; `Err` says what is wrong with the
 /// file (it does not parse, or the value is not a string).
@@ -73,11 +55,6 @@ pub fn set_common_language(text: &str, code: &str) -> Result<String, String> {
     let mut doc = text.parse::<toml_edit::DocumentMut>().map_err(|e| format!("common.toml does not read, so it is left as it is: {e}"))?;
     doc["language"] = toml_edit::value(code);
     Ok(doc.to_string())
-}
-
-/// The OS's language as it names it (`ja-JP`, `en_US.UTF-8` …).
-pub fn os_language() -> Option<String> {
-    sys_locale::get_locale()
 }
 
 /// The language to use: the first of the app's and the common setting that
