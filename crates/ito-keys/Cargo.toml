@@ -1,6 +1,6 @@
 [package]
 name = "ito-keys"
-description = "yazi's key notation (`<C-a>`, `<A-S-Up>`, `<P-e>` …): parsing, printing, and egui's key events in the same terms"
+description = "yazi's key notation (`<C-a>`, `<A-S-Up>` …; `C` is Cmd on macOS): parsing, printing, and egui's key events in the same terms"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

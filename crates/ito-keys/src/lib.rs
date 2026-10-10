@@ -2,10 +2,11 @@
 //! shared by uchmk's apps that read a yazi-style `keymap.toml` (yagura;
 //! kura's `config/keys.rs` is where it started).
 //!
-//! On top of yazi's: `P-` is the primary modifier, Cmd on macOS and Ctrl
-//! elsewhere, so one default keymap reads naturally on every OS (`<P-S-e>` is
-//! Cmd+Shift+E on a Mac). With the `egui` feature, [`from_egui`] turns egui's
-//! key events into the same [`Key`] the notation parses to.
+//! `C-` is Ctrl on Windows and Linux and Cmd on macOS (where Ctrl itself
+//! still counts as `C` too), so one default keymap serves every OS: `<C-S-e>`
+//! is Ctrl+Shift+E on the one and Cmd+Shift+E on the other. With the `egui`
+//! feature, [`from_egui`] turns egui's key events into the same [`Key`] the
+//! notation parses to.
 //!
 //! What a key *does* (the keymap's layers, the commands) stays in each app:
 //! those differ from app to app, the spelling of a key does not.
@@ -113,12 +114,11 @@ impl Key {
         let (mods, last) = parts.split_at(parts.len() - 1);
         for m in mods {
             match m.to_ascii_lowercase().as_str() {
-                "c" | "ctrl" => key.ctrl = true,
+                // `p` and `primary` were ito 0.5's name for what `C` is now.
+                "c" | "ctrl" | "p" | "primary" => key.ctrl = true,
                 "a" | "alt" | "m" | "meta" => key.alt = true,
                 "s" | "shift" => key.shift = true,
                 "d" | "cmd" | "super" | "win" => key.sup = true,
-                "p" | "primary" if cfg!(target_os = "macos") => key.sup = true,
-                "p" | "primary" => key.ctrl = true,
                 _ => return None,
             }
         }
@@ -236,8 +236,8 @@ pub fn render_seq(keys: &[Key]) -> String {
 impl Key {
     /// The key the way the OS names it, for what a person reads on screen
     /// (help, palette, settings, status bar) rather than the keymap's
-    /// notation, which says `P`: `Ctrl+Shift+P` on Windows and Linux,
-    /// `⌘⇧P` on macOS.
+    /// notation: `<C-S-p>` is `Ctrl+Shift+P` on Windows and Linux and `⇧⌘P`
+    /// on macOS, where `C` is Cmd.
     pub fn human(&self) -> String {
         let name = match self.code {
             Code::Char(' ') => "Space".to_string(),
@@ -249,7 +249,7 @@ impl Key {
         let shift = self.shift || self.code == Code::Named(Named::BackTab);
         if cfg!(target_os = "macos") {
             let mut out = String::new();
-            for (on, sign) in [(self.ctrl, '⌃'), (self.alt, '⌥'), (shift, '⇧'), (self.sup, '⌘')] {
+            for (on, sign) in [(self.alt, '⌥'), (shift, '⇧'), (self.ctrl || self.sup, '⌘')] {
                 if on {
                     out.push(sign);
                 }
@@ -273,17 +273,16 @@ pub fn human_seq(keys: &[Key]) -> String {
 /// Translate an egui key event into our representation.
 ///
 /// Returns `None` for events that arrive as text instead (bare printable
-/// characters), so a keypress is never handled twice. An app that wants Cmd
-/// to count as Ctrl (filer's way) folds `mods.command` into `mods.ctrl`
-/// before the call.
+/// characters), so a keypress is never handled twice. On macOS both Cmd and
+/// Ctrl come out as `ctrl`, so `<C-q>` is Cmd+Q there.
 #[cfg(feature = "egui")]
 pub fn from_egui(key: egui::Key, mods: &egui::Modifiers) -> Option<Key> {
     use egui::Key as K;
-    // The physical keys, so `<C-…>` is Ctrl and `<D-…>` is Cmd on a Mac;
-    // `<P-…>` in a keymap picks the right one of the two.
-    let ctrl = mods.ctrl;
+    // Cmd is `C` on a Mac (since 0.6.0): one keymap line serves every OS.
+    // `<D-…>` still parses, as yazi's, but no key event carries it.
+    let ctrl = mods.ctrl || mods.mac_cmd;
     let alt = mods.alt;
-    let sup = mods.mac_cmd;
+    let sup = false;
     let named = |n: Named| Some(Key { code: Code::Named(n), ctrl, alt, shift: mods.shift, sup });
     match key {
         K::Enter => named(Named::Enter),
@@ -481,27 +480,39 @@ mod tests {
         assert_eq!(Key::parse("<C-S-t>"), Key::parse("<C-T>"));
     }
 
-    /// `P-` is Cmd on macOS and Ctrl elsewhere: what the platform's own
-    /// shortcuts use.
+    /// ito 0.5's `P-` (and `primary-`) reads as `C-`.
     #[test]
-    fn primary_is_cmd_on_macos_and_ctrl_elsewhere() {
-        let k = Key::parse("<P-S-e>").unwrap();
-        assert_eq!(k.sup, cfg!(target_os = "macos"));
-        assert_eq!(k.ctrl, !cfg!(target_os = "macos"));
-        assert!(k.shift && k.code == Code::Char('e'));
+    fn the_old_primary_is_ctrl() {
+        assert_eq!(Key::parse("<P-S-e>"), Key::parse("<C-S-e>"));
+        assert_eq!(Key::parse("<primary-q>"), Key::parse("<C-q>"));
     }
 
-    /// What a person reads names the OS's keys, never `P`.
+    /// `C` is Cmd on macOS and Ctrl elsewhere, and Ctrl on macOS still
+    /// matches it too.
+    #[test]
+    #[cfg(feature = "egui")]
+    fn ctrl_is_cmd_on_macos() {
+        let c = Key::parse("<C-q>").unwrap();
+        let held = if cfg!(target_os = "macos") {
+            egui::Modifiers { command: true, mac_cmd: true, ..Default::default() }
+        } else {
+            egui::Modifiers { command: true, ctrl: true, ..Default::default() }
+        };
+        assert_eq!(from_egui(egui::Key::Q, &held), Some(c));
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        assert_eq!(from_egui(egui::Key::Q, &ctrl), Some(c));
+    }
+
+    /// What a person reads names the OS's keys.
     #[test]
     fn keys_are_shown_by_the_os_names() {
         let show = |s: &str| Key::parse(s).unwrap().human();
         if cfg!(target_os = "macos") {
-            assert_eq!(show("<P-S-p>"), "⇧⌘P");
-            assert_eq!(show("<P-,>"), "⌘,");
+            assert_eq!(show("<C-S-p>"), "⇧⌘P");
+            assert_eq!(show("<C-,>"), "⌘,");
         } else {
-            assert_eq!(show("<P-S-p>"), "Ctrl+Shift+P");
-            assert_eq!(show("<P-,>"), "Ctrl+,");
-            assert_eq!(show("<primary-q>"), "Ctrl+Q");
+            assert_eq!(show("<C-S-p>"), "Ctrl+Shift+P");
+            assert_eq!(show("<C-,>"), "Ctrl+,");
             assert_eq!(show("<BackTab>"), "Shift+Tab");
         }
         assert_eq!(show("<F1>"), "F1");

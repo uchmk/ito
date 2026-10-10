@@ -8,7 +8,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |
 | `ito-layout` | 矩形をペインに分ける木と、egui の仕切り | tsumugi、kura、yagura |
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する | tsumugi、yagura |
-| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`・`<P-e>`） | yagura |
+| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd） | yagura |
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし） | tsumugi、kura |

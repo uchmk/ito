@@ -12,7 +12,7 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
 | `ito-theme` | テーマ（`Colors`・`Theme`・組み込みの 13 個・`from_table`・`pick`・`mix`・`contrast`）。egui の `ecolor` だけに依る。機能 `pane` でターミナルの `Palette` |
 | `ito-prefs` | 設定の画面の枠と部品、共通のページ（`language_row`・`scale_row`・`clock_card`・`theme_page`）。文字は `Words`（`EN`・`JA`、`Words::of(lang)`） |
 | `ito-i18n` | 言語の表（`tr`）。`base_dir` などは `ito-common` の再エクスポート |
-| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<P-,>`。`P` は Primary で、macOS で Cmd、ほかで Ctrl） |
+| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は Windows と Linux で Ctrl、macOS で Cmd）、egui のキーの変換（`from_egui`）、画面に出す名前（`Key::human`） |
 
 ## 置き場所
 
@@ -80,12 +80,12 @@ weekday = true
   書いた common.toml を見張りが拾うので、同じ机のほかのアプリも 2 秒以内に同じ倍率になる。
 - 変えたらステータスバーに `scale_text(s, lang)`（「Scale 120%」「倍率 120%（最大）」）を出す。
 - 設定の画面の General に `scale_row`（50–200% を 10% 刻み、それに 250・300・400%）を置く。
-- **ターミナル（tsumugi）は例外**: `<P-=>` `<P-->` `<P-0>` はターミナルの字の大きさに使う。common.toml の `scale` は読んで当てるだけ
+- **ターミナル（tsumugi）は例外**: `<C-=>` `<C-->` `<C-0>` はターミナルの字の大きさに使う。common.toml の `scale` は読んで当てるだけ
   （設定の画面の `scale_row` からは書く）。
 
 ## キー
 
-`P` は Primary（Windows と Linux は Ctrl、macOS は Cmd）。キーを変えられるアプリは yazi の書き方の keymap.toml（`ito-keys`）で持つ。
+`C` は Windows と Linux で Ctrl、macOS で Cmd（macOS では Ctrl を押しても同じ）。キーを変えられるアプリは yazi の書き方の keymap.toml（`ito-keys`）で持つ。
 組み込みの既定を `defaults/keymap.toml` に置き、`<app>/keymap.toml` に書いた分だけ上書きする（yagura の形）。
 
 ### keymap.toml の形
@@ -93,11 +93,11 @@ weekday = true
 **yazi の形を標準にする**（kura は yazi の keymap.toml をそのまま読むので、ほかのアプリもこれに合わせる）:
 
 ```toml
-# P = the primary modifier: Ctrl on Windows and Linux, Cmd on macOS.
-# <P-,> is Ctrl+, (Cmd+, on a Mac). <C-…> (Ctrl) and <D-…> (Cmd) also work.
+# C = Ctrl on Windows and Linux, Cmd on macOS (where Ctrl works too).
+# <C-,> is Ctrl+, (Cmd+, on a Mac).
 [mgr]
 prepend_keymap = [
-  { on = "<P-,>", run = "settings", desc = "Open the settings" },
+  { on = "<C-,>", run = "settings", desc = "Open the settings" },
   { on = ["g", "h"], run = "cd ~", desc = "Go home" },
 ]
 ```
@@ -105,27 +105,29 @@ prepend_keymap = [
 - 層（`[mgr]`・`[main]` など、アプリが決める）ごとに `keymap`（全部を置き換える）・`prepend_keymap`（前に足す）・`append_keymap`（後ろに足す）。
   1 つは `{ on, run, desc }`。`on` は 1 つのキーか、続けて押すキーの配列。macOS だけ違うキーは `on_mac`。
 - `[[mgr.keymap]]` の表の配列で書いても同じ（TOML として同じもの）。
-- **`P` の説明**: Windows の人に `P` は分かりにくいので、
+- **`C` の書き方**: Ctrl も Cmd も `C` と書く（どの OS の人にも読める。ito 0.6.0 から）。
+  - `ito_keys::from_egui` は macOS の Cmd と Ctrl をどちらも `C` にする。macOS で Ctrl と Cmd を別のキーに分けない。
+    `<D-…>`（Cmd だけ）は yazi の書き方として読むが、合うキーは来ない。
   - 組み込みの keymap.toml と、アプリが作る雛形の頭に上の 2 行のコメントを置く。
-  - 画面（ヘルプ・パレット・設定・ステータスバー）には `P` を出さず、OS の名前（`Ctrl+,`・`⌘,`）で出す（`ito-keys` の表示用の関数）。
-  - `<C-…>` で書いてもよい（Windows と Linux では `<P-…>` と同じ。macOS では Ctrl のまま）。`<primary-…>` も `P` と同じに読む。
+  - 画面（ヘルプ・パレット・設定・ステータスバー）には OS の名前（`Ctrl+,`・`⌘,`）で出す（`Key::human`）。
+  - ito 0.5 の `<C-…>`・`<primary-…>` も `C` と同じに読む。
 - tsumugi の settings.toml の `[keys]`（`"Ctrl+Shift+T"` の形）は古い形。keymap.toml に移す（tsumugi の TODO）。
 
 | 役割 | キー | 補足 |
 | --- | --- | --- |
-| 設定の画面 | `<P-,>` | 開いている間にもう一度押すと閉じる |
+| 設定の画面 | `<C-,>` | 開いている間にもう一度押すと閉じる |
 | ヘルプ | `<F1>` | アプリ固有の別のキー（kura の `~`、yagura の `?`）は残してよい |
-| 倍率 | 大きく `<P-=>`・`<P-+>`・`<P-;>`、小さく `<P-->`、戻す `<P-0>` | 上の「倍率」。tsumugi は字の大きさ。下の「JIS の配列」 |
-| コマンドパレット | `<P-S-p>` | パレットを持つアプリ |
-| 終了 | `<P-q>` | ターミナルの tsumugi は除く（シェルに渡す） |
+| 倍率 | 大きく `<C-=>`・`<C-+>`・`<C-;>`、小さく `<C-->`、戻す `<C-0>` | 上の「倍率」。tsumugi は字の大きさ。下の「JIS の配列」 |
+| コマンドパレット | `<C-S-p>` | パレットを持つアプリ |
+| 終了 | `<C-q>` | ターミナルの tsumugi は除く（シェルに渡す） |
 
 - アプリ固有のキーは自由。ただし上の表のキーをほかの役割に使わない。
 - **JIS の配列**: `=` は Shift+`-`、`+` は Shift+`;` にあり、US の Ctrl+= の位置では押せない。そこで大きくするキーを 3 つ並べる:
-  - `<P-+>`: JIS の Ctrl+Shift+;、US の Ctrl+Shift+=、テンキーの +。`ito_keys::from_egui` は記号の Shift を字に含めて渡すので、
-    `<P-S-+>` と書かなくてよい（書くと合わない）。
-  - `<P-;>`: JIS の Ctrl+;（Shift なし。+ の刻まれたキーで、Windows の VK_OEM_PLUS。ブラウザもこれで大きくする）。
-  - `<P-=>`: US の Ctrl+=（JIS では Ctrl+Shift+- でも届く）。
-  - 小さくする `<P-->` と戻す `<P-0>` はどちらの配列でも同じ位置。
+  - `<C-+>`: JIS の Ctrl+Shift+;、US の Ctrl+Shift+=、テンキーの +。`ito_keys::from_egui` は記号の Shift を字に含めて渡すので、
+    `<C-S-+>` と書かなくてよい（書くと合わない）。
+  - `<C-;>`: JIS の Ctrl+;（Shift なし。+ の刻まれたキーで、Windows の VK_OEM_PLUS。ブラウザもこれで大きくする）。
+  - `<C-=>`: US の Ctrl+=（JIS では Ctrl+Shift+- でも届く）。
+  - 小さくする `<C-->` と戻す `<C-0>` はどちらの配列でも同じ位置。
 
 ## 設定の読み直し
 
@@ -162,7 +164,7 @@ prepend_keymap = [
 
 ## 設定の画面
 
-- 開くキーは **Ctrl+,**（macOS は Cmd+,。keymap では `<P-,>`）。開いている間にもう一度押すと閉じる。窓いっぱいに出し、サイドバーやステータスバーは隠す。
+- 開くキーは **Ctrl+,**（macOS は Cmd+,。keymap では `<C-,>`）。開いている間にもう一度押すと閉じる。窓いっぱいに出し、サイドバーやステータスバーは隠す。
 - 左に幅 240 の帯: 上から検索、ページの一覧、一番下に「Open <file>」のボタン（そのアプリの設定ファイルを OS の既定のアプリで開く）。
 - 右はページ: 題（24pt）とひとこと（13.5pt）の下に、見出しの付いたカードを並べる。カードの中の行は高さ 48、左にラベルと注、右に操作の部品
   （`switch` / `select` / `field` / `button` / `keycap`）。
@@ -188,7 +190,7 @@ prepend_keymap = [
 1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys` を同じ `rev` で足す。
 2. 設定は `ito_common::app_dir("<app>")/config.toml`、状態は `ito_common::state_dir("<app>")` に置く。
 3. 起動時と見張りのスレッドで `Common::read` を読み、テーマ・時計・言語・倍率を当てる。自分の config.toml と keymap.toml も見張る。
-4. egui の `zoom_with_keyboard` を切り、`defaults/keymap.toml`（yazi の形、頭に `P` の説明）に標準のキー（上の表）を入れる。
+4. egui の `zoom_with_keyboard` を切り、`defaults/keymap.toml`（yazi の形、頭に `C` の説明）に標準のキー（上の表）を入れる。
 5. `ito_prefs::show` で設定の画面を作る（General に `language_row`・`scale_row`・`clock_card`、Theme に `theme_page`）。
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。

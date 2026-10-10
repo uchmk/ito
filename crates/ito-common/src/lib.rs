@@ -191,7 +191,7 @@ pub const SCALE_MIN: f32 = 0.2;
 pub const SCALE_MAX: f32 = 5.0;
 pub const SCALE_STEP: f32 = 0.1;
 
-/// Which way a key moves the scale: `<P-=>`, `<P-->`, `<P-0>`.
+/// Which way a key moves the scale: `<C-=>`, `<C-->`, `<C-0>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScaleTo {
     In,
@@ -266,7 +266,7 @@ pub struct Common {
     pub dark_theme: Option<String>,
     pub light_theme: Option<String>,
     /// The size the whole window is drawn at, from [`SCALE_MIN`] to
-    /// [`SCALE_MAX`]; the keys `<P-=>` `<P-->` `<P-0>` write it.
+    /// [`SCALE_MAX`]; the keys `<C-=>` `<C-->` `<C-0>` write it.
     pub scale: Option<f32>,
     pub clock: Option<Clock>,
 }

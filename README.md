@@ -10,7 +10,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-pane` | A terminal pane: a shell on a PTY (ConPTY on Windows), its key encoding, and an egui view |
 | `ito-layout` | Splitting a rectangle into panes: a tree of splits, and its dividers in egui |
 | `ito-i18n` | The words on screen by key, and the language setting the apps share (`common.toml`) |
-| `ito-keys` | yazi's key notation (`<C-a>`, `<A-S-Up>`, `<P-e>` …): parsing, printing, and egui's key events |
+| `ito-keys` | yazi's key notation (`<C-a>`, `<A-S-Up>` …; `C` is Cmd on macOS): parsing, printing, and egui's key events |
 | `ito-match` | How a search query matches text: a regular expression with smart case, or fzf-style fuzzy letters |
 | `ito-ipc` | A per-user local door into a running app (Unix socket / named pipe) and framed serde messages |
 | `ito-mcp` | A small MCP server over stdio: JSON-RPC, `tools/list` and `tools/call`, without an async runtime |
