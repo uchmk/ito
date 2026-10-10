@@ -5,8 +5,8 @@
 //! a person wrote around it kept.
 //!
 //! ```text
-//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, [clock]
-//! <config dir>/uchmk/<app>/config.toml  each app's own
+//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, [clock]
+//! <config dir>/uchmk/<app>/config.toml  each app's own (`<APP>_CONFIG_HOME` moves the folder)
 //! <config dir>/uchmk/themes/*.toml      themes of one's own
 //! ```
 
@@ -15,11 +15,13 @@ use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 
+pub mod fonts;
+
 /// The `uchmk` folder: `UCHMK_CONFIG_DIR` when set; else `%APPDATA%\uchmk`
 /// on Windows, `~/Library/Application Support/uchmk` on macOS,
 /// `$XDG_CONFIG_HOME/uchmk` (or `~/.config/uchmk`) elsewhere.
 pub fn base_dir() -> Option<PathBuf> {
-    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let var = env_dir;
     if let Some(d) = var("UCHMK_CONFIG_DIR") {
         return Some(d);
     }
@@ -31,6 +33,53 @@ pub fn base_dir() -> Option<PathBuf> {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
     };
     Some(dir.join("uchmk"))
+}
+
+/// The folder an environment variable names; `None` when it is not set or
+/// is empty (an exported but blank variable means unset, not `/`).
+pub fn env_dir(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The folder of `app`'s own settings (`config.toml`, `keymap.toml` …):
+/// `<APP>_CONFIG_HOME` when set, else `<uchmk>/<app>`.
+pub fn app_dir(app: &str) -> Option<PathBuf> {
+    env_dir(&format!("{}_CONFIG_HOME", app.to_ascii_uppercase())).or_else(|| Some(base_dir()?.join(app)))
+}
+
+/// The folder of what `app` keeps between runs (sessions, history, the
+/// window's place), apart from its settings: `<APP>_STATE_HOME` when set;
+/// else `%LOCALAPPDATA%\uchmk\<app>` on Windows (not roaming),
+/// `~/Library/Application Support/uchmk/<app>/state` on macOS (where the
+/// settings folder is too), `$XDG_STATE_HOME/uchmk/<app>` (or
+/// `~/.local/state/uchmk/<app>`) elsewhere.
+pub fn state_dir(app: &str) -> Option<PathBuf> {
+    if let Some(d) = env_dir(&format!("{}_STATE_HOME", app.to_ascii_uppercase())) {
+        return Some(d);
+    }
+    let var = env_dir;
+    Some(if cfg!(windows) {
+        var("LOCALAPPDATA")?.join("uchmk").join(app)
+    } else if cfg!(target_os = "macos") {
+        var("HOME")?.join("Library").join("Application Support").join("uchmk").join(app).join("state")
+    } else {
+        var("XDG_STATE_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("state")))?.join("uchmk").join(app)
+    })
+}
+
+/// Move what an older build kept at `old` (a file or a folder) to `new`, so
+/// an upgrade keeps its settings: only when `old` is there and `new` is not,
+/// so nothing is merged or written over. `Ok(true)` when it moved. Run it
+/// once at the start, before anything reads the settings.
+pub fn move_old(old: &Path, new: &Path) -> Result<bool, String> {
+    if !old.exists() || new.exists() {
+        return Ok(false);
+    }
+    if let Some(dir) = new.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::rename(old, new).map_err(|e| format!("could not move {} to {}: {e}", old.display(), new.display()))?;
+    Ok(true)
 }
 
 /// `common.toml` in the `uchmk` folder `base`.
@@ -131,6 +180,75 @@ mod clock {
     }
 }
 
+/// The smallest and the largest `scale`, the size the whole window is drawn
+/// at (1.0: the app's own), and how far one key press moves it.
+pub const SCALE_MIN: f32 = 0.2;
+pub const SCALE_MAX: f32 = 5.0;
+pub const SCALE_STEP: f32 = 0.1;
+
+/// Which way a key moves the scale: `<P-=>`, `<P-->`, `<P-0>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScaleTo {
+    In,
+    Out,
+    Reset,
+}
+
+/// A scale kept in range and to one decimal place, so ten steps up and ten
+/// down land where they began.
+pub fn tidy_scale(s: f32) -> f32 {
+    if !s.is_finite() {
+        return 1.0;
+    }
+    (s.clamp(SCALE_MIN, SCALE_MAX) * 10.0).round() / 10.0
+}
+
+/// `now` one step bigger or smaller, or back at 1.0.
+pub fn scale_step(now: f32, to: ScaleTo) -> f32 {
+    tidy_scale(match to {
+        ScaleTo::In => now + SCALE_STEP,
+        ScaleTo::Out => now - SCALE_STEP,
+        ScaleTo::Reset => 1.0,
+    })
+}
+
+/// A scale written as text -- `1.2` or `120%` -- as a number in range;
+/// `None` for anything else. For an environment variable such as
+/// `KURA_SCALE` that sets the scale for one run.
+pub fn parse_scale(text: &str) -> Option<f32> {
+    let text = text.trim();
+    let (num, per) = match text.strip_suffix('%') {
+        Some(n) => (n.trim(), 100.0),
+        None => (text, 1.0),
+    };
+    let n = num.parse::<f32>().ok().map(|n| n / per).filter(|n| n.is_finite() && (SCALE_MIN..=SCALE_MAX).contains(n))?;
+    Some(tidy_scale(n))
+}
+
+/// What a key that moved the scale says: `Scale 120%`, with `(maximum)` or
+/// `(minimum)` at the ends; in Japanese 「倍率 120%（最大）」.
+pub fn scale_text(s: f32, lang: &str) -> String {
+    let percent = (s * 100.0).round() as i32;
+    let end = |max: &'static str, min: &'static str| {
+        if s >= SCALE_MAX {
+            max
+        } else if s <= SCALE_MIN {
+            min
+        } else {
+            ""
+        }
+    };
+    match lang {
+        "ja" => format!("倍率 {percent}%{}", end("（最大）", "（最小）")),
+        _ => format!("Scale {percent}%{}", end(" (maximum)", " (minimum)")),
+    }
+}
+
+/// The change that writes `s` as common.toml's `scale`.
+pub fn scale_change(s: f32) -> CommonChange {
+    CommonChange { table: None, key: "scale", value: format!("{:.1}", tidy_scale(s)) }
+}
+
 /// What `common.toml` holds; `None` for a key it does not have, so an app
 /// can fall back on its own older setting.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -142,11 +260,14 @@ pub struct Common {
     /// The themes `system` uses in a dark and a light OS.
     pub dark_theme: Option<String>,
     pub light_theme: Option<String>,
+    /// The size the whole window is drawn at, from [`SCALE_MIN`] to
+    /// [`SCALE_MAX`]; the keys `<P-=>` `<P-->` `<P-0>` write it.
+    pub scale: Option<f32>,
     pub clock: Option<Clock>,
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 5] = ["language", "theme", "dark_theme", "light_theme", "clock"];
+const KEYS: [&str; 6] = ["language", "theme", "dark_theme", "light_theme", "scale", "clock"];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -164,6 +285,20 @@ impl Common {
                 None => Ok(None),
                 Some(toml::Value::String(s)) => Ok(Some(s.clone())),
                 Some(_) => Err(format!("common.toml: `{key}` must be a string")),
+            }
+        };
+        let scale = match t.get("scale") {
+            None => None,
+            Some(v) => {
+                let n = match v {
+                    toml::Value::Integer(i) => *i as f32,
+                    toml::Value::Float(f) => *f as f32,
+                    _ => return Err("common.toml: `scale` must be a number (1.0 is the app's own size)".to_owned()),
+                };
+                if !(SCALE_MIN..=SCALE_MAX).contains(&n) {
+                    warnings.push(format!("common.toml: scale {n} is not from {SCALE_MIN} to {SCALE_MAX}, so {} is used", tidy_scale(n)));
+                }
+                Some(tidy_scale(n))
             }
         };
         let clock = match t.get("clock") {
@@ -197,6 +332,7 @@ impl Common {
             theme: text_of("theme")?,
             dark_theme: text_of("dark_theme")?,
             light_theme: text_of("light_theme")?,
+            scale,
             clock,
         };
         Ok((common, warnings))
@@ -219,6 +355,11 @@ impl Common {
         let (theme, dark, light) = fallback.unwrap_or(("dark", "tsumugi Dark", "tsumugi Light"));
         let pick = |own: &Option<String>, old: &str| own.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| old.to_owned());
         (pick(&self.theme, theme), pick(&self.dark_theme, dark), pick(&self.light_theme, light))
+    }
+
+    /// The scale: common.toml's, else 1.0.
+    pub fn scale_or_one(&self) -> f32 {
+        self.scale.unwrap_or(1.0)
     }
 
     /// The clock: common.toml's, else `fallback`, else the default.
@@ -442,6 +583,24 @@ mod tests {
         d
     }
 
+    /// The folders follow `<APP>_CONFIG_HOME` and `<APP>_STATE_HOME` (an app
+    /// name no other test uses, so no test races on the variables).
+    #[test]
+    fn the_app_folders_follow_their_variables() {
+        std::env::set_var("ITOTESTAPP_STATE_HOME", "/s/t");
+        std::env::set_var("ITOTESTAPP_CONFIG_HOME", "");
+        assert_eq!(state_dir("itotestapp"), Some(PathBuf::from("/s/t")));
+        // Empty is the same as unset: the folder under uchmk's.
+        if let Some(d) = app_dir("itotestapp") {
+            assert!(d.ends_with("itotestapp"), "{d:?}");
+        }
+        std::env::remove_var("ITOTESTAPP_STATE_HOME");
+        if let Some(d) = state_dir("itotestapp") {
+            assert!(d.ends_with(if cfg!(target_os = "macos") { "itotestapp/state" } else { "itotestapp" }), "{d:?}");
+            assert!(d.components().any(|c| c.as_os_str() == "uchmk"), "{d:?}");
+        }
+    }
+
     #[test]
     fn common_toml_is_read_and_what_it_does_not_know_is_said() {
         let (c, warnings) = Common::parse("language = \"ja\"\ntheme = \"Nord\"\n[clock]\nhour24 = false\n").unwrap();
@@ -457,6 +616,49 @@ mod tests {
         assert!(Common::parse("[clock]\nshow = \"yes\"\n").is_err());
         assert!(Common::parse("[broken\n").is_err());
         assert_eq!(Common::read(&dir("none")), Ok((Common::default(), Vec::new())), "no file: nothing set");
+    }
+
+    #[test]
+    fn the_scale_is_read_stepped_and_written() {
+        assert_eq!(Common::parse("scale = 1.25\n").unwrap(), (Common { scale: Some(1.3), ..Common::default() }, Vec::new()));
+        assert_eq!(Common::parse("scale = 2\n").unwrap().0.scale, Some(2.0), "a whole number is a number too");
+        let (c, warnings) = Common::parse("scale = 9.0\n").unwrap();
+        assert_eq!((c.scale, warnings.len()), (Some(SCALE_MAX), 1), "too big: the largest, and said");
+        assert!(Common::parse("scale = \"big\"\n").is_err());
+        assert_eq!(Common::default().scale_or_one(), 1.0);
+        let mut s = 1.0;
+        for _ in 0..10 {
+            s = scale_step(s, ScaleTo::In);
+        }
+        assert_eq!(s, 2.0, "ten steps make a whole one, with no drift");
+        assert_eq!(scale_step(SCALE_MAX, ScaleTo::In), SCALE_MAX);
+        assert_eq!(scale_step(SCALE_MIN, ScaleTo::Out), SCALE_MIN);
+        assert_eq!(scale_step(3.3, ScaleTo::Reset), 1.0);
+        assert_eq!(parse_scale(" 1.5 "), Some(1.5));
+        assert_eq!(parse_scale("150%"), Some(1.5));
+        assert_eq!(parse_scale("0.1"), None);
+        assert_eq!(parse_scale("NaN"), None);
+        assert_eq!(parse_scale("big"), None);
+        assert_eq!(scale_text(1.2, "en"), "Scale 120%");
+        assert_eq!(scale_text(SCALE_MAX, "en"), "Scale 500% (maximum)");
+        assert_eq!(scale_text(SCALE_MIN, "ja"), "倍率 20%（最小）");
+        assert_eq!(scale_change(1.25).apply("language = \"ja\"\n").unwrap(), "language = \"ja\"\nscale = 1.3\n");
+    }
+
+    #[test]
+    fn an_older_place_is_moved_once_and_never_over_the_new() {
+        let d = dir("move");
+        let (old, new) = (d.join("old").join("settings.toml"), d.join("uchmk").join("app").join("config.toml"));
+        assert_eq!(move_old(&old, &new), Ok(false), "nothing there: nothing to do");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "a = 1\n").unwrap();
+        assert_eq!(move_old(&old, &new), Ok(true));
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "a = 1\n");
+        assert!(!old.exists());
+        std::fs::write(&old, "a = 2\n").unwrap();
+        assert_eq!(move_old(&old, &new), Ok(false), "both there: both kept");
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "a = 1\n");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

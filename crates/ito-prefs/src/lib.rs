@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use egui::{Color32, FontId, RichText};
-use ito_common::{quote, Clock, CommonChange, DATE_FORMATS};
+use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
 
 /// The words the screen and the shared pages say, in one language.
@@ -24,6 +24,7 @@ pub struct Words {
     pub open: &'static str,
     pub language: &'static str,
     pub auto: &'static str,
+    pub scale: &'static str,
     pub clock: &'static str,
     pub show_time: &'static str,
     pub show_time_note: &'static str,
@@ -50,6 +51,7 @@ pub const EN: Words = Words {
     open: "Open",
     language: "Language",
     auto: "Auto (system)",
+    scale: "Scale",
     clock: "CLOCK",
     show_time: "Show the time in the status bar",
     show_time_note: "Stays visible when the window is maximized or full screen",
@@ -76,6 +78,7 @@ pub const JA: Words = Words {
     open: "開く:",
     language: "言語",
     auto: "自動（OS に従う）",
+    scale: "倍率",
     clock: "時計",
     show_time: "ステータスバーに時刻を出す",
     show_time_note: "窓を最大化・全画面にしても出たまま",
@@ -476,6 +479,25 @@ pub fn language_row(ui: &mut egui::Ui, l: Look, w: &Words, now: &str, note: &str
     Some(common(None, "language", quote(code)))
 }
 
+/// The scales the scale row offers, in percent: 50% to 200% by tens, then
+/// a few bigger ones.
+const SCALES: [i32; 19] = [50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 250, 300, 400];
+
+/// The scale row, common.toml's `scale` (`now`; 1.0 when unset), the size
+/// the whole window is drawn at. The note is the app's: its keys.
+pub fn scale_row(ui: &mut egui::Ui, l: Look, w: &Words, now: f32, note: &str) -> Option<CommonChange> {
+    let now = (now * 100.0).round() as i32;
+    let mut percents = SCALES.to_vec();
+    if !percents.contains(&now) {
+        percents.push(now);
+        percents.sort_unstable();
+    }
+    let names: Vec<String> = percents.iter().map(|p| format!("{p}%")).collect();
+    let options: Vec<(i32, &str)> = percents.iter().zip(&names).map(|(p, n)| (*p, n.as_str())).collect();
+    let picked = row(ui, l, w.scale, note, |ui| select(ui, "scale", now, &options))?;
+    Some(scale_change(picked as f32 / 100.0))
+}
+
 /// The CLOCK card: common.toml's `[clock]`.
 pub fn clock_card(ui: &mut egui::Ui, l: Look, w: &Words, k: &Clock) -> Vec<CommonChange> {
     let mut out = Vec::new();
@@ -680,6 +702,7 @@ mod tests {
         assert_eq!(Words::of("ja").language, "言語");
         assert_eq!(Words::of("en").language, "Language");
         assert_eq!(Words::of("fr").language, "Language", "English for the rest");
+        assert_eq!(Words::of("ja").scale, "倍率");
     }
 
     type Texts = Vec<(String, egui::Rect)>;

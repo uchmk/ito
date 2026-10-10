@@ -233,6 +233,43 @@ pub fn render_seq(keys: &[Key]) -> String {
     keys.iter().map(|k| k.to_string()).collect()
 }
 
+impl Key {
+    /// The key the way the OS names it, for what a person reads on screen
+    /// (help, palette, settings, status bar) rather than the keymap's
+    /// notation, which says `P`: `Ctrl+Shift+P` on Windows and Linux,
+    /// `⌘⇧P` on macOS.
+    pub fn human(&self) -> String {
+        let name = match self.code {
+            Code::Char(' ') => "Space".to_string(),
+            Code::Char(c) if self.ctrl || self.alt || self.sup => c.to_uppercase().to_string(),
+            Code::Char(c) => c.to_string(),
+            Code::Named(Named::BackTab) => "Tab".to_string(),
+            Code::Named(n) => n.label(),
+        };
+        let shift = self.shift || self.code == Code::Named(Named::BackTab);
+        if cfg!(target_os = "macos") {
+            let mut out = String::new();
+            for (on, sign) in [(self.ctrl, '⌃'), (self.alt, '⌥'), (shift, '⇧'), (self.sup, '⌘')] {
+                if on {
+                    out.push(sign);
+                }
+            }
+            out + &name
+        } else {
+            let mods = [(self.ctrl, "Ctrl"), (self.alt, "Alt"), (shift, "Shift"), (self.sup, "Win")];
+            let mut parts: Vec<&str> = mods.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
+            parts.push(&name);
+            parts.join("+")
+        }
+    }
+}
+
+/// A chord sequence the way the OS names its keys ([`Key::human`]), one
+/// space between the keys (`g h`).
+pub fn human_seq(keys: &[Key]) -> String {
+    keys.iter().map(Key::human).collect::<Vec<_>>().join(" ")
+}
+
 /// Translate an egui key event into our representation.
 ///
 /// Returns `None` for events that arrive as text instead (bare printable
@@ -452,6 +489,23 @@ mod tests {
         assert_eq!(k.sup, cfg!(target_os = "macos"));
         assert_eq!(k.ctrl, !cfg!(target_os = "macos"));
         assert!(k.shift && k.code == Code::Char('e'));
+    }
+
+    /// What a person reads names the OS's keys, never `P`.
+    #[test]
+    fn keys_are_shown_by_the_os_names() {
+        let show = |s: &str| Key::parse(s).unwrap().human();
+        if cfg!(target_os = "macos") {
+            assert_eq!(show("<P-S-p>"), "⇧⌘P");
+            assert_eq!(show("<P-,>"), "⌘,");
+        } else {
+            assert_eq!(show("<P-S-p>"), "Ctrl+Shift+P");
+            assert_eq!(show("<P-,>"), "Ctrl+,");
+            assert_eq!(show("<primary-q>"), "Ctrl+Q");
+            assert_eq!(show("<BackTab>"), "Shift+Tab");
+        }
+        assert_eq!(show("<F1>"), "F1");
+        assert_eq!(human_seq(&[Key::char('g'), Key::char('h')]), "g h");
     }
 
     #[test]
