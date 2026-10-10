@@ -31,8 +31,8 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
   macOS は `~/Library/Application Support/uchmk/<app>/state`、Linux は `$XDG_STATE_HOME`（無ければ `~/.local/state`）`/uchmk/<app>`。
 - **古い場所からは自動で移す。**起動時に `ito_common::move_old(old, new)` を呼ぶ（古いものがあり、新しいものが無いときだけ名前を変えて移す。
   新しいものは決して上書きしない）。移したら 1 行の通知を出す。
-  - tsumugi: `<config>/tsumugi/settings.toml` → `<config>/uchmk/tsumugi/config.toml`（0.83）
-  - kura: `<config>/uchmk/kura/kura.toml` → `config.toml`（0.96）
+  - tsumugi: `<config>/tsumugi/settings.toml` → `<config>/uchmk/tsumugi/config.toml`、状態は `<local data>/tsumugi/` → `state_dir`（0.87）
+  - kura: `<config>/kura/kura.toml` → `<config>/uchmk/kura/config.toml`、状態は `state_dir` へ（0.99。`KURA_CONFIG_HOME` のフォルダは動かさず、ファイルの名前だけ変える）
 
 ## 環境変数
 
