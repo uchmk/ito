@@ -562,7 +562,9 @@ pub fn show_faces<P: Pane + ?Sized>(
             ui.output_mut(|o| {
                 o.ime = Some(egui::output::IMEOutput {
                     purpose: egui::IMEPurpose::Terminal,
-                    rect: inner,
+                    // egui-winit puts the candidate window by `rect`, so it is the
+                    // cursor's cell, not the pane.
+                    rect: at,
                     cursor_rect: at,
                     should_interrupt_composition: false,
                 });

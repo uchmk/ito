@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.15.1] - 2026-10-11
+
+### 修正
+
+- `ito-pane`: IME の候補の窓がペインの左上に出ていた。egui-winit が窓の位置に使う `rect` に、ペイン全体でなくカーソルのセルを渡す。
+
 ## [0.15.0] - 2026-10-11
 
 ### 追加
