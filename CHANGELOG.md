@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.17.2] - 2026-10-11
+
+### 追加
+
+- `ito-notify::notifier`: Linux の `notify-send` で、通知のボタンも返せる。`--action=名前=ラベル` を `Action` ごとに渡し（`launch` と同じ `arg` と、システムの dismiss は除く）、`--wait` が出力した名前をコールバックの `arg` に戻す。通知自体のクリックは `launch`。
+
 ## [0.17.1] - 2026-10-11
 
 ### 変更

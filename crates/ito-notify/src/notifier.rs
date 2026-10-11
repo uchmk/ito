@@ -66,6 +66,30 @@ impl Notifier {
     }
 }
 
+/// The `notify-send --action` arguments for a notification: a click on its
+/// body is `default`, and each button that is not the system's own dismiss is
+/// named by its `arg` (the `launch` one is the body's already).
+#[cfg_attr(windows, allow(dead_code))]
+fn notify_send_actions(t: &Toast) -> Vec<String> {
+    let mut out = vec!["--action=default=Open".to_owned()];
+    for a in t.actions.iter().filter(|a| !a.dismiss && a.arg != t.launch) {
+        out.push(format!("--action={}={}", a.arg, a.label));
+    }
+    out.push("--wait".to_owned());
+    out
+}
+
+/// What `notify-send --wait` printed (the name of the action clicked) as the
+/// `arg` to call back with.
+#[cfg_attr(windows, allow(dead_code))]
+fn arg_of(t: &Toast, printed: &str) -> Option<String> {
+    let said = printed.trim();
+    if said == "default" {
+        return Some(t.launch.clone());
+    }
+    t.actions.iter().find(|a| !a.dismiss && a.arg == said).map(|a| a.arg.clone())
+}
+
 #[cfg(windows)]
 mod os {
     use super::{Click, Toast};
@@ -162,49 +186,87 @@ mod os {
             // Each on a thread of its own: one that can say it was clicked
             // waits until it is closed.
             let _ = std::thread::Builder::new().name("notify".into()).spawn(move || {
-                if show(app, &toast) {
-                    click(&toast.tag, &toast.launch);
+                if let Some(arg) = show(app, &toast) {
+                    click(&toast.tag, &arg);
                 }
             });
         }
     }
 
-    /// Show it; whether it was clicked.
+    /// Show it; what a click on it asked for.
     #[cfg(target_os = "macos")]
-    fn show(_app: App, t: &Toast) -> bool {
+    fn show(_app: App, t: &Toast) -> Option<String> {
         let script = format!(
             "display notification {} with title {}",
             crate::toast::applescript_string(&t.body),
             crate::toast::applescript_string(&t.title)
         );
         let _ = Command::new("osascript").arg("-e").arg(script).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
-        false
+        None
     }
 
-    /// Show it; whether it was clicked. An older `notify-send` does not know
-    /// the options for waiting, and shows it plainly.
+    /// Show it; what a click on it asked for. An older `notify-send` does not
+    /// know the options for waiting, and shows it plainly.
     #[cfg(not(target_os = "macos"))]
-    fn show(app: App, t: &Toast) -> bool {
+    fn show(app: App, t: &Toast) -> Option<String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         static PLAIN: AtomicBool = AtomicBool::new(false);
         let run = |actions: bool| {
             let mut cmd = Command::new("notify-send");
             cmd.arg(format!("--app-name={}", app.name));
             if actions {
-                cmd.args(["--action=default=Open", "--wait"]);
+                cmd.args(super::notify_send_actions(t));
             }
             cmd.args(["--", &t.title, &t.body]).stdin(Stdio::null()).stderr(Stdio::null());
             cmd.output()
         };
         if !PLAIN.load(Ordering::Relaxed) {
             match run(true) {
-                Ok(out) if out.status.success() => return String::from_utf8_lossy(&out.stdout).trim() == "default",
+                Ok(out) if out.status.success() => return super::arg_of(t, &String::from_utf8_lossy(&out.stdout)),
                 // Not there at all: nothing more to try.
-                Err(_) => return false,
+                Err(_) => return None,
                 Ok(_) => PLAIN.store(true, Ordering::Relaxed),
             }
         }
         let _ = run(false);
-        false
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn toast() -> Toast {
+        let act = |label: &str, arg: &str, dismiss| Action { label: label.into(), arg: arg.into(), dismiss };
+        Toast {
+            title: "t".into(),
+            body: "b".into(),
+            tag: "7".into(),
+            launch: "open".into(),
+            actions: vec![act("Allow", "allow", false), act("Open", "open", false), act("Later", "dismiss", true)],
+            ..Toast::default()
+        }
+    }
+
+    #[test]
+    fn notify_send_gets_a_name_for_each_button() {
+        assert_eq!(notify_send_actions(&toast()), ["--action=default=Open", "--action=allow=Allow", "--wait"]);
+        assert_eq!(notify_send_actions(&Toast::default()), ["--action=default=Open", "--wait"]);
+    }
+
+    #[test]
+    fn a_printed_name_is_the_arg_it_stands_for() {
+        let t = toast();
+        assert_eq!(
+            arg_of(
+                &t, "default
+"
+            )
+            .as_deref(),
+            Some("open")
+        );
+        assert_eq!(arg_of(&t, "allow").as_deref(), Some("allow"));
+        assert_eq!((arg_of(&t, ""), arg_of(&t, "dismiss")), (None, None));
     }
 }
