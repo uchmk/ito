@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.11.0] - 2026-10-11
+
+### 追加
+
+- `ito-pane`: `Terminal::bells`。`drain` が読んだ分でプログラムが鳴らしたベル（BEL）の数。アプリが見せたら 0 に戻す（視覚ベルのため）。
+  使う側がやること: `rev` を上げる（欄が増えただけで、`Terminal` を組み立てる側は無い）。
+
 ## [0.10.0] - 2026-10-11
 
 ### 追加

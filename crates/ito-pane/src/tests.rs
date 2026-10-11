@@ -258,6 +258,21 @@ mod pane {
         assert_eq!(got, vec![crate::Triggered { rules: vec![0], line: "BUILD FAILED now".into() }]);
     }
 
+    /// A BEL the program writes is counted, for the app to show.
+    #[cfg(unix)]
+    #[test]
+    fn the_bell_is_counted() {
+        let dir = crate::util::test_dir("term-bell");
+        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "sleep 0.3; printf 'a\\007b\\007\\n'; sleep 5".to_owned()]));
+        let mut t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while t.bells < 2 && Instant::now() < deadline {
+            t.drain();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(t.bells, 2);
+    }
+
     /// A selection scrolled off the screen is still a selection: no cell
     /// shown carries it, but Ctrl+Shift+C copies it all the same.
     #[cfg(unix)]

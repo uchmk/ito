@@ -311,6 +311,9 @@ pub struct Terminal {
     pub title: String,
     /// The shell is gone; the pane says so rather than pretending.
     pub exited: bool,
+    /// How many times the program has rung the bell (BEL) in what `drain`
+    /// has read. The app sets it back to 0 once it has shown them.
+    pub bells: u32,
     /// The pane's foreground and background as drawn, for a program that asks
     /// (OSC 10 / 11). Set from the theme each frame; none until then.
     colors: Option<([u8; 3], [u8; 3])>,
@@ -506,6 +509,7 @@ impl Terminal {
             rx,
             title: String::new(),
             exited: false,
+            bells: 0,
             colors: None,
             size,
             followed: Some(cwd.to_path_buf()),
@@ -600,6 +604,7 @@ impl Terminal {
                     }
                 }
                 PtyEvent::Exit | PtyEvent::ChildExit(_) => self.exited = true,
+                PtyEvent::Bell => self.bells = self.bells.saturating_add(1),
                 _ => {}
             }
         }
