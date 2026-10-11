@@ -3,7 +3,7 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
-## [0.17.3] - 2026-10-11
+## [0.17.4] - 2026-10-11
 
 ### 追加
 
