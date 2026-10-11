@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.19.1] - 2026-10-12
+
+### 追加
+
+- `ito-prefs::field_id(id)`: `field` の egui の id。アプリが Enter で渡された値を断るとき、`request_focus` でキャレットを戻すのに使う（kura の再テストの (c)）。
+
 ## [0.19.0] - 2026-10-12
 
 ### 追加

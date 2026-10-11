@@ -452,7 +452,7 @@ pub type Drafts = HashMap<String, Draft>;
 /// leaves it as it was): the new words, when they differ. The words are all
 /// picked when it takes the keys, so what is typed replaces them.
 pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: &str, width: f32) -> Option<String> {
-    let eid = egui::Id::new(("prefs-field", id));
+    let eid = field_id(id);
     let focused = ui.memory(|m| m.has_focus(eid));
     if !focused {
         let done = drafts.get(id).is_some_and(|d| match &d.sent {
@@ -497,6 +497,12 @@ pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: 
         return Some(text);
     }
     None
+}
+
+/// The egui id of the field `id`: `ctx.memory_mut(|m| m.request_focus(..))`
+/// on it puts the caret back, as an app does when it refuses what Enter sent.
+pub fn field_id(id: &str) -> egui::Id {
+    egui::Id::new(("prefs-field", id))
 }
 
 /// A key's cap, as the design draws one.
