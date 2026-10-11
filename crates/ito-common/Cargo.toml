@@ -22,3 +22,7 @@ toml_edit = "0.23"
 # and the environment), no C to build.
 sys-locale = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"], optional = true }
+
+[target."cfg(windows)".dependencies]
+# The OS's light or dark from the registry (`OsLight`): winit's lags a switch.
+windows = { version = "0.62", features = ["Win32_System_Registry"] }

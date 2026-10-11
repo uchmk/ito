@@ -13,7 +13,7 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
 
 | クレート | 持つもの |
 | --- | --- |
-| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono） |
+| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）、OS の明暗（`OsLight`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono） |
 | `ito-theme` | テーマ（`Colors`・`Theme`・組み込みの 13 個・`from_table`・`pick`・`mix`・`contrast`）。egui の `ecolor` だけに依る。機能 `pane` でターミナルの `Palette` |
 | `ito-prefs` | 設定の画面の枠と部品、共通のページ（`language_row`・`scale_row`・`clock_card`・`theme_page`）。文字は `Words`（`EN`・`JA`、`Words::of(lang)`） |
 | `ito-i18n` | 言語の表（`tr`）。`base_dir` などは `ito-common` の再エクスポート |
@@ -70,6 +70,8 @@ weekday = true
 ```
 
 - 無いキーは既定の値。知らないキーと知らない `date_format` は警告に出す（読み込みは止めない）。値の型が違えば読めない理由を出す。
+- `system` の OS の明暗は `ito_common::OsLight` で読む（`OsLight::watch(2 秒, 描き直し)` の `light_or(ctx.system_theme() == Light)`）。
+  Windows では egui の `system_theme`（winit）が OS の切り替えに 1 回遅れるので、それだけに頼らない。
 - **テーマ・時計・倍率は common.toml だけに置く。**アプリごとの上書きは持たない。
   - 移行: tsumugi の config.toml に古い `theme`・`dark_theme`・`light_theme`・`[clock]` があり、common.toml に無ければ古い値を使う
     （`Common::theme_choice(Some(..))`・`Common::clock_or(Some(..))`）。設定の画面で書いた値は common.toml に入る。

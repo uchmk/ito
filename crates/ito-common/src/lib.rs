@@ -16,6 +16,9 @@ use std::time::{Duration, SystemTime};
 use serde::Deserialize;
 
 pub mod fonts;
+mod os_theme;
+
+pub use os_theme::OsLight;
 
 /// The `uchmk` folder: `UCHMK_CONFIG_DIR` when set; else `%APPDATA%\uchmk`
 /// on Windows, `~/Library/Application Support/uchmk` on macOS,
