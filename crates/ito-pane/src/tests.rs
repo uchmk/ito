@@ -765,13 +765,15 @@ mod pane {
         log_pty(&log, "out", b"\x1b[?9001h");
         log_pty(&log, "in reply", b"\x1b[?6c");
         log_pty(&None, "in key", b"ignored when the log is off");
+        log_pty(&log, "note", b"key <C-,>: nothing sent");
         drop(log);
 
         let text = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines.len(), 2, "one line per chunk, nothing when off: {text:?}");
+        assert_eq!(lines.len(), 3, "one line per chunk, nothing when off: {text:?}");
         assert!(lines[0].ends_with("out       \\e[?9001h"), "{:?}", lines[0]);
         assert!(lines[1].ends_with("in reply  \\e[?6c"), "{:?}", lines[1]);
+        assert!(lines[2].ends_with("note      key <C-,>: nothing sent"), "what `log_note` writes: {:?}", lines[2]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -837,6 +839,8 @@ mod pane {
         assert_eq!(named(b"\x1b[66;48;66;1;16;1_"), "B", "a shifted character says itself");
         assert_eq!(named(b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"), "Esc Esc up", "two records, a release");
         assert_eq!(named(b"\x1b[112;59;0;1;0;1_"), "F1");
+        assert_eq!(named(b"\x1b[219;26;27;1;8;1_"), "Ctrl+[", "not vk219");
+        assert_eq!(named(b"\x1b[32;57;0;1;8;1_"), "Ctrl+Space");
         assert_eq!(named(b"ls\r"), "", "plain text names nothing");
         assert_eq!(named(b"\x1b[A"), "", "nor does a VT sequence");
 
@@ -1027,7 +1031,10 @@ mod win32_input_tests {
         assert_eq!(s(char_record('b', alt).unwrap()), "\x1b[66;48;98;1;2;1_");
         assert_eq!(s(char_record('b', alt_shift).unwrap()), "\x1b[66;48;66;1;18;1_");
         assert_eq!(s(char_record('1', alt).unwrap()), "\x1b[49;2;49;1;2;1_");
-        assert_eq!(char_record('[', ctrl), None, "no record form: the caller keeps the old bytes");
+        assert_eq!(s(char_record('[', ctrl).unwrap()), "\x1b[219;26;27;1;8;1_", "ESC as a key of its own (kura #341)");
+        assert_eq!(s(char_record(' ', ctrl).unwrap()), "\x1b[32;57;0;1;8;1_", "NUL as a key of its own");
+        assert_eq!(char_record('[', alt), None, "Alt+[ has no record form: the caller keeps the old bytes");
+        assert_eq!(char_record(',', ctrl), None);
         assert_eq!(char_record('a', Mods::default()), None, "a plain letter is text");
     }
 }

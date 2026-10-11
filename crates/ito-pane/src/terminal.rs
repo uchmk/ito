@@ -688,6 +688,13 @@ impl Terminal {
         self.send_as(bytes, "in key");
     }
 
+    /// A line in the PTY log that is not bytes crossing it: a key the pane was
+    /// given and sent nothing for, say, so the log shows the key was seen.
+    /// Nothing without a log.
+    pub fn log_note(&self, text: &str) {
+        log_pty(&self.log, "note", text.as_bytes());
+    }
+
     /// `send`, labelled for the PTY log by where the bytes came from.
     fn send_as(&self, bytes: Vec<u8>, origin: &str) {
         let bytes = self.charset.encode(bytes);

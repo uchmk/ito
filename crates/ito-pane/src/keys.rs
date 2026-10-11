@@ -69,12 +69,17 @@ pub fn special_record(key: Special, mods: Mods) -> Vec<u8> {
     record(vk, scan, ch, mods, enhanced)
 }
 
-/// A letter or digit held with Ctrl or Alt as a win32-input-mode record.
-/// `None` for anything else, which then goes as the bytes it always did.
+/// A letter or digit held with Ctrl or Alt as a win32-input-mode record, and
+/// `Ctrl+[` and `Ctrl+Space`. `None` for anything else, which then goes as the
+/// bytes it always did.
 ///
 /// `ch` is what the key would type: the control code under Ctrl (`Ctrl+C` is
 /// 3), the character itself under Alt alone. The scan codes are a US
 /// keyboard's, which is what ConPTY expects of a synthesised key.
+///
+/// `Ctrl+[` and `Ctrl+Space` are records because their VT bytes run together:
+/// ESC and then NUL reached ConPTY's input parser as one Alt+Ctrl+Space, and
+/// `cat -v` saw neither (kura #341). The `[` is the US keyboard's `VK_OEM_4`.
 pub fn char_record(c: char, mods: Mods) -> Option<Vec<u8>> {
     const LETTERS: [u16; 26] = [
         0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f,
@@ -82,6 +87,11 @@ pub fn char_record(c: char, mods: Mods) -> Option<Vec<u8>> {
     ];
     if !(mods.ctrl || mods.alt) {
         return None;
+    }
+    match c {
+        '[' if mods.ctrl => return Some(record(0xdb, 0x1a, 0x1b, mods, false)),
+        ' ' if mods.ctrl => return Some(record(0x20, 0x39, 0, mods, false)),
+        _ => {}
     }
     let (vk, scan) = match c.to_ascii_uppercase() {
         u @ 'A'..='Z' => (u as u16, LETTERS[(u as u8 - b'A') as usize]),
