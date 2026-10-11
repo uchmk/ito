@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.18.0] - 2026-10-12
+
+### 追加
+
+- `ito-common::window`: 窓の位置と大きさを覚える部品（ito#3 の 8）。`Window { x, y, w, h, maximized }`（外枠の位置と内側の大きさ、論理ポイント）、`read(dir)` / `write(dir, &w)` は状態のフォルダー（`state_dir`）の `window.toml` を読み書きする。数が窓として見えないもの（NaN・極端な大きさ・最小化の駐車位置 -32000）は書かず、読まない（`Window::sane`）。`Window::reachable(monitor, grab)` は主モニターの外へ出すぎた窓を断る。egui にも winit にも依存しない。使う側は、起動時に `read` で戻し、動いたら `write` する。
+
 ## [0.17.7] - 2026-10-12
 
 ### 追加
