@@ -208,6 +208,7 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         .margin(egui::vec2(10.0, 8.0))
         .font(FontId::proportional(12.5));
     let searched = nav_ui.add(search);
+    focus_ring(&nav_ui, &searched);
     if keys.find {
         searched.request_focus();
     }
@@ -230,6 +231,10 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     if searched.lost_focus() && nav_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
         if let Some(first) = shown.first() {
             state.page = *first;
+            // The keys go on to the first row the search lights.
+            if !q.is_empty() {
+                ui.data_mut(|d| d.insert_temp(egui::Id::new(JUMP), true));
+            }
         }
     }
     if shown.is_empty() {
@@ -283,6 +288,8 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
             body(ui, page, l);
         });
     });
+    // No row lit took the keys: they stay where the search left them.
+    ui.data_mut(|d| d.remove::<bool>(egui::Id::new(JUMP)));
     // The file last, so Tab comes to it after the page.
     let foot = egui::Rect::from_min_max(
         egui::pos2(side.left() + 10.0, side.bottom() - 48.0),
@@ -298,6 +305,18 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     out.open_file = file.clicked();
     state.held = ui.memory(|m| m.focused().is_some());
     out
+}
+
+/// Enter in the search: the first row it lights takes the keys.
+const JUMP: &str = "prefs-jump";
+/// The row taking the keys: its control takes them.
+const JUMP_HERE: &str = "prefs-jump-here";
+
+/// The control `r` takes the keys, when the row it is in is to have them.
+fn take_keys(ui: &egui::Ui, r: &egui::Response) {
+    if ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(JUMP_HERE))).is_some() {
+        r.request_focus();
+    }
 }
 
 /// A card of rows under a small heading.
@@ -336,7 +355,14 @@ pub fn row<R>(ui: &mut egui::Ui, l: Look, label: &str, note: &str, control: impl
         // The control first, on the right; the words wrap in what is left,
         // never under it.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let jump = hit && ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(JUMP))).is_some();
+            if jump {
+                ui.data_mut(|d| d.insert_temp(egui::Id::new(JUMP_HERE), true));
+            }
             r = Some(control(ui));
+            if jump {
+                ui.data_mut(|d| d.remove::<bool>(egui::Id::new(JUMP_HERE)));
+            }
             ui.add_space(16.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.vertical(|ui| {
@@ -368,6 +394,7 @@ pub fn switch(ui: &mut egui::Ui, l: Look, on: bool) -> bool {
     p.rect_filled(rect, 11.0, if on { c.run } else { c.border_strong() });
     let x = if on { rect.right() - 11.0 } else { rect.left() + 11.0 };
     p.circle_filled(egui::pos2(x, rect.center().y), 8.0, if on { c.on_accent() } else { c.dim });
+    take_keys(ui, &resp);
     focus_ring(ui, &resp);
     resp.clicked()
 }
@@ -383,11 +410,12 @@ pub fn focus_ring(ui: &egui::Ui, r: &egui::Response) {
 pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
     let mut pick = now;
     let shown = options.iter().find(|(v, _)| *v == now).map_or("", |(_, t)| *t).to_owned();
-    egui::ComboBox::from_id_salt(("prefs", id)).selected_text(shown).width(190.0).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt(("prefs", id)).selected_text(shown).width(190.0).show_ui(ui, |ui| {
         for (v, t) in options {
             ui.selectable_value(&mut pick, *v, *t);
         }
     });
+    take_keys(ui, &combo.response);
     (pick != now).then_some(pick)
 }
 
@@ -399,6 +427,7 @@ pub fn button(ui: &mut egui::Ui, l: Look, words: &str) -> bool {
         .corner_radius(7.0)
         .min_size(egui::vec2(0.0, 30.0));
     let r = ui.add(b);
+    take_keys(ui, &r);
     focus_ring(ui, &r);
     r.clicked()
 }
@@ -419,7 +448,8 @@ pub struct Draft {
 pub type Drafts = HashMap<String, Draft>;
 
 /// A one-line field that writes when Enter is pressed or it is left (Esc
-/// leaves it as it was): the new words, when they differ.
+/// leaves it as it was): the new words, when they differ. The words are all
+/// picked when it takes the keys, so what is typed replaces them.
 pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: &str, width: f32) -> Option<String> {
     let eid = egui::Id::new(("prefs-field", id));
     let focused = ui.memory(|m| m.has_focus(eid));
@@ -439,7 +469,15 @@ pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: 
         .desired_width(width)
         .font(FontId::monospace(12.5))
         .margin(egui::vec2(10.0, 6.0));
-    let resp = ui.add(edit);
+    let shown = edit.show(ui);
+    let resp = &shown.response.response;
+    take_keys(ui, resp);
+    if resp.gained_focus() {
+        let mut st = shown.state.clone();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::select_all(&shown.galley)));
+        st.store(ui.ctx(), eid);
+    }
+    focus_ring(ui, resp);
     if resp.has_focus() || resp.changed() {
         drafts.insert(id.to_owned(), Draft { text: text.clone(), sent: None });
     }
@@ -540,6 +578,20 @@ fn picked(choice: (&str, &str, &str), name: &str, light: bool) -> bool {
     }
 }
 
+/// The name of the theme in force: in Follow OS, the one picked for the kind
+/// shown (`light`). As the theme list spells it, when it has the theme.
+fn in_force<'a>(themes: &'a [Theme], choice: (&'a str, &'a str, &'a str), light: bool) -> &'a str {
+    let (theme, dark, bright) = choice;
+    let name = match theme {
+        "system" if light => bright,
+        "system" => dark,
+        "dark" => "tsumugi Dark",
+        "light" => "tsumugi Light",
+        other => other,
+    };
+    themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)).map_or(name, |t| t.name.as_str())
+}
+
 /// The theme page: the mode (Follow OS, Light, Dark) under the heading, the
 /// themes of that mode on the left, and on the right the preview the app
 /// draws in the theme in force (`l.c`). `choice` is common.toml's `theme`,
@@ -618,7 +670,7 @@ pub fn theme_page(
                         // Follow OS keeps one theme for each kind: the one shown
                         // now is lit, the other only named as the other kind's.
                         let chosen = picked(choice, &t.name, t.colors.light);
-                        let on = chosen && (mode != "system" || t.colors == l.c);
+                        let on = chosen && (mode != "system" || t.colors.light == l.c.light);
                         let (r, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
                         let p = ui.painter();
                         if on {
@@ -675,8 +727,10 @@ pub fn theme_page(
         });
         ui.add_space(20.0);
         ui.vertical(|ui| {
-            let name = themes.iter().find(|t| t.colors == l.c).map_or("", |t| t.name.as_str());
-            ui.label(RichText::new(format!("{} · {name}", w.preview)).size(11.0).strong().color(c.dim));
+            // By the name picked, not the colours: a theme.toml that repaints
+            // the window leaves no theme with these colours (kura #321).
+            let name = in_force(themes, choice, l.c.light);
+            ui.label(RichText::new(format!("{} · {name}", w.preview)).size(11.0).strong().color(c.fg));
             preview(ui);
         });
     });
@@ -742,6 +796,94 @@ mod tests {
             walk(&c.shape, &mut texts);
         }
         (changes, texts)
+    }
+
+    #[test]
+    fn the_preview_names_the_theme_picked() {
+        let themes = ito_theme::builtin();
+        let choice = ("system", "Nord", "tsumugi Light");
+        assert_eq!(in_force(&themes, choice, false), "Nord");
+        assert_eq!(in_force(&themes, choice, true), "tsumugi Light");
+        assert_eq!(in_force(&themes, ("light", "", ""), false), "tsumugi Light");
+        assert_eq!(in_force(&themes, ("nord", "", ""), false), "Nord", "as the list spells it");
+        assert_eq!(in_force(&themes, ("Mine", "", ""), false), "Mine", "an app's own, not built in");
+    }
+
+    fn key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE }
+    }
+
+    fn tap(k: egui::Key) -> Vec<egui::Event> {
+        vec![key(k, true), key(k, false)]
+    }
+
+    /// One frame of a page of a field and a switch: what the field wrote.
+    fn form(ctx: &egui::Context, state: &mut State, drafts: &mut Drafts, events: Vec<egui::Event>) -> Option<String> {
+        let nav = Nav { pages: &[("Form", "")], index: &[(0, "Width"), (0, "Wrap")], words: &EN, file: "config.toml" };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        let mut wrote = None;
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                show(ui, ito_theme::colors(), state, &nav, Keys::default(), |ui, _, l| {
+                    section(ui, l, "LIST", |ui| {
+                        wrote = row(ui, l, "Width", "", |ui| field(ui, drafts, "width", "14", "", 80.0));
+                        sep(ui, l);
+                        row(ui, l, "Wrap", "", |ui| switch(ui, l, false));
+                    });
+                });
+            });
+        });
+        out.textures_delta.clear();
+        wrote
+    }
+
+    fn focused(ctx: &egui::Context) -> Option<egui::Id> {
+        ctx.memory(|m| m.focused())
+    }
+
+    /// Tab comes to the field with its words picked, so what is typed
+    /// replaces them (kura #324, #340).
+    #[test]
+    fn a_field_tabbed_to_is_typed_over() {
+        let ctx = egui::Context::default();
+        let (mut state, mut drafts) = (State::default(), Drafts::new());
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Tab));
+        assert_eq!(focused(&ctx), Some(egui::Id::new("prefs-search")), "the search first");
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Tab));
+        assert_eq!(focused(&ctx), Some(egui::Id::new(("prefs-field", "width"))));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        form(&ctx, &mut state, &mut drafts, vec![egui::Event::Text("abc".into())]);
+        assert_eq!(form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter)), Some("abc".into()));
+    }
+
+    /// Enter in the search hands the keys to the first row it lights.
+    #[test]
+    fn enter_in_the_search_goes_to_the_row_found() {
+        let ctx = egui::Context::default();
+        let (mut state, mut drafts) = (State::default(), Drafts::new());
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Tab));
+        form(&ctx, &mut state, &mut drafts, vec![egui::Event::Text("wrap".into())]);
+        assert_eq!(state.query, "wrap");
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        let at = focused(&ctx).expect("a control has the keys");
+        assert_ne!(at, egui::Id::new("prefs-search"));
+        assert_ne!(at, egui::Id::new(("prefs-field", "width")), "the row the search lit, not the first");
+        // The width row next, as the search lights it.
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Escape));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("prefs-search")));
+        state.query = "wid".into();
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        assert_eq!(focused(&ctx), Some(egui::Id::new(("prefs-field", "width"))));
     }
 
     /// A click on a theme writes it into common.toml; the keys walk the

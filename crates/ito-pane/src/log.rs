@@ -113,6 +113,7 @@ fn name_key(vk: u32, uc: u32, kd: u32, cs: u32) -> String {
         _ => match char::from_u32(uc).filter(|c| !c.is_control()) {
             Some(c) => return format!("{name}{c}{}", if kd == 0 { " up" } else { "" }),
             // Ctrl turns a letter into a control character; the key is the letter.
+            None if vk == 0xdb => "[".to_owned(),
             None => {
                 char::from_u32(vk).filter(char::is_ascii_alphanumeric).map_or(format!("vk{vk}"), |c| c.to_ascii_lowercase().to_string())
             }

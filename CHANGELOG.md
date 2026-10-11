@@ -3,6 +3,36 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.14.0] - 2026-10-11
+
+### 追加
+
+- `ito-pane`: `Terminal::log_note(text)`。PTY のログ（`KURA_PTY_LOG` など）に、PTY を渡ったバイトでない 1 行（`note`）を書く。
+  ペインが受けて何も送らなかったキーを、ログから見えるようにするため（kura #332）。ログが無ければ何もしない。
+- `scripts/lanes/keys.ps1`: `-Isolate`。`lanes.conf` の `isolate=`（空白区切りの環境変数）をそれぞれ、走らせたフォルダの下の空のフォルダに向け、
+  機械の設定を読まず書かない。
+- `scripts/lanes/keys.ps1`: 前面のシステムのダイアログ（ファイアウォールや Windows セキュリティの確認、`Shell_SystemDialog` など）を見る。
+  アプリが動いている間に出たら `blocked.txt` に書き、結果にしない（終了コード 3）。`-Foreground` だけで、今出ているかを 1 行で言う
+  （マウスの行の前に。合成のマウスの入力はダイアログの間アプリに届かない。kura #327）。
+
+### 変更
+
+- `ito-pane`: win32 の入力モードで、Ctrl+[ と Ctrl+Space をそれぞれのキーのレコード（VK_OEM_4 と VK_SPACE）で送る。
+  前は ESC と NUL の素のバイトで、ConPTY が 2 つを 1 つの Alt+Ctrl+Space と読んでいた（kura #341）。`[` の仮想キーは US の配列を前提にする。
+  PTY のログはこのキーを `Ctrl+[` と名前で書く。
+- `ito-prefs`: 検索の欄で Enter を押すと、ページを移るだけでなく、検索が照らした最初の行の部品（欄・スイッチ・選択・ボタン）にフォーカスを渡す。
+  検索の欄と文字の欄にも、ほかの部品と同じフォーカスの輪を描く（kura #340）。
+- `ito-prefs`: 文字の欄がフォーカスを得たら中身を全部選ぶ。打てば置き換わる（前は末尾に足されて `14abc` になった。kura #324）。
+- `ito-prefs`: テーマのページの PREVIEW の見出しに、色の一致でなく選んでいるテーマの名前を出し、色を `fg` にする。
+  theme.toml が窓を塗り直していると、どの組み込みのテーマとも色が合わず、名前が空だった（kura #321）。
+  Follow OS の一覧で今のテーマを照らすのも、色でなく明暗（`Colors::light`）で比べる。
+
+### 使う側がやること
+
+- `rev` を上げる（公開の API は足しただけ）。
+- `scripts/lanes.sh sync` で keys.ps1 を写す。`-Isolate` を使うなら `scripts/lanes.conf` に `isolate=` を足す
+  （例: kura は `isolate=KURA_CONFIG_HOME YAZI_CONFIG_HOME KURA_STATE_HOME UCHMK_CONFIG_DIR`）。
+
 ## [0.13.0] - 2026-10-11
 
 ### 追加
