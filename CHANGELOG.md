@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.16.0] - 2026-10-11
+
+### 追加
+
+- `ito-notify`: 人に知らせる 3 つの手段。`toast::show`（システムの通知。Windows はトースト、macOS は AppleScript、ほかは `notify-send`）、`sound::play`（`chime`・`low`・`alert`・`default`）と `sound::quiet_time`（Windows の集中モードなど）、`webhook::send`（ntfy・Slack・JSON。システムの `curl` で、スレッドで送る）。tsumugi の `sound.rs` と `webhook.rs` をそのまま切り出した。設定の言葉は `SOUNDS`・`FORMATS`、アドレスの検査は `is_http`。使う側（yagura が最初）が `[notify]` に同じキーを持つ。tsumugi を `ito-notify` に載せ替えるのはこの後。
+
 ## [0.15.3] - 2026-10-11
 
 ### 変更

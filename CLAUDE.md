@@ -15,6 +15,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`） | tsumugi、yagura |
 | `ito-theme` | 組み込みの 13 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
+| `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / JSON）） | yagura（tsumugi も載せ替える） |
 | `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。依存は serde と toml だけ | kura（dev-dependencies） |
 
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
