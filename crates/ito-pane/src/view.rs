@@ -181,6 +181,9 @@ impl CursorStyle {
 
 /// How long the cursor stays on, then off, while it blinks.
 const BLINK: f64 = 0.53;
+/// How long text an input method committed stays drawn at the cursor while
+/// waiting for the program to echo it.
+const IME_HOLD: f64 = 0.25;
 
 /// The rows as text, a line each, without the blanks at their ends or the
 /// blank lines under the last one written: what a screen reader reads.
@@ -573,17 +576,31 @@ pub fn show_faces<P: Pane + ?Sized>(
             // frames (an event comes only when it changes), drawn at the
             // cursor, underlined, over what is there.
             let preedit_id = id.with("ime-preedit");
+            // A commit is kept drawn at the same place until the program has
+            // echoed it (the cursor moves) or a moment has passed: without
+            // that the text vanishes at the commit and comes back from the
+            // left once the echo arrives, which looks like typing it again.
+            let now = ui.input(|i| i.time);
             let said = ui.ctx().input(|i| {
                 i.events.iter().rev().find_map(|e| match e {
-                    egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => Some(text.clone()),
-                    egui::Event::Ime(egui::ImeEvent::Commit(_)) => Some(String::new()),
+                    egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => Some((text.clone(), None)),
+                    egui::Event::Ime(egui::ImeEvent::Commit(text)) => Some((text.clone(), Some(((cx, cy), now)))),
                     _ => None,
                 })
             });
-            if let Some(text) = said {
-                ui.ctx().data_mut(|d| d.insert_temp(preedit_id, text));
+            if let Some(said) = said {
+                ui.ctx().data_mut(|d| d.insert_temp(preedit_id, said));
             }
-            let preedit = ui.ctx().data(|d| d.get_temp::<String>(preedit_id)).unwrap_or_default();
+            let (preedit, committed) =
+                ui.ctx().data(|d| d.get_temp::<(String, Option<((usize, usize), f64)>)>(preedit_id)).unwrap_or_default();
+            let preedit = match committed {
+                Some((was, since)) if was == (cx, cy) && now - since < IME_HOLD => {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(IME_HOLD - (now - since)));
+                    preedit
+                }
+                Some(_) => String::new(),
+                None => preedit,
+            };
             if !preedit.is_empty() {
                 let g = painter.layout_no_wrap(preedit, f.clone(), pal.fg);
                 let place = Rect::from_min_size(at.left_top(), g.size());
