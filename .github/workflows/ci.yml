@@ -46,6 +46,16 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- -D warnings
 
+  # The lanes' scripts the apps copy (scripts/lanes/FILES): parsed, and
+  # merge-lanes.py's self-test run. Nothing of them runs against a repository.
+  lanes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: for f in scripts/lanes/*.sh; do bash -n "$f"; done
+      - run: python3 scripts/lanes/merge-lanes.py --self-test
+      - run: pwsh -NoProfile -File scripts/lanes/check-ps1.ps1
+
   fmt:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,14 @@
+[package]
+name = "ito-testcheck"
+description = "The checklists an app's lanes tick: TESTING.md rearranged into one line per check, and one line per binding of a yazi-style keymap, ticks kept across regenerations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The annotations file (`scripts/testcheck-ja.toml`); the same versions as
+# ito-common, both Pure Rust.
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"

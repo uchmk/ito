@@ -32,4 +32,9 @@ tests=$(echo "$last" | grep 'test result' | awk '{p+=$4; f+=$6} END {print p " p
 run cargo +stable clippy -q --workspace --all-targets --all-features -- -D warnings
 run cargo +stable clippy -q --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- -D warnings
 run cargo +stable clippy -q --workspace --all-targets -- -D warnings
+# The lanes' scripts (scripts/lanes/FILES): they run in the apps, so here they
+# are only parsed, and merge-lanes.py's self-test run.
+for f in scripts/lanes/*.sh; do run bash -n "$f"; done
+run python3 scripts/lanes/merge-lanes.py --self-test
+if command -v pwsh >/dev/null; then run pwsh -NoProfile -File scripts/lanes/check-ps1.ps1; fi
 echo "ALL OK: $tests"
