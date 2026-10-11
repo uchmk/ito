@@ -699,7 +699,9 @@ impl Terminal {
     fn send_as(&self, bytes: Vec<u8>, origin: &str) {
         let bytes = self.charset.encode(bytes);
         log_pty(&self.log, origin, &bytes);
-        if origin != "in reply" {
+        // Neither a reply nor the pane gaining or losing the keys is a person
+        // answering: a "waiting" noticed before it still stands.
+        if origin != "in reply" && bytes != crate::focus_bytes(true) && bytes != crate::focus_bytes(false) {
             *self.last_input.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
         }
         // Typing is an answer to what is on screen, so the view comes back to

@@ -211,6 +211,21 @@ mod pane {
         assert_eq!(String::from_utf8_lossy(&got), "\x1b]11;rgb:101", "{got:?}");
     }
 
+    /// Gaining or losing the keys is not a person answering: it does not
+    /// count as input (a "waiting" noticed before it still stands).
+    #[cfg(unix)]
+    #[test]
+    fn focus_is_not_input() {
+        let dir = crate::util::test_dir("term-focus-input");
+        let shell = Some(("sh".to_owned(), vec!["-c".to_owned(), "sleep 5".to_owned()]));
+        let t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
+        t.send(crate::focus_bytes(true));
+        t.send(crate::focus_bytes(false));
+        assert!(t.last_input().is_none());
+        t.send(b"x".to_vec());
+        assert!(t.last_input().is_some());
+    }
+
     /// A recording holds the screen as it began, what the shell wrote after,
     /// as `.cast` lines, and a resize.
     #[cfg(unix)]
