@@ -56,6 +56,7 @@ pub use keys::*;
 pub use liga::Shaper;
 pub use link::{hints, link_at, Hint, Link};
 pub use log::escape_bytes;
+pub use osc::set_identity;
 pub use pane::{Pane, Screen};
 /// The regular expressions triggers are written in, for an app to make them.
 pub use regex;

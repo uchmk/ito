@@ -63,7 +63,6 @@ crates.io には出さない。使う側は git の依存を `rev` で固定し�
   クレートごとに 1 つ `--config` を足す。確かめ終えたら ito を push し、使う側の `rev` を上げてから使う側を push する。
 - 文書・テストの中の `tsumugi` は、名前の変更から外したもの。どれも動きに関わる:
   - 動きに関わる文字列: OSC の URI（`tsumugi:prompt`・`tsumugi:output`・`tsumugi:img?`）、id（`tsumugi-mark`・`tsumugi-img-`）、一時フォルダの名前（`tsumugi-cast-` など）。
-  - XTVERSION の応答（`crates/ito-pane/src/osc.rs`）。アプリの名前と版を渡す形にする件は TODO にある。
 
 ## 持ち主の PC への依頼（needs-pc）
 

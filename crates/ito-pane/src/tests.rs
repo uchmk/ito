@@ -1586,7 +1586,7 @@ mod identity_tests {
     use alacritty_terminal::term::{Config, Term};
     use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
-    use crate::osc::{answer_query, cell_size, scan_cell_size, scan_xtversion, xtversion};
+    use crate::osc::{answer_query, cell_size, scan_cell_size, scan_xtversion, xtversion, xtversion_for};
     use crate::{Proxy, Size};
 
     /// The replies the parser wrote back, as the pane would send them, for
@@ -1644,8 +1644,10 @@ mod identity_tests {
         assert_eq!(scan_xtversion(&mut tail, b"0q\x1b[c"), 1, "across two reads");
         assert_eq!(scan_xtversion(&mut tail, b"\x1b[>4;2m\x1b[>1q"), 0, "other CSI > are not this");
         assert!(tail.len() < 5);
+        assert_eq!(xtversion_for("kura", "1.2.3"), b"\x1bP>|kura 1.2.3\x1b\\");
+        // The identity is the process's, so other tests may have set it: only the form is fixed.
         let reply = String::from_utf8(xtversion()).unwrap();
-        assert_eq!(reply, format!("\x1bP>|tsumugi {}\x1b\\", env!("CARGO_PKG_VERSION")));
+        assert!(reply.starts_with("\x1bP>|") && reply.ends_with("\x1b\\"), "{reply:?}");
     }
 
     /// DECRQM: set (1), reset (2), and 0 only for what is not known at all.

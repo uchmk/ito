@@ -105,10 +105,28 @@ pub(crate) fn cell_size((w, h): (u16, u16)) -> Vec<u8> {
     format!("\x1b[6;{};{}t", h.max(1), w.max(1)).into_bytes()
 }
 
+/// The name and version the pane gives as itself, set once by the app.
+static IDENTITY: std::sync::OnceLock<(&'static str, &'static str)> = std::sync::OnceLock::new();
+
+/// Name the app the panes answer XTVERSION (`\e[>q`) as, such as
+/// `set_identity("kura", env!("CARGO_PKG_VERSION"))`. Call it once, first
+/// thing in `main`, next to [`crate::restrict_dll_search`]: the first call
+/// wins and later ones are ignored. Without it the pane answers as
+/// `ito-pane` and its own version.
+pub fn set_identity(name: &'static str, version: &'static str) {
+    let _ = IDENTITY.set((name, version));
+}
+
 /// The answer to XTVERSION, in the form xterm, kitty and WezTerm give it:
 /// a DCS `>|` with the name and version.
+pub(crate) fn xtversion_for(name: &str, version: &str) -> Vec<u8> {
+    format!("\x1bP>|{name} {version}\x1b\\").into_bytes()
+}
+
+/// [`xtversion_for`] the app named by [`set_identity`].
 pub(crate) fn xtversion() -> Vec<u8> {
-    format!("\x1bP>|tsumugi {}\x1b\\", env!("CARGO_PKG_VERSION")).into_bytes()
+    let (name, version) = IDENTITY.get().copied().unwrap_or(("ito-pane", env!("CARGO_PKG_VERSION")));
+    xtversion_for(name, version)
 }
 
 /// What goes back for a query alacritty answered, put right where it says
