@@ -416,6 +416,7 @@ pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options:
         }
     });
     take_keys(ui, &combo.response);
+    focus_ring(ui, &combo.response);
     (pick != now).then_some(pick)
 }
 
@@ -482,6 +483,11 @@ pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: 
         drafts.insert(id.to_owned(), Draft { text: text.clone(), sent: None });
     }
     if resp.lost_focus() {
+        // Enter is reported on two frames in a row; what was sent is not sent
+        // again until the field has had the keys (which clears `sent`).
+        if drafts.get(id).is_some_and(|d| d.sent.is_some()) {
+            return None;
+        }
         drafts.remove(id);
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || text == now {
             return None;

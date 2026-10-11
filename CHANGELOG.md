@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.17.6] - 2026-10-12
+
+### 修正
+
+- `ito-prefs`: `select`（Language・Scale などのコンボ）にもフォーカスの輪が出る。ボタンと入力欄にはあった。
+- `ito-prefs`: `field` が Enter を 2 フレーム続けて返し、有効な値でも 2 回書き込まれていた（使う側の「Saved」のトーストが 2 回出た）。送った値は、欄がもう一度キーを持つまで返さない。
+
 ## [0.17.5] - 2026-10-11
 
 ### 修正
