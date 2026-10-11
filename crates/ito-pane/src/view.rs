@@ -707,7 +707,16 @@ pub fn show_faces<P: Pane + ?Sized>(
     if let Some(p) = pointer {
         if resp.double_clicked() {
             let (col, line, _) = cell_at(p);
-            term.select_word((col, line));
+            // A link is one word however many separators it holds
+            // (`https://host/a?b=c`), so the whole of it is taken rather than
+            // what the word rule stops at.
+            match rows.get(line).and_then(|r| crate::link_at(r, col)) {
+                Some((cells, _)) if !cells.is_empty() => {
+                    term.select((cells.start, line), false, true);
+                    term.select((cells.end - 1, line), true, false);
+                }
+                _ => term.select_word((col, line)),
+            }
         } else if resp.drag_started() {
             // Where the button went down, not where the pointer is now: egui
             // calls a drag started only once it has moved past a threshold,

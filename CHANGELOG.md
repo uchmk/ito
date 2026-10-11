@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.17.1] - 2026-10-11
+
+### 変更
+
+- `ito-pane`: https:// などのリンクの上でダブルクリックすると、単語の規則で途中で切れず、リンク全体（`https://host/a?b=c`）を選ぶ。リンクでない所は今までどおり単語。Ctrl / Cmd+クリックで開くのも今までどおり。
+
 ## [0.17.0] - 2026-10-11
 
 ### 追加
