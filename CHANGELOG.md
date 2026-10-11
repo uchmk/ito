@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.17.7] - 2026-10-12
+
+### 追加
+
+- `ito-keys`: `display_seq`（と、OS を指定する `display_seq_for`）。macOS（`C` が Cmd）では `<C-q>` を `⌘Q`、`<C-A-x>` を `⌥⌘X` と書き、素の名前つきキーは `<Enter>` のまま。ほかの OS では keymap の書き方（`render_seq`）のまま。kura の `config/keys.rs` にあったものを移した（kura#345 の提案 5）。`human_seq`（`Ctrl+Q` と書く）とは別の綴り。
+
 ## [0.17.6] - 2026-10-12
 
 ### 修正

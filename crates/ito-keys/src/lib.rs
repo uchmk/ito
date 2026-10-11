@@ -270,6 +270,49 @@ pub fn human_seq(keys: &[Key]) -> String {
     keys.iter().map(Key::human).collect::<Vec<_>>().join(" ")
 }
 
+/// A chord sequence the way a reader of a help or a status line sees it: on
+/// macOS, where `C` is Cmd, `<C-q>` is `⌘Q` and `<C-A-x>` is `⌥⌘X`
+/// (`⌥⇧⌘` in that order, then the key); a bare named key stays `<Enter>`;
+/// elsewhere it is the keymap's own notation ([`render_seq`]). Matching and
+/// the keymap keep using [`render_seq`]; this is only for text a reader sees.
+/// kura's spelling; [`human_seq`] is the one that says `Ctrl+Q`.
+pub fn display_seq(keys: &[Key]) -> String {
+    display_seq_for(keys, cfg!(target_os = "macos"))
+}
+
+/// [`display_seq`] for `mac` named, so either spelling can be tested anywhere.
+pub fn display_seq_for(keys: &[Key], mac: bool) -> String {
+    if !mac {
+        return render_seq(keys);
+    }
+    keys.iter().map(mac_key).collect()
+}
+
+/// One key the macOS way: `⌥⇧⌘` in that order, then the key.
+fn mac_key(k: &Key) -> String {
+    let label = match k.code {
+        Code::Char(' ') => "Space".to_string(),
+        Code::Char(c) => c.to_uppercase().to_string(),
+        Code::Named(n) => n.label(),
+    };
+    let named = !matches!(k.code, Code::Char(c) if c != ' ');
+    let shift = k.shift && k.code != Code::Named(Named::BackTab);
+    if !(k.ctrl || k.alt || k.sup || shift) {
+        return if named { format!("<{label}>") } else { k.to_string() };
+    }
+    let mut out = String::new();
+    if k.alt {
+        out.push('⌥');
+    }
+    if shift {
+        out.push('⇧');
+    }
+    if k.ctrl || k.sup {
+        out.push('⌘');
+    }
+    out + &label
+}
+
 /// Translate an egui key event into our representation.
 ///
 /// Returns `None` for events that arrive as text instead (bare printable
@@ -407,6 +450,23 @@ mod tests {
 
     /// `<A-G>` as written in a keymap is what Alt+Shift+G arrives as: the
     /// letter lowercased with Shift carried beside it (Q76's preview end).
+    /// What a reader sees on macOS (Cmd is `C` there) and elsewhere.
+    #[test]
+    fn display_seq_spells_macos_keys_with_symbols() {
+        let seq = |s: &str| -> Vec<Key> { s.split(' ').map(|k| Key::parse(k).unwrap()).collect() };
+        let mac = |s: &str| display_seq_for(&seq(s), true);
+        assert_eq!(mac("<C-q>"), "⌘Q");
+        assert_eq!(mac("<C-A-x>"), "⌥⌘X");
+        assert_eq!(mac("<C-A>"), "⇧⌘A");
+        assert_eq!(mac("<A-g>"), "⌥G");
+        assert_eq!(mac("<C-F5>"), "⌘F5");
+        assert_eq!(mac("<Enter>"), "<Enter>");
+        assert_eq!(mac("<BackTab>"), "<BackTab>");
+        assert_eq!(mac("g g"), "gg");
+        assert_eq!(mac("G"), "G");
+        assert_eq!(display_seq_for(&seq("<C-q>"), false), "<C-q>");
+    }
+
     #[test]
     #[cfg(feature = "egui")]
     fn alt_shift_letter_matches_its_capital() {
