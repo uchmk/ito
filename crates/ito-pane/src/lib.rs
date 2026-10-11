@@ -13,6 +13,8 @@
 //! ([`gpu`]). What differs by OS is in `sys`.
 //! The plan this crate is being built by is `docs/pane-extraction.md`.
 
+#[cfg(feature = "egui")]
+mod bidi;
 mod cast;
 mod charset;
 #[cfg(feature = "wgpu")]

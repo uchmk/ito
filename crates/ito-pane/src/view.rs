@@ -356,15 +356,41 @@ pub fn show_faces<P: Pane + ?Sized>(
     let baseline = faces.shaper.as_ref().map(|_| {
         painter.layout_no_wrap("M".into(), f.clone(), pal.fg).rows.first().and_then(|r| r.glyphs.first()).map_or(0.0, |g| g.pos.y)
     });
-    for (y, row) in rows.iter().enumerate() {
+    // Rows with right-to-left text are drawn in the order they are read;
+    // the rest, and everything but the drawing, keep the program's order.
+    let orders: Vec<Option<crate::bidi::Order>> = rows.iter().map(|r| crate::bidi::order(r)).collect();
+    for (y, logical) in rows.iter().enumerate() {
         let top = inner.top() + y as f32 * row_h;
         if top > inner.bottom() {
             break;
         }
+        // What the triggers colour in the row, by cell.
+        let mut paint = crate::highlight_row(logical, opts.highlights);
+        let order = orders[y].as_ref();
+        let turned: Vec<crate::CellView>;
+        let row: &[crate::CellView] = match order {
+            Some(o) => {
+                turned = o
+                    .cells
+                    .iter()
+                    .zip(&o.rtl)
+                    .map(|(&l, &rtl)| {
+                        let mut c = logical[l];
+                        if rtl {
+                            c.c = crate::bidi::mirror(c.c);
+                        }
+                        c
+                    })
+                    .collect();
+                if !paint.is_empty() {
+                    paint = o.cells.iter().map(|&l| paint.get(l).copied().flatten()).collect();
+                }
+                &turned
+            }
+            None => logical,
+        };
         // Backgrounds first, run by run: one rectangle for a stretch of the
         // same color beats one per cell.
-        // What the triggers colour in the row, by cell.
-        let paint = crate::highlight_row(row, opts.highlights);
         let painted = |x: usize| paint.get(x).copied().flatten();
         let mut run: Option<(usize, Color32)> = None;
         for (x, cell) in row.iter().enumerate() {
@@ -393,7 +419,8 @@ pub fn show_faces<P: Pane + ?Sized>(
         // the cells a merged glyph covers, not drawn at all.
         let mut liga: Vec<Option<crate::liga::Sub>> = Vec::new();
         let mut hidden: Vec<bool> = Vec::new();
-        if let Some(shaper) = &faces.shaper {
+        // Not on a turned row: a ligature is shaped left to right.
+        if let Some(shaper) = faces.shaper.as_ref().filter(|_| order.is_none()) {
             liga = vec![None; row.len()];
             hidden = vec![false; row.len()];
             let plain = |c: &crate::CellView| {
@@ -480,6 +507,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     // The cursor: filled while the pane has the keys, outlined when it does
     // not, which is the same language the split panes use.
     let (cx, cy) = cursor;
+    let cx = orders.get(cy).and_then(Option::as_ref).map_or(cx, |o| o.visual(cx));
     if cy < size.lines && cx < size.cols {
         let cell = Vec2::new(cx as f32 * cell_w, cy as f32 * row_h);
         let style = faces.cursor;
@@ -510,7 +538,8 @@ pub fn show_faces<P: Pane + ?Sized>(
         if focused && !lit {
         } else if focused && style.shape == CursorShape::Block {
             painter.rect_filled(at, CornerRadius::ZERO, pal.cursor);
-            if let Some(cell) = rows.get(cy).and_then(|r| r.get(cx)).filter(|_| !moving) {
+            let drawn = orders.get(cy).and_then(Option::as_ref).map_or(cx, |o| o.logical(cx));
+            if let Some(cell) = rows.get(cy).and_then(|r| r.get(drawn)).filter(|_| !moving) {
                 if cell.c != ' ' {
                     painter.text(at.left_top(), Align2::LEFT_TOP, cell.c, f.clone(), pal.on_cursor);
                 }
@@ -554,7 +583,13 @@ pub fn show_faces<P: Pane + ?Sized>(
         let col = x.floor().max(0.0);
         let line = ((p.y - inner.top()) / row_h).floor().max(0.0) as usize;
         let cell = (col as usize).min(size.cols.saturating_sub(1));
-        (cell, line.min(size.lines.saturating_sub(1)), x - col >= 0.5)
+        let (line, right) = (line.min(size.lines.saturating_sub(1)), x - col >= 0.5);
+        // On a turned row, the cell drawn there; in a right-to-left run its
+        // halves change sides too.
+        match orders.get(line).and_then(Option::as_ref) {
+            Some(o) => (o.logical(cell), line, right != o.rtl.get(cell).copied().unwrap_or(false)),
+            None => (cell, line, right),
+        }
     };
     // Ctrl (Cmd on a Mac) over a web address or a path underlines it and
     // shows a hand; a click opens it, as in VS Code's and Windows Terminal's
@@ -563,6 +598,11 @@ pub fn show_faces<P: Pane + ?Sized>(
     // line, as in Windows Terminal: its text need not look like one.
     let x = |c: usize| inner.left() + c as f32 * cell_w;
     let under = |line: usize| inner.top() + (line + 1) as f32 * row_h - 1.5;
+    // Where cells of a line are drawn: one span, or several on a turned row.
+    let spans = |line: usize, cells: &std::ops::Range<usize>| match orders.get(line).and_then(Option::as_ref) {
+        Some(o) => o.spans(cells.start, cells.end),
+        None => vec![cells.clone()],
+    };
     // Each command that ended, a bar in the margin from its prompt to the
     // next: green for success, red for a failure (Warp's and iTerm2's marks).
     for b in &blocks {
@@ -581,10 +621,12 @@ pub fn show_faces<P: Pane + ?Sized>(
         }
     }
     for h in &hyperlinks {
-        let mut at = x(h.cells.start);
-        while at < x(h.cells.end) {
-            painter.hline(at..=(at + 2.0).min(x(h.cells.end)), under(h.line), Stroke::new(1.0, pal.fg_dim));
-            at += 4.0;
+        for cells in spans(h.line, &h.cells) {
+            let mut at = x(cells.start);
+            while at < x(cells.end) {
+                painter.hline(at..=(at + 2.0).min(x(cells.end)), under(h.line), Stroke::new(1.0, pal.fg_dim));
+                at += 4.0;
+            }
         }
     }
     let linking = over && ui.ctx().input(|i| i.modifiers.command);
@@ -595,7 +637,9 @@ pub fn show_faces<P: Pane + ?Sized>(
             .find(|h| h.line == line && h.cells.contains(&col))
             .map(|h| (h.cells.clone(), crate::Link::Url(h.uri.clone())));
         if let Some((cells, link)) = program.or_else(|| rows.get(line).and_then(|r| crate::link_at(r, col))) {
-            painter.hline(x(cells.start)..=x(cells.end), under(line), Stroke::new(1.0, pal.cursor));
+            for cells in spans(line, &cells) {
+                painter.hline(x(cells.start)..=x(cells.end), under(line), Stroke::new(1.0, pal.cursor));
+            }
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if resp.clicked() {
                 shown.open = Some(link);

@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = []
 # The pane drawn with egui: `show`, `Palette`, `wheel_whole`.
-egui = ["dep:egui", "dep:harfrust", "dep:skrifa", "dep:vello_cpu"]
+egui = ["dep:egui", "dep:harfrust", "dep:skrifa", "dep:vello_cpu", "dep:unicode-bidi"]
 # Choosing wgpu's backends (`gpu`), through the wgpu that egui draws with.
 wgpu = ["dep:egui-wgpu"]
 # `Screen` and its cells as serde types, for the tsumugi server to send.
@@ -32,6 +32,10 @@ harfrust = { version = "0.12", optional = true }
 skrifa = { version = "0.44", default-features = false, features = ["std"], optional = true }
 vello_cpu = { version = "0.1", default-features = false, features = ["std", "u8_pipeline"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
+# Right-to-left text (tsumugi's #28): the order a row is drawn in, by the
+# Unicode bidirectional algorithm. Pure Rust, Servo's; kura builds it already
+# (through resvg).
+unicode-bidi = { version = "0.3", optional = true }
 # A pane's character set other than UTF-8 (Shift_JIS, EUC-JP, ...): what the
 # program writes turned into UTF-8 for the parser, and what is typed back
 # (tsumugi's QUESTIONS.md Q11, the owner's yes on 2026-10-07). Pure Rust,
