@@ -658,7 +658,11 @@ pub fn theme_page(
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(300.0);
-            let list: Vec<&Theme> = themes.iter().filter(|t| mode == "system" || t.colors.light == (mode == "light")).collect();
+            // Light and Dark list their own kind; Follow OS lists the kind the
+            // OS is showing now (the other kind's theme is set when the OS
+            // turns to it, and could not be seen here).
+            let list: Vec<&Theme> =
+                themes.iter().filter(|t| t.colors.light == if mode == "system" { l.c.light } else { mode == "light" }).collect();
             ui.label(RichText::new(format!("{} · {}", w.themes, list.len())).size(11.0).strong().color(c.dim));
             egui::Frame::NONE
                 .fill(c.panel)
@@ -667,10 +671,7 @@ pub fn theme_page(
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
                     for t in list {
-                        // Follow OS keeps one theme for each kind: the one shown
-                        // now is lit, the other only named as the other kind's.
-                        let chosen = picked(choice, &t.name, t.colors.light);
-                        let on = chosen && (mode != "system" || t.colors.light == l.c.light);
+                        let on = picked(choice, &t.name, t.colors.light);
                         let (r, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
                         let p = ui.painter();
                         if on {
@@ -698,7 +699,7 @@ pub fn theme_page(
                             FontId::proportional(13.0),
                             if on { c.strong() } else { c.fg },
                         );
-                        let tagged = chosen && mode == "system";
+                        let tagged = on && mode == "system";
                         let kind = match (tagged, t.colors.light) {
                             (true, true) => w.when_light,
                             (true, false) => w.when_dark,

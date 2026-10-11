@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.15.3] - 2026-10-11
+
+### 変更
+
+- `ito-prefs`: テーマの画面で「OS に合わせる」のとき、一覧を今の OS の明暗に合うテーマだけにする（OS が暗ければダークだけ）。もう一方の明暗のテーマは、OS がそちらに替わったときに選ぶ。
+
 ## [0.15.2] - 2026-10-11
 
 ### 修正
