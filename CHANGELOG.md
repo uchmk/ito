@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.19.0] - 2026-10-12
+
+### 追加
+
+- `ito-common::update`: 「更新を確かめる」の部品（ito#3 の 7）。`check(repo, ours, wake)` が専用のスレッドでシステムの `curl` から GitHub の `releases/latest` を聞き、`Update::Newer(版)` / `Current` / `Unknown`（オフライン・`curl` なし・レート制限）を `Receiver` で返す。比べ方は `judge(body, ours)`（純粋な関数、`tag_name` の `v` を外して 3 つの数で比べる）。Windows では `curl` の窓を出さない。`serde_json` を足した。
+
 ## [0.18.0] - 2026-10-12
 
 ### 追加
