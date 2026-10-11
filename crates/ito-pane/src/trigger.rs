@@ -30,6 +30,20 @@ enum State {
     StrEsc,
 }
 
+/// Where the shell is, by its OSC 133 marks: a prompt and the command typed
+/// at it are not output, so a trigger does not hear its own words being
+/// typed (PSReadLine draws the line again at each key).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Part {
+    #[default]
+    Output,
+    /// From the prompt's start (`A`) to the output's (`C`).
+    Prompt,
+    /// After the prompt's end (`B`) with no `C` to come (pwsh): the line
+    /// ended next is the command.
+    Typed,
+}
+
 /// The output as plain lines: escape sequences taken out, a line ended by
 /// `\n`, and a lone `\r` starting it again (what a progress bar redraws
 /// with). Fed what is read, a piece at a time; a sequence or a line cut in
@@ -46,6 +60,9 @@ pub(crate) struct Lines {
     /// A full-screen program is on the alternate screen: what it draws
     /// there is not lines of output, and is not read.
     alt: bool,
+    /// An OSC's start so far (`133;A`), kept short.
+    osc: Vec<u8>,
+    part: Part,
 }
 
 impl Lines {
@@ -99,7 +116,10 @@ impl Lines {
                         self.end(&mut out);
                         State::Text
                     }
-                    b']' => State::Osc,
+                    b']' => {
+                        self.osc.clear();
+                        State::Osc
+                    }
                     b'P' | b'_' | b'^' | b'X' => State::Str,
                     // `ESC ( B` and its kind: the intermediate, then one more.
                     0x20..=0x2f => State::Esc,
@@ -122,12 +142,23 @@ impl Lines {
                     }
                 },
                 State::Osc => match b {
-                    0x07 => State::Text,
+                    0x07 => {
+                        self.mark(&mut out);
+                        State::Text
+                    }
                     0x1b => State::OscEsc,
-                    _ => State::Osc,
+                    _ => {
+                        if self.osc.len() < 8 {
+                            self.osc.push(b);
+                        }
+                        State::Osc
+                    }
                 },
                 State::OscEsc => match b {
-                    b'\\' => State::Text,
+                    b'\\' => {
+                        self.mark(&mut out);
+                        State::Text
+                    }
                     _ => State::Osc,
                 },
                 State::Str => match b {
@@ -155,12 +186,37 @@ impl Lines {
         }
     }
 
+    /// An OSC ended: a shell's mark moves between output and prompt. The
+    /// output's last line ends where the prompt starts, newline or not.
+    fn mark(&mut self, out: &mut Vec<String>) {
+        let Some(mark) = self.osc.strip_prefix(b"133;") else { return };
+        match mark.first() {
+            Some(b'A') => {
+                if self.part == Part::Output {
+                    self.end(out);
+                }
+                self.part = Part::Prompt;
+            }
+            Some(b'B') if self.part == Part::Prompt => self.part = Part::Typed,
+            Some(b'C') => {
+                // What is left of the command line is not output either.
+                self.line.clear();
+                self.cr = false;
+                self.part = Part::Output;
+            }
+            _ => {}
+        }
+    }
+
     fn end(&mut self, out: &mut Vec<String>) {
         self.cr = false;
         let text = String::from_utf8_lossy(&self.line);
         let text = text.trim();
-        if !text.is_empty() && !self.alt {
+        if !text.is_empty() && !self.alt && self.part == Part::Output {
             out.push(text.to_owned());
+        }
+        if self.part == Part::Typed && !text.is_empty() {
+            self.part = Part::Output;
         }
         self.line.clear();
     }
@@ -331,6 +387,23 @@ mod tests {
         let mut l = Lines::default();
         assert_eq!(l.feed(b" 10%\r 50%\r100% done\n"), vec!["100% done"]);
         assert_eq!(l.feed("ab\u{3042}\x08c\x08\x08d\tx\n".as_bytes()), vec!["ad x"]);
+    }
+
+    #[test]
+    fn a_prompt_and_the_command_typed_at_it_are_not_output() {
+        let mut l = Lines::default();
+        // pwsh: `D`, `A`, the prompt, `B`, the line drawn again at each key,
+        // then the output. A line with no newline ends at the prompt.
+        let pwsh = b"\x1b]133;D;0\x1b\\\x1b]133;A\x1b\\PS C:\\> \x1b]133;B\x1b\\echo Build\x1b[5D\x1b[Kecho Build succeeded\r\nBuild succeeded\r\nno newline";
+        assert_eq!(l.feed(pwsh), vec!["Build succeeded"]);
+        assert_eq!(l.feed(b"\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\r\n"), vec!["no newline"]);
+        // Enter on an empty command ends the typing too.
+        assert_eq!(l.feed(b"out\n"), vec!["out"]);
+        // bash and zsh: a prompt of two lines, the command, then `C`.
+        let bash = b"\x1b]133;A\x07~/src\n$ echo Build succeeded\n\x1b]133;C\x07Build succeeded\n";
+        assert_eq!(l.feed(bash), vec!["Build succeeded"]);
+        // Other OSCs leave it where it was.
+        assert_eq!(l.feed(b"\x1b]133;A\x07$ x\x1b]0;title\x07\n\x1b]7;file:///\x07y\n\x1b]133;C\x07z\n"), vec!["z"]);
     }
 
     #[test]
