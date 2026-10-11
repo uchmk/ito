@@ -5,7 +5,8 @@
 
 Run by .github/workflows/merge-lanes.yml. It merges a pull request from a lane
 branch (test/win-*, in tsumugi test/arm-*, in kura test/linux-*) with a merge commit
-pinned to its head, and only when all of these hold:
+pinned to its head, and only when all of these hold (yagura has no lanes: there
+it only keeps the labels and counts the votes):
 
   1. it touches only the files a lane may write: the checklists and one new
      report under qa-reports/ (kura), or the checklists and new files under
@@ -35,20 +36,22 @@ the merge routine reads (.claude/merge-routine.md).
 
 It also does the merger's share for lane pull requests merged in the last 7
 days whose `#N` is not in CHANGELOG.md: a PATCH bump (Cargo.toml and
-Cargo.lock) and a CHANGELOG line per pull request. In tsumugi it also takes
-the ticked rows out of the role's re-test list and lists the reports'
-proposals, queue notes and votes in TODO.md. In kura (since v0.102.0) they go
-to issues instead: a vote `- #N: option — why` on an open question issue as a
-comment there, the rest as one finding issue per pull request (a hidden
-`<!-- kura-lane:#N -->` keeps it from repeating), and the pull request gets
-the label lane-review, which the merge routine takes off once it has read the
-report.
+Cargo.lock) and a CHANGELOG line per pull request. The reports' proposals,
+queue notes and votes go to issues (kura since v0.102.0, tsumugi since
+v0.94.0): a vote `- #N: option — why` on an open question issue as a comment
+there, the rest as one finding issue per pull request (a hidden
+`<!-- kura-lane:#N -->`, named after the repository, keeps it from
+repeating), and the pull request gets the label lane-review, which the merge
+routine takes off once it has read the report. (A rule with share.role and
+todo_heading set takes the ticked rows out of the role's re-test list and
+lists the leftovers in TODO.md instead: tsumugi's way before v0.94.0.)
 
-In kura it also keeps the labels as LABELS says (`--labels` does only that),
-and counts the votes on the open question issues: `vote[cloud]:` and
-`vote[win]:` comments, the newest per voter, from the owner's account (or
-relayed here). Both on one option: vote-decided; apart: needs-owner; an
-owner's `回答:` makes it answered whatever the votes say.
+It also keeps the labels as LABELS says (each repository the ones its rule
+names; `--labels` does only that), and counts the votes on the open question
+issues: `vote[cloud]:` and `vote[win]:` comments, the newest per voter, from
+the owner's account (or relayed here). Both on one option: vote-decided;
+apart: needs-owner; an owner's `回答:` makes it answered whatever the votes
+say.
 
 Last, it watches the lanes' status issues ("Lane status: <lane>", label
 lane-status, written by the lane's machine at every firing): one whose last
@@ -121,7 +124,8 @@ RULES = {
             "issues": True,
             "dispatch": ["ci.yml"],
         },
-        # labels kept as LABELS says, and question issues' votes counted
+        # labels kept as LABELS says (True: all of them, or a list of names),
+        # and question issues' votes counted
         "labels": True,
         "votes": True,
     },
@@ -131,14 +135,31 @@ RULES = {
         "evidence_in_report": True,
         "required_checks": ["check"],
         "hold_heading": None,
+        # since v0.94.0 as kura's: re-tests come from retest issues, which the
+        # lane's pull request closes, and the leftovers go to issues
         "share": {
-            "role": ".claude/windows-role.md",
-            "todo_heading": "実機のレーンから",
+            "role": None,
+            "todo_heading": None,
             "todo_mark": "",
-            "issues": False,
+            "issues": True,
             # a push with the workflow's token starts no workflows, except these
             "dispatch": ["ci.yml", "checklists.yml"],
         },
+        "labels": True,
+        "votes": True,
+    },
+    # no lanes (its real-machine checks are TESTING.md, by hand): the labels
+    # the issue flow uses and the question issues' votes only
+    "uchmk/yagura": {
+        "lanes": {},
+        "reports": (0, 0),
+        "evidence_in_report": False,
+        "required_checks": [],
+        "hold_heading": None,
+        "share": None,
+        "labels": ["bug", "finding", "question", "lane:cloud", "lane:qa",
+                   "vote", "vote-decided", "needs-owner", "answered"],
+        "votes": True,
     },
 }
 
@@ -1034,11 +1055,19 @@ def file_findings(pr, lane, items):
     print(f"  #{n}: finding issue {status} {payload.get('html_url') or payload.get('message')}")
 
 
-def ensure_labels():
-    """Create or correct the labels in LABELS; others are left alone."""
+def wanted_labels(setting):
+    """The labels of LABELS a rule's `labels` asks for: True for all of them,
+    or a list of names; nothing when it is missing or false."""
+    if setting is True:
+        return dict(LABELS)
+    return {name: LABELS[name] for name in setting or []}
+
+
+def ensure_labels(setting=True):
+    """Create or correct the labels the rule names; others are left alone."""
     existing = {label["name"]: (label["color"], label.get("description") or "")
                 for label in get_all(f"/repos/{REPO}/labels")}
-    changes = label_changes(existing, LABELS)
+    changes = label_changes(existing, wanted_labels(setting))
     for method, name, colour, desc in changes:
         print(f"labels: {method} {name}")
         if DRY:
@@ -1119,7 +1148,7 @@ def main():
         print(f"#{pr['number']} {ref}: {outcome}")
     if rules.get("labels"):
         try:
-            ensure_labels()
+            ensure_labels(rules["labels"])
         except RuntimeError as e:
             print(f"labels: {e}")
     if rules["share"]:
@@ -1327,6 +1356,15 @@ def self_test():
     for REPO, marker in (("uchmk/kura", "<!-- kura-lane:#331 -->"), ("uchmk/tsumugi", "<!-- tsumugi-lane:#331 -->")):
         assert finding_marker(331) == marker, finding_marker(331)
     REPO = saved
+    assert set(wanted_labels(True)) == set(LABELS)
+    assert wanted_labels(None) == {}
+    for repo, rules in RULES.items():
+        assert set(wanted_labels(rules.get("labels"))) <= set(LABELS), repo
+        share = rules["share"]
+        assert share is None or share["issues"] or share["todo_heading"], repo
+        assert set(rules["lanes"]) <= set(MACHINES), repo
+    assert wanted_labels(RULES["uchmk/yagura"]["labels"])["question"] == LABELS["question"]
+    assert "retest" not in wanted_labels(RULES["uchmk/yagura"]["labels"])
     assert "### Proposals\n\n- Reword 2.62. (qa-reports/a.md)\n- Kit helpers. (PR 本文)\n" in body, body
     assert "### Queue" not in body and "### Votes\n\n- Q57: 1 -- old (PR 本文)\n" in body, body
     print("merge-lanes self-test: OK")
@@ -1338,6 +1376,8 @@ if __name__ == "__main__":
     elif sys.argv[1:] == ["--labels"]:
         if not TOKEN or not REPO:
             sys.exit("merge-lanes: GITHUB_TOKEN and GITHUB_REPOSITORY are needed")
-        ensure_labels()
+        if not (RULES.get(REPO) or {}).get("labels"):
+            sys.exit(f"merge-lanes: no labels for {REPO!r} in RULES")
+        ensure_labels(RULES[REPO]["labels"])
     else:
         main()
