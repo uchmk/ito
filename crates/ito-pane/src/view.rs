@@ -693,10 +693,12 @@ pub fn show_faces<P: Pane + ?Sized>(
         let program = hyperlinks
             .iter()
             .find(|h| h.line == line && h.cells.contains(&col))
-            .map(|h| (h.cells.clone(), crate::Link::Url(h.uri.clone())));
-        if let Some((cells, link)) = program.or_else(|| rows.get(line).and_then(|r| crate::link_at(r, col))) {
-            for cells in spans(line, &cells) {
-                painter.hline(x(cells.start)..=x(cells.end), under(line), Stroke::new(1.0, pal.cursor));
+            .map(|h| (vec![(line, h.cells.clone())], crate::Link::Url(h.uri.clone())));
+        if let Some((parts, link)) = program.or_else(|| crate::link_across(&rows, line, col)) {
+            for (at, cells) in &parts {
+                for cells in spans(*at, cells) {
+                    painter.hline(x(cells.start)..=x(cells.end), under(*at), Stroke::new(1.0, pal.cursor));
+                }
             }
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if resp.clicked() {
@@ -710,10 +712,11 @@ pub fn show_faces<P: Pane + ?Sized>(
             // A link is one word however many separators it holds
             // (`https://host/a?b=c`), so the whole of it is taken rather than
             // what the word rule stops at.
-            match rows.get(line).and_then(|r| crate::link_at(r, col)) {
-                Some((cells, _)) if !cells.is_empty() => {
-                    term.select((cells.start, line), false, true);
-                    term.select((cells.end - 1, line), true, false);
+            match crate::link_across(&rows, line, col) {
+                Some((parts, _)) if !parts.is_empty() => {
+                    let ((from, head), (to, tail)) = (&parts[0], &parts[parts.len() - 1]);
+                    term.select((head.start, *from), false, true);
+                    term.select((tail.end - 1, *to), true, false);
                 }
                 _ => term.select_word((col, line)),
             }
