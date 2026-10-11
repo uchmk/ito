@@ -150,6 +150,8 @@ pub struct Faces {
 pub struct CursorStyle {
     pub shape: CursorShape,
     pub blink: bool,
+    /// Slide from cell to cell when it moves, rather than jump.
+    pub glide: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -173,12 +175,60 @@ impl CursorStyle {
             "underline" => CursorShape::Underline,
             _ => CursorShape::Block,
         };
-        Self { shape, blink }
+        Self { shape, blink, glide: false }
     }
 }
 
 /// How long the cursor stays on, then off, while it blinks.
 const BLINK: f64 = 0.53;
+
+/// The rows as text, a line each, without the blanks at their ends or the
+/// blank lines under the last one written: what a screen reader reads.
+fn screen_text(rows: &[Vec<crate::CellView>]) -> String {
+    let mut lines: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let line: String =
+                row.iter().filter(|c| !c.flags.contains(Flags::WIDE_CHAR_SPACER)).map(|c| if c.c == '\0' { ' ' } else { c.c }).collect();
+            line.trim_end().to_string()
+        })
+        .collect();
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+/// How long a gliding cursor takes to reach the cell it moved to.
+const GLIDE: f64 = 0.09;
+
+/// A gliding cursor: where it set off from and where it is going, from the
+/// pane's top left, and when it set off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Glide {
+    from: Vec2,
+    to: Vec2,
+    since: f64,
+}
+
+impl Glide {
+    /// Where the cursor is at `now`, and whether it is still on its way. It
+    /// slows as it arrives, so the eye lands with it.
+    fn at(&self, now: f64) -> (Vec2, bool) {
+        let t = ((now - self.since) / GLIDE).clamp(0.0, 1.0) as f32;
+        let eased = 1.0 - (1.0 - t).powi(3);
+        (self.from + (self.to - self.from) * eased, t < 1.0)
+    }
+
+    /// Set off for `to` from wherever it is at `now`; already going there,
+    /// it carries on.
+    fn toward(self, to: Vec2, now: f64) -> Self {
+        match to == self.to {
+            true => self,
+            false => Self { from: self.at(now).0, to, since: now },
+        }
+    }
+}
 
 impl Faces {
     pub fn plain(regular: FontId) -> Self {
@@ -431,9 +481,26 @@ pub fn show_faces<P: Pane + ?Sized>(
     // not, which is the same language the split panes use.
     let (cx, cy) = cursor;
     if cy < size.lines && cx < size.cols {
-        let at =
-            Rect::from_min_size(egui::pos2(inner.left() + cx as f32 * cell_w, inner.top() + cy as f32 * row_h), Vec2::new(cell_w, row_h));
+        let cell = Vec2::new(cx as f32 * cell_w, cy as f32 * row_h);
         let style = faces.cursor;
+        // Where the cursor is drawn: on its cell, or on the way there. The
+        // way is kept from the pane's corner, so moving the pane is no move.
+        let (off, moving) = match style.glide {
+            true => {
+                let now = ui.input(|i| i.time);
+                let glide_id = id.with("cursor-glide");
+                let was = ui.ctx().data(|d| d.get_temp::<Glide>(glide_id));
+                let glide = was.map_or(Glide { from: cell, to: cell, since: now - GLIDE }, |g| g.toward(cell, now));
+                ui.ctx().data_mut(|d| d.insert_temp(glide_id, glide));
+                let (off, moving) = glide.at(now);
+                if moving {
+                    ui.ctx().request_repaint();
+                }
+                (off, moving)
+            }
+            false => (cell, false),
+        };
+        let at = Rect::from_min_size(inner.min + off, Vec2::new(cell_w, row_h));
         let lit = !style.blink || {
             let now = ui.input(|i| i.time);
             let left = BLINK - now % BLINK;
@@ -443,7 +510,7 @@ pub fn show_faces<P: Pane + ?Sized>(
         if focused && !lit {
         } else if focused && style.shape == CursorShape::Block {
             painter.rect_filled(at, CornerRadius::ZERO, pal.cursor);
-            if let Some(cell) = rows.get(cy).and_then(|r| r.get(cx)) {
+            if let Some(cell) = rows.get(cy).and_then(|r| r.get(cx)).filter(|_| !moving) {
                 if cell.c != ' ' {
                     painter.text(at.left_top(), Align2::LEFT_TOP, cell.c, f.clone(), pal.on_cursor);
                 }
@@ -459,6 +526,15 @@ pub fn show_faces<P: Pane + ?Sized>(
             painter.rect_stroke(at, CornerRadius::ZERO, Stroke::new(1.0, pal.fg_dim), egui::StrokeKind::Inside);
         }
     }
+
+    // For a screen reader, the pane is a terminal whose value is the rows on
+    // the screen. Built only when one is listening: egui runs this only
+    // while AccessKit is on.
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(egui::accesskit::Role::Terminal);
+        node.set_read_only();
+        node.set_value(screen_text(&rows));
+    });
 
     // Somewhere above the bottom, which is easy to forget being in.
     let back = term.scrolled_back();
@@ -853,10 +929,48 @@ mod tests {
 
     #[test]
     fn a_cursor_word_names_its_shape_and_blink() {
-        assert_eq!(CursorStyle::from_word("block-blink"), CursorStyle { shape: CursorShape::Block, blink: true });
-        assert_eq!(CursorStyle::from_word("bar"), CursorStyle { shape: CursorShape::Bar, blink: false });
-        assert_eq!(CursorStyle::from_word("underline-blink"), CursorStyle { shape: CursorShape::Underline, blink: true });
+        assert_eq!(CursorStyle::from_word("block-blink"), CursorStyle { shape: CursorShape::Block, blink: true, glide: false });
+        assert_eq!(CursorStyle::from_word("bar"), CursorStyle { shape: CursorShape::Bar, blink: false, glide: false });
+        assert_eq!(CursorStyle::from_word("underline-blink"), CursorStyle { shape: CursorShape::Underline, blink: true, glide: false });
         assert_eq!(CursorStyle::from_word("odd"), CursorStyle::default());
+    }
+
+    /// A gliding cursor sets off from where it is, slows as it arrives, and
+    /// a second move midway starts from the middle rather than jumping back.
+    #[test]
+    fn the_cursor_glides_from_where_it_is() {
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(80.0, 0.0), Vec2::new(80.0, 40.0));
+        let g = Glide { from: a, to: a, since: 0.0 }.toward(b, 1.0);
+        assert_eq!(g.at(1.0), (a, true));
+        let (mid, moving) = g.at(1.0 + GLIDE / 2.0);
+        assert!(moving && mid.x > 40.0 && mid.x < 80.0, "{mid:?}");
+        assert_eq!(g.at(1.0 + GLIDE), (b, false));
+        assert_eq!(g.toward(b, 1.05), g);
+        let turned = g.toward(c, 1.0 + GLIDE / 2.0);
+        assert_eq!(turned.from, mid);
+        assert_eq!(turned.at(2.0), (c, false));
+    }
+
+    /// A screen reader gets the rows as lines, without the blanks after
+    /// them, and a wide character once.
+    #[test]
+    fn the_screen_reads_as_lines() {
+        use alacritty_terminal::vte::ansi::Color;
+        let cell = |c, flags| crate::CellView {
+            c,
+            fg: Color::Named(NamedColor::Foreground),
+            bg: Color::Named(NamedColor::Background),
+            flags,
+            ul: None,
+            selected: false,
+        };
+        let row = |s: &str| s.chars().map(|c| cell(c, Flags::empty())).collect::<Vec<_>>();
+        let mut wide = row("$ ");
+        wide.push(cell('漢', Flags::WIDE_CHAR));
+        wide.push(cell(' ', Flags::WIDE_CHAR_SPACER));
+        wide.extend(row("x  "));
+        let rows = vec![row("hello   "), row("        "), wide, row("    "), vec![cell('\0', Flags::empty())]];
+        assert_eq!(screen_text(&rows), "hello\n\n$ 漢x");
     }
 
     /// A drag held past an edge runs the view that way, faster the further out
