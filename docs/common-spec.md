@@ -69,7 +69,7 @@ date_format = "YYYY/MM/DD"  # YYYY/MM/DD, YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY
 weekday = true
 ```
 
-- 無いキーは既定の値。知らないキーと知らない `date_format` は警告に出す（読み込みは止めない）。値の型が違えば読めない理由を出す。
+- 無いキーは既定の値。知らないキーと知らない `date_format` は警告に出す（読み込みは止めない）。値の型が違うキーも警告に出し、そのキーだけ無いものとして読む（ほかのキーは使う。TOML として読めないときだけ全体が読めない）。
 - `system` の OS の明暗は `ito_common::OsLight` で読む（`OsLight::watch(2 秒, 描き直し)` の `light_or(ctx.system_theme() == Light)`）。
   Windows では egui の `system_theme`（winit）が OS の切り替えに 1 回遅れるので、それだけに頼らない。
 - **テーマ・時計・倍率は common.toml だけに置く。**アプリごとの上書きは持たない。

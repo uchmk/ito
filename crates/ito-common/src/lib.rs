@@ -280,28 +280,36 @@ const KEYS: [&str; 6] = ["language", "theme", "dark_theme", "light_theme", "scal
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
     /// (a key no app reads, a date format not in [`DATE_FORMATS`]) to show
-    /// as a warning. `Err` when the file does not read as TOML or a value is
-    /// of the wrong kind.
+    /// as a warning. A value of the wrong kind is a warning too, and that key
+    /// is taken as not set. `Err` only when the file does not read as TOML.
     pub fn parse(text: &str) -> Result<(Self, Vec<String>), String> {
         let t = text.parse::<toml::Table>().map_err(|e| format!("common.toml: {e}"))?;
         let mut warnings = Vec::new();
         for k in t.keys().filter(|k| !KEYS.contains(&k.as_str())) {
             warnings.push(format!("common.toml: `{k}` is not a setting uchmk's apps read"));
         }
-        let text_of = |key: &str| -> Result<Option<String>, String> {
-            match t.get(key) {
-                None => Ok(None),
-                Some(toml::Value::String(s)) => Ok(Some(s.clone())),
-                Some(_) => Err(format!("common.toml: `{key}` must be a string")),
+        let text_of = |key: &str, warnings: &mut Vec<String>| match t.get(key) {
+            None => None,
+            Some(toml::Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                warnings.push(format!("common.toml: `{key}` must be a string, so it is not used"));
+                None
             }
         };
+        let language = text_of("language", &mut warnings);
+        let theme = text_of("theme", &mut warnings);
+        let dark_theme = text_of("dark_theme", &mut warnings);
+        let light_theme = text_of("light_theme", &mut warnings);
         let scale = match t.get("scale") {
             None => None,
-            Some(v) => {
+            Some(v) => 'n: {
                 let n = match v {
                     toml::Value::Integer(i) => *i as f32,
                     toml::Value::Float(f) => *f as f32,
-                    _ => return Err("common.toml: `scale` must be a number (1.0 is the app's own size)".to_owned()),
+                    _ => {
+                        warnings.push("common.toml: `scale` must be a number (1.0 is the app's own size), so it is not used".to_owned());
+                        break 'n None;
+                    }
                 };
                 if !(SCALE_MIN..=SCALE_MAX).contains(&n) {
                     warnings.push(format!("common.toml: scale {n} is not from {SCALE_MIN} to {SCALE_MAX}, so {} is used", tidy_scale(n)));
@@ -315,14 +323,20 @@ impl Common {
                 let known = ["show", "hour24", "date", "date_format", "weekday"];
                 let mut kept = toml::Table::new();
                 for (k, v) in c {
-                    if known.contains(&k.as_str()) {
-                        kept.insert(k.clone(), v.clone());
-                    } else {
+                    if !known.contains(&k.as_str()) {
                         warnings.push(format!("common.toml: `clock.{k}` is not a setting uchmk's apps read"));
+                        continue;
+                    }
+                    // Each key on its own, so one of the wrong kind leaves the rest.
+                    let one = toml::Table::from_iter([(k.clone(), v.clone())]);
+                    match Clock::deserialize(toml::Value::Table(one)) {
+                        Ok(_) => {
+                            kept.insert(k.clone(), v.clone());
+                        }
+                        Err(e) => warnings.push(format!("common.toml: clock.{k}: {}, so it is not used", e.message())),
                     }
                 }
-                let mut clock =
-                    Clock::deserialize(toml::Value::Table(kept)).map_err(|e| format!("common.toml: [clock]: {}", e.message()))?;
+                let mut clock = Clock::deserialize(toml::Value::Table(kept)).unwrap_or_default();
                 if !DATE_FORMATS.contains(&clock.date_format.as_str()) {
                     warnings.push(format!(
                         "common.toml: clock.date_format `{}` is not one of {}",
@@ -333,16 +347,12 @@ impl Common {
                 }
                 Some(clock)
             }
-            Some(_) => return Err("common.toml: `clock` must be a table ([clock])".to_owned()),
+            Some(_) => {
+                warnings.push("common.toml: `clock` must be a table ([clock]), so it is not used".to_owned());
+                None
+            }
         };
-        let common = Self {
-            language: text_of("language")?,
-            theme: text_of("theme")?,
-            dark_theme: text_of("dark_theme")?,
-            light_theme: text_of("light_theme")?,
-            scale,
-            clock,
-        };
+        let common = Self { language, theme, dark_theme, light_theme, scale, clock };
         Ok((common, warnings))
     }
 
@@ -478,30 +488,173 @@ pub fn remove_key(text: &str, table: Option<&str>, key: &str) -> Result<String, 
     Ok(doc.to_string())
 }
 
-/// `text` with every `[[name]]` block taken out and `blocks` written at the
-/// end in their place, each a list of keys and their values as TOML.
-/// Comments inside the old blocks go with them; the rest stays.
+/// `text` with the `[[name]]` blocks made `blocks`, each a list of keys and
+/// their values as TOML. A block keeps the old table it matches -- the same
+/// `name`, else the same `addr`, else the next one left over -- with its
+/// place and comments: only the values that changed are written (a comment
+/// after one stays), keys no longer there are taken out. A table nothing
+/// matches is taken out, and a new one goes after the last of them.
 pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Result<String, String> {
     let mut doc = document(text)?;
     let (parent, last) = match name.rsplit_once('.') {
         Some((p, l)) => (Some(p), l),
         None => (None, name),
     };
-    let mut list = toml_edit::ArrayOfTables::new();
+    let mut want = Vec::new();
     for b in blocks {
-        let mut t = toml_edit::Table::new();
+        let mut keys = Vec::new();
         for (k, v) in b {
             let v: toml_edit::Value = v.parse().map_err(|e| format!("`{v}` is not a TOML value: {e}"))?;
-            t.insert(&key_name(k)?, toml_edit::Item::Value(v));
+            keys.push((key_name(k)?, v));
         }
-        list.push(t);
+        want.push(keys);
     }
     let t = table_at(&mut doc, parent)?;
-    t.remove(last);
+    let old: Vec<toml_edit::Table> = match t.remove(last) {
+        Some(toml_edit::Item::ArrayOfTables(a)) => a.into_iter().collect(),
+        _ => Vec::new(),
+    };
+    let pick = match_tables(&old, &want);
+    // The places the kept tables had, handed out again in the new order, so
+    // the file shows them in the order of `blocks`.
+    let mut places: Vec<isize> = pick.iter().flatten().filter_map(|&j| old[j].position()).collect();
+    places.sort_unstable();
+    let mut places = places.into_iter();
+    let mut at = old.iter().filter_map(toml_edit::Table::position).max();
+    let mut list = toml_edit::ArrayOfTables::new();
+    for (keys, p) in want.into_iter().zip(pick.iter().copied()) {
+        let table = match p {
+            Some(j) => {
+                let mut kept = old[j].clone();
+                if let Some(place) = places.next() {
+                    kept.set_position(place);
+                    at = Some(place);
+                }
+                kept.retain(|k, _| keys.iter().any(|(name, _)| name == k));
+                for (k, mut v) in keys {
+                    match kept.get_mut(&k).and_then(toml_edit::Item::as_value_mut) {
+                        Some(was) if same_value(was, &v) => {}
+                        Some(was) => {
+                            let suffix = was.decor().suffix().and_then(|s| s.as_str()).filter(|s| s.contains('#')).map(str::to_owned);
+                            v.decor_mut().set_prefix(" ");
+                            v.decor_mut().set_suffix(suffix.unwrap_or_default());
+                            *was = v;
+                        }
+                        None => {
+                            kept.insert(&k, toml_edit::Item::Value(v));
+                        }
+                    }
+                }
+                kept
+            }
+            None => {
+                let mut new = toml_edit::Table::new();
+                if let Some(place) = at {
+                    new.set_position(place);
+                }
+                for (k, v) in keys {
+                    new.insert(&k, toml_edit::Item::Value(v));
+                }
+                new
+            }
+        };
+        list.push(table);
+    }
     if !list.is_empty() {
         t.insert(last, toml_edit::Item::ArrayOfTables(list));
     }
+    // Comments above a table taken out that stand apart from it (a blank
+    // line between) are about the file, so they go to what comes next.
+    let mut taken: Vec<(isize, String)> = (0..old.len())
+        .filter(|j| !pick.contains(&Some(*j)))
+        .filter_map(|j| Some((old[j].position()?, apart(old[j].decor().prefix()?.as_str()?)?)))
+        .collect();
+    taken.sort_by_key(|&(p, _)| std::cmp::Reverse(p));
+    for (place, text) in taken {
+        let mut next: Option<&mut toml_edit::Table> = None;
+        after(doc.as_table_mut(), place, &mut next);
+        match next {
+            Some(n) => {
+                let was = n.decor().prefix().and_then(|s| s.as_str()).unwrap_or("").trim_start_matches('\n').to_owned();
+                n.decor_mut().set_prefix(format!("{text}\n{was}"));
+            }
+            None => {
+                let end = doc.trailing().as_str().unwrap_or("").to_owned();
+                doc.set_trailing(format!("{end}\n{text}"));
+            }
+        }
+    }
     Ok(doc.to_string())
+}
+
+/// The lines of a table's `prefix` up to its last blank line, when they hold
+/// a comment.
+fn apart(prefix: &str) -> Option<String> {
+    let lines: Vec<&str> = prefix.split_inclusive('\n').collect();
+    let blank = lines.iter().rposition(|l| l.trim().is_empty() && l.ends_with('\n'))?;
+    let text: String = lines[..=blank].concat();
+    let text = text.trim_start_matches('\n');
+    text.contains('#').then(|| format!("{}\n", text.trim_end_matches('\n')))
+}
+
+/// The table in `t` that is shown first after the place `place`.
+fn after<'a>(t: &'a mut toml_edit::Table, place: isize, best: &mut Option<&'a mut toml_edit::Table>) {
+    for (_, item) in t.iter_mut() {
+        match item {
+            toml_edit::Item::Table(sub) => {
+                consider(sub, place, best);
+            }
+            toml_edit::Item::ArrayOfTables(a) => {
+                for sub in a.iter_mut() {
+                    consider(sub, place, best);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn consider<'a>(sub: &'a mut toml_edit::Table, place: isize, best: &mut Option<&'a mut toml_edit::Table>) {
+    let p = sub.position().filter(|&p| p > place && !sub.is_implicit());
+    if p.is_some_and(|p| best.as_ref().and_then(|b| b.position()).is_none_or(|b| p < b)) {
+        *best = Some(sub);
+    } else {
+        after(sub, place, best);
+    }
+}
+
+/// Which of the `old` tables each wanted block keeps: the same `name`, else
+/// the same `addr`, else the next one no block has taken.
+fn match_tables(old: &[toml_edit::Table], want: &[Vec<(String, toml_edit::Value)>]) -> Vec<Option<usize>> {
+    let mut used = vec![false; old.len()];
+    let mut pick = vec![None; want.len()];
+    for key in ["name", "addr"] {
+        for (i, keys) in want.iter().enumerate() {
+            let Some(w) = keys.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_str()) else { continue };
+            if pick[i].is_some() {
+                continue;
+            }
+            if let Some(j) = (0..old.len()).find(|&j| !used[j] && old[j].get(key).and_then(toml_edit::Item::as_str) == Some(w)) {
+                used[j] = true;
+                pick[i] = Some(j);
+            }
+        }
+    }
+    let mut free = (0..old.len()).filter(|&j| !used[j]).collect::<Vec<_>>().into_iter();
+    for p in pick.iter_mut().filter(|p| p.is_none()) {
+        *p = free.next();
+    }
+    pick
+}
+
+/// Whether two TOML values are the same, however they are written (`'a'` and `"a"`).
+fn same_value(a: &toml_edit::Value, b: &toml_edit::Value) -> bool {
+    let read = |v: &toml_edit::Value| {
+        let mut v = v.clone();
+        v.decor_mut().clear();
+        format!("v = {v}").parse::<toml::Table>().ok()
+    };
+    read(a).is_some_and(|a| Some(a) == read(b))
 }
 
 /// A string as TOML writes it, quoted and escaped.
@@ -620,9 +773,15 @@ mod tests {
         let (c, warnings) = Common::parse("colour = 1\n[clock]\nseconds = true\ndate_format = \"DD.MM.YYYY\"\n").unwrap();
         assert_eq!(warnings.len(), 3, "{warnings:?}");
         assert_eq!(c.clock.unwrap().date_format, "YYYY/MM/DD", "an unknown format falls back");
-        assert!(Common::parse("theme = 3\n").is_err());
-        assert!(Common::parse("[clock]\nshow = \"yes\"\n").is_err());
         assert!(Common::parse("[broken\n").is_err());
+        let (c, warnings) = Common::parse("scale = \"x\"\ntheme = 3\nlanguage = \"ja\"\n").unwrap();
+        assert_eq!(warnings.len(), 2, "every key of the wrong kind is said, not just the first: {warnings:?}");
+        assert_eq!((c.scale, c.theme, c.language.as_deref()), (None, None, Some("ja")), "the wrong ones are not set, the rest are");
+        let (c, warnings) = Common::parse("[clock]\nshow = \"yes\"\nhour24 = false\n").unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(c.clock, Some(Clock { hour24: false, ..Clock::default() }), "the clock keeps the keys that read");
+        let (c, warnings) = Common::parse("clock = 1\n").unwrap();
+        assert_eq!((c.clock, warnings.len()), (None, 1));
         assert_eq!(Common::read(&dir("none")), Ok((Common::default(), Vec::new())), "no file: nothing set");
     }
 
@@ -632,7 +791,7 @@ mod tests {
         assert_eq!(Common::parse("scale = 2\n").unwrap().0.scale, Some(2.0), "a whole number is a number too");
         let (c, warnings) = Common::parse("scale = 9.0\n").unwrap();
         assert_eq!((c.scale, warnings.len()), (Some(SCALE_MAX), 1), "too big: the largest, and said");
-        assert!(Common::parse("scale = \"big\"\n").is_err());
+        assert_eq!(Common::parse("scale = \"big\"\n").unwrap().0.scale, None, "not a number: not set");
         assert_eq!(Common::default().scale_or_one(), 1.0);
         let mut s = 1.0;
         for _ in 0..10 {
@@ -697,6 +856,38 @@ mod tests {
         let t = set_tables("x = 1\n", "host", &blocks).unwrap();
         assert_eq!(t, "x = 1\n\n[[host]]\nname = \"a\"\naddr = \"127.0.0.1:1\"\n");
         assert_eq!(set_tables(&t, "host", &[]).unwrap(), "x = 1\n");
+    }
+
+    #[test]
+    fn tables_are_set_in_place_and_keep_what_a_person_wrote() {
+        let text = "# my machines\n# the first two\n\n[[host]]\nname = \"a\" # the first host\naddr = \"10.0.0.1:7313\"\n\n[agent]\nport = 7323\n\n# the box\n[[host]]\nname = \"b\"\naddr = \"10.0.0.2:7313\"\nevery = 5\n";
+        let a = vec![("name", quote("a")), ("addr", quote("10.0.0.1:7313"))];
+        let b = vec![("name", quote("b")), ("addr", quote("10.0.0.2:7313")), ("every", "5".to_owned())];
+        let c = vec![("name", quote("c")), ("addr", quote("10.0.0.3:7313"))];
+        assert_eq!(set_tables(text, "host", &[a.clone(), b.clone()]).unwrap(), text, "nothing changed: the same text");
+        let added = set_tables(text, "host", &[a.clone(), b.clone(), c.clone()]).unwrap();
+        assert_eq!(added, format!("{text}\n[[host]]\nname = \"c\"\naddr = \"10.0.0.3:7313\"\n"), "a new one goes after the last");
+        let gone = set_tables(&added, "host", &[a.clone(), c.clone()]).unwrap();
+        assert_eq!(
+            gone,
+            "# my machines\n# the first two\n\n[[host]]\nname = \"a\" # the first host\naddr = \"10.0.0.1:7313\"\n\n[agent]\nport = 7323\n\n[[host]]\nname = \"c\"\naddr = \"10.0.0.3:7313\"\n",
+            "the middle one taken out, the others as they were"
+        );
+        let renamed = vec![("name", quote("alpha")), ("addr", quote("10.0.0.1:7313"))];
+        let t = set_tables(text, "host", &[renamed, vec![("name", quote("b")), ("addr", quote("10.0.0.2:7313"))]]).unwrap();
+        assert!(t.contains("name = \"alpha\" # the first host\n"), "the comment after a changed value stays: {t}");
+        assert!(t.contains("# the box\n[[host]]\nname = \"b\"\naddr = \"10.0.0.2:7313\"\n") && !t.contains("every"), "{t}");
+        let swapped = set_tables(text, "host", &[b.clone(), a]).unwrap();
+        let read: toml::Table = swapped.parse().unwrap();
+        let names: Vec<_> = read["host"].as_array().unwrap().iter().map(|h| h["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["b", "a"], "the file reads in the new order: {swapped}");
+        let none = set_tables(text, "host", &[]).unwrap();
+        assert_eq!(none, "# my machines\n# the first two\n\n[agent]\nport = 7323\n");
+        let first = set_tables(text, "host", std::slice::from_ref(&b)).unwrap();
+        assert!(first.starts_with("# my machines\n# the first two\n\n[agent]\n"), "the file's own comments stay: {first}");
+        assert_eq!(set_tables("x = 1\n\n# head\n\n[[host]]\nname = \"a\"\n", "host", &[]).unwrap(), "x = 1\n\n# head\n");
+        let quoted = "[[host]]\nname = 'a'\n";
+        assert_eq!(set_tables(quoted, "host", &[vec![("name", quote("a"))]]).unwrap(), quoted, "written another way, the same value");
     }
 
     #[test]
