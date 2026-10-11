@@ -115,6 +115,9 @@ pub fn feed_as<P: Pane + ?Sized>(term: &P, id: u64, events: &[Event], mut claim:
             }
             Event::Text(_) if swallow_text => swallow_text = false,
             Event::Text(text) => term.send(text.clone().into_bytes()),
+            // What an input method (Japanese, Chinese, Korean) settled on.
+            // The composition before it is drawn by the pane, not sent.
+            Event::Ime(egui::ImeEvent::Commit(text)) if !text.is_empty() => term.send(text.clone().into_bytes()),
             // egui-winit turns the clipboard chords into these and never sends
             // the key press, so `<C-c>` -- the key that stops a command -- would
             // never reach the shell. Put the chord back.
@@ -412,6 +415,15 @@ mod tests {
         let p = Sent(Default::default(), 31);
         super::feed(&p, &[key(egui::Key::A, none, true), egui::Event::Text("a".into())], |_, _| false);
         assert_eq!(sent(&p), "\x1b[97;1;97u");
+    }
+
+    /// What an input method settled on is typed; the composition before it is not.
+    #[test]
+    fn an_input_method_commit_is_typed() {
+        let p = Sent(Default::default(), 0);
+        let preedit = egui::ImeEvent::Preedit { text: "にほん".into(), active_range_chars: None };
+        super::feed(&p, &[egui::Event::Ime(preedit), egui::Event::Ime(egui::ImeEvent::Commit("日本語".into()))], |_, _| false);
+        assert_eq!(sent(&p), "日本語");
     }
 
     /// Ctrl let go before `c` still tells `c`'s release (as it was pressed),

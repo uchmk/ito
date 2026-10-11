@@ -554,6 +554,45 @@ pub fn show_faces<P: Pane + ?Sized>(
         } else {
             painter.rect_stroke(at, CornerRadius::ZERO, Stroke::new(1.0, pal.fg_dim), egui::StrokeKind::Inside);
         }
+
+        // An input method (Japanese, Chinese, Korean) types only where the
+        // window says text is being edited, and puts its candidates there.
+        // Not while a field of the app has the keys: that one says so itself.
+        if focused && ui.memory(|m| m.focused().is_none()) {
+            ui.output_mut(|o| {
+                o.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Terminal,
+                    rect: inner,
+                    cursor_rect: at,
+                    should_interrupt_composition: false,
+                });
+            });
+            // The composition so far stays in the pane's memory between
+            // frames (an event comes only when it changes), drawn at the
+            // cursor, underlined, over what is there.
+            let preedit_id = id.with("ime-preedit");
+            let said = ui.ctx().input(|i| {
+                i.events.iter().rev().find_map(|e| match e {
+                    egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => Some(text.clone()),
+                    egui::Event::Ime(egui::ImeEvent::Commit(_)) => Some(String::new()),
+                    _ => None,
+                })
+            });
+            if let Some(text) = said {
+                ui.ctx().data_mut(|d| d.insert_temp(preedit_id, text));
+            }
+            let preedit = ui.ctx().data(|d| d.get_temp::<String>(preedit_id)).unwrap_or_default();
+            if !preedit.is_empty() {
+                let g = painter.layout_no_wrap(preedit, f.clone(), pal.fg);
+                let place = Rect::from_min_size(at.left_top(), g.size());
+                painter.rect_filled(place, CornerRadius::ZERO, pal.bg);
+                painter.galley(place.min, g, pal.fg);
+                painter.line_segment(
+                    [place.left_bottom() - Vec2::new(0.0, 1.0), place.right_bottom() - Vec2::new(0.0, 1.0)],
+                    Stroke::new(1.0, pal.fg),
+                );
+            }
+        }
     }
 
     // For a screen reader, the pane is a terminal whose value is the rows on
