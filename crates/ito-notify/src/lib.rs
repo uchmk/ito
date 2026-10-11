@@ -8,6 +8,7 @@
 //! The words of the settings (`[notify] sound_waiting`, `webhook_format`)
 //! are the same in every app that uses this: see [`SOUNDS`] and [`FORMATS`].
 
+pub mod notifier;
 pub mod sound;
 pub mod toast;
 pub mod webhook;

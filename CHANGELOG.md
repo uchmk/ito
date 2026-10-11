@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.17.0] - 2026-10-11
+
+### 追加
+
+- `ito-notify::notifier`: 答えられる通知。`Notifier` が専用のスレッドを持ち、出した通知をそこで生かすので、アプリが動いている間のクリックはコールバックに届く。`Toast`（題・本文・`tag`（同じ tag は前のを置き換える）・`urgent`（自然には消えない）・`launch`（通知自体のクリック）・ボタン `Action`）。Windows はボタン付きのトースト、`notify-send`（libnotify 0.7.12 以降）は通知自体のクリックを返し、macOS は返せない。ロゴは最初の通知の前に 1 度だけ `fn() -> Option<PathBuf>` で頼む。tsumugi の `alert.rs` の通知の部分を切り出した。
+
+### 変更
+
+- `webhook::send` と `webhook::args` が `Level`（`Waiting`・`Error`・`Done`・`Alert`）を取る。ntfy の `Tags` と `Priority`、JSON の `state` が決まる。送れなかったら 30 秒後に 1 度だけやり直す。tsumugi の `webhook.rs` に揃えた。
+
 ## [0.16.0] - 2026-10-11
 
 ### 追加

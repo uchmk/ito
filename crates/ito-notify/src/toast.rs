@@ -21,18 +21,18 @@ pub fn show(app: App, title: &str, body: &str) {
 
 /// Text put inside the notification's XML (Windows).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn xml_escape(s: &str) -> String {
+pub(crate) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 /// Text put inside an AppleScript string (macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn applescript_string(s: &str) -> String {
+pub(crate) fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(windows)]
-mod os {
+pub(crate) mod os {
     use super::xml_escape;
     use windows::core::{w, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
@@ -42,8 +42,9 @@ mod os {
     };
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
-    /// Register the id with the name the notifications show.
-    fn register(id: &str, name: &str) {
+    /// Register the id with the name the notifications show, and the small
+    /// mark (`logo`, a picture file) beside it.
+    pub fn register(id: &str, name: &str, logo: Option<&std::path::Path>) {
         let key = HSTRING::from(format!("Software\\Classes\\AppUserModelId\\{id}"));
         // SAFETY: the key and the value are alive for the calls.
         unsafe {
@@ -51,6 +52,10 @@ mod os {
             if RegCreateKeyExW(HKEY_CURRENT_USER, &key, None, None, REG_OPTION_NON_VOLATILE, KEY_WRITE, None, &mut k, None).is_ok() {
                 let name: Vec<u8> = format!("{name}\0").encode_utf16().flat_map(u16::to_le_bytes).collect();
                 let _ = RegSetValueExW(k, w!("DisplayName"), None, REG_SZ, Some(&name));
+                if let Some(path) = logo {
+                    let uri: Vec<u8> = format!("{}\0", path.display()).encode_utf16().flat_map(u16::to_le_bytes).collect();
+                    let _ = RegSetValueExW(k, w!("IconUri"), None, REG_SZ, Some(&uri));
+                }
                 let _ = RegCloseKey(k);
             }
         }
@@ -71,7 +76,7 @@ mod os {
     pub fn show(id: &str, name: &str, title: &str, body: &str) {
         // SAFETY: a thread of its own; already initialized is fine.
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        register(id, name);
+        register(id, name, None);
         if let Err(e) = toast(id, title, body) {
             eprintln!("the notification failed: {e}");
         }
