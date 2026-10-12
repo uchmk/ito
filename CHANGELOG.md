@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.23.0] - 2026-10-12
+
+### 追加
+
+- `ito-winres::emit_ico(name, ico)`: 絵を描く関数の代わりに、できあがった `.ico`（中身がすべて PNG のもの）を渡せる。kura の `assets/icon.ico` のように、すでに絵のファイルがあるアプリ向け。
+
 ## [0.22.0] - 2026-10-12
 
 ### 追加

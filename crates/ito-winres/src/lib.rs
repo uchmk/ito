@@ -9,7 +9,8 @@
 //! and a cross build from another OS gets the icon too.
 //!
 //! In a `build.rs`: `ito_winres::emit("app", &[16, 32, 256], |side| rgba(side))`.
-//! It reads the name's version, description and target from Cargo's own
+//! (or `ito_winres::emit_ico("app", include_bytes!("assets/icon.ico"))` for an
+//! `.ico` file made already). It reads the name's version, description and target from Cargo's own
 //! variables and does nothing for a target that is not MSVC.
 
 /// For a `build.rs`: write `<name>.res` into `OUT_DIR` and link it, with the
@@ -18,11 +19,31 @@
 /// linkers take a `.res` as it is; the GNU one would want an object first.
 pub fn emit(name: &str, sides: &[u32], rgba: impl Fn(u32) -> Vec<u8>) {
     println!("cargo:rerun-if-changed=build.rs");
-    let var = |k: &str| std::env::var(k).unwrap_or_default();
-    if var("CARGO_CFG_TARGET_OS") != "windows" || var("CARGO_CFG_TARGET_ENV") != "msvc" {
+    if !msvc() {
         return;
     }
     let icons: Vec<(u32, Vec<u8>)> = sides.iter().map(|&side| (side, png(side, &rgba(side)))).collect();
+    link(name, &icons);
+}
+
+/// [`emit`] for an icon that is already a file: the bytes of an `.ico` whose
+/// images are all PNG (what most tools write for 32-bit images). Panics on
+/// anything else, since the `.ico` is a file of the app's own.
+pub fn emit_ico(name: &str, ico: &[u8]) {
+    println!("cargo:rerun-if-changed=build.rs");
+    if !msvc() {
+        return;
+    }
+    link(name, &ico_images(ico).unwrap_or_else(|e| panic!("{name}'s icon: {e}")));
+}
+
+fn msvc() -> bool {
+    let var = |k: &str| std::env::var(k).unwrap_or_default();
+    var("CARGO_CFG_TARGET_OS") == "windows" && var("CARGO_CFG_TARGET_ENV") == "msvc"
+}
+
+fn link(name: &str, icons: &[(u32, Vec<u8>)]) {
+    let var = |k: &str| std::env::var(k).unwrap_or_default();
     let num = |k: &str| var(k).parse().unwrap_or(0);
     let text = var("CARGO_PKG_VERSION");
     let comments = var("CARGO_PKG_DESCRIPTION");
@@ -33,9 +54,36 @@ pub fn emit(name: &str, sides: &[u32], rgba: impl Fn(u32) -> Vec<u8>) {
         comments: &comments,
     };
     let path = std::path::PathBuf::from(var("OUT_DIR")).join(format!("{name}.res"));
-    std::fs::write(&path, res(&icons, &info)).unwrap_or_else(|e| panic!("writing {name}.res: {e}"));
+    std::fs::write(&path, res(icons, &info)).unwrap_or_else(|e| panic!("writing {name}.res: {e}"));
     // Every linked target, the tests too.
     println!("cargo:rustc-link-arg={}", path.display());
+}
+
+/// The images of an `.ico` as (side, PNG): its directory is a 6-byte header
+/// and 16 bytes per image, a side of 0 meaning 256.
+fn ico_images(ico: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    let at = |i: usize, n: usize| ico.get(i..i + n).ok_or_else(|| "cut short".to_owned());
+    let head = at(0, 6)?;
+    if head[..4] != [0, 0, 1, 0] {
+        return Err("not an .ico".into());
+    }
+    let count = u16::from_le_bytes([head[4], head[5]]) as usize;
+    let mut out = Vec::new();
+    for i in 0..count {
+        let d = at(6 + 16 * i, 16)?;
+        let side = if d[0] == 0 { 256 } else { d[0] as u32 };
+        let size = u32::from_le_bytes([d[8], d[9], d[10], d[11]]) as usize;
+        let off = u32::from_le_bytes([d[12], d[13], d[14], d[15]]) as usize;
+        let data = at(off, size)?;
+        if !data.starts_with(b"\x89PNG") {
+            return Err(format!("the {side}-pixel image is not a PNG"));
+        }
+        out.push((side, data.to_vec()));
+    }
+    if out.is_empty() {
+        return Err("no images".into());
+    }
+    Ok(out)
 }
 
 /// `rgba` (side x side) as PNG.
@@ -325,5 +373,24 @@ mod tests {
         let (key, lang, _) = walk(vars[0]);
         assert_eq!(key, "Translation");
         assert_eq!((u16at(lang, 0), u16at(lang, 2)), (LANG, CODEPAGE));
+    }
+
+    #[test]
+    fn an_ico_gives_its_png_images_by_side() {
+        let png = b"\x89PNG-data".to_vec();
+        let mut ico = vec![0, 0, 1, 0, 2, 0];
+        for (side, off) in [(16u8, 38u32), (0, 38)] {
+            ico.extend_from_slice(&[side, side, 0, 0, 1, 0, 32, 0]);
+            ico.extend_from_slice(&(png.len() as u32).to_le_bytes());
+            ico.extend_from_slice(&off.to_le_bytes());
+        }
+        ico.extend_from_slice(&png);
+        let images = ico_images(&ico).unwrap();
+        assert_eq!(images, [(16, png.clone()), (256, png)]);
+        assert!(ico_images(&ico[..30]).is_err());
+        assert!(ico_images(b"BM....").is_err());
+        let mut bmp = ico.clone();
+        bmp[38] = b'B';
+        assert!(ico_images(&bmp).unwrap_err().contains("not a PNG"));
     }
 }
