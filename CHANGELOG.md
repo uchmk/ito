@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.21.1] - 2026-10-12
+
+### 変更
+
+- `docs/common-spec.md` の「キーの台本」を v0.21.0 に合わせた。`<Now>`・`<RClick>`・修飾キー付きの `<Click>`・`<Hover>`・`<Wheel>`・`<Paste>` を全部のアプリの語に移し、アプリ固有の語は `Dialect` で足すと書いた。コードは変わらない。
+
 ## [0.21.0] - 2026-10-12
 
 ### 変更

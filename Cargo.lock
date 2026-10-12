@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "ito-common"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "chrono",
  "serde",
@@ -798,14 +798,14 @@ dependencies = [
 
 [[package]]
 name = "ito-gpu"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui-wgpu",
 ]
 
 [[package]]
 name = "ito-i18n"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "ito-common",
  "toml",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "ito-ipc"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "postcard",
  "serde",
@@ -823,14 +823,14 @@ dependencies = [
 
 [[package]]
 name = "ito-keys"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-keyscript"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
  "ito-keys",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "ito-layout"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
  "serde",
@@ -847,35 +847,35 @@ dependencies = [
 
 [[package]]
 name = "ito-match"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "fancy-regex",
 ]
 
 [[package]]
 name = "ito-mcp"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ito-notify"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-palette"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-pane"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -896,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "ito-prefs"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
  "ito-common",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "ito-testcheck"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "serde",
  "toml",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "ito-theme"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "egui",
  "ito-pane",

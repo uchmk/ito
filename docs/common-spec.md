@@ -167,13 +167,21 @@ prepend_keymap = [
 | `<State:name>` | その時の状態を `name.txt` に書く（形は下） |
 | `<Click:x,y>` | 窓の中の点をクリックする。`x`・`y` は窓の幅と高さに対する 0〜1 の割合 |
 | `<Drag:x,y-x,y>` | 1 つ目の点から 2 つ目の点へ引きずる（割合は同じ） |
+| `<Now>` | 待たずに次へ（直後のキーか `<State:>`・`<Shot:>` と同じ回に入れる。`d<Now>w` のように） |
+| `<RClick:x,y>` | 右クリック |
+| `<Click:C-x,y>` | 修飾キーを押したままクリック（`C`・`S`・`A`。`<RClick:…>` も同じ） |
+| `<Hover:x,y>` | ポインタをその点へ動かすだけ |
+| `<Wheel:n@x,y>` | その点でホイールを n 目盛り回す（負は逆向き） |
+| `<Paste>`・`<Paste:text>` | 貼り付け（`<Paste>` はクリップボード、`text` は `\n \t \e \\ \xNN` が使える）。`<C-v>` も貼り付けになる |
 | `<Quit>` | アプリを閉じる |
 
 - `name` は英数字と `-`・`_` だけ。ファイルは `<APP>_KEYS_DONE` のファイルと同じフォルダに書く。
 - 台本が終わったとき（`<Quit>` の前）にも `<APP>_KEYS_DONE` に状態を書く。テストはこのファイルができるのを待つ。
-- アプリが足してよい語（kura が持つ）: `<Now>`（待たずに次へ）、`<RClick:x,y>`、修飾キー付きのクリック（`<Click:C-x,y>`）、
-  `<Hover:x,y>`、`<Wheel:n@x,y>`、`<Paste>`・`<Paste:text>`、`<PaneText:name>`（ペインの文字を書く）など。
-  足すときは名前の形（`<Word:引数>`）を守り、そのアプリの README に書く。
+- 上の語はすべて ito の `ito-keyscript` が解析して再生する（kura・yagura・tsumugi が同じものを使う）。`<Space>` はキーとテキストの両方で届く。
+- アプリが足してよい語（kura の `<PaneText:name>`・`<PreviewText:name>`、`<Shot:name@preview>` の `@preview` など）は `Dialect`
+  （`parse_with(script, &Dialect { reads, shot_suffixes })`）で渡す。`reads` の語は `<Word:name>` の形で、`Do::Read { tag, name }` として
+  アプリに返る。足すときは名前の形（`<Word:引数>`）を守り、そのアプリの README に書く。
+- 自前のフレームのループで回すアプリ（kura は窓の落ち着くのを待つ）は、`press` で語を `Press` に直して自分で再生する。
 
 **状態のファイル**は UTF-8 の `key: value` の行（1 行に 1 つ、順は自由）:
 
