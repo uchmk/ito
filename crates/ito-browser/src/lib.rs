@@ -46,6 +46,8 @@ pub fn start_url(ports: &[u16]) -> String {
 /// The words of the address bar, in the app's language.
 #[derive(Clone, Copy, Debug)]
 pub struct Words<'a> {
+    /// The hover of ←.
+    pub back: &'a str,
     /// The hover of ⟳.
     pub reload: &'a str,
     /// The hover of ↗.
@@ -75,20 +77,61 @@ pub use none::Browser;
 mod native {
     use super::{normalize, Answer, Words};
     use raw_window_handle::HasWindowHandle;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
 
     pub struct Browser {
         url: String,
         edit: String,
+        /// The address field had the keys last frame: a page loading does
+        /// not overwrite what is being typed.
+        editing: bool,
         view: Option<wry::WebView>,
+        /// Where the WebView keeps its cookies and cache (see
+        /// [`Browser::with_data_dir`]), and the context made from it, kept
+        /// as long as the view.
+        data: Option<PathBuf>,
+        context: Option<wry::WebContext>,
         /// Why there is no page (the WebView could not be made).
         failed: Option<String>,
         /// A page to go to when the view is next shown.
         goto: Option<String>,
+        /// What the view's handlers saw, read on the next frame.
+        seen: Rc<RefCell<Seen>>,
+    }
+
+    /// Told by the WebView between frames.
+    #[derive(Default)]
+    struct Seen {
+        /// The page it moved to (a link followed, back).
+        loaded: Option<String>,
+        /// A page it wanted in a new window: it comes in this view instead.
+        popup: Option<String>,
     }
 
     impl Browser {
         pub fn new(url: String) -> Self {
-            Self { edit: url.clone(), goto: Some(url.clone()), url, view: None, failed: None }
+            Self {
+                edit: url.clone(),
+                editing: false,
+                goto: Some(url.clone()),
+                url,
+                view: None,
+                data: None,
+                context: None,
+                failed: None,
+                seen: Default::default(),
+            }
+        }
+
+        /// Keep the WebView's cookies and cache in `dir` (the app's state
+        /// folder), so a sign-in lasts from one start to the next. Without
+        /// it, WebView2 keeps them beside the `.exe`. macOS keeps them per
+        /// app whatever is given.
+        pub fn with_data_dir(mut self, dir: Option<PathBuf>) -> Self {
+            self.data = dir;
+            self
         }
 
         pub fn go(&mut self, url: String) {
@@ -108,12 +151,28 @@ mod native {
         /// app's (`eframe::Frame`), the view's parent.
         pub fn show(&mut self, ui: &mut egui::Ui, window: &impl HasWindowHandle, hidden: bool, words: &Words) -> Answer {
             let mut answer = Answer::default();
+            let seen = std::mem::take(&mut *self.seen.borrow_mut());
+            if let Some(url) = seen.popup {
+                self.go(url);
+            }
+            if let Some(url) = seen.loaded {
+                if !self.editing {
+                    self.edit = url.clone();
+                }
+                self.url = url;
+            }
             ui.horizontal(|ui| {
+                if ui.small_button("←").on_hover_text(words.back).clicked() {
+                    if let Some(view) = &self.view {
+                        let _ = view.evaluate_script("history.back()");
+                    }
+                }
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut self.edit)
-                        .desired_width((ui.available_width() - 90.0).max(60.0))
+                        .desired_width((ui.available_width() - 116.0).max(60.0))
                         .font(egui::FontId::monospace(12.0)),
                 );
+                self.editing = field.has_focus();
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     if let Some(url) = normalize(&self.edit) {
                         self.go(url);
@@ -141,7 +200,7 @@ mod native {
                 return answer;
             }
             if self.view.is_none() {
-                self.make(window, rect, ui.pixels_per_point(), words);
+                self.make(window, ui.ctx(), rect, ui.pixels_per_point(), words);
             }
             if let Some(view) = &self.view {
                 if let Some(url) = self.goto.take() {
@@ -160,11 +219,32 @@ mod native {
             }
         }
 
-        fn make(&mut self, window: &impl HasWindowHandle, rect: egui::Rect, ppp: f32, words: &Words) {
+        fn make(&mut self, window: &impl HasWindowHandle, ctx: &egui::Context, rect: egui::Rect, ppp: f32, words: &Words) {
             let Ok(_) = window.window_handle() else { return };
             let url = self.goto.take().unwrap_or_else(|| self.url.clone());
-            match wry::WebViewBuilder::new().with_url(&url).with_bounds(bounds(rect, ppp)).build_as_child(window) {
-                Ok(view) => self.view = Some(view),
+            let mut context = self.data.clone().map(|dir| wry::WebContext::new(Some(dir)));
+            let builder = match context.as_mut() {
+                Some(c) => wry::WebViewBuilder::new_with_web_context(c),
+                None => wry::WebViewBuilder::new(),
+            };
+            let (seen, wake) = (self.seen.clone(), ctx.clone());
+            let builder = builder.with_on_page_load_handler(move |event, url| {
+                if matches!(event, wry::PageLoadEvent::Started) {
+                    seen.borrow_mut().loaded = Some(url);
+                    wake.request_repaint();
+                }
+            });
+            let (seen, wake) = (self.seen.clone(), ctx.clone());
+            let builder = builder.with_new_window_req_handler(move |url, _| {
+                seen.borrow_mut().popup = Some(url);
+                wake.request_repaint();
+                wry::NewWindowResponse::Deny
+            });
+            match builder.with_url(&url).with_bounds(bounds(rect, ppp)).build_as_child(window) {
+                Ok(view) => {
+                    self.view = Some(view);
+                    self.context = context;
+                }
                 Err(e) => self.failed = Some(format!("{}: {e}", words.failed)),
             }
         }
@@ -186,6 +266,7 @@ mod native {
 mod none {
     use super::{Answer, Words};
     use raw_window_handle::HasWindowHandle;
+    use std::path::PathBuf;
 
     pub struct Browser {
         url: String,
@@ -194,6 +275,10 @@ mod none {
     impl Browser {
         pub fn new(url: String) -> Self {
             Self { url }
+        }
+
+        pub fn with_data_dir(self, _dir: Option<PathBuf>) -> Self {
+            self
         }
 
         pub fn go(&mut self, url: String) {
@@ -242,7 +327,7 @@ mod tests {
 
     #[test]
     fn the_page_is_kept_and_moved() {
-        let mut b = Browser::new("http://localhost:3000".into());
+        let mut b = Browser::new("http://localhost:3000".into()).with_data_dir(None);
         assert_eq!(b.url(), "http://localhost:3000");
         b.go("http://localhost:5173".into());
         assert_eq!(b.url(), "http://localhost:5173");

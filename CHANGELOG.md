@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.28.0] - 2026-10-13
+
+### 追加
+
+- `ito-browser`: `Browser::with_data_dir(Option<PathBuf>)`。WebView のクッキーとキャッシュをアプリの状態のフォルダに置き、サインインが次の起動にも残る（渡さないと WebView2 は `.exe` の横に置く。macOS は渡しても OS がアプリごとに持つ）。
+- `ito-browser`: アドレスの欄の左に ←（前のページへ）。
+
+### 変更
+
+- `ito-browser`: ページの中でリンクをたどると、アドレスの欄がそのページの URL になる（欄に打っている間は書き換えない）。`↗` と ⟳ もそのページに効く。
+- `ito-browser`: 新しい窓で開くリンク（`target="_blank"`・`window.open`）は、別の窓を作らず同じページで開く。
+  - 使う側: `Words` に `back`（← のヒント）を足して渡す。状態のフォルダに残したいアプリは `Browser::new(url).with_data_dir(Some(dir))` で作る。
+
 ## [0.27.0] - 2026-10-13
 
 ### 追加
