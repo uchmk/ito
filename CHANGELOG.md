@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.19.2] - 2026-10-12
+
+### 修正
+
+- `ito-prefs::select`: リストをキーボードだけで使えるようにした。開いている間もキーはボタンが持ち、↑↓・Home・End で現在の値から光が動き、Enter / Space で選んで閉じ、Esc は選ばずに閉じてフォーカスを残し、Tab は閉じて次のコントロールへ進む。これまでは Down が先頭の項目へフォーカスを飛ばし（位置が揺れる）、Enter ではポップアップが開いたまま、Tab で開いたまま次へ出ていた（yagura のコンボボックスの不具合）。
+
 ## [0.19.1] - 2026-10-12
 
 ### 追加

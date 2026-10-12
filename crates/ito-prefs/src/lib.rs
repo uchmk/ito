@@ -407,14 +407,93 @@ pub fn focus_ring(ui: &egui::Ui, r: &egui::Response) {
 }
 
 /// A list to pick one of: the value picked, when it changed.
+///
+/// The keys stay with the button the whole time, so the list is used from the
+/// keyboard alone: Enter or Space opens it with the current value lit, Up and
+/// Down (Home and End) move the light, Enter or Space picks and shuts it, Esc
+/// shuts it as it was, and Tab shuts it and goes on to the next control.
 pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
     let mut pick = now;
     let shown = options.iter().find(|(v, _)| *v == now).map_or("", |(_, t)| *t).to_owned();
-    let combo = egui::ComboBox::from_id_salt(("prefs", id)).selected_text(shown).width(190.0).show_ui(ui, |ui| {
-        for (v, t) in options {
-            ui.selectable_value(&mut pick, *v, *t);
+    let salt = ("prefs", id);
+    let button = ui.make_persistent_id(egui::IdSalt::new(salt));
+    // egui keeps the list under this id (`ComboBox::widget_to_popup_id`, private).
+    let popup = button.with("popup");
+    let light_id = popup.with("light");
+    let ctx = ui.ctx().clone();
+    let open = egui::Popup::is_id_open(&ctx, popup);
+    let has_keys = ui.memory(|m| m.has_focus(button));
+    let mut light = if open { ui.data(|d| d.get_temp::<usize>(light_id)) } else { None };
+    let mut moved = false;
+    if open && has_keys {
+        let at = light.unwrap_or_else(|| options.iter().position(|(v, _)| *v == now).unwrap_or(0));
+        let last = options.len().saturating_sub(1);
+        let (up, down, home, end, enter, esc, tab) = ui.input_mut(|i| {
+            let none = egui::Modifiers::NONE;
+            (
+                i.consume_key(none, egui::Key::ArrowUp),
+                i.consume_key(none, egui::Key::ArrowDown),
+                i.consume_key(none, egui::Key::Home),
+                i.consume_key(none, egui::Key::End),
+                i.consume_key(none, egui::Key::Enter) | i.consume_key(none, egui::Key::Space),
+                i.consume_key(none, egui::Key::Escape),
+                i.key_pressed(egui::Key::Tab),
+            )
+        });
+        let to = if home {
+            0
+        } else if end {
+            last
+        } else if up {
+            at.saturating_sub(1)
+        } else if down {
+            (at + 1).min(last)
+        } else {
+            at
+        };
+        moved = to != at || light.is_none();
+        light = Some(to);
+        if enter {
+            if let Some((v, _)) = options.get(to) {
+                pick = *v;
+            }
+        }
+        if enter || esc || tab {
+            egui::Popup::close_id(&ctx, popup);
+        }
+    }
+    let combo = egui::ComboBox::from_id_salt(salt).selected_text(shown).width(190.0).show_ui(ui, |ui| {
+        for (k, (v, t)) in options.iter().enumerate() {
+            let behind = ui.painter().add(egui::Shape::Noop);
+            let r = ui.selectable_value(&mut pick, *v, *t);
+            if light == Some(k) {
+                ui.painter().set(behind, egui::Shape::rect_filled(r.rect, 3.0, ito_theme::colors().wait.gamma_multiply(0.25)));
+                if moved {
+                    r.scroll_to_me(None);
+                }
+            }
         }
     });
+    if combo.inner.is_some() && ui.memory(|m| m.has_focus(button)) {
+        // The arrows and Esc are the list's while it is open, from the next
+        // frame on (egui reads the filter as the keys come in): it must not
+        // move the focus off the button or drop it.
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(button, egui::EventFilter { tab: false, horizontal_arrows: false, vertical_arrows: true, escape: true })
+        });
+    }
+    ui.data_mut(|d| match light {
+        Some(k) if combo.inner.is_some() => {
+            d.insert_temp(light_id, k);
+        }
+        _ => {
+            d.remove_temp::<usize>(light_id);
+        }
+    });
+    if pick != now {
+        // A pick with the mouse leaves the keys on the list that just shut.
+        ui.memory_mut(|m| m.request_focus(button));
+    }
     take_keys(ui, &combo.response);
     focus_ring(ui, &combo.response);
     (pick != now).then_some(pick)
@@ -852,6 +931,74 @@ mod tests {
         });
         out.textures_delta.clear();
         wrote
+    }
+
+    /// One frame of a page of two lists and a switch: what the first picked.
+    fn lists(ctx: &egui::Context, state: &mut State, events: Vec<egui::Event>, now: &mut u8) {
+        let nav = Nav { pages: &[("Form", "")], index: &[(0, "A"), (0, "B")], words: &EN, file: "config.toml" };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                show(ui, ito_theme::colors(), state, &nav, Keys::default(), |ui, _, l| {
+                    section(ui, l, "LIST", |ui| {
+                        if let Some(v) = row(ui, l, "A", "", |ui| select(ui, "a", *now, &[(1u8, "one"), (2, "two"), (3, "three")])) {
+                            *now = v;
+                        }
+                        sep(ui, l);
+                        row(ui, l, "B", "", |ui| select(ui, "b", 1u8, &[(1u8, "x"), (2, "y")]));
+                        sep(ui, l);
+                        row(ui, l, "C", "", |ui| switch(ui, l, false));
+                    });
+                });
+            });
+        });
+        out.textures_delta.clear();
+    }
+
+    /// A list is used from the keyboard alone: the keys stay on its button,
+    /// Enter picks and shuts, Esc shuts, Tab shuts and goes on.
+    #[test]
+    fn a_list_is_used_from_the_keyboard_alone() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let mut now = 1u8;
+        let mut key = |ctx: &egui::Context, now: &mut u8, k: egui::Key| {
+            lists(ctx, &mut state, tap(k), now);
+            lists(ctx, &mut state, Vec::new(), now);
+        };
+        let on = |ctx: &egui::Context, which: &str| {
+            let at = focused(ctx).expect("something has the keys");
+            // The button's id is its salt below the page's ids.
+            format!("{at:?}").ends_with(&format!("{:?})", egui::IdSalt::new(("prefs", which))))
+        };
+        key(&ctx, &mut now, egui::Key::Tab);
+        key(&ctx, &mut now, egui::Key::Tab);
+        assert!(on(&ctx, "a"), "Tab reaches the list");
+        key(&ctx, &mut now, egui::Key::Enter);
+        assert!(egui::Popup::is_any_open(&ctx), "Enter opens it");
+        assert!(on(&ctx, "a"));
+        key(&ctx, &mut now, egui::Key::ArrowDown);
+        key(&ctx, &mut now, egui::Key::ArrowDown);
+        assert!(on(&ctx, "a"), "the arrows move the light, not the keys");
+        assert_eq!(now, 1, "and pick nothing");
+        key(&ctx, &mut now, egui::Key::Enter);
+        assert_eq!(now, 3, "Enter picks what is lit");
+        assert!(!egui::Popup::is_any_open(&ctx), "and shuts it");
+        assert!(on(&ctx, "a"));
+        key(&ctx, &mut now, egui::Key::Space);
+        key(&ctx, &mut now, egui::Key::ArrowUp);
+        key(&ctx, &mut now, egui::Key::Escape);
+        assert!(!egui::Popup::is_any_open(&ctx), "Esc shuts it");
+        assert_eq!(now, 3, "as it was");
+        assert!(on(&ctx, "a"), "with the keys kept");
+        key(&ctx, &mut now, egui::Key::Enter);
+        key(&ctx, &mut now, egui::Key::Tab);
+        assert!(!egui::Popup::is_any_open(&ctx), "Tab shuts it");
+        assert!(on(&ctx, "b"), "and goes on to the next");
     }
 
     fn focused(ctx: &egui::Context) -> Option<egui::Id> {
