@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.21.2] - 2026-10-12
+
+### 追加
+
+- `scripts/lanes/merge-lanes.py` が yagura の実機レーン（`test/win-*`・`test/arm-*`）を扱う。yagura の表は `TESTING.md` の 1 枚で、行は `- [ ] 3e.12 …`（太字なし）なので、`row_id` が先頭の `3e.12` を行 ID として読む。印は `[x]`・`[~]`。yagura の `required_checks` は空（レーンの PR は Markdown だけで、`ci.yml` が走らない）。ラベルは全部（`retest`・`lane:win` を含む）。
+
 ## [0.21.1] - 2026-10-12
 
 ### 変更
