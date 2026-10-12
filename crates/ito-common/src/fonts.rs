@@ -16,6 +16,32 @@ pub const NERD_FONTS: [&str; 6] = [
     "JetBrainsMonoNerdFont-Regular.ttf",
 ];
 
+/// The window's own words (titles, buttons) in a proportional face, as the
+/// design has them (IBM Plex Sans JP): the first of these found by
+/// [`find_file`], else egui's own.
+pub const UI_REGULAR: &[&str] = &[
+    "IBMPlexSansJP-Regular.ttf",
+    "IBMPlexSansJP-Regular.otf",
+    "IBMPlexSans-Regular.ttf",
+    "IBMPlexSans-Regular.otf",
+    "segoeui.ttf",
+    "NotoSans-Regular.ttf",
+    "DejaVuSans.ttf",
+];
+
+/// Their bold for titles (egui has no bold of its own: `strong` is only a colour).
+pub const UI_BOLD: &[&str] = &[
+    "IBMPlexSansJP-SemiBold.ttf",
+    "IBMPlexSansJP-SemiBold.otf",
+    "IBMPlexSansJP-Bold.ttf",
+    "IBMPlexSans-SemiBold.ttf",
+    "IBMPlexSans-SemiBold.otf",
+    "seguisb.ttf",
+    "segoeuib.ttf",
+    "NotoSans-SemiBold.ttf",
+    "DejaVuSans-Bold.ttf",
+];
+
 /// The system faces that draw Japanese, in order; the first that reads is
 /// used. Plain paths rather than fontconfig, which would be a C dependency
 /// for one lookup.
@@ -102,7 +128,7 @@ mod tests {
     #[test]
     fn the_lists_are_whole_paths_and_file_names() {
         assert!(JAPANESE.iter().chain(JAPANESE_BOLD).all(|p| std::path::Path::new(p).is_absolute()));
-        assert!(NERD_FONTS.iter().all(|n| !n.contains(['/', '\\'])));
+        assert!(NERD_FONTS.iter().chain(UI_REGULAR).chain(UI_BOLD).all(|n| !n.contains(['/', '\\'])));
         assert!(read_first(&["/no/such/font.ttc"]).is_none());
     }
 }

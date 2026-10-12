@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.26.0] - 2026-10-12
+
+### 追加
+
+- `ito_common::fonts::UI_REGULAR`・`UI_BOLD`: 窓の文字（タイトル・ボタン）の比例フォント（IBM Plex Sans JP など）の探すファイル名の並び。tsumugi が持っていたものを移した。
+
 ## [0.25.0] - 2026-10-12
 
 ### 追加
