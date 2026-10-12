@@ -20,6 +20,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
 | `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。依存は serde と toml だけ | kura（dev-dependencies） |
+| `ito-winres` | `.exe` のアイコンと版の情報の `.res`（rc.exe なしで書く）と、`build.rs` から呼ぶ `emit(name, sides, rgba)`。MSVC のターゲットだけ、クロスビルドでも付く |
 
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
 アプリの `scripts/lanes.sh sync` が、固定した `rev` のここから自分の `scripts/` へバイト単位で同じものを写し、`lanes.sh check` は写しが違えば落ちる。

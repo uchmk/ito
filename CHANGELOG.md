@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.22.0] - 2026-10-12
+
+### 追加
+
+- `ito-winres`: `.exe` のアイコンと版の情報の `.res` を Rust で書き、リンカーに渡すクレート（yagura の `winres.rs` と `build.rs` を移した）。`build.rs` から `ito_winres::emit("app", &[16, 32, 256], |side| rgba(side))` と呼ぶだけで、パッケージの版と説明を読み、MSVC のターゲットなら `OUT_DIR` に `<name>.res` を書いて `cargo:rustc-link-arg` で渡す。rc.exe は要らず、Linux や macOS からの Windows 向けビルドにも付く。
+
 ## [0.21.4] - 2026-10-12
 
 ### 変更

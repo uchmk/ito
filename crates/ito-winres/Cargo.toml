@@ -1,0 +1,11 @@
+[package]
+name = "ito-winres"
+description = "An .exe's icon and version information as a Windows .res written in Rust, for a build.rs: no rc.exe, and a cross build gets it too"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+png = "0.18"
