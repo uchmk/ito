@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.25.0] - 2026-10-12
+
+### 追加
+
+- `ito_common::shellhook`: `shell-hook`（tsumugi・kura）が出す pwsh・bash・zsh の行（OSC 7 と OSC 133 の印）と、プロファイルに印をつけて入れる・外す（`with_hook`・`without_hook`・`has_hook`）・シェルのプロファイルの場所（`profile`）。アプリの名前と、フォルダを何に使うかの一言だけ引数で渡す。
+
 ## [0.24.0] - 2026-10-12
 
 ### 追加
