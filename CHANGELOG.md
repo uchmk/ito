@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.21.4] - 2026-10-12
+
+### 変更
+
+- `ito-pane` の合字（`liga.rs`）を harfrust 0.14・skrifa 0.48・vello_cpu 0.3 に書き換えた（Dependabot の #2 で見送った分）。harfrust 0.14 は `ShaperFont`・`Buffer`・`shape()` の形に変わったので、シェイプの呼び出しだけを直した。合字の出し方（`Sub`）と描き方は変わらない。
+
 ## [0.21.3] - 2026-10-12
 
 ### 変更
