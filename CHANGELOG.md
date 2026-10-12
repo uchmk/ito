@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.24.0] - 2026-10-12
+
+### 追加
+
+- `ito_common::report`: `env` コマンド（`kura env`・`yagura env`）の文面の組み方（`section`・`finish`・`row`・`variables`）。キーをそろえ、長いキーと複数行の値を逃がす書式は kura と yagura で同じだったので、ここに移した。
+
 ## [0.23.0] - 2026-10-12
 
 ### 追加

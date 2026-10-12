@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 pub mod fonts;
 mod os_theme;
+pub mod report;
 pub mod update;
 pub mod window;
 
