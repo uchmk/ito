@@ -1,0 +1,11 @@
+[package]
+name = "ito-gpu"
+description = "Which wgpu backends an egui app draws with: GL first on Windows (an AMD driver thread spins under Vulkan and DX12), a named backend or a fallback to auto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui-wgpu = "0.36"

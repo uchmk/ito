@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.20.0] - 2026-10-12
+
+### 追加
+
+- `ito-keyscript`（ito#3 の 1）: `--keys` の台本。yagura と tsumugi が同じ中身で持っていた `keyscript.rs` を 1 つにした。`parse`（`2<A-S-Right>*2<Wait:300><Shot:cpu><State:a><Click:x,y><Drag:x1,y1-x2,y2><Quit>`）、`events`（キー → egui のイベント）、`Runner { new, input, due, shot }`、`Step`・`Do`。`<State:名前>` が何を書くか・`<APP>_KEYS_DONE` の名前はアプリが決める（`Runner::new(steps, done)` と `Do::State`）。使う側がやること: `crate::keyscript` を消して `ito_keyscript` に替える。
+- `ito-gpu`（ito#3 の 2）: wgpu のバックエンドの選び方。`ito-pane::gpu` にあった `pick_backends`・`auto_backends`・`has_adapter` を、ペインを使わないアプリ（yagura）も使えるよう独立させ、yagura の `gpu_backend::options` をそのまま `options(backend) -> (WgpuConfiguration, Option<String>)` として足した（警告の文は `backend = "…": …` で、`config.toml: ` のような前置きはアプリが付ける）。`ito-pane` の `wgpu` 機能は `ito-gpu` を再エクスポートするだけになり、`ito_pane::gpu::…` の名前は変わらない。
+- `ito-palette`（ito#3 の 10 の一部、yagura#15 の 1）: コマンドパレット（`Ctrl+Shift+P`）。`Entry<T>`（題・詳細・同じことをするキー・選んだときの `T`）の一覧を、打った文字が順に含まれるもの（`score`・`search`）に絞り、窓の上に出す `show(ctx, &mut View, &entries, &Style, &Words) -> Option<Answer<T>>`。↑↓・Ctrl+P/N/K/J で動き、Enter で選び、Esc か外のクリックで閉じる。色と文言はアプリが渡す。tsumugi の `palette.rs` の `score`・`search` を一般にしたもの（tsumugi の載せ替えは別）。
+
 ## [0.19.2] - 2026-10-12
 
 ### 修正

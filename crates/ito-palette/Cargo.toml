@@ -1,0 +1,11 @@
+[package]
+name = "ito-palette"
+description = "The command palette (Ctrl+Shift+P): a list narrowed by the letters typed, in order, and an egui overlay that returns what was picked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"

@@ -1,0 +1,13 @@
+[package]
+name = "ito-keyscript"
+description = "`--keys` scripts (`2<A-S-Right><Wait:300><Shot:cpu>`): parsed, and played into an egui app's input, with screenshots saved as PNG"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-keys = { path = "../ito-keys", features = ["egui"] }
+png = "0.18"
