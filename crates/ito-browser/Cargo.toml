@@ -1,0 +1,17 @@
+[package]
+name = "ito-browser"
+description = "A web page beside the panes: the OS's own WebView (WebView2, WKWebView) as a child of the window under an egui address bar, and the checks of a typed address"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+raw-window-handle = "0.6"
+
+# Linux has no child WebView (wry's need GTK): there `EMBEDDED` is false and
+# the app opens the page in the system's browser.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+wry = { version = "0.57", default-features = false }

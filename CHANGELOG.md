@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.27.0] - 2026-10-13
+
+### 追加
+
+- `ito-browser`: ペインの横に出すウェブのページ（tsumugi の内蔵ブラウザを移した）。Windows と macOS では OS の WebView（WebView2・WKWebView）を窓の子にし、上に egui のアドレスの欄と ⟳・↗・✕ を描く。Linux には無いので `EMBEDDED` が `false` になり、アプリはシステムのブラウザで開く（同じ API の `Browser` もあり、最初の `show` で `Answer { close: true, external: Some(url) }` を返す）。打った行の読み方（`normalize`: `3000` → `http://localhost:3000`、`file:`・`javascript:` などは断る）と、開くページ（`start_url`）も入れた。
+  - 使う側: `Option<Browser>` を持ち、パネルの中で毎フレーム `show(ui, frame, hidden, &Words { reload, external, close, failed })` を呼ぶ（`frame` は `eframe::Frame`、`hidden` は egui の重ね表示が開いているとき。WebView はいつも egui の絵より上に出るため）。パネルを描かないフレームは `hide()`。`Answer::external` はシステムのブラウザで開き、`Answer::close` で `None` にする。ボタンの言葉は `Words` でアプリの言語のものを渡す。
+
 ## [0.26.0] - 2026-10-12
 
 ### 追加
