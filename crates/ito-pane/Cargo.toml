@@ -28,9 +28,9 @@ ito-gpu = { path = "../ito-gpu", optional = true }
 # fills them. The three egui 0.36 draws its own text with, at its versions,
 # so nothing new is built; rustybuzz and ab_glyph, used before, are
 # unmaintained or carry ttf-parser, which is (RUSTSEC-2026-0206, -0192).
-harfrust = { version = "0.12", optional = true }
-skrifa = { version = "0.44", default-features = false, features = ["std"], optional = true }
-vello_cpu = { version = "0.1", default-features = false, features = ["std", "u8_pipeline"], optional = true }
+harfrust = { version = "0.14", optional = true }
+skrifa = { version = "0.48", default-features = false, features = ["std"], optional = true }
+vello_cpu = { version = "0.3", default-features = false, features = ["std", "u8_pipeline"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 # Right-to-left text (tsumugi's #28): the order a row is drawn in, by the
 # Unicode bidirectional algorithm. Pure Rust, Servo's; kura builds it already

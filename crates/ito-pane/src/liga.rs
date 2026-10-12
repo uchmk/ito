@@ -62,8 +62,8 @@ type Glyphs = HashMap<(u16, u32), Option<Arc<Drawn>>>;
 pub struct Shaper {
     data: Arc<Vec<u8>>,
     index: u32,
-    /// The font's layout tables, read once.
-    shaping: harfrust::ShaperData,
+    /// The font as harfrust reads it; its layout tables are cached inside.
+    shaping: harfrust::Font,
     runs: Mutex<HashMap<String, Arc<Vec<Sub>>>>,
     glyphs: Mutex<Glyphs>,
 }
@@ -81,20 +81,16 @@ impl Shaper {
     /// The font in `data` (`index` in a collection), when it reads and has
     /// outlines to draw.
     pub fn new(data: Vec<u8>, index: u32) -> Option<Arc<Shaper>> {
-        let font = harfrust::FontRef::from_index(&data, index).ok()?;
+        let font = skrifa::FontRef::from_index(&data, index).ok()?;
         font.outline_glyphs().get(font.charmap().map('M')?)?;
-        let shaping = harfrust::ShaperData::new(&font);
-        Some(Arc::new(Shaper {
-            data: Arc::new(data),
-            index,
-            shaping,
-            runs: Mutex::new(HashMap::new()),
-            glyphs: Mutex::new(HashMap::new()),
-        }))
+        let data = Arc::new(data);
+        let shared: Arc<dyn AsRef<[u8]> + Send + Sync> = data.clone();
+        let shaping = harfrust::Font::new(shared, index)?;
+        Some(Arc::new(Shaper { data, index, shaping, runs: Mutex::new(HashMap::new()), glyphs: Mutex::new(HashMap::new()) }))
     }
 
-    fn font(&self) -> Option<harfrust::FontRef<'_>> {
-        harfrust::FontRef::from_index(&self.data, self.index).ok()
+    fn font(&self) -> Option<skrifa::FontRef<'_>> {
+        skrifa::FontRef::from_index(&self.data, self.index).ok()
     }
 
     /// What shaping `text` puts in place of its characters' own glyphs.
@@ -115,10 +111,12 @@ impl Shaper {
     fn shape(&self, text: &str) -> Vec<Sub> {
         let Some(font) = self.font() else { return Vec::new() };
         let charmap = font.charmap();
-        let mut buf = harfrust::UnicodeBuffer::new();
-        buf.push_str(text);
-        buf.guess_segment_properties();
-        let out = self.shaping.shaper(&font).build().shape(buf, harfrust::ShapeOptions::new());
+        let mut out = harfrust::Buffer::new();
+        out.push_str(text);
+        out.guess_segment_properties();
+        if harfrust::shape(&harfrust::ShaperFont::new(&self.shaping), &mut out, harfrust::ShapeOptions::new()).is_err() {
+            return Vec::new();
+        }
         let (infos, places) = (out.glyph_infos(), out.glyph_positions());
         let starts: Vec<usize> = text.char_indices().map(|(b, _)| b).collect();
         let chars: Vec<char> = text.chars().collect();
@@ -175,7 +173,7 @@ impl Shaper {
 
 /// The glyph's coverage as a white image, to be tinted when drawn; `None`
 /// for a glyph with nothing to draw (a ligature's spacer).
-fn raster(ctx: &egui::Context, font: &harfrust::FontRef, glyph: u16, px_unit: f32) -> Option<Drawn> {
+fn raster(ctx: &egui::Context, font: &skrifa::FontRef, glyph: u16, px_unit: f32) -> Option<Drawn> {
     let upem = font.head().ok()?.units_per_em();
     let outline = font.outline_glyphs().get(skrifa::GlyphId::new(u32::from(glyph)))?;
     let mut path = kurbo::BezPath::new();
