@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.21.0] - 2026-10-12
+
+### 変更
+
+- `ito-keyscript`: kura の `keyscript.rs`（yagura のものの上位集合）を取り込み、kura も使えるようにした。台本の語彙が増えた: `<Now>`・`<Paste>`・`<Paste:text>`（`\n \t \e \\ \xNN`）・`<Key:C-Tab>`（egui のキーそのもの）・`<Click:C-0.5,0.4>`・`<RClick:…>`・`<Hover:…>`・`<Wheel:-3@x,y>`。`<Space>` はキーとテキストの両方で届く。`Step` は kura の形（`Click { right, mods, at }`・`Drag { from, to }`）になり、yagura の `Click(At)`・`Drag(At, At)` は使えない。
+- 台本を自前のフレームのループで回すアプリ（kura は窓の落ち着くのを待つ）のために、`Press`・`press`・`label`・`pointer_events`・`paste_text_event`・`STALL`・`stalled_report`・`quit_report`・`closed_report`・`refused_report`・`panic_report`・`install_panic_report`・`save_png` を公開した。`Runner` は `Press` を全部扱い（`<Now>` は待たないだけ）、`<Paste>` のクリップボードは `Runner::clipboard`（`fn() -> String`）で渡す。
+- アプリ固有の語は `Dialect`（`parse_with(script, &Dialect { reads, shot_suffixes })`）で足す: `reads` は kura の `<PaneText:name>`・`<PreviewText:name>`（`Step::Read { tag, name }`・`Do::Read`）、`shot_suffixes` は `<Shot:name@preview>` の `@preview`。`parse(script)` は共通の語だけ。
+
 ## [0.20.0] - 2026-10-12
 
 ### 追加
