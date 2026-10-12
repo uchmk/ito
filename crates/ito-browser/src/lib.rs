@@ -208,6 +208,12 @@ mod native {
                 }
                 let _ = view.set_bounds(bounds(rect, ui.pixels_per_point()));
                 let _ = view.set_visible(!hidden);
+                // A click in the window outside the page gives the keys back
+                // to the window (the address field, the app's keys): the
+                // page keeps them from its own click on.
+                if ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))) {
+                    let _ = view.focus_parent();
+                }
             }
             answer
         }
