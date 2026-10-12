@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.21.3] - 2026-10-12
+
+### 変更
+
+- 依存の更新（Dependabot #2）のうち `toml` 1.1.8・`toml_edit` 0.25.17・`fancy-regex` 0.19.2・`miniz_oxide` 0.9.1 を入れた。`toml_edit` 0.25 で `Table::set_position` が `Option<isize>` を取るようになったので、`ito-common` の 2 か所を `Some(place)` に直した。
+- `harfrust` 0.14・`skrifa` 0.48・`vello_cpu` 0.3 は入れていない（0.12・0.44・0.1 のまま）。harfrust 0.14 は API が作り直され（`FontRef`・`ShaperData`・`UnicodeBuffer` が無くなり、`ShaperFont` と `shape` に）、`ito-pane` の `liga.rs` の書き換えが要るため、別の作業にした。
+
 ## [0.21.2] - 2026-10-12
 
 ### 追加

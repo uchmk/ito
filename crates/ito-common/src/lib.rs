@@ -529,7 +529,7 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
             Some(j) => {
                 let mut kept = old[j].clone();
                 if let Some(place) = places.next() {
-                    kept.set_position(place);
+                    kept.set_position(Some(place));
                     at = Some(place);
                 }
                 kept.retain(|k, _| keys.iter().any(|(name, _)| name == k));
@@ -552,7 +552,7 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
             None => {
                 let mut new = toml_edit::Table::new();
                 if let Some(place) = at {
-                    new.set_position(place);
+                    new.set_position(Some(place));
                 }
                 for (k, v) in keys {
                     new.insert(&k, toml_edit::Item::Value(v));

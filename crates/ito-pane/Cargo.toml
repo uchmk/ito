@@ -45,7 +45,7 @@ encoding_rs = "0.8"
 # the PNG, JPEG and GIF they send, decoded, and kitty's zlib. Pure Rust,
 # and filer builds both already.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 # Triggers (iTerm2's): a regular expression matched against the output.
 # Pure Rust, and alacritty_terminal's search builds its automata already.
 regex = "1"
