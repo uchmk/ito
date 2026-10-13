@@ -165,6 +165,12 @@ pub fn cursor_cell<T: EventListener>(term: &Term<T>) -> (usize, usize) {
     (p.column.0, (p.line.0.max(0) as usize).saturating_add(grid.display_offset()))
 }
 
+/// Whether the program hid the cursor (DECTCEM off).
+pub fn cursor_hidden<T: EventListener>(term: &Term<T>) -> bool {
+    use alacritty_terminal::term::TermMode;
+    !term.mode().contains(TermMode::SHOW_CURSOR)
+}
+
 /// Whether the arrows should be sent as SS3 rather than CSI.
 pub fn app_cursor<T: EventListener>(term: &Term<T>) -> bool {
     use alacritty_terminal::term::TermMode;

@@ -14,6 +14,9 @@ pub struct Screen {
     pub rows: Vec<Vec<CellView>>,
     /// Column and line of the cursor.
     pub cursor: (usize, usize),
+    /// The program hid the cursor (`\e[?25l`): it draws its own caret and
+    /// parks this one anywhere, so an input method must not follow it.
+    pub cursor_hidden: bool,
     /// The program asked for application cursor keys (`\e[?1h`).
     pub app_cursor: bool,
     /// The program is on the alternate screen (a full-screen program).
@@ -110,6 +113,7 @@ impl Pane for Terminal {
         self.with_grid(|t| Screen {
             rows: crate::snapshot(t),
             cursor: crate::cursor_cell(t),
+            cursor_hidden: crate::cursor_hidden(t),
             app_cursor: crate::app_cursor(t),
             alt_screen: crate::alt_screen(t),
             mouse: crate::mouse_report(t),

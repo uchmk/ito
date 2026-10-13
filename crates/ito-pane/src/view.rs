@@ -347,7 +347,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     let Some(term) = term else { return shown };
     term.resize(size, (cell_w.round() as u16, row_h.round() as u16));
     // Out from under the lock before any laying out happens.
-    let crate::Screen { rows, cursor, app_cursor, alt_screen, mouse, .. } = term.screen();
+    let crate::Screen { rows, cursor, cursor_hidden, app_cursor, alt_screen, mouse, .. } = term.screen();
     let hyperlinks = term.hyperlinks();
     let blocks = if alt_screen { Vec::new() } else { term.blocks() };
     let pictures = term.pictures();
@@ -562,13 +562,26 @@ pub fn show_faces<P: Pane + ?Sized>(
         // window says text is being edited, and puts its candidates there.
         // Not while a field of the app has the keys: that one says so itself.
         if focused && ui.memory(|m| m.focused().is_none()) {
+            // A program that hid the cursor paints its own caret and leaves
+            // this one wherever its last redraw ended (Claude Code's footer
+            // timer): the input method stays where the cursor last showed.
+            let seen_id = id.with("ime-seen");
+            if !cursor_hidden {
+                ui.ctx().data_mut(|d| d.insert_temp(seen_id, (cx, cy)));
+            }
+            let (ix, iy) = match cursor_hidden {
+                true => ui.ctx().data(|d| d.get_temp::<(usize, usize)>(seen_id)).filter(|&(x, y)| y < size.lines && x < size.cols),
+                false => None,
+            }
+            .unwrap_or((cx, cy));
+            let ime_at = Rect::from_min_size(inner.min + Vec2::new(ix as f32 * cell_w, iy as f32 * row_h), Vec2::new(cell_w, row_h));
             ui.output_mut(|o| {
                 o.ime = Some(egui::output::IMEOutput {
                     purpose: egui::IMEPurpose::Terminal,
                     // egui-winit puts the candidate window by `rect`, so it is the
                     // cursor's cell, not the pane.
-                    rect: at,
-                    cursor_rect: at,
+                    rect: ime_at,
+                    cursor_rect: ime_at,
                     should_interrupt_composition: false,
                 });
             });
@@ -584,7 +597,7 @@ pub fn show_faces<P: Pane + ?Sized>(
             let said = ui.ctx().input(|i| {
                 i.events.iter().rev().find_map(|e| match e {
                     egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => Some((text.clone(), None)),
-                    egui::Event::Ime(egui::ImeEvent::Commit(text)) => Some((text.clone(), Some(((cx, cy), now)))),
+                    egui::Event::Ime(egui::ImeEvent::Commit(text)) => Some((text.clone(), Some(((ix, iy), now)))),
                     _ => None,
                 })
             });
@@ -594,7 +607,7 @@ pub fn show_faces<P: Pane + ?Sized>(
             let (preedit, committed) =
                 ui.ctx().data(|d| d.get_temp::<(String, Option<((usize, usize), f64)>)>(preedit_id)).unwrap_or_default();
             let preedit = match committed {
-                Some((was, since)) if was == (cx, cy) && now - since < IME_HOLD => {
+                Some((was, since)) if was == (ix, iy) && now - since < IME_HOLD => {
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(IME_HOLD - (now - since)));
                     preedit
                 }
@@ -603,7 +616,7 @@ pub fn show_faces<P: Pane + ?Sized>(
             };
             if !preedit.is_empty() {
                 let g = painter.layout_no_wrap(preedit, f.clone(), pal.fg);
-                let place = Rect::from_min_size(at.left_top(), g.size());
+                let place = Rect::from_min_size(ime_at.left_top(), g.size());
                 painter.rect_filled(place, CornerRadius::ZERO, pal.bg);
                 painter.galley(place.min, g, pal.fg);
                 painter.line_segment(

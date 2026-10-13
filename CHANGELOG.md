@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.29.0] - 2026-10-14
+
+### 追加
+
+- `ito-pane`: `Screen::cursor_hidden`（プログラムが `\e[?25l` でカーソルを隠した）と `cursor_hidden(term)`。
+
+### 修正
+
+- `ito-pane`: Claude Code がバックグラウンドのエージェントを動かしている間、IME の変換中の文字と候補の窓が、フッターの時計の再描画のあとにカーソルが残る行末に出ていた。カーソルが隠れている間は、最後に見えていた場所に出す。
+  - 使う側: `Screen` を作る所（直接作るアプリ）は `cursor_hidden` を足す。tsumugi は mux の `Update` にも運ぶ。
+
 ## [0.28.2] - 2026-10-13
 
 ### 修正
