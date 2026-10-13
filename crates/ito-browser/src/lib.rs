@@ -106,6 +106,9 @@ mod native {
     struct Seen {
         /// The page it moved to (a link followed, back).
         loaded: Option<String>,
+        /// Its title changed: a page that moves on without loading (GitHub
+        /// does, by the history API) may be at another address.
+        retitled: bool,
         /// A page it wanted in a new window: it comes in this view instead.
         popup: Option<String>,
     }
@@ -155,7 +158,8 @@ mod native {
             if let Some(url) = seen.popup {
                 self.go(url);
             }
-            if let Some(url) = seen.loaded {
+            let moved = seen.retitled.then(|| self.view.as_ref().and_then(|v| v.url().ok())).flatten().filter(|u| *u != self.url);
+            if let Some(url) = seen.loaded.or(moved) {
                 if !self.editing {
                     self.edit = url.clone();
                 }
@@ -241,11 +245,19 @@ mod native {
                 }
             });
             let (seen, wake) = (self.seen.clone(), ctx.clone());
+            let builder = builder.with_document_title_changed_handler(move |_| {
+                seen.borrow_mut().retitled = true;
+                wake.request_repaint();
+            });
+            let (seen, wake) = (self.seen.clone(), ctx.clone());
             let builder = builder.with_new_window_req_handler(move |url, _| {
                 seen.borrow_mut().popup = Some(url);
                 wake.request_repaint();
                 wry::NewWindowResponse::Deny
             });
+            // The keys stay with the app (`o` then `j` moves on in its list):
+            // the page takes them from a click in it.
+            let builder = builder.with_focused(false);
             match builder.with_url(&url).with_bounds(bounds(rect, ppp)).build_as_child(window) {
                 Ok(view) => {
                     self.view = Some(view);

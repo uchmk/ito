@@ -186,14 +186,24 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         let ink = if on { style.selected_text } else { style.text };
                         let font = egui::TextStyle::Body.resolve(ui.style());
                         let mid = rect.center().y;
-                        let title =
-                            ui.painter().text(egui::pos2(rect.left() + 6.0, mid), egui::Align2::LEFT_CENTER, &e.title, font.clone(), ink);
-                        if !e.detail.is_empty() {
-                            let at = egui::pos2(title.right() + 8.0, mid);
-                            ui.painter().text(at, egui::Align2::LEFT_CENTER, &e.detail, font.clone(), style.dim);
+                        // Nothing leaves the row: a long title ends in "…" so the
+                        // detail and the key still show.
+                        let p = ui.painter_at(rect);
+                        let key = (!e.key.is_empty()).then(|| p.layout_no_wrap(e.key.clone(), font.clone(), style.dim));
+                        let detail = (!e.detail.is_empty()).then(|| p.layout_no_wrap(e.detail.clone(), font.clone(), style.dim));
+                        let key_w = key.as_ref().map_or(0.0, |g| g.size().x + 12.0);
+                        let detail_w = detail.as_ref().map_or(0.0, |g| g.size().x + 8.0);
+                        let room = (rect.width() - 12.0 - key_w - detail_w).max(rect.width() / 2.0);
+                        let mut job = egui::text::LayoutJob::simple_singleline(e.title.clone(), font.clone(), ink);
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+                        let title = p.layout_job(job);
+                        let right = rect.left() + 6.0 + title.size().x;
+                        p.galley(egui::pos2(rect.left() + 6.0, mid - title.size().y / 2.0), title, ink);
+                        if let Some(g) = detail {
+                            p.galley(egui::pos2(right + 8.0, mid - g.size().y / 2.0), g, style.dim);
                         }
-                        if !e.key.is_empty() {
-                            ui.painter().text(egui::pos2(rect.right() - 6.0, mid), egui::Align2::RIGHT_CENTER, &e.key, font, style.dim);
+                        if let Some(g) = key {
+                            p.galley(egui::pos2(rect.right() - 6.0 - g.size().x, mid - g.size().y / 2.0), g, style.dim);
                         }
                         if resp.clicked() {
                             answer = Some(Answer::Pick(e.pick.clone()));
