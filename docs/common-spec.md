@@ -122,7 +122,9 @@ prepend_keymap = [
   - 組み込みの keymap.toml と、アプリが作る雛形の頭に上の 2 行のコメントを置く。
   - 画面（ヘルプ・パレット・設定・ステータスバー）には OS の名前（`Ctrl+,`・`⌘,`）で出す（`Key::human`）。
   - ito 0.5 の `<C-…>`・`<primary-…>` も `C` と同じに読む。
-- tsumugi の config.toml の `[keys]`（`"Ctrl+Shift+T"` の形）は古い形。keymap.toml に移す（tsumugi の TODO）。
+- tsumugi はターミナルなので、macOS でも Ctrl のキーはペインのプログラムに渡す。そのため tsumugi の keymap.toml（層 `[window]`）だけは
+  `C` がどの OS でも Ctrl、`D` が Mac の Cmd（ほかの OS では押されない）。窓のキーの既定は Mac では Cmd（設定の「macOS で Cmd を使う」）。
+- tsumugi の config.toml の `[keys]`（`"Ctrl+Shift+T"` の形）は古い形。今も読み、設定 → キーで次にキーを変えたときに keymap.toml に移す（0.108.0 から）。
 
 | 役割 | キー | 補足 |
 | --- | --- | --- |
@@ -302,7 +304,7 @@ scale: 100%           # 書くなら倍率を % で
 | common.toml の言語・テーマ・時計 | ○ | ○ | ○ |
 | 倍率（common.toml の `scale`・`scale_row`） | ○ | ○ | △（読んで当てるだけ。キーは字の大きさ） |
 | 自分の設定の自動の読み直し | ○ | ○ | ○ |
-| keymap.toml（yazi の形、`ito-keymap`） | ○（0.110.3） | ○（0.60.0） | ×（config.toml の `[keys]`） |
+| keymap.toml（yazi の形、`ito-keymap`） | ○（0.110.3） | ○（0.60.0） | ○（0.108.0。`C` は Ctrl、`D` が Cmd） |
 | `<C-,>`・`<F1>`・`<C-q>` | ○ | ○ | △（`<C-q>` はシェルに渡す） |
 | コマンドパレット `<C-S-p>` | ○ | × | × |
 | 設定の画面（`ito_prefs`） | ○ | ○ | ○ |
