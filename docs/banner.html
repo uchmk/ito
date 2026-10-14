@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  ito's social preview -- the banner GitHub shows when the repository is
+  linked anywhere. Rendered to docs/social-preview.png and uploaded by hand at
+  Settings > General > Social preview; GitHub has no API for that setting.
+  The same shape as the uchmk apps' banners (tsumugi, kura, yagura, minato):
+  the kanji, the name and the kana on the left, real screenshots on the right.
+
+  Kept as source rather than as a PNG alone so the wording can change without
+  anyone having to rebuild it in a drawing program. To re-render, from the
+  repository root, with any Chromium:
+
+      chromium --headless --disable-gpu --hide-scrollbars \
+        --force-device-scale-factor=2 --window-size=1280,640 \
+        --screenshot=docs/social-preview.png docs/banner.html
+
+  then scale the 2560x1280 result down to 1280x640 (GitHub's size), for
+  example `magick docs/social-preview.png -resize 1280x640 docs/social-preview.png`.
+
+  What to keep true when changing it:
+
+  - **ito has no window of its own**, so the right side shows the apps built
+    on it: copies of each app's own banner shot (docs/images/<app>.png, scaled
+    to 900 px wide), tied by a thread in that app's banner colour. When an
+    app retakes its banner shot, copy it here again.
+  - **Only released apps.** An app still to come gets a card when it has a
+    window to show.
+  - **The tagline is the README's own claim.**
+-->
+<html><head><meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:640px;overflow:hidden}
+  body{background:#faf8f3;position:relative;font-family:"Noto Sans JP",sans-serif;color:#26231f}
+  .kanji{position:absolute;left:62px;top:28px;font-family:"Noto Serif JP",serif;font-weight:500;font-size:250px;line-height:1}
+  .name{position:absolute;left:70px;top:318px;font-weight:700;font-size:76px;letter-spacing:4px;line-height:1}
+  .kana{position:absolute;left:74px;top:420px;font-size:22px;letter-spacing:22px;opacity:.6}
+  .tag{position:absolute;left:73px;top:466px;font-size:22px;line-height:33px}
+  .url{position:absolute;left:73px;top:592px;font-size:18px;letter-spacing:1px;opacity:.55}
+  .card{position:absolute;width:318px;border-radius:7px;
+        box-shadow:0 14px 34px rgba(40,30,20,.28),0 0 0 1px rgba(0,0,0,.18)}
+  .tsumugi{left:598px;top:46px;transform:rotate(-2.5deg)}
+  .kura{left:938px;top:30px;transform:rotate(2deg)}
+  .yagura{left:606px;top:316px;transform:rotate(1.8deg)}
+  .minato{left:946px;top:306px;transform:rotate(-2deg)}
+  svg.threads{position:absolute;left:0;top:0}
+</style></head>
+<body>
+  <div class="kanji">糸</div>
+  <div class="name">ito</div>
+  <div class="kana">いと</div>
+  <div class="tag">The shared crates of uchmk's apps,<br>the thread that runs through them</div>
+  <div class="url">github.com/uchmk/ito</div>
+  <img class="card tsumugi" src="images/tsumugi.png" alt="">
+  <img class="card kura" src="images/kura.png" alt="">
+  <img class="card yagura" src="images/yagura.png" alt="">
+  <img class="card minato" src="images/minato.png" alt="">
+  <svg class="threads" width="1280" height="640" viewBox="0 0 1280 640" fill="none" stroke-width="2.2" stroke-linecap="round">
+    <!-- four threads run together from the left edge to the knot, then part, one to each app -->
+    <path d="M0,568 C200,562 330,574 470,569 C540,566 560,330 600,180" stroke="#155f84"/>
+    <path d="M0,572 C200,566 330,578 470,573 C640,566 760,300 948,262" stroke="#8f2e14"/>
+    <path d="M0,576 C200,570 330,582 470,577 C540,576 570,470 612,440" stroke="#017a41"/>
+    <path d="M0,580 C200,574 330,586 470,581 C700,592 900,600 1010,520" stroke="#1f2a44"/>
+    <circle cx="470" cy="575" r="9" fill="#26231f"/>
+    <circle cx="600" cy="180" r="4.5" fill="#155f84"/>
+    <circle cx="948" cy="262" r="4.5" fill="#8f2e14"/>
+    <circle cx="612" cy="440" r="4.5" fill="#017a41"/>
+    <circle cx="1010" cy="520" r="4.5" fill="#1f2a44"/>
+  </svg>
+</body></html>

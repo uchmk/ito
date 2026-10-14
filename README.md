@@ -26,6 +26,7 @@ the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
 - [tsumugi](https://github.com/uchmk/tsumugi) (紬): a terminal for running many AI CLI sessions side by side
 - [kura](https://github.com/uchmk/kura) (蔵): a keyboard-driven file manager in the spirit of yazi
 - [yagura](https://github.com/uchmk/yagura) (櫓): a keyboard-driven system monitor
+- [minato](https://github.com/uchmk/minato) (港): a keyboard-driven GitHub app for several repositories at once
 - [fuda](https://github.com/uchmk/fuda) (札, to come): a keyboard-driven to-do list
 - [fude](https://github.com/uchmk/fude) (筆, to come): a keyboard-driven text editor
 

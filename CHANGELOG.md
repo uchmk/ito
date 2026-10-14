@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.29.1] - 2026-10-14
+
+### 追加
+
+- 紹介画像（GitHub の Social preview）: `docs/social-preview.png` と、元の `docs/banner.html`。左に糸の字、
+  右に 4 つのアプリ（tsumugi・kura・yagura・minato）の実画面（`docs/images/`、各アプリの banner-shot の写し）を
+  それぞれの色の糸でつないで並べる。リポジトリの Settings > General > Social preview に手で上げる。
+
+### 変更
+
+- README の「The apps」に minato（港）を足した。
+
 ## [0.29.0] - 2026-10-14
 
 ### 追加
