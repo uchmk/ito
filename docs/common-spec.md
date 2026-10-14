@@ -156,7 +156,8 @@ prepend_keymap = [
   「特別なキー ▾」から入れる。決めるまで何も書かない。決める前に、ぶつかり（同じキー・頭が同じキー・上の表の共通のキー、
   アプリが足すもの）を文で出す。頭が同じキーは 3 つまで名前を出し、残りは数だけ出す（`g` は十を超えるキーの頭）。
 - 入れている間（`KeysEdit::busy`）は、`show` に `Keys::default()` を渡す（Esc・Ctrl+Tab をページに渡す）。
-  ほかのページへ移ったら、入れかけのキー（`KeysEdit::capture`）を捨てる。
+  ほかのページへ移ったとき、設定の画面を閉じたとき・開き直したときは、入れかけのキー（`KeysEdit::capture`・`listening`）を捨てる
+  （残すと、次に開いたときもまだ受け取っていて、最初の Esc がページに取られる。`KeysEdit` を画面と一緒に作り直すのでもよい）。
 - Ctrl+C・X・V は egui が `Copy`・`Cut`・`Paste` に変えるので、ページは `ito_keys::from_clipboard` でもとのキーに戻して受け取る。
   ページで `<C-S-v>` などに割り当てたキーが一覧でも効くよう、アプリのキーの入口も同じものを通す（kura 0.111 から）。
 - ページは `Edit` を返す。アプリは UI ではないスレッドで `ito_keymap::edit` を自分の keymap.toml に当てて `write_atomic` で書き、
@@ -263,7 +264,9 @@ scale: 100%           # 書くなら倍率を % で
   - General: **Language**（`language_row`）・**Scale**（`scale_row`）と **CLOCK** のカード（`clock_card`）。
   - Theme: 上にモード（Follow OS / Light / Dark）、左にテーマの一覧、右に見本（`theme_page` の閉包でアプリが描く）。
 - アプリ自身の設定は、そのアプリの設定ファイルに `set_key` で書く（コメントと並びを残す）。書いたら読み直して当てる。
-- **ページは General・Theme・アプリの設定・キー（Keys。キーを変えられるアプリ、上の「設定の画面から変えるとき」）・通知（Notifications）・Advanced を既定にする**（下の「通知」）。
+- **ページは General・Theme・アプリの設定・キー（Keys）・通知（Notifications）・Advanced を既定にする**（下の「通知」）。
+  **新しいアプリは、キーのページ（上の「設定の画面から変えるとき」）を設定の画面の機能として必ず作る。**keymap.toml を
+  `ito-keymap` で読み、何もしないコマンド（`noop` か `none`）を 1 つ持ち、層ごとの今のキーと既定のキーを `KeyTable` で渡す。
 
 ## 通知
 
@@ -294,12 +297,14 @@ scale: 100%           # 書くなら倍率を % で
 
 ## 新しいアプリを作るとき
 
-1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys` を同じ `rev` で足す。
+1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys`・`ito-keymap` を同じ `rev` で足す。
 2. 設定は `ito_common::app_dir("<app>")/config.toml`、状態は `ito_common::state_dir("<app>")` に置く。
 3. 起動時と見張りのスレッドで `Common::read` を読み、テーマ・時計・言語・倍率を当てる。自分の config.toml と keymap.toml も見張る。
 4. egui の `zoom_with_keyboard` を切り、`defaults/keymap.toml`（yazi の形、頭に `C` の説明）に標準のキー（上の表）を入れる。
+   読むのは `ito-keymap`。何もしないコマンド（`noop`）を持たせる（キーのページで既定のキーを外すのに使う）。
 5. `ito_prefs::show` で設定の画面を作る（General に `language_row`・`scale_row`・`clock_card`、Theme に `theme_page`、
-   キーに `keys_page`、通知に `notify_page`）。
+   キーに `keys_page`、通知に `notify_page`）。**キーのページは必ず入れる**（変えた分だけを UI ではないスレッドで
+   keymap.toml の `prepend_keymap` に書き、読み直す。上の「設定の画面から変えるとき」）。TESTING.md にキーのページの行を足す。
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
 8. `--version`・`--help`・`--keys "<script>"` を受ける。
@@ -334,7 +339,7 @@ scale: 100%           # 書くなら倍率を % で
 | `<C-,>`・`<F1>`・`<C-q>` | ○ | ○ | △（`<C-q>` はシェルに渡す） |
 | コマンドパレット `<C-S-p>` | ○ | × | × |
 | 設定の画面（`ito_prefs`） | ○ | ○ | ○ |
-| キーのページ（`keys_page`） | ○（0.111） | × | △（独自のページ。1 操作 1 キー） |
+| キーのページ（`keys_page`） | ○（0.111） | ○（0.61） | ○（0.109。minato も 0.44.0 から） |
 | 通知のページ（`notify_page`・`[notify]`） | ○（0.110） | ○（0.59） | △（独自のページ。行が多い。minato も独自） |
 | 通知にアイコン（`show_with_icon`） | ○（0.110） | ○（0.59.1） | ○（独自。minato は 0.42.1） |
 | 字体の並び（`ito_common::fonts`） | ○ | ○ | ○ |
