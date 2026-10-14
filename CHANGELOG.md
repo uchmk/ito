@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.33.3] - 2026-10-15
+
+### 変更
+
+- ito-prefs: キーのページで入れかけのキーが多くのキーの頭になるとき（`g` だけなど）、頭が同じキーの文は 3 つまでにし、
+  残りは「ほか N 件も同じです」と数だけ出す。前は十を超える文が並んだ。`KeyWords` に `more` を足した。
+
 ## [0.33.2] - 2026-10-15
 
 ### 追加

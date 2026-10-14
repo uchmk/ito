@@ -52,6 +52,8 @@ pub struct KeyWords {
     pub clash_prefix: &'static str,
     /// `{0}` the keys, `{1}` one of [`KeyWords::common_what`].
     pub clash_common: &'static str,
+    /// After the first few clashes of the same kind: `{0}` how many more.
+    pub more: &'static str,
     /// What each of [`ito_keymap::COMMON`] is for, in its order.
     pub common_what: [&'static str; 9],
     pub nothing: &'static str,
@@ -87,6 +89,7 @@ pub const KEYS_EN: KeyWords = KeyWords {
     clash_same: "{0} is on “{2}” in {1}: setting it here takes it from that",
     clash_prefix: "{0} (“{1}”) starts the same way as these keys: setting them takes it from that",
     clash_common: "{0} is the key every app keeps for {1}: it may never reach here",
+    more: "…and {0} more like these",
     common_what: [
         "the settings",
         "the help",
@@ -131,6 +134,7 @@ pub const KEYS_JA: KeyWords = KeyWords {
     clash_same: "{0} は『{1}』で『{2}』に使っています。決めるとそちらが効かなくなります",
     clash_prefix: "{0}（『{1}』）とは片方がもう片方の頭なので、決めるとそちらが効かなくなります",
     clash_common: "{0} はどのアプリでも{1}に使うキーです。この場面に届かないことがあります",
+    more: "ほか {0} 件も同じです",
     common_what: ["設定", "ヘルプ", "コマンドパレット", "終了", "拡大", "拡大", "拡大", "縮小", "倍率を 100% に戻す"],
     nothing: "当てはまるキーはありません",
 };
@@ -149,6 +153,10 @@ impl KeyWords {
 pub fn keys_index(w: &KeyWords) -> Vec<&'static str> {
     vec![w.by_key, w.changed_only, w.layer, w.add, w.remove, w.reset, w.special]
 }
+
+/// How many keys a sequence being set starts (or is the start of) are named
+/// before the rest are only counted.
+const PREFIXES_SHOWN: usize = 3;
 
 /// The keymap the page shows, and the app's ways of naming its parts.
 pub struct KeyTable<'a, A> {
@@ -649,13 +657,23 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
         if !cap.keys.is_empty() {
             let bindings: &[Binding<A>] = t.now.iter().find(|(n, _)| *n == cap.layer).map_or(&[], |(_, b)| b);
             let keys = human_seq(&cap.keys);
-            let mut said: Vec<String> = clashes(bindings, &cap.keys, &cap.run, t.noop)
-                .into_iter()
-                .map(|cl| match cl {
-                    Clash::Same { run, desc } => fill(w.clash_same, &[&keys, layer, &tr_desc(&desc, &run)]),
-                    Clash::Prefix { run, desc, on } => fill(w.clash_prefix, &[&human_seq(&on), &tr_desc(&desc, &run)]),
-                })
-                .collect();
+            let mut said: Vec<String> = Vec::new();
+            let mut prefixes = 0;
+            for cl in clashes(bindings, &cap.keys, &cap.run, t.noop) {
+                match cl {
+                    Clash::Same { run, desc } => said.push(fill(w.clash_same, &[&keys, layer, &tr_desc(&desc, &run)])),
+                    // `g` alone is the head of a dozen keys: name a few.
+                    Clash::Prefix { run, desc, on } => {
+                        prefixes += 1;
+                        if prefixes <= PREFIXES_SHOWN {
+                            said.push(fill(w.clash_prefix, &[&human_seq(&on), &tr_desc(&desc, &run)]));
+                        }
+                    }
+                }
+            }
+            if prefixes > PREFIXES_SHOWN {
+                said.push(fill(w.more, &[&(prefixes - PREFIXES_SHOWN).to_string()]));
+            }
             if let Some(k) = common(&cap.keys) {
                 let first = human_seq(&cap.keys[..1]);
                 said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
@@ -865,6 +883,20 @@ desc = "Close the help"
         let mut st = adding("paste", "list");
         let (texts, _) = page(&ctx, "", &mut st, key(egui::Key::F1, egui::Modifiers::NONE));
         assert!(has(&texts, "F1 is the key every app keeps for the help"));
+    }
+
+    #[test]
+    fn a_few_keys_it_starts_are_named_and_the_rest_counted() {
+        let ctx = egui::Context::default();
+        let file: String = ["a", "b", "c", "d"]
+            .iter()
+            .map(|k| format!("[[list.prepend_keymap]]\non = \"g {k}\"\nrun = \"go {k}\"\ndesc = \"Go {k}\"\n"))
+            .collect();
+        let mut st = adding("paste", "list");
+        let (texts, _) = page(&ctx, &file, &mut st, vec![egui::Event::Text("g".into())]);
+        let named = texts.iter().filter(|(t, _)| t.contains("starts the same way")).count();
+        assert_eq!(named, PREFIXES_SHOWN);
+        assert!(has(&texts, "…and 2 more like these"), "five keys start with g");
     }
 
     #[test]
@@ -1117,6 +1149,7 @@ desc = "Close the help"
                 w.clash_same,
                 w.clash_prefix,
                 w.clash_common,
+                w.more,
                 w.nothing,
             ];
             v.extend(w.common_what);
