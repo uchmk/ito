@@ -1,0 +1,14 @@
+[package]
+name = "ito-keymap"
+description = "A yazi-style keymap.toml: layers of bindings with keymap / prepend_keymap / append_keymap, folded over the built-in defaults, resolved key by key, with the warnings for keys that can never run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-keys = { path = "../ito-keys" }
+# The same versions as ito-common, both Pure Rust.
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"

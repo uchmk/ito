@@ -11,6 +11,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-layout` | Splitting a rectangle into panes: a tree of splits, and its dividers in egui |
 | `ito-i18n` | The words on screen by key, and the language setting the apps share (`common.toml`) |
 | `ito-keys` | yazi's key notation (`<C-a>`, `<A-S-Up>` …; `C` is Cmd on macOS): parsing, printing, and egui's key events |
+| `ito-keymap` | A yazi-style `keymap.toml`: layers of bindings over the built-in defaults, resolved key by key, with warnings for keys that can never run |
 | `ito-match` | How a search query matches text: a regular expression with smart case, or fzf-style fuzzy letters |
 | `ito-ipc` | A per-user local door into a running app (Unix socket / named pipe) and framed serde messages |
 | `ito-mcp` | A small MCP server over stdio: JSON-RPC, `tools/list` and `tools/call`, without an async runtime |

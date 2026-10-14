@@ -94,6 +94,9 @@ weekday = true
 
 `C` は Windows と Linux で Ctrl、macOS で Cmd（macOS では Ctrl を押しても同じ）。キーを変えられるアプリは yazi の書き方の keymap.toml（`ito-keys`）で持つ。
 組み込みの既定を `defaults/keymap.toml` に置き、`<app>/keymap.toml` に書いた分だけ上書きする（yagura の形）。
+読むのは `ito-keymap`（ito 0.32.0 から。kura の `config/keymap.rs` を移したもの）: 層の名前と既定を `Spec` で渡し、
+`run` の 1 つを読む関数をアプリが持つ。重ねる順・`for`・`on_mac`・押せないキーや二重のキーの警告・既定を置き換えた印（`overrides`）は
+どのアプリでも同じになる。
 
 ### keymap.toml の形
 
@@ -110,7 +113,8 @@ prepend_keymap = [
 ```
 
 - 層（`[mgr]`・`[main]` など、アプリが決める）ごとに `keymap`（全部を置き換える）・`prepend_keymap`（前に足す）・`append_keymap`（後ろに足す）。
-  1 つは `{ on, run, desc }`。`on` は 1 つのキーか、続けて押すキーの配列。macOS だけ違うキーは `on_mac`。
+  1 つは `{ on, run, desc }`。`on` は 1 つのキーか、続けて押すキーの配列（`"gg"`・`"g g"` も同じ）。macOS だけ違うキーは `on_mac`、
+  1 つの OS だけのものは yazi の `for`（`windows`・`macos`・`linux`・`unix`）。
 - `[[mgr.keymap]]` の表の配列で書いても同じ（TOML として同じもの）。
 - **`C` の書き方**: Ctrl も Cmd も `C` と書く（どの OS の人にも読める。ito 0.6.0 から）。
   - `ito_keys::from_egui` は macOS の Cmd と Ctrl をどちらも `C` にする。macOS で Ctrl と Cmd を別のキーに分けない。
@@ -298,7 +302,7 @@ scale: 100%           # 書くなら倍率を % で
 | common.toml の言語・テーマ・時計 | ○ | ○ | ○ |
 | 倍率（common.toml の `scale`・`scale_row`） | ○ | ○ | △（読んで当てるだけ。キーは字の大きさ） |
 | 自分の設定の自動の読み直し | ○ | ○ | ○ |
-| keymap.toml（yazi の形） | ○ | ○ | ×（config.toml の `[keys]`） |
+| keymap.toml（yazi の形、`ito-keymap`） | ○（0.110.3） | ○（0.60.0） | ×（config.toml の `[keys]`） |
 | `<C-,>`・`<F1>`・`<C-q>` | ○ | ○ | △（`<C-q>` はシェルに渡す） |
 | コマンドパレット `<C-S-p>` | ○ | × | × |
 | 設定の画面（`ito_prefs`） | ○ | ○ | ○ |

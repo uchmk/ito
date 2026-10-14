@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.32.0] - 2026-10-14
+
+### 追加
+
+- ito-keymap: yazi の形の keymap.toml を読むクレート。kura の `config/keymap.rs` を移したもの。層（`[mgr]`・`[main]` など、
+  別名も持てる）ごとの `keymap`（置き換え）・`prepend_keymap`・`append_keymap` を組み込みの既定に重ね、押したキーの並びから
+  `resolve` で 1 つ（`Exact`）か続き待ち（`Pending`）か無し（`None`）を返す。`on` は `"gg"` とも `"g g"` とも書け、`for`
+  （windows・macos・linux・unix）と `on_mac` で機械ごとに分けられる。知らない層・欄、読めないキー、押せない `<S-t>`、
+  二重のキー、続きを隠すキー、既定の大半を消す短い `keymap` を警告にし、利用者が既定のキーを置き換えたものは `overrides` に
+  分ける。TOML の読み違いには、Windows のパスを単引用符で書く手がかりを足す（`parse_error`）。
+- 共通の仕様の「キー」に ito-keymap の段落。対応の表の行を「keymap.toml（yazi の形、`ito-keymap`）」にした。
+
+### 使う側がやること
+
+- keymap.toml を読むアプリは `ito-keymap` に依り、層と既定を `Spec` で書き、`run` の 1 つを自分の動きに読む関数を
+  `load` に渡す。kura（0.110.3）と yagura（0.60.0）は移した。`Match::Prefix` は `Match::Pending(_)` になる。
+
 ## [0.31.0] - 2026-10-14
 
 ### 追加
