@@ -494,7 +494,8 @@ pub fn remove_key(text: &str, table: Option<&str>, key: &str) -> Result<String, 
 
 /// `text` with the `[[name]]` blocks made `blocks`, each a list of keys and
 /// their values as TOML. A block keeps the old table it matches -- the same
-/// `name`, else the same `addr`, else the next one left over -- with its
+/// `name`, else the same `addr`, else one with the same keys and values,
+/// else the next one left over -- with its
 /// place and comments: only the values that changed are written (a comment
 /// after one stays), keys no longer there are taken out. A table nothing
 /// matches is taken out, and a new one goes after the last of them.
@@ -524,13 +525,17 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
     let mut places: Vec<isize> = pick.iter().flatten().filter_map(|&j| old[j].position()).collect();
     places.sort_unstable();
     let mut places = places.into_iter();
+    let given: Vec<Option<isize>> = pick.iter().map(|p| p.and_then(|j| old[j].position()).and_then(|_| places.next())).collect();
+    // A new one shares the place of the next kept one (and is shown before
+    // it, being before it in the list), else of the last: the file reads in
+    // the order of `blocks`.
     let mut at = old.iter().filter_map(toml_edit::Table::position).max();
     let mut list = toml_edit::ArrayOfTables::new();
-    for (keys, p) in want.into_iter().zip(pick.iter().copied()) {
+    for (i, (keys, p)) in want.into_iter().zip(pick.iter().copied()).enumerate() {
         let table = match p {
             Some(j) => {
                 let mut kept = old[j].clone();
-                if let Some(place) = places.next() {
+                if let Some(place) = given[i] {
                     kept.set_position(Some(place));
                     at = Some(place);
                 }
@@ -553,7 +558,7 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
             }
             None => {
                 let mut new = toml_edit::Table::new();
-                if let Some(place) = at {
+                if let Some(place) = given[i..].iter().flatten().next().copied().or(at) {
                     new.set_position(Some(place));
                 }
                 for (k, v) in keys {
@@ -642,6 +647,21 @@ fn match_tables(old: &[toml_edit::Table], want: &[Vec<(String, toml_edit::Value)
                 used[j] = true;
                 pick[i] = Some(j);
             }
+        }
+    }
+    // A table written again as it was keeps its comments, whatever came
+    // in before it or went (keymap.toml's bindings have no name).
+    let same = |t: &toml_edit::Table, keys: &[(String, toml_edit::Value)]| {
+        t.len() == keys.len()
+            && keys.iter().all(|(k, v)| t.get(k).and_then(toml_edit::Item::as_value).is_some_and(|was| same_value(was, v)))
+    };
+    for (i, keys) in want.iter().enumerate() {
+        if pick[i].is_some() {
+            continue;
+        }
+        if let Some(j) = (0..old.len()).find(|&j| !used[j] && same(&old[j], keys)) {
+            used[j] = true;
+            pick[i] = Some(j);
         }
     }
     let mut free = (0..old.len()).filter(|&j| !used[j]).collect::<Vec<_>>().into_iter();
@@ -892,6 +912,12 @@ mod tests {
         assert_eq!(set_tables("x = 1\n\n# head\n\n[[host]]\nname = \"a\"\n", "host", &[]).unwrap(), "x = 1\n\n# head\n");
         let quoted = "[[host]]\nname = 'a'\n";
         assert_eq!(set_tables(quoted, "host", &[vec![("name", quote("a"))]]).unwrap(), quoted, "written another way, the same value");
+        // Tables with no name: one put in front, the comments stay with theirs.
+        let bare = "# zoom\n[[bind]]\non = \"z\"\n\n# help\n[[bind]]\non = \"h\"\n";
+        let x = vec![("on", quote("x"))];
+        let t = set_tables(bare, "bind", &[x, vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap();
+        assert!(t.contains("# zoom\n[[bind]]\non = \"z\"\n") && t.contains("# help\n[[bind]]\non = \"h\"\n"), "{t}");
+        assert!(t.find("on = \"x\"") < t.find("# zoom"), "the new one first: {t}");
     }
 
     #[test]
