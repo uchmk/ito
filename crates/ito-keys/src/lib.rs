@@ -372,8 +372,9 @@ pub fn from_egui(key: egui::Key, mods: &egui::Modifiers) -> Option<Key> {
             // already inside `c`. Carrying `mods.shift` as well counts it twice,
             // and then no binding spelled `<C-+>` can ever match, on any layout.
             // Letters are the exception -- `printable` lowercases them, so the
-            // shift is the only thing telling `<C-A>` from `<C-a>`.
-            let shift = mods.shift && c.is_ascii_alphabetic();
+            // shift is the only thing telling `<C-A>` from `<C-a>` -- and so is
+            // Space, which types the same with Shift or without.
+            let shift = mods.shift && (c.is_ascii_alphabetic() || c == ' ');
             Some(Key { code: Code::Char(c), ctrl, alt, shift, sup })
         }
     }
@@ -652,5 +653,13 @@ mod tests {
         }
         // Plain Tab stays Tab.
         assert_eq!(Key::parse("<Tab>"), from_egui(egui::Key::Tab, &egui::Modifiers::NONE));
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn shift_space_keeps_its_shift() {
+        let held = egui::Modifiers { ctrl: true, shift: true, ..Default::default() };
+        assert_eq!(from_egui(egui::Key::Space, &held), Key::parse("<C-S-Space>"));
+        assert_ne!(from_egui(egui::Key::Space, &held), Key::parse("<C-Space>"));
     }
 }

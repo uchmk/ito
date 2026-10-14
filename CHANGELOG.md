@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.34.0] - 2026-10-15
+
+### 追加
+
+- ito-prefs: `KeyTable` に `unbound` と `sup` を足した。
+  - `unbound`: 既定でキーの無い操作 `(層, run, desc)` の並び。その層の行の後ろに、キーの無い行として出し、＋でキーを足せる。
+  - `sup`: Mac の Cmd を Ctrl（`C`）と分けて `D` と書く。Cmd と Ctrl を別のキーとして扱うアプリ（tsumugi）のため。
+  - 使う側がやること: `KeyTable` を作るところに `unbound: &[]` と `sup: false` を足す（今までと同じ動き）。
+
+### 修正
+
+- ito-keys: `from_egui` が Shift+Space（Ctrl+Shift+Space など）の Shift を落としていた。`<C-S-Space>` が `<C-Space>` になっていた。
+
 ## [0.33.3] - 2026-10-15
 
 ### 変更

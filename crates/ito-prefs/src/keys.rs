@@ -177,6 +177,12 @@ pub struct KeyTable<'a, A> {
     /// More to say about giving a layer some keys (keys the app or what runs
     /// in it keeps for itself), in the person's words.
     pub extra: &'a dyn Fn(&str, &[Key]) -> Vec<String>,
+    /// Operations with no key by default, as `(layer, run, desc)`: shown
+    /// after the layer's other rows, so a key can be given to them.
+    pub unbound: &'a [(&'a str, &'a str, &'a str)],
+    /// Cmd on a Mac is its own modifier, written `D`, rather than `C` like
+    /// Ctrl (for an app that tells the two apart).
+    pub sup: bool,
 }
 
 /// The page's own state.
@@ -233,7 +239,7 @@ fn special() -> [Key; 7] {
 
 /// The keys pressed this frame, taken out of egui's input so nothing else
 /// sees them.
-fn presses(ui: &egui::Ui) -> Vec<Press> {
+fn presses(ui: &egui::Ui, sup: bool) -> Vec<Press> {
     ui.input_mut(|i| {
         let clip: Vec<_> = (0..i.events.len()).map(|n| ito_keys::from_clipboard(&i.events, n, &i.modifiers)).collect();
         let mut clip = clip.into_iter();
@@ -261,7 +267,11 @@ fn presses(ui: &egui::Ui) -> Vec<Press> {
                             egui::Key::Escape if bare => out.push(Press::Esc),
                             egui::Key::Backspace if bare => out.push(Press::Back),
                             _ => {
-                                if let Some(k) = ito_keys::from_egui(*key, modifiers) {
+                                if let Some(mut k) = ito_keys::from_egui(*key, modifiers) {
+                                    if sup {
+                                        k.ctrl = modifiers.ctrl;
+                                        k.sup = modifiers.mac_cmd;
+                                    }
                                     skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl;
                                     out.push(Press::Key(k));
                                 }
@@ -331,7 +341,15 @@ fn sign(ui: &mut egui::Ui, l: Look, s: &str, tip: &str, enabled: bool) -> bool {
 /// back the edits to write; `None` the rest of the time.
 pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, st: &mut KeysEdit) -> Option<Vec<Edit>> {
     let c = l.c;
-    let all = rows(t.now, t.built_in, t.noop);
+    let mut all = rows(t.now, t.built_in, t.noop);
+    for &(layer, run, desc) in t.unbound {
+        if all.iter().any(|r| r.layer == layer && r.run == run) {
+            continue;
+        }
+        let at = all.iter().rposition(|r| r.layer == layer).map_or(all.len(), |k| k + 1);
+        let row = Row { layer: layer.to_owned(), run: run.to_owned(), desc: desc.to_owned(), keys: Vec::new(), defaults: Vec::new() };
+        all.insert(at, row);
+    }
     let mut out = Vec::new();
 
     // Keys pressed for a row no longer there (the keymap was read again)
@@ -352,7 +370,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                 m.surrender_focus(f);
             }
         });
-        for p in presses(ui) {
+        for p in presses(ui, t.sup) {
             if let Some(cap) = &mut st.capture {
                 match p {
                     Press::Key(k) => cap.keys.push(k),
@@ -747,11 +765,34 @@ desc = "Close the help"
         events: Vec<egui::Event>,
         modifiers: egui::Modifiers,
     ) -> Drawn {
+        frame_with(ctx, files, st, events, modifiers, &[], false)
+    }
+
+    /// [`frame`] with operations that have no key, and Cmd told from Ctrl.
+    fn frame_with(
+        ctx: &egui::Context,
+        files: &[(&str, &str)],
+        st: &mut KeysEdit,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+        unbound: &[(&str, &str, &str)],
+        sup: bool,
+    ) -> Drawn {
         let (now, built_in) = keymap(files);
         let layer_name = |n: &str| if n == "list" { "List".to_owned() } else { "Help".to_owned() };
         let tr = |d: &str| d.to_owned();
         let extra = |_: &str, _: &[Key]| Vec::new();
-        let t = KeyTable { now: &now, built_in: &built_in, noop: "noop", own: OWN, layer_name: &layer_name, tr: &tr, extra: &extra };
+        let t = KeyTable {
+            now: &now,
+            built_in: &built_in,
+            noop: "noop",
+            own: OWN,
+            layer_name: &layer_name,
+            tr: &tr,
+            extra: &extra,
+            unbound,
+            sup,
+        };
         let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))),
@@ -842,6 +883,41 @@ desc = "Close the help"
         assert!(at(&texts, "Go to the top").is_some());
         let (texts, _) = page(&ctx, "", &mut st, Vec::new());
         assert!(at(&texts, "Copy").is_none(), "only the rows with a key that starts with g");
+    }
+
+    #[test]
+    fn an_operation_with_no_key_is_a_row_to_give_one() {
+        let ctx = egui::Context::default();
+        let unbound = [("list", "rename", "Rename"), ("list", "copy", "Copy again"), ("help", "scroll", "Scroll")];
+        let mut st = KeysEdit::default();
+        let (texts, _) = frame_with(&ctx, &[(OWN, "")], &mut st, Vec::new(), egui::Modifiers::NONE, &unbound, false);
+        let rename = at(&texts, "Rename").expect("a row with no key");
+        assert!(at(&texts, "Copy again").is_none(), "an operation with keys is its own row");
+        assert!(rename.top() > at(&texts, "Visual mode").unwrap().top(), "after its layer's rows");
+        assert!(rename.top() < at(&texts, "Close the help").unwrap().top(), "before the next layer's");
+        assert!(at(&texts, "Scroll").unwrap().top() > at(&texts, "Close the help").unwrap().top());
+
+        let mut st = adding("rename", "list");
+        let events = [vec![egui::Event::Text("r".into())], key(egui::Key::Enter, egui::Modifiers::NONE)].concat();
+        let (_, edits) = frame_with(&ctx, &[(OWN, "")], &mut st, events, egui::Modifiers::NONE, &unbound, false);
+        let add = Edit::Add { layer: "list".into(), on: keys("r"), run: "rename".into(), desc: "Rename".into() };
+        assert_eq!(edits, Some(vec![add]));
+    }
+
+    #[test]
+    fn cmd_is_its_own_key_when_the_app_tells_it_from_ctrl() {
+        let ctx = egui::Context::default();
+        let cmd = egui::Modifiers { mac_cmd: true, command: true, ..Default::default() };
+        let mut st = adding("paste", "list");
+        frame_with(&ctx, &[(OWN, "")], &mut st, key(egui::Key::K, cmd), cmd, &[], true);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<D-k>"));
+        let mut st = adding("paste", "list");
+        frame_with(&ctx, &[(OWN, "")], &mut st, key(egui::Key::K, cmd), cmd, &[], false);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<C-k>"), "Cmd is Ctrl to the rest");
+        let ctrl = egui::Modifiers::CTRL;
+        let mut st = adding("paste", "list");
+        frame_with(&ctx, &[(OWN, "")], &mut st, key(egui::Key::K, ctrl), ctrl, &[], true);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<C-k>"));
     }
 
     #[test]
