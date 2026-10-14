@@ -321,7 +321,7 @@ fn clashes_name_what_the_new_keys_would_shut_out() {
     assert!(clashes(main, &keys("g g h"), "quit", "noop").len() == 1, "`g g` runs first");
     assert!(clashes(main, &keys("g g"), "top", "noop").is_empty(), "its own key");
     assert!(clashes(main, &keys("z"), "top", "noop").is_empty(), "a noop is nothing to lose");
-    assert_eq!(common(&keys("<C-,>")), Some("the settings"));
+    assert_eq!(common(&keys("<C-,>")).map(|i| COMMON[i].1), Some("the settings"));
     assert_eq!(common(&keys("<C-t>")), None);
 }
 
@@ -344,6 +344,12 @@ fn reset(run: &str) -> Edit {
 fn top_keys(text: &str) -> Vec<Vec<Key>> {
     let km = load_with(&[("km.toml", text)]);
     assert!(km.warnings.is_empty(), "{:?}", km.warnings);
+    top_keys_said(text)
+}
+
+/// [`top_keys`] for a file the loader has something to say about.
+fn top_keys_said(text: &str) -> Vec<Vec<Key>> {
+    let km = load_with(&[("km.toml", text)]);
     let rows = rows(&names(&km), &names(&load_with(&[])), "noop");
     row(&rows, "top").keys.iter().filter(|k| k.state == State::Live).map(|k| k.on.clone()).collect()
 }
@@ -419,4 +425,147 @@ fn a_file_the_screen_cannot_write_back_is_left_alone() {
     // A line for some machines only is the person's: kept as written.
     let only = "[[main.prepend_keymap]]\non = \"<C-t>\"\nfor = \"macos\"\nrun = \"quit\"\n";
     assert_eq!(edited(only, &[add("<C-t>", "top")]).matches("for = \"macos\"").count(), 1);
+}
+
+/// The name `for` gives this machine, and one it does not.
+fn here_and_not() -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        ("windows", "macos")
+    } else if cfg!(target_os = "macos") {
+        ("macos", "windows")
+    } else {
+        ("linux", "windows")
+    }
+}
+
+#[test]
+fn a_run_written_as_a_list_is_written_back_as_one() {
+    const LIST: &str = "[[main.keymap]]\non = \"<Space>\"\nrun = [\"toggle\", \"down\"]\n";
+    let spec = Spec { layers: &[Layer::new("main")], ignored: &[], defaults: LIST };
+    let edits = [Edit::Add { layer: "main".into(), on: keys("<C-t>"), run: "toggle; down".into(), desc: String::new() }];
+    let out = edit("", &spec, &edits, "noop").unwrap();
+    assert!(out.contains("run = [\"toggle\", \"down\"]"), "{out}");
+    let km = load(&spec, &[("km.toml", &out)], &mut command);
+    assert!(km.warnings.is_empty(), "{:?}", km.warnings);
+    assert_eq!(run_of(&km, "main", "<C-t>"), Some("toggle; down"));
+}
+
+#[test]
+fn a_key_something_else_already_shuts_out_needs_no_noop() {
+    // A shorter key in front.
+    let start = "[[main.prepend_keymap]]\non = \"g\"\nrun = \"quit\"\n";
+    assert_eq!(edited(start, &[remove("g g", "top")]), start);
+    // A longer one: a press of `g g` waits on it.
+    let start = "[[main.prepend_keymap]]\non = [\"g\", \"g\", \"x\"]\nrun = \"quit\"\n";
+    assert_eq!(edited(start, &[remove("g g", "top")]), start);
+}
+
+#[test]
+fn a_line_for_another_machine_takes_nothing_and_one_for_this_one_is_kept() {
+    let (here, there) = here_and_not();
+    // On another machine only: the default key here still needs its noop.
+    let other = format!("[[main.prepend_keymap]]\non = \"g\"\nfor = \"{there}\"\nrun = \"quit\"\n");
+    let out = edited(&other, &[remove("g g", "top")]);
+    assert!(out.contains("run = \"noop\"") && out.contains(&format!("for = \"{there}\"")), "{out}");
+    assert!(top_keys(&out).is_empty(), "{out}");
+    // On this machine: left as written, a noop in front of it.
+    let mine = format!("[[main.prepend_keymap]]\non = \"<C-t>\"\nfor = \"{here}\"\nrun = \"top\"\n");
+    assert_eq!(top_keys(&mine), [keys("<C-t>"), keys("g g")]);
+    let out = edited(&mine, &[remove("<C-t>", "top")]);
+    assert!(out.contains(&format!("for = \"{here}\"")), "{out}");
+    assert_eq!(top_keys_said(&out), [keys("g g")]);
+}
+
+#[test]
+fn a_line_with_its_own_mac_key_is_kept() {
+    let start = "[[main.prepend_keymap]]\non = \"<C-t>\"\non_mac = \"<D-t>\"\nrun = \"top\"\n";
+    let mine = if cfg!(target_os = "macos") { "<D-t>" } else { "<C-t>" };
+    let out = edited(start, &[remove(mine, "top")]);
+    assert_eq!(out.matches("on_mac").count(), 1, "{out}");
+    assert_eq!(top_keys_said(&out), [keys("g g")]);
+    let out = edited(start, &[add(mine, "quit")]);
+    assert_eq!(out.matches("on_mac").count(), 1, "{out}");
+    assert_eq!(run_of(&load_with(&[("km.toml", &out)]), "main", mine), Some("quit"));
+}
+
+#[test]
+fn a_default_key_made_longer_leaves_the_short_one_away() {
+    // `q` taken away, `q x` given: a press of `q` must wait on `x`.
+    let out = edited("", &[remove("q", "quit"), add("q x", "quit")]);
+    let km = load_with(&[("km.toml", &out)]);
+    assert_eq!(run_of(&km, "main", "q x"), Some("quit"));
+    let rows = rows(&names(&km), &names(&load_with(&[])), "noop");
+    let quit = row(&rows, "quit");
+    assert!(quit.keys.iter().any(|k| k.on == keys("q") && k.removed), "{out}");
+    assert_eq!(edited(&out, &[reset("quit")]), "");
+    // The same over a noop on a longer key: the reset clears both.
+    let out = edited("", &[remove("g g", "top"), add("g", "top")]);
+    assert_eq!(top_keys_said(&out), [keys("g")]);
+    assert_eq!(edited(&out, &[reset("top")]), "");
+}
+
+#[test]
+fn a_reset_takes_its_default_keys_back_from_another_run() {
+    let out = edited("", &[add("g", "quit")]);
+    assert!(top_keys_said(&out).is_empty());
+    let back = edited(&out, &[reset("top")]);
+    assert_eq!(back, "");
+    assert_eq!(top_keys(&back), [keys("g g")]);
+}
+
+#[test]
+fn a_layer_in_two_sections_gets_its_new_line_in_the_one_read_last() {
+    let start = "[[main.prepend_keymap]]\non = \"<C-t>\"\nrun = \"quit\"\n\n[[manager.prepend_keymap]]\non = \"y\"\nrun = \"mine\"\n";
+    let out = edited(start, &[add("<C-t>", "top")]);
+    assert_eq!(out.matches("<C-t>").count(), 1, "{out}");
+    assert!(out.find("<C-t>") > out.find("[[manager."), "{out}");
+    assert_eq!(top_keys(&out), [keys("<C-t>"), keys("g g")]);
+}
+
+#[test]
+fn edits_in_one_go_are_made_in_turn() {
+    let start = "# mine\n";
+    assert_eq!(edited(start, &[add("<C-t>", "top"), remove("<C-t>", "top")]), start);
+    let both = edited(start, &[remove("g g", "top"), add("<C-t>", "top")]);
+    let one_by_one = edited(&edited(start, &[remove("g g", "top")]), &[add("<C-t>", "top")]);
+    assert_eq!(
+        both.replace(
+            "
+
+", "
+"
+        ),
+        one_by_one.replace(
+            "
+
+", "
+"
+        )
+    );
+    assert_eq!(top_keys(&both), [keys("<C-t>")]);
+}
+
+#[test]
+fn a_key_appended_is_taken_away_too() {
+    let start = "[[main.append_keymap]]\non = \"<C-t>\"\nrun = \"top\"\n";
+    let out = edited(start, &[remove("<C-t>", "top")]);
+    assert!(!out.contains("<C-t>"), "{out}");
+    assert_eq!(top_keys(&out), [keys("g g")]);
+}
+
+#[test]
+fn a_change_with_no_key_is_refused() {
+    assert!(edit("", &SPEC, &[add("", "top")], "noop").is_err());
+    assert!(edit("", &SPEC, &[Edit::Remove { layer: "main".into(), on: Vec::new(), run: "top".into() }], "noop").is_err());
+}
+
+#[test]
+fn a_longer_key_of_the_same_run_behind_a_shorter_one_is_not_live() {
+    let rows = table_of(&[("km.toml", "[[main.prepend_keymap]]\non = \"g\"\nrun = \"top\"\n")]);
+    let top = row(&rows, "top");
+    assert_eq!(top.keys[0].state, State::Live);
+    assert!(matches!(&top.keys[1].state, State::Shadowed { run, .. } if run == "top"));
+    // A new key longer than one there: that one shuts it out.
+    let km = load_with(&[]);
+    assert!(matches!(&clashes(km.layer("main"), &keys("q x"), "top", "noop")[..], [Clash::Prefix { run, .. }] if run == "quit"));
 }

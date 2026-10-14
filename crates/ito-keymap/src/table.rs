@@ -74,11 +74,18 @@ pub fn rows<A>(now: &[(String, Vec<Binding<A>>)], built_in: &[(String, Vec<Bindi
                 if keys.iter().any(|k| k.on == b.on) {
                     continue;
                 }
+                // Live only when a press of its keys reaches this very key: a
+                // shorter key of the same run in front makes it a dead one.
                 let state = match reach(bindings, &b.on) {
-                    Some(hit) if hit.raw != run => State::Shadowed { run: hit.raw.clone(), desc: hit.desc.clone(), from: hit.from.clone() },
+                    Some(hit) if hit.raw != run || hit.on != b.on => {
+                        State::Shadowed { run: hit.raw.clone(), desc: hit.desc.clone(), from: hit.from.clone() }
+                    }
                     _ => State::Live,
                 };
-                let removed = matches!(&state, State::Shadowed { run, .. } if run == noop) && &*b.from == BUILT_IN;
+                // A `noop` on exactly its keys in front of it took it away
+                // (whatever a press now reaches).
+                let removed =
+                    &*b.from == BUILT_IN && bindings.iter().take_while(|x| !std::ptr::eq(*x, b)).any(|x| x.raw == noop && x.on == b.on);
                 keys.push(Cell { on: b.on.clone(), from: b.from.clone(), state, removed });
             }
             let defaults: Vec<Vec<Key>> = defaults.iter().filter(|b| b.raw == run).map(|b| b.on.clone()).collect();
@@ -153,8 +160,8 @@ pub const COMMON: [(&str, &str); 9] = [
     ("<C-0>", "the zoom back to 100%"),
 ];
 
-/// What of [`COMMON`] the first of `on` is, in English.
-pub fn common(on: &[Key]) -> Option<&'static str> {
+/// Which of [`COMMON`] the first of `on` is (its index there).
+pub fn common(on: &[Key]) -> Option<usize> {
     let first = on.first()?;
-    COMMON.iter().find(|(k, _)| Key::parse(k).as_ref() == Some(first)).map(|(_, what)| *what)
+    COMMON.iter().position(|(k, _)| Key::parse(k).as_ref() == Some(first))
 }

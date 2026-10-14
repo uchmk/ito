@@ -9,7 +9,7 @@
 
 use ito_keys::Key;
 
-use crate::{parses, tokenize, Spec};
+use crate::{for_here, parses, tokenize, Spec};
 
 /// One change to a layer of the keymap. `run` is the operation's command as
 /// written ([`crate::Binding::raw`]).
@@ -38,11 +38,19 @@ struct Lists {
 /// text back when nothing needs writing: the caller then writes nothing,
 /// and makes no file.
 ///
+/// An entry for some machines only (`for`, `on_mac`) is the person's: it is
+/// left as written. A reset brings the operation's default keys back, so it
+/// also takes out what the file put on or around them for something else.
+///
 /// An error, and nothing to write, when the file does not read, when a
 /// layer is a `keymap` of its own (it replaces the defaults, so a change
-/// there is the person's to make by hand), or when a section is written in
-/// a way that cannot be written back (an inline table).
+/// there is the person's to make by hand), when a section is written in a
+/// way that cannot be written back (an inline table), or when a change has
+/// no key.
 pub fn edit(text: &str, spec: &Spec, edits: &[Edit], noop: &str) -> Result<String, String> {
+    if edits.iter().any(|e| matches!(e, Edit::Add { on, .. } | Edit::Remove { on, .. } if on.is_empty())) {
+        return Err("a key change with no key".into());
+    }
     if !text.trim().is_empty() && !parses(text) {
         return Err("keymap.toml does not read: fix it, or take it away, before a key is changed here".into());
     }
@@ -58,8 +66,13 @@ pub fn edit(text: &str, spec: &Spec, edits: &[Edit], noop: &str) -> Result<Strin
             layers.push((name.clone(), sections(&file, layer.name, layer.aliases)?));
         }
         let at = layers.iter().position(|(n, _)| n == name).expect("just put in");
-        let d = default_keys(&defaults, layer.name, layer.aliases, run_of_edit(e));
-        apply(&mut layers[at].1, e, &d, noop);
+        let run = run_of_edit(e);
+        let d = default_keys(&defaults, layer.name, layer.aliases, run);
+        // A run written as a list is written back as one.
+        let value = run_value(&defaults, layer.name, layer.aliases, run)
+            .or_else(|| run_value(&file, layer.name, layer.aliases, run))
+            .unwrap_or_else(|| run.into());
+        apply(&mut layers[at].1, e, &d, &value, noop);
     }
     let mut out = text.to_owned();
     for (_, secs) in &layers {
@@ -97,8 +110,10 @@ fn has(file: &toml::Table, section: &str, list: &str) -> bool {
     file.get(section).and_then(toml::Value::as_table).is_some_and(|t| t.contains_key(list))
 }
 
-/// The sections of `file` that hold the layer, in the file's order; one
-/// called `name`, empty, when none does.
+/// The sections of `file` that hold the layer, the one [`crate::load`]
+/// folds last first (it takes them in alphabetical order, so that one's
+/// `prepend_keymap` is the frontmost); one called `name`, empty, when none
+/// does.
 fn sections(file: &toml::Table, name: &str, aliases: &[&str]) -> Result<Vec<Lists>, String> {
     let mut out = Vec::new();
     for (section, v) in file {
@@ -116,8 +131,8 @@ fn sections(file: &toml::Table, name: &str, aliases: &[&str]) -> Result<Vec<List
         };
         out.push(Lists { section: section.clone(), lists: [list(LISTS[0]), list(LISTS[1])], changed: false });
     }
-    // The layer's own name first: a new line goes there.
-    out.sort_by_key(|s| s.section != name);
+    // A new line goes in front of everything: in the section folded last.
+    out.sort_by(|a, b| b.section.cmp(&a.section));
     if out.is_empty() {
         out.push(Lists { section: name.to_owned(), lists: [Vec::new(), Vec::new()], changed: false });
     }
@@ -156,37 +171,46 @@ fn runs(t: &toml::Table, run: &str) -> bool {
 
 /// An entry this screen leaves as written: one for some machines only.
 fn kept(t: &toml::Table) -> bool {
-    t.contains_key("for")
+    t.contains_key("for") || t.contains_key("on_mac")
 }
 
-/// The keys the built-in defaults give `run` in the layer.
+/// Whether an entry binds on this machine (its `for`, if any, lets it in).
+fn applies(t: &toml::Table) -> bool {
+    t.get("for").is_none_or(|v| v.as_str().and_then(for_here).unwrap_or(false))
+}
+
+/// The entries of the layer's sections in `table` (the defaults, or the
+/// user's file), every list in turn.
+fn entries<'a>(table: &'a toml::Table, name: &'a str, aliases: &'a [&str]) -> impl Iterator<Item = &'a toml::Table> + 'a {
+    table
+        .iter()
+        .filter(move |(section, _)| *section == name || aliases.contains(&section.as_str()))
+        .flat_map(|(_, v)| ["prepend_keymap", "keymap", "append_keymap"].map(|l| v.get(l).and_then(toml::Value::as_array)))
+        .flatten()
+        .flatten()
+        .filter_map(toml::Value::as_table)
+}
+
+/// The keys the built-in defaults give `run` in the layer on this machine.
 fn default_keys(defaults: &toml::Table, name: &str, aliases: &[&str], run: &str) -> Vec<Vec<Key>> {
-    let mut out = Vec::new();
-    for (section, v) in defaults {
-        if section != name && !aliases.contains(&section.as_str()) {
-            continue;
-        }
-        for l in ["prepend_keymap", "keymap", "append_keymap"] {
-            for e in v.get(l).and_then(toml::Value::as_array).into_iter().flatten().filter_map(toml::Value::as_table) {
-                if runs(e, run) && !kept(e) {
-                    out.extend(keys_of(e));
-                }
-            }
-        }
-    }
-    out
+    entries(defaults, name, aliases).filter(|e| runs(e, run) && applies(e)).filter_map(keys_of).collect()
+}
+
+/// `run` as an entry of the layer writes it: a list stays a list.
+fn run_value(table: &toml::Table, name: &str, aliases: &[&str], run: &str) -> Option<toml::Value> {
+    entries(table, name, aliases).find(|e| runs(e, run)).and_then(|e| e.get("run").cloned())
 }
 
 /// A new entry: `on` as one string for a single key, a list for keys
 /// pressed in turn.
-fn entry(on: &[Key], run: &str, desc: &str) -> toml::Table {
+fn entry(on: &[Key], run: toml::Value, desc: &str) -> toml::Table {
     let mut t = toml::Table::new();
     let on: toml::Value = match on {
         [one] => one.to_string().into(),
         many => toml::Value::Array(many.iter().map(|k| k.to_string().into()).collect()),
     };
     t.insert("on".into(), on);
-    t.insert("run".into(), run.into());
+    t.insert("run".into(), run);
     if !desc.is_empty() {
         t.insert("desc".into(), desc.into());
     }
@@ -199,7 +223,7 @@ fn overlap(a: &[Key], b: &[Key]) -> bool {
     a[..n] == b[..n]
 }
 
-fn apply(secs: &mut [Lists], e: &Edit, defaults: &[Vec<Key>], noop: &str) {
+fn apply(secs: &mut [Lists], e: &Edit, defaults: &[Vec<Key>], value: &toml::Value, noop: &str) {
     // Take out every entry `gone` says, marking the sections it changed.
     let retain = |secs: &mut [Lists], gone: &dyn Fn(&toml::Table, &[Key]) -> bool| {
         for s in secs.iter_mut() {
@@ -210,31 +234,50 @@ fn apply(secs: &mut [Lists], e: &Edit, defaults: &[Vec<Key>], noop: &str) {
             }
         }
     };
+    // Whether something in front of the defaults, other than `run` on
+    // exactly `on`, is reached by a press of `on` first (or waits on it).
+    let taken = |secs: &[Lists], on: &[Key], run: &str| {
+        secs.iter().any(|s| {
+            s.lists[0].iter().filter(|t| applies(t)).any(|t| keys_of(t).is_some_and(|k| overlap(&k, on) && !(runs(t, run) && k == on)))
+        })
+    };
+    let front = |secs: &mut [Lists], t: toml::Table| {
+        secs[0].lists[0].insert(0, t);
+        secs[0].changed = true;
+    };
     match e {
         Edit::Add { on, run, desc, .. } => {
+            let default = defaults.iter().any(|d| d == on);
             // What else the file put on these keys (or on keys one of them
             // starts with) loses them; so do lines of this run on them, put
-            // back in front below when they are still needed.
-            retain(secs, &|t, k| overlap(k, on) && (!runs(t, run) || k == on.as_slice()));
-            let default = defaults.iter().any(|d| d == on);
-            if !default {
-                secs[0].lists[0].insert(0, entry(on, run, desc));
-                secs[0].changed = true;
+            // back in front below when they are still needed. A `noop` stays
+            // (a default key taken away is still away), unless it is this
+            // run's own default key coming back.
+            retain(secs, &|t, k| {
+                overlap(k, on) && if runs(t, noop) { default && k == on.as_slice() } else { !runs(t, run) || k == on.as_slice() }
+            });
+            if !default || taken(secs, on, run) {
+                front(secs, entry(on, value.clone(), desc));
             }
         }
         Edit::Remove { on, run, .. } => {
             retain(secs, &|t, k| k == on.as_slice() && runs(t, run));
-            let default = defaults.iter().any(|d| d == on);
-            // A default key goes behind a `noop`, unless something in front
+            // A default key (or a line for this machine the screen leaves as
+            // written) goes behind a `noop`, unless something in front
             // already has it.
-            let taken = secs.iter().any(|s| s.lists[0].iter().any(|t| keys_of(t).is_some_and(|k| k == *on)));
-            if default && !taken {
-                secs[0].lists[0].insert(0, entry(on, noop, ""));
-                secs[0].changed = true;
+            let still = defaults.iter().any(|d| d == on)
+                || secs
+                    .iter()
+                    .flat_map(|s| s.lists.iter().flatten())
+                    .any(|t| kept(t) && applies(t) && runs(t, run) && keys_of(t).is_some_and(|k| k == *on));
+            if still && !taken(secs, on, run) {
+                front(secs, entry(on, noop.into(), ""));
             }
         }
         Edit::Reset { run, .. } => {
-            retain(secs, &|t, k| runs(t, run) || (runs(t, noop) && defaults.iter().any(|d| d == k)));
+            // Its lines go, and so does whatever the file put on or around
+            // its default keys: they are its again.
+            retain(secs, &|t, k| runs(t, run) || defaults.iter().any(|d| overlap(d, k)));
         }
     }
 }

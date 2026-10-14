@@ -6,7 +6,7 @@
 //! the keymap again.
 
 use egui::{Color32, FontId, RichText};
-use ito_keymap::{clashes, common, rows, Binding, Clash, Edit, Row, State, BUILT_IN, COMMON};
+use ito_keymap::{clashes, common, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
 use ito_keys::{human_seq, render_seq, Code, Key, Named};
 
 use crate::{select, switch, Look};
@@ -44,13 +44,15 @@ pub struct KeyWords {
     pub elsewhere: &'static str,
     /// `{0}` is what runs instead.
     pub shadowed: &'static str,
+    /// A key with a line that does nothing in front of it.
+    pub taken_away: &'static str,
     /// `{0}` the keys, `{1}` the layer, `{2}` what they run now.
     pub clash_same: &'static str,
     /// `{0}` the other keys, `{1}` what they run.
     pub clash_prefix: &'static str,
     /// `{0}` the keys, `{1}` one of [`KeyWords::common_what`].
     pub clash_common: &'static str,
-    /// What each of [`COMMON`] is for, in its order.
+    /// What each of [`ito_keymap::COMMON`] is for, in its order.
     pub common_what: [&'static str; 9],
     pub nothing: &'static str,
 }
@@ -81,6 +83,7 @@ pub const KEYS_EN: KeyWords = KeyWords {
     mine: "Changed in {0}",
     elsewhere: "Written in {0}: change it there",
     shadowed: "Not reached: “{0}” runs first on these keys",
+    taken_away: "Taken away: a line that does nothing comes first on these keys",
     clash_same: "{0} is on “{2}” in {1}: setting it here takes it from that",
     clash_prefix: "{0} (“{1}”) starts the same way as these keys: setting them takes it from that",
     clash_common: "{0} is the key every app keeps for {1}: it may never reach here",
@@ -124,6 +127,7 @@ pub const KEYS_JA: KeyWords = KeyWords {
     mine: "{0} で変えたキー",
     elsewhere: "{0} に書かれています。そちらで変えてください",
     shadowed: "届きません。このキーでは先に『{0}』が動きます",
+    taken_away: "外されています。このキーには先に何もしない行があります",
     clash_same: "{0} は『{1}』で『{2}』に使っています。決めるとそちらが効かなくなります",
     clash_prefix: "{0}（『{1}』）とは片方がもう片方の頭なので、決めるとそちらが効かなくなります",
     clash_common: "{0} はどのアプリでも{1}に使うキーです。この場面に届かないことがあります",
@@ -176,8 +180,8 @@ pub struct KeysEdit {
     pub by_key: Vec<Key>,
     /// Keys pressed go into `by_key`.
     pub listening: bool,
-    /// The layer filter: 0 for all, else the layer's place plus one.
-    pub layer: usize,
+    /// The layer filter: a layer's name, or empty for all.
+    pub layer: String,
     pub changed_only: bool,
     /// The keys being pressed for an operation.
     pub capture: Option<Capture>,
@@ -212,31 +216,35 @@ enum Press {
     Back,
 }
 
-/// The special keys the menu puts in: the ones pressed alone set or stop.
-const SPECIAL: [Named; 4] = [Named::Enter, Named::Esc, Named::Backspace, Named::Tab];
+/// The keys the menu puts in: the ones pressed alone set or stop, and the
+/// clipboard's, which egui hands over only when there is text to paste.
+fn special() -> [Key; 7] {
+    let named = |n| Key::plain(Code::Named(n));
+    [named(Named::Enter), named(Named::Esc), named(Named::Backspace), named(Named::Tab), Key::ctrl('c'), Key::ctrl('x'), Key::ctrl('v')]
+}
 
 /// The keys pressed this frame, taken out of egui's input so nothing else
 /// sees them.
 fn presses(ui: &egui::Ui) -> Vec<Press> {
     ui.input_mut(|i| {
-        let shift = i.modifiers.shift;
+        let mods = i.modifiers;
         let mut out = Vec::new();
-        // A character with Alt may come as the key and then as text too.
+        // The text a key press brings with it when the key is taken already
+        // (a character with Alt), or when the key is held down.
         let mut skip_text = false;
         i.events.retain(|e| match e {
-            egui::Event::Key { key, pressed, repeat, modifiers, .. } => {
-                if *pressed && !*repeat {
+            egui::Event::Key { key, pressed: true, repeat, modifiers, .. } => {
+                // A key held down is pressed once.
+                skip_text = *repeat;
+                if !*repeat {
                     let bare = modifiers.is_none();
                     match key {
                         egui::Key::Enter if bare => out.push(Press::Enter),
                         egui::Key::Escape if bare => out.push(Press::Esc),
                         egui::Key::Backspace if bare => out.push(Press::Back),
-                        // Tab alone moves the keys between controls: it is
-                        // in the special keys' menu.
-                        egui::Key::Tab if bare => {}
                         _ => {
                             if let Some(k) = ito_keys::from_egui(*key, modifiers) {
-                                skip_text = matches!(k.code, Code::Char(_));
+                                skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl;
                                 out.push(Press::Key(k));
                             }
                         }
@@ -244,20 +252,28 @@ fn presses(ui: &egui::Ui) -> Vec<Press> {
                 }
                 false
             }
+            egui::Event::Key { .. } | egui::Event::Ime(_) => false,
             egui::Event::Text(t) => {
                 if !std::mem::take(&mut skip_text) {
                     out.extend(t.chars().filter(|c| !c.is_control()).map(|c| Press::Key(Key::char(c))));
                 }
                 false
             }
-            // egui hands these over as the clipboard's, with no key.
+            // egui hands these over as the clipboard's, with no key: Ctrl+X,
+            // C and V, and on Windows Shift+Delete, Ctrl+Insert (as Ctrl+C
+            // here: the two are one to egui) and Shift+Insert.
             egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
-                let c = match e {
-                    egui::Event::Copy => 'c',
-                    egui::Event::Cut => 'x',
-                    _ => 'v',
+                let ctrl = mods.ctrl || mods.command || mods.mac_cmd;
+                let shifted = |n| Key { shift: true, ..Key::plain(Code::Named(n)) };
+                let k = match e {
+                    egui::Event::Cut if !ctrl => shifted(Named::Delete),
+                    egui::Event::Paste(_) if !ctrl => shifted(Named::Insert),
+                    egui::Event::Cut => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('x') },
+                    egui::Event::Copy => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('c') },
+                    _ => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('v') },
                 };
-                out.push(Press::Key(Key { shift, ..Key::ctrl(c) }));
+                skip_text = false;
+                out.push(Press::Key(k));
                 false
             }
             _ => true,
@@ -300,10 +316,11 @@ fn chip(ui: &mut egui::Ui, l: Look, words: &str, lit: bool, removed: bool) -> eg
     ui.add(egui::Button::new(text).fill(if removed { Color32::TRANSPARENT } else { c.side }).stroke(stroke).corner_radius(6.0))
 }
 
-/// A small button of one sign, with a tooltip.
+/// A small button of one sign, with a tooltip, named by it.
 fn sign(ui: &mut egui::Ui, l: Look, s: &str, tip: &str, enabled: bool) -> bool {
     let b = egui::Button::new(RichText::new(s).size(12.5).color(l.c.dim)).fill(Color32::TRANSPARENT).frame(false);
     let r = ui.add_enabled(enabled, b);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
     let r = if enabled { r.on_hover_text(tip) } else { r.on_disabled_hover_text(tip) };
     r.clicked()
 }
@@ -314,6 +331,17 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
     let c = l.c;
     let all = rows(t.now, t.built_in, t.noop);
     let mut out = Vec::new();
+
+    // Keys pressed for a row no longer there (the keymap was read again)
+    // are for nothing; for a key no longer on it, they are added instead.
+    if let Some(cap) = &st.capture {
+        let row = all.iter().find(|r| r.layer == cap.layer && r.run == cap.run);
+        match row.map(|r| cap.replace.as_ref().is_none_or(|old| r.keys.iter().any(|k| &k.on == old && !k.removed))) {
+            None => st.capture = None,
+            Some(false) => st.capture.as_mut().expect("checked").replace = None,
+            Some(true) => {}
+        }
+    }
 
     // The keys first, before anything drawn here can see them.
     if st.busy() {
@@ -332,7 +360,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                     Press::Esc => st.capture = None,
                     Press::Enter => {
                         let row = all.iter().find(|r| r.layer == cap.layer && r.run == cap.run);
-                        out = set(cap, row);
+                        out.extend(set(cap, row));
                         st.capture = None;
                     }
                 }
@@ -359,7 +387,8 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         }
     }
     let one_layer = layers.len() <= 1;
-    st.layer = st.layer.min(layers.len());
+    // The filter's place in the menu: 0 for all.
+    let layer_at = layers.iter().position(|n| *n == st.layer).map_or(0, |k| k + 1);
 
     // The search and the filters.
     ui.horizontal(|ui| {
@@ -375,6 +404,10 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         if st.listening {
             let words = if st.by_key.is_empty() { w.listening.to_owned() } else { format!("{} …", human_seq(&st.by_key)) };
             chip(ui, l, &words, true, false);
+            if crate::button(ui, l, w.clear) {
+                st.listening = false;
+                st.by_key.clear();
+            }
         } else {
             if crate::button(ui, l, w.by_key) {
                 st.listening = true;
@@ -395,8 +428,8 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             ui.label(RichText::new(w.layer).size(12.5).color(c.dim));
             let names: Vec<String> = std::iter::once(w.all.to_owned()).chain(layers.iter().map(|n| (t.layer_name)(n))).collect();
             let options: Vec<(usize, &str)> = names.iter().enumerate().map(|(k, n)| (k, n.as_str())).collect();
-            if let Some(k) = select(ui, "keys-layer", st.layer, &options) {
-                st.layer = k;
+            if let Some(k) = select(ui, "keys-layer", layer_at, &options) {
+                st.layer = if k == 0 { String::new() } else { layers[k - 1].to_owned() };
             }
             ui.add_space(16.0);
         }
@@ -418,7 +451,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             let hay = format!("{desc}\n{}\n{}\n{layer}\n{}", r.desc, r.run, keys.join("\n")).to_lowercase();
             let capturing = st.capture.as_ref().is_some_and(|cap| cap.layer == r.layer && cap.run == r.run);
             let keep = capturing
-                || ((st.layer == 0 || layers.get(st.layer - 1) == Some(&r.layer.as_str()))
+                || ((layer_at == 0 || r.layer == st.layer)
                     && (!st.changed_only || r.changed())
                     && (q.is_empty() || hay.contains(&q))
                     && (st.by_key.is_empty() || r.keys.iter().any(|k| k.on.starts_with(&st.by_key))));
@@ -435,9 +468,10 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             ui.set_width(ui.available_width());
             let width = ui.available_width();
             let gap = 12.0;
-            let layer_w = if one_layer { 0.0 } else { 110.0 };
-            let op_w = (width * 0.34).max(160.0);
-            let keys_w = (width - op_w - layer_w - if one_layer { gap } else { 2.0 * gap }).max(120.0);
+            // Narrow panes take from the operation and the layer first.
+            let layer_w = if one_layer { 0.0 } else { 110.0_f32.min(width * 0.2) };
+            let op_w = (width * 0.34).max(160.0_f32.min(width * 0.4));
+            let keys_w = (width - op_w - layer_w - if one_layer { gap } else { 2.0 * gap }).max(60.0);
             let head = |ui: &mut egui::Ui, words: &str, w: f32| {
                 ui.allocate_ui_with_layout(egui::vec2(w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.set_width(w);
@@ -522,15 +556,22 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                 capture_chip(ui, this.as_ref().expect("checked"));
                 continue;
             }
+            let from = &*cell.from;
+            // What a press of it reaches first, when not this.
+            let first = match &cell.state {
+                State::Shadowed { run, desc, from } => Some((run, desc, &**from)),
+                State::Live => None,
+            };
+            // A default taken away comes back by taking out what the page's
+            // file put in front of it; another file's is changed there.
+            let back = cell.removed && first.is_some_and(|(_, _, f)| own(f));
             let mut words = human_seq(&cell.on);
-            if &*cell.from != BUILT_IN {
+            if from != BUILT_IN {
                 words.push_str(" •");
             }
-            let shadowed = matches!(cell.state, State::Shadowed { .. });
-            if shadowed && !cell.removed {
+            if first.is_some() && !cell.removed {
                 words.push_str(" ⚠");
             }
-            let from = &*cell.from;
             let mut tip = vec![render_seq(&cell.on)];
             tip.push(if from == BUILT_IN {
                 w.built_in.to_owned()
@@ -539,24 +580,28 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             } else {
                 fill(w.elsewhere, &[from])
             });
-            if cell.removed {
-                tip.push(w.put_back.to_owned());
-            } else if let State::Shadowed { run, desc, .. } = &cell.state {
-                tip.push(fill(w.shadowed, &[&tr_desc(desc, run)]));
+            match first {
+                Some((_, _, f)) if cell.removed && !back => tip.push(fill(w.elsewhere, &[f])),
+                _ if cell.removed => tip.push(w.put_back.to_owned()),
+                Some((run, _, _)) if run == t.noop => tip.push(w.taken_away.to_owned()),
+                Some((run, desc, _)) => tip.push(fill(w.shadowed, &[&tr_desc(desc, run)])),
+                None => {}
             }
             if editable(from) && !cell.removed {
                 tip.push(w.change.to_owned());
             }
             let r = chip(ui, l, &words, false, cell.removed).on_hover_text(tip.join("\n"));
-            if r.clicked() && editable(from) {
-                if cell.removed {
+            if r.clicked() {
+                if back {
                     out.push(Edit::Add { layer: row.layer.clone(), on: cell.on.clone(), run: row.run.clone(), desc: row.desc.clone() });
-                } else {
+                    st.capture = None;
+                } else if editable(from) && !cell.removed {
                     start(st, Some(cell.on.clone()));
                 }
             }
             if !cell.removed && editable(from) && sign(ui, l, "×", w.remove, true) {
                 out.push(Edit::Remove { layer: row.layer.clone(), on: cell.on.clone(), run: row.run.clone() });
+                st.capture = None;
             }
         }
         match &this {
@@ -565,8 +610,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                     capture_chip(ui, cap);
                 }
                 ui.menu_button(RichText::new(w.special).size(12.0).color(c.fg), |ui| {
-                    for n in SPECIAL {
-                        let k = Key::plain(Code::Named(n));
+                    for k in special() {
                         if ui.button(k.human()).clicked() {
                             if let Some(cap) = &mut st.capture {
                                 cap.keys.push(k);
@@ -576,7 +620,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                     }
                 });
                 if crate::button(ui, l, w.set) {
-                    *out = set(cap, Some(row));
+                    out.extend(set(cap, Some(row)));
                     st.capture = None;
                 }
                 if crate::button(ui, l, w.cancel) {
@@ -597,6 +641,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             let tip = if mine { w.reset.to_owned() } else { fill(w.elsewhere, &[elsewhere]) };
             if sign(ui, l, "↺", &tip, mine) {
                 out.push(Edit::Reset { layer: row.layer.clone(), run: row.run.clone() });
+                st.capture = None;
             }
         }
     });
@@ -617,8 +662,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                     Clash::Prefix { run, desc, on } => fill(w.clash_prefix, &[&human_seq(&on), &tr_desc(&desc, &run)]),
                 })
                 .collect();
-            if let Some(what) = common(&cap.keys) {
-                let k = COMMON.iter().position(|(_, x)| *x == what).unwrap_or(0);
+            if let Some(k) = common(&cap.keys) {
                 let first = human_seq(&cap.keys[..1]);
                 said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
             }
@@ -668,21 +712,30 @@ desc = "Close the help"
 
     type Layers = Vec<(String, Vec<Binding<String>>)>;
 
-    fn keymap(file: &str) -> (Layers, Layers) {
+    type Drawn = (Vec<(String, egui::Rect)>, Option<Vec<Edit>>);
+
+    fn keymap(files: &[(&str, &str)]) -> (Layers, Layers) {
         let mut cmd = |s: &str, _: &mut Vec<String>| Some(s.to_owned());
-        let now = load(&SPEC, &[(OWN, file)], &mut cmd).layers;
+        let now = load(&SPEC, files, &mut cmd).layers;
         let built_in = load(&SPEC, &[], &mut cmd).layers;
         (now, built_in)
     }
 
-    /// One frame of the page: the texts drawn and where, and the edits.
-    fn page(
+    /// One frame of the page with the page's file: the texts drawn and
+    /// where, and the edits.
+    fn page(ctx: &egui::Context, file: &str, st: &mut KeysEdit, events: Vec<egui::Event>) -> Drawn {
+        frame(ctx, &[(OWN, file)], st, events, egui::Modifiers::NONE)
+    }
+
+    /// One frame of the page with these files, and these modifiers held.
+    fn frame(
         ctx: &egui::Context,
-        file: &str,
+        files: &[(&str, &str)],
         st: &mut KeysEdit,
         events: Vec<egui::Event>,
-    ) -> (Vec<(String, egui::Rect)>, Option<Vec<Edit>>) {
-        let (now, built_in) = keymap(file);
+        modifiers: egui::Modifiers,
+    ) -> Drawn {
+        let (now, built_in) = keymap(files);
         let layer_name = |n: &str| if n == "list" { "List".to_owned() } else { "Help".to_owned() };
         let tr = |d: &str| d.to_owned();
         let extra = |_: &str, _: &[Key]| Vec::new();
@@ -690,7 +743,7 @@ desc = "Close the help"
         let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))),
-            events,
+            events: [vec![egui::Event::ModifiersChanged(modifiers)], events].concat(),
             ..Default::default()
         };
         let mut screen = Screen::default();
@@ -809,7 +862,7 @@ desc = "Close the help"
     fn a_clash_is_said_before_it_is_set() {
         let ctx = egui::Context::default();
         let mut st = adding("paste", "list");
-        let (texts, _) = page(&ctx, "", &mut st, vec![egui::Event::Paste(String::new())]);
+        let (texts, _) = frame(&ctx, &[(OWN, "")], &mut st, vec![egui::Event::Paste(String::new())], egui::Modifiers::CTRL);
         assert_eq!(st.capture.as_ref().unwrap().keys, keys("<C-v>"), "Ctrl+V comes as the clipboard's");
         assert!(has(&texts, "Ctrl+V is on “Visual mode” in List"));
         let mut st = adding("paste", "list");
@@ -882,49 +935,200 @@ desc = "Close the help"
     #[test]
     fn keys_from_another_file_are_not_the_page_s_to_change() {
         let ctx = egui::Context::default();
-        let mut cmd = |s: &str, _: &mut Vec<String>| Some(s.to_owned());
-        let now = load(&SPEC, &[("C:/yazi/keymap.toml", "[[list.prepend_keymap]]\non = \"Y\"\nrun = \"copy\"\n")], &mut cmd).layers;
-        let built_in = load(&SPEC, &[], &mut cmd).layers;
+        let yazi = ("C:/yazi/keymap.toml", "[[list.prepend_keymap]]\non = \"Y\"\nrun = \"copy\"\n");
+        let (now, built_in) = keymap(&[yazi]);
         let rows = rows(&now, &built_in, "noop");
-        let copy = rows.iter().find(|r| r.run == "copy").unwrap();
-        assert!(copy.changed());
+        assert!(rows.iter().find(|r| r.run == "copy").unwrap().changed());
         // Clicking it starts nothing.
         let mut st = KeysEdit::default();
-        let layer_name = |n: &str| n.to_owned();
-        let tr = |d: &str| d.to_owned();
-        let extra = |_: &str, _: &[Key]| Vec::new();
-        let t = KeyTable { now: &now, built_in: &built_in, noop: "noop", own: OWN, layer_name: &layer_name, tr: &tr, extra: &extra };
-        let run = |st: &mut KeysEdit, events| {
-            let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))),
-                events,
-                ..Default::default()
-            };
-            let mut texts = Vec::new();
-            let mut screen = Screen::default();
-            let mut out = ctx.run_ui(input, |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    show(ui, ito_theme::colors(), &mut screen, &nav, Keys::default(), |ui, _, l| {
-                        keys_page(ui, l, &KEYS_EN, &t, st);
-                    });
-                });
-            });
-            out.textures_delta.clear();
-            for s in &out.shapes {
-                if let egui::Shape::Text(tx) = &s.shape {
-                    texts.push((tx.galley.text().to_owned(), tx.galley.rect.translate(tx.pos.to_vec2())));
-                }
-            }
-            texts
-        };
-        let texts = run(&mut st, Vec::new());
-        run(&mut st, click(at(&texts, "Y •").unwrap().center()));
+        let (texts, _) = frame(&ctx, &[yazi], &mut st, Vec::new(), egui::Modifiers::NONE);
+        frame(&ctx, &[yazi], &mut st, click(at(&texts, "Y •").unwrap().center()), egui::Modifiers::NONE);
         assert!(st.capture.is_none());
     }
 
     #[test]
+    fn a_default_another_file_took_away_is_put_back_there() {
+        let ctx = egui::Context::default();
+        let yazi = ("C:/yazi/keymap.toml", "[[list.prepend_keymap]]\non = \"p\"\nrun = \"noop\"\n");
+        let mut st = KeysEdit::default();
+        let (texts, _) = frame(&ctx, &[yazi, (OWN, "")], &mut st, Vec::new(), egui::Modifiers::NONE);
+        let (_, edits) = frame(&ctx, &[yazi, (OWN, "")], &mut st, click(at(&texts, "p").unwrap().center()), egui::Modifiers::NONE);
+        assert!(edits.is_none() && st.capture.is_none(), "the page's file has nothing to take out");
+    }
+
+    #[test]
+    fn a_key_held_down_is_pressed_once() {
+        let ctx = egui::Context::default();
+        let mut st = adding("copy", "list");
+        let down =
+            || egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let a = || egui::Event::Text("a".into());
+        page(&ctx, "", &mut st, vec![down(), a(), down(), a(), down(), a()]);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("a"));
+    }
+
+    #[test]
+    fn modifiers_and_text_in_one_frame_are_each_one_key() {
+        let ctx = egui::Context::default();
+        let mut st = adding("copy", "list");
+        let ev = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        // Ctrl+K brings no text; the x after it is a key of its own.
+        page(&ctx, "", &mut st, vec![ev(egui::Key::K, egui::Modifiers::CTRL), egui::Event::Text("x".into())]);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<C-k> x"));
+        // Alt+A may bring its character too: it is one key.
+        let mut st = adding("copy", "list");
+        page(&ctx, "", &mut st, vec![ev(egui::Key::A, egui::Modifiers::ALT), egui::Event::Text("a".into())]);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<A-a>"));
+        // Tab and Shift+Tab are keys too; IME text is not.
+        let mut st = adding("copy", "list");
+        let ime = egui::Event::Ime(egui::ImeEvent::Commit("あ".into()));
+        page(
+            &ctx,
+            "",
+            &mut st,
+            [key(egui::Key::Tab, egui::Modifiers::NONE), key(egui::Key::Tab, egui::Modifiers::SHIFT), vec![ime]].concat(),
+        );
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<Tab> <BackTab>"));
+    }
+
+    #[test]
+    fn the_clipboard_s_keys_are_told_apart() {
+        let ctx = egui::Context::default();
+        let shift = egui::Modifiers::SHIFT;
+        let ctrl = egui::Modifiers::CTRL;
+        for (event, mods, on) in [
+            (egui::Event::Paste("t".into()), shift, "<S-Insert>"),
+            (egui::Event::Cut, shift, "<S-Delete>"),
+            (egui::Event::Copy, ctrl, "<C-c>"),
+            (egui::Event::Cut, ctrl, "<C-x>"),
+            (egui::Event::Paste("t".into()), ctrl | shift, "<C-S-v>"),
+        ] {
+            let mut st = adding("copy", "list");
+            frame(&ctx, &[(OWN, "")], &mut st, vec![event], mods);
+            assert_eq!(st.capture.as_ref().unwrap().keys, keys(on), "{on}");
+        }
+    }
+
+    #[test]
+    fn keys_pressed_never_reach_the_search() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        let search = at(&texts, KEYS_EN.search).unwrap().center();
+        page(&ctx, "", &mut st, click(search));
+        page(&ctx, "", &mut st, vec![egui::Event::Text("p".into())]);
+        assert_eq!(st.query, "p", "the search has the focus");
+        st.capture = adding("copy", "list").capture;
+        page(&ctx, "", &mut st, vec![egui::Event::Text("q".into())]);
+        page(&ctx, "", &mut st, vec![egui::Event::Text("r".into())]);
+        assert_eq!(st.query, "p");
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("q r"));
+    }
+
+    #[test]
+    fn the_row_keys_are_pressed_for_stays_in_sight() {
+        let ctx = egui::Context::default();
+        let mut st = adding("paste", "list");
+        st.query = "copy".into();
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        assert!(at(&texts, "Paste").is_some() && at(&texts, "Copy").is_some());
+        assert!(at(&texts, "Go to the top").is_none());
+    }
+
+    #[test]
+    fn keys_pressed_for_what_is_gone_are_dropped() {
+        let ctx = egui::Context::default();
+        // The row is no longer there.
+        let mut st = adding("gone", "list");
+        page(&ctx, "", &mut st, Vec::new());
+        assert!(st.capture.is_none() && !st.busy());
+        // The key it was to replace is no longer on it: the keys are added.
+        let mut st = adding("copy", "list");
+        st.capture.as_mut().unwrap().replace = Some(keys("z"));
+        let (_, edits) =
+            page(&ctx, "", &mut st, [vec![egui::Event::Text("w".into())], key(egui::Key::Enter, egui::Modifiers::NONE)].concat());
+        let add = Edit::Add { layer: "list".into(), on: keys("w"), run: "copy".into(), desc: "Copy".into() };
+        assert_eq!(edits, Some(vec![add]));
+        // × while keys are pressed for the row stops them.
+        let mut st = adding("copy", "list");
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        let y = at(&texts, "y").unwrap();
+        let x = texts.iter().find(|(t, r)| t == "×" && (r.center().y - y.center().y).abs() < 8.0).unwrap().1;
+        let (_, edits) = page(&ctx, "", &mut st, click(x.center()));
+        assert!(edits.is_some() && st.capture.is_none());
+    }
+
+    #[test]
+    fn finding_by_key_takes_one_back_and_stops() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { listening: true, ..Default::default() };
+        page(&ctx, "", &mut st, [vec![egui::Event::Text("g".into())], key(egui::Key::Backspace, egui::Modifiers::NONE)].concat());
+        assert!(st.by_key.is_empty() && st.listening);
+        page(&ctx, "", &mut st, [vec![egui::Event::Text("g".into())], key(egui::Key::Escape, egui::Modifiers::NONE)].concat());
+        assert!(st.by_key.is_empty() && !st.listening);
+        // The mouse stops it too.
+        let mut st = KeysEdit { listening: true, ..Default::default() };
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        page(&ctx, "", &mut st, click(at(&texts, KEYS_EN.clear).unwrap().center()));
+        assert!(!st.listening);
+    }
+
+    #[test]
+    fn the_layer_filter_is_kept_by_name() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { layer: "help".into(), ..Default::default() };
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        assert!(at(&texts, "Close the help").is_some() && at(&texts, "Copy").is_none());
+        st.layer = "gone".into();
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        assert!(at(&texts, "Copy").is_some(), "a layer no longer there is all of them");
+    }
+
+    #[test]
     fn every_word_has_both_languages() {
+        fn all(w: &KeyWords) -> Vec<&'static str> {
+            let mut v = vec![
+                w.search,
+                w.by_key,
+                w.listening,
+                w.clear,
+                w.layer,
+                w.all,
+                w.changed_only,
+                w.operation,
+                w.keys,
+                w.default_is,
+                w.none,
+                w.press,
+                w.hint,
+                w.special,
+                w.set,
+                w.cancel,
+                w.add,
+                w.remove,
+                w.put_back,
+                w.reset,
+                w.change,
+                w.built_in,
+                w.mine,
+                w.elsewhere,
+                w.shadowed,
+                w.taken_away,
+                w.clash_same,
+                w.clash_prefix,
+                w.clash_common,
+                w.nothing,
+            ];
+            v.extend(w.common_what);
+            v
+        }
+        for (en, ja) in all(&KEYS_EN).into_iter().zip(all(&KEYS_JA)) {
+            assert!(!en.is_empty() && !ja.is_empty());
+            for k in 0..3 {
+                let n = format!("{{{k}}}");
+                assert_eq!(en.contains(&n), ja.contains(&n), "{en} / {ja}");
+            }
+        }
         assert_eq!(KeyWords::of("ja").set, "決める");
         assert_eq!(KeyWords::of("fr").set, "Set");
         assert!(keys_index(&KEYS_JA).contains(&"変えたものだけ"));
