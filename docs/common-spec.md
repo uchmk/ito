@@ -231,6 +231,27 @@ scale: 100%           # 書くなら倍率を % で
   - General: **Language**（`language_row`）・**Scale**（`scale_row`）と **CLOCK** のカード（`clock_card`）。
   - Theme: 上にモード（Follow OS / Light / Dark）、左にテーマの一覧、右に見本（`theme_page` の閉包でアプリが描く）。
 - アプリ自身の設定は、そのアプリの設定ファイルに `set_key` で書く（コメントと並びを残す）。書いたら読み直して当てる。
+- **ページは General・Theme・アプリの設定・通知（Notifications）・Advanced を既定にする**（下の「通知」）。
+
+## 通知
+
+アプリの出来事（kura なら長い操作の終わり、yagura ならアラート、minato なら見張った実行の終わり）を窓の外に知らせる。
+知らせ方は `ito-notify`、設定の画面の「通知」のページは `ito_prefs::notify_page` が描く。
+
+- 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast`。アプリの id は `uchmk.<app>`）、**音**（`ito_notify::sound::play`。
+  `ito_notify::SOUNDS` の chime・low・alert・default から出来事ごとに 1 つ）、**Webhook**（`ito_notify::webhook::send`。
+  ntfy・Slack・JSON、`ito_notify::FORMATS`）。アドレスが空か http(s) で始まらなければ送らない。
+- Windows の集中モード・プレゼンテーション・全画面のゲームの間は音を鳴らさない（`focus_mode`、既定は入り。`sound::quiet_time`）。
+- ページ（`notify_page`。出来事は `End` の並びでアプリが渡す）:
+  - 上に「試しに送る」（3 つとも。Webhook はアドレスがあるときだけ）と「既定に戻す」（Webhook のアドレスと形式は残す）。
+  - 「知らせるとき」: 出来事が 1 つなら行ごとのスイッチ、2 つ以上なら列が出来事・行が知らせ方の表。
+    Webhook の行は出来事ごとに送り分けるアプリだけ（`Notify::webhook` が空なら出さない）。
+  - 「鳴らす音」: 出来事ごとの音（▶ で鳴らしてみる）と集中モードのスイッチ。
+  - 「Webhook」: アドレス（http(s) でなければ赤い注意）と形式。
+  - 検索の言葉は `notify_index`。
+- 設定はアプリの設定ファイルの `[notify]` に置く（minato は `minato-settings.json`）。鍵は tsumugi に揃える:
+  `system`・`sound`・`webhook_states`（出来事の名前の並び。出来事が 1 つのアプリは `system`・`sound` を真偽値にしてよい）、
+  `sound_<出来事>`、`focus_mode`、`webhook`（アドレス）、`webhook_format`。知らない値は警告して既定に戻す。
 
 ## 時計
 
@@ -244,7 +265,8 @@ scale: 100%           # 書くなら倍率を % で
 2. 設定は `ito_common::app_dir("<app>")/config.toml`、状態は `ito_common::state_dir("<app>")` に置く。
 3. 起動時と見張りのスレッドで `Common::read` を読み、テーマ・時計・言語・倍率を当てる。自分の config.toml と keymap.toml も見張る。
 4. egui の `zoom_with_keyboard` を切り、`defaults/keymap.toml`（yazi の形、頭に `C` の説明）に標準のキー（上の表）を入れる。
-5. `ito_prefs::show` で設定の画面を作る（General に `language_row`・`scale_row`・`clock_card`、Theme に `theme_page`）。
+5. `ito_prefs::show` で設定の画面を作る（General に `language_row`・`scale_row`・`clock_card`、Theme に `theme_page`、
+   通知に `notify_page`）。
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
 8. `--version`・`--help`・`--keys "<script>"` を受ける。
@@ -279,6 +301,7 @@ scale: 100%           # 書くなら倍率を % で
 | `<C-,>`・`<F1>`・`<C-q>` | ○ | ○ | △（`<C-q>` はシェルに渡す） |
 | コマンドパレット `<C-S-p>` | ○ | × | × |
 | 設定の画面（`ito_prefs`） | ○ | ○ | ○ |
+| 通知のページ（`notify_page`・`[notify]`） | ○（0.110） | ○（0.59） | △（独自のページ。行が多い。minato も独自） |
 | 字体の並び（`ito_common::fonts`） | ○ | ○ | ○ |
 | 窓 1280×800 | ○（config で変えられる） | ○ | ○ |
 | 窓の位置と大きさを覚える | × | ○（kura 0.107） | × |

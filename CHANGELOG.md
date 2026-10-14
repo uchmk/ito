@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.30.0] - 2026-10-14
+
+### 追加
+
+- ito-prefs: 設定の画面の「通知」のページ（`notify_page`）。minato の通知のページを共通にしたもの。上に「試しに送る」と
+  「既定に戻す」（Webhook のアドレスと形式は残す）、「知らせるとき」（出来事が 1 つならスイッチの行、2 つ以上なら列が出来事の表。
+  Webhook の行は出来事ごとに送り分けるときだけ）、「鳴らす音」（出来事ごとの音と ▶、集中モード）、「Webhook」（アドレスと形式）。
+  出来事は `End`、設定は `Notify`（アプリの設定ファイルとの読み書きはアプリ）、言葉は `Words` の `notify*`・`sound*`・`focus*`・
+  `webhook*`、検索の言葉は `notify_index`。ito-prefs が ito-notify に依るようになった。
+- 共通の仕様（`docs/common-spec.md`）に「通知」の節。通知のページを設定の画面の既定のページにする。
+
+### 使う側がやること
+
+- 通知のページを持たないアプリ（kura・yagura）は `notify_page` でページを足し、`[notify]` を読み書きする（鍵は仕様の「通知」）。
+- `Words` に欄が増えた。`Words { .. }` を自分で組み立てているなら欄を足す（`EN`・`JA`・`Words::of` を使うなら何もしない）。
+
 ## [0.29.1] - 2026-10-14
 
 ### 追加

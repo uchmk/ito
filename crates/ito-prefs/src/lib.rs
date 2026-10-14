@@ -8,13 +8,17 @@
 //! app shares -- the language, the clock, the theme -- are here too
 //! ([`language_row`], [`clock_card`], [`theme_page`]); they hand back
 //! [`CommonChange`]s, which go into common.toml
-//! ([`ito_common::edit_common`]), so one change reaches every app.
+//! ([`ito_common::edit_common`]), so one change reaches every app. So is the
+//! Notifications page ([`notify_page`]), whose settings are the app's.
 
 use std::collections::HashMap;
 
 use egui::{Color32, FontId, RichText};
 use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
+
+mod notify;
+pub use notify::{format_name, notify_index, notify_page, sound_name, End, Notify};
 
 /// The words the screen and the shared pages say, in one language.
 pub struct Words {
@@ -43,6 +47,28 @@ pub struct Words {
     pub when_light: &'static str,
     pub when_dark: &'static str,
     pub preview: &'static str,
+    pub notify: &'static str,
+    pub notify_when: &'static str,
+    pub notify_system: &'static str,
+    pub notify_system_note: &'static str,
+    pub notify_sound: &'static str,
+    pub notify_sound_note: &'static str,
+    pub notify_webhook: &'static str,
+    pub notify_webhook_note: &'static str,
+    pub notify_sounds: &'static str,
+    pub sound_play: &'static str,
+    /// The names of [`ito_notify::SOUNDS`], in order.
+    pub sound_names: [&'static str; 4],
+    pub focus: &'static str,
+    pub focus_note: &'static str,
+    pub notify_test: &'static str,
+    pub notify_reset: &'static str,
+    pub webhook: &'static str,
+    pub webhook_url: &'static str,
+    pub webhook_url_note: &'static str,
+    pub webhook_bad: &'static str,
+    pub webhook_format: &'static str,
+    pub webhook_format_note: &'static str,
 }
 
 pub const EN: Words = Words {
@@ -70,6 +96,27 @@ pub const EN: Words = Words {
     when_light: "when light",
     when_dark: "when dark",
     preview: "PREVIEW",
+    notify: "Notifications",
+    notify_when: "WHEN TO TELL",
+    notify_system: "System notification",
+    notify_system_note: "The OS's notification; it stays in the notification centre",
+    notify_sound: "Sound",
+    notify_sound_note: "The sound picked below, once",
+    notify_webhook: "Webhook",
+    notify_webhook_note: "A message to the address below",
+    notify_sounds: "SOUNDS",
+    sound_play: "Play",
+    sound_names: ["Soft chime", "Low tone", "Alert", "System default"],
+    focus: "Keep quiet in Windows' focus mode",
+    focus_note: "No sound during focus mode, a presentation or a full-screen game (Windows only)",
+    notify_test: "Send a test",
+    notify_reset: "Reset to defaults",
+    webhook: "WEBHOOK",
+    webhook_url: "Address",
+    webhook_url_note: "An ntfy topic for the phone, a Slack webhook or any address that takes JSON; nothing is sent while it is empty",
+    webhook_bad: "Start the address with http:// or https://; nothing is sent until then",
+    webhook_format: "Format",
+    webhook_format_note: "What the address takes",
 };
 
 pub const JA: Words = Words {
@@ -97,6 +144,27 @@ pub const JA: Words = Words {
     when_light: "ライトのとき",
     when_dark: "ダークのとき",
     preview: "見本",
+    notify: "通知",
+    notify_when: "知らせるとき",
+    notify_system: "システムの通知",
+    notify_system_note: "OS の通知。通知センターにも残ります",
+    notify_sound: "音",
+    notify_sound_note: "下で選んだ音を 1 回",
+    notify_webhook: "Webhook",
+    notify_webhook_note: "下のアドレスに送ります",
+    notify_sounds: "鳴らす音",
+    sound_play: "鳴らす",
+    sound_names: ["やわらかいチャイム", "低い音", "警告音", "システムの既定"],
+    focus: "Windows の集中モードに従う",
+    focus_note: "集中モード・プレゼンテーション・全画面のゲームの間は音を鳴らしません（Windows だけ）",
+    notify_test: "試しに送る",
+    notify_reset: "既定に戻す",
+    webhook: "Webhook",
+    webhook_url: "アドレス",
+    webhook_url_note: "ntfy のトピック・Slack の webhook・JSON を受けるアドレス。空なら送りません",
+    webhook_bad: "http:// か https:// で始めてください。それまでは送りません",
+    webhook_format: "形式",
+    webhook_format_note: "アドレスが受ける形",
 };
 
 impl Words {
