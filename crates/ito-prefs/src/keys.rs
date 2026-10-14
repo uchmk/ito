@@ -227,56 +227,50 @@ fn special() -> [Key; 7] {
 /// sees them.
 fn presses(ui: &egui::Ui) -> Vec<Press> {
     ui.input_mut(|i| {
-        let mods = i.modifiers;
+        let clip: Vec<_> = (0..i.events.len()).map(|n| ito_keys::from_clipboard(&i.events, n, &i.modifiers)).collect();
+        let mut clip = clip.into_iter();
         let mut out = Vec::new();
         // The text a key press brings with it when the key is taken already
         // (a character with Alt), or when the key is held down.
         let mut skip_text = false;
-        i.events.retain(|e| match e {
-            egui::Event::Key { key, pressed: true, repeat, modifiers, .. } => {
-                // A key held down is pressed once.
-                skip_text = *repeat;
-                if !*repeat {
-                    let bare = modifiers.is_none();
-                    match key {
-                        egui::Key::Enter if bare => out.push(Press::Enter),
-                        egui::Key::Escape if bare => out.push(Press::Esc),
-                        egui::Key::Backspace if bare => out.push(Press::Back),
-                        _ => {
-                            if let Some(k) = ito_keys::from_egui(*key, modifiers) {
-                                skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl;
-                                out.push(Press::Key(k));
-                            }
-                        }
-                    }
-                }
-                false
-            }
-            egui::Event::Key { .. } | egui::Event::Ime(_) => false,
-            egui::Event::Text(t) => {
-                if !std::mem::take(&mut skip_text) {
-                    out.extend(t.chars().filter(|c| !c.is_control()).map(|c| Press::Key(Key::char(c))));
-                }
-                false
-            }
+        i.events.retain(|e| match (e, clip.next().flatten()) {
             // egui hands these over as the clipboard's, with no key: Ctrl+X,
             // C and V, and on Windows Shift+Delete, Ctrl+Insert (as Ctrl+C
             // here: the two are one to egui) and Shift+Insert.
-            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
-                let ctrl = mods.ctrl || mods.command || mods.mac_cmd;
-                let shifted = |n| Key { shift: true, ..Key::plain(Code::Named(n)) };
-                let k = match e {
-                    egui::Event::Cut if !ctrl => shifted(Named::Delete),
-                    egui::Event::Paste(_) if !ctrl => shifted(Named::Insert),
-                    egui::Event::Cut => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('x') },
-                    egui::Event::Copy => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('c') },
-                    _ => Key { shift: mods.shift, alt: mods.alt, ..Key::ctrl('v') },
-                };
+            (_, Some(k)) => {
                 skip_text = false;
                 out.push(Press::Key(k));
                 false
             }
-            _ => true,
+            (e, None) => match e {
+                egui::Event::Key { key, pressed: true, repeat, modifiers, .. } => {
+                    // A key held down is pressed once.
+                    skip_text = *repeat;
+                    if !*repeat {
+                        let bare = modifiers.is_none();
+                        match key {
+                            egui::Key::Enter if bare => out.push(Press::Enter),
+                            egui::Key::Escape if bare => out.push(Press::Esc),
+                            egui::Key::Backspace if bare => out.push(Press::Back),
+                            _ => {
+                                if let Some(k) = ito_keys::from_egui(*key, modifiers) {
+                                    skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl;
+                                    out.push(Press::Key(k));
+                                }
+                            }
+                        }
+                    }
+                    false
+                }
+                egui::Event::Key { .. } | egui::Event::Ime(_) => false,
+                egui::Event::Text(t) => {
+                    if !std::mem::take(&mut skip_text) {
+                        out.extend(t.chars().filter(|c| !c.is_control()).map(|c| Press::Key(Key::char(c))));
+                    }
+                    false
+                }
+                _ => true,
+            },
         });
         out
     })
@@ -1007,6 +1001,12 @@ desc = "Close the help"
             frame(&ctx, &[(OWN, "")], &mut st, vec![event], mods);
             assert_eq!(st.capture.as_ref().unwrap().keys, keys(on), "{on}");
         }
+        // Let go of before the frame (the real machine: Ctrl+Shift+V came out
+        // as Shift+Insert): the release of the key still has the modifiers.
+        let mut st = adding("copy", "list");
+        let up = egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers: ctrl | shift };
+        frame(&ctx, &[(OWN, "")], &mut st, vec![egui::Event::Paste("t".into()), up], egui::Modifiers::NONE);
+        assert_eq!(st.capture.as_ref().unwrap().keys, keys("<C-S-v>"));
     }
 
     #[test]

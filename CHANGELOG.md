@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.33.2] - 2026-10-15
+
+### 追加
+
+- ito-keys: `from_clipboard(events, at, now)`。egui が `Copy`・`Cut`・`Paste` に変えてしまうクリップボードの和音
+  （Ctrl+C・X・V、Windows の Ctrl+Insert・Shift+Delete・Shift+Insert）を、もとのキーに戻す。修飾キーは、同じフレームに
+  そのキーを離した出来事があればそこから取る（すばやく押して離すと、フレームの終わりの `modifiers` からは消えている）。
+  使う側がやること: 和音を `<C-v>` などと決め打ちしているところで、Shift や Alt を付けたキーにも割り当てたいときは、これを通す。
+
+### 修正
+
+- ito-prefs: キーのページで Ctrl+Shift+V を押すと、Shift+Insert として受け取ることがあった（実機）。`from_clipboard` で受け取る。
+
 ## [0.33.1] - 2026-10-15
 
 ### 修正

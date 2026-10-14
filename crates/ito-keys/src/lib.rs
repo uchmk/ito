@@ -379,6 +379,36 @@ pub fn from_egui(key: egui::Key, mods: &egui::Modifiers) -> Option<Key> {
     }
 }
 
+/// The chord behind one of egui's clipboard events, `events[at]`.
+///
+/// egui-winit turns Ctrl+C, X and V (Cmd on a Mac), Shift held or not, and on
+/// Windows Ctrl+Insert, Shift+Delete and Shift+Insert, into `Copy`, `Cut` and
+/// `Paste`, and never sends the key press. The event carries no modifiers:
+/// they are taken from the release of the same key later in `events` when it
+/// came in the same frame (a quick chord is often let go by then, and `now`,
+/// the modifiers at the end of the frame, has lost them), else from `now`.
+/// Ctrl+Insert comes back as Ctrl+C: egui gives the two one event.
+#[cfg(feature = "egui")]
+pub fn from_clipboard(events: &[egui::Event], at: usize, now: &egui::Modifiers) -> Option<Key> {
+    use egui::Key as K;
+    let (letter, bare) = match events.get(at)? {
+        egui::Event::Copy => (K::C, K::Insert),
+        egui::Event::Cut => (K::X, K::Delete),
+        egui::Event::Paste(_) => (K::V, K::Insert),
+        _ => return None,
+    };
+    let held = events[at + 1..]
+        .iter()
+        .find_map(|e| match e {
+            egui::Event::Key { key, pressed: false, modifiers, .. } if *key == letter || *key == bare => Some(*modifiers),
+            _ => None,
+        })
+        .unwrap_or(*now);
+    let ctrl = held.ctrl || held.command || held.mac_cmd;
+    let mods = egui::Modifiers { ctrl, shift: held.shift || !ctrl, ..held };
+    from_egui(if ctrl { letter } else { bare }, &mods)
+}
+
 /// The character a key types without Shift (letters lowercase), for keys
 /// with one.
 #[cfg(feature = "egui")]
@@ -475,6 +505,30 @@ mod tests {
         let alt = egui::Modifiers { alt: true, ..Default::default() };
         assert_eq!(from_egui(egui::Key::G, &alt), Some(Key::parse("<A-g>").unwrap()));
         assert_ne!(Key::parse("<A-g>"), Key::parse("<A-G>"));
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn a_clipboard_event_is_its_chord_again() {
+        let none = egui::Modifiers::NONE;
+        let ctrl = egui::Modifiers::CTRL;
+        let shift = egui::Modifiers::SHIFT;
+        let up = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers };
+        let key = |events: &[egui::Event], now| from_clipboard(events, 0, &now).map(|k| k.to_string());
+        let paste = || egui::Event::Paste("t".into());
+
+        assert_eq!(key(&[paste()], ctrl), Some("<C-v>".into()));
+        assert_eq!(key(&[paste()], ctrl | shift), Key::parse("<C-S-v>").map(|k| k.to_string()));
+        assert_eq!(key(&[paste()], shift), Some("<S-Insert>".into()));
+        assert_eq!(key(&[egui::Event::Cut], shift), Some("<S-Delete>".into()));
+        assert_eq!(key(&[egui::Event::Copy], ctrl), Some("<C-c>".into()));
+        assert_eq!(key(&[egui::Event::Cut], ctrl | egui::Modifiers::ALT), Some("<C-A-x>".into()));
+        // Let go of within the frame: the release still says what was held.
+        assert_eq!(key(&[paste(), up(egui::Key::V, ctrl | shift)], none), Key::parse("<C-S-v>").map(|k| k.to_string()));
+        assert_eq!(key(&[paste(), up(egui::Key::Insert, shift)], none), Some("<S-Insert>".into()));
+        // Another key's release says nothing about this one.
+        assert_eq!(key(&[paste(), up(egui::Key::A, none)], ctrl), Some("<C-v>".into()));
+        assert_eq!(key(&[egui::Event::Text("v".into())], ctrl), None);
     }
 
     #[test]
