@@ -530,11 +530,18 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
     // it, being before it in the list), else of the last: the file reads in
     // the order of `blocks`.
     let mut at = old.iter().filter_map(toml_edit::Table::position).max();
+    // The comments standing apart above a kept table (the file's, say) go
+    // to a new one put in front of it, staying at the top.
+    let mut took = vec![false; old.len()];
     let mut list = toml_edit::ArrayOfTables::new();
     for (i, (keys, p)) in want.into_iter().zip(pick.iter().copied()).enumerate() {
         let table = match p {
             Some(j) => {
                 let mut kept = old[j].clone();
+                if took[j] {
+                    let rest = kept.decor().prefix().and_then(|s| s.as_str()).map(after_apart).unwrap_or_default();
+                    kept.decor_mut().set_prefix(format!("\n{rest}"));
+                }
                 if let Some(place) = given[i] {
                     kept.set_position(Some(place));
                     at = Some(place);
@@ -560,6 +567,12 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
                 let mut new = toml_edit::Table::new();
                 if let Some(place) = given[i..].iter().flatten().next().copied().or(at) {
                     new.set_position(Some(place));
+                }
+                if let Some(j) = pick[i..].iter().zip(&given[i..]).find_map(|(p, g)| g.and(*p)).filter(|&j| !took[j]) {
+                    if let Some(head) = old[j].decor().prefix().and_then(|s| s.as_str()).and_then(apart) {
+                        new.decor_mut().set_prefix(format!("{head}\n"));
+                        took[j] = true;
+                    }
                 }
                 for (k, v) in keys {
                     new.insert(&k, toml_edit::Item::Value(v));
@@ -604,6 +617,13 @@ fn apart(prefix: &str) -> Option<String> {
     let text: String = lines[..=blank].concat();
     let text = text.trim_start_matches('\n');
     text.contains('#').then(|| format!("{}\n", text.trim_end_matches('\n')))
+}
+
+/// The lines of a table's `prefix` after its last blank line.
+fn after_apart(prefix: &str) -> String {
+    let lines: Vec<&str> = prefix.split_inclusive('\n').collect();
+    let blank = lines.iter().rposition(|l| l.trim().is_empty() && l.ends_with('\n'));
+    lines[blank.map_or(0, |b| b + 1)..].concat()
 }
 
 /// The table in `t` that is shown first after the place `place`.
@@ -918,6 +938,13 @@ mod tests {
         let t = set_tables(bare, "bind", &[x, vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap();
         assert!(t.contains("# zoom\n[[bind]]\non = \"z\"\n") && t.contains("# help\n[[bind]]\non = \"h\"\n"), "{t}");
         assert!(t.find("on = \"x\"") < t.find("# zoom"), "the new one first: {t}");
+        let headed = format!("# my keys\n\n{bare}");
+        let t = set_tables(&headed, "bind", &[vec![("on", quote("x"))], vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap();
+        assert!(
+            t.starts_with("# my keys\n\n[[bind]]\non = \"x\"\n\n# zoom\n[[bind]]\non = \"z\"\n"),
+            "the file's comment stays at the top: {t}"
+        );
+        assert_eq!(set_tables(&t, "bind", &[vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap(), headed, "and back");
     }
 
     #[test]

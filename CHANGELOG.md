@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.32.2] - 2026-10-14
+
+### 修正
+
+- ito-common: `set_tables` が新しい表をファイルの最初の表の前に置くとき、ファイルの頭のコメント（空の行までのもの）が新しい表の
+  下に回っていた。頭のコメントは頭に残し、新しい表はその下に置く。
+
 ## [0.32.1] - 2026-10-14
 
 ### 修正
