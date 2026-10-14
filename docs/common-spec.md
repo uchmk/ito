@@ -238,7 +238,8 @@ scale: 100%           # 書くなら倍率を % で
 アプリの出来事（kura なら長い操作の終わり、yagura ならアラート、minato なら見張った実行の終わり）を窓の外に知らせる。
 知らせ方は `ito-notify`、設定の画面の「通知」のページは `ito_prefs::notify_page` が描く。
 
-- 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast`。アプリの id は `uchmk.<app>`）、**音**（`ito_notify::sound::play`。
+- 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast::show_with_icon`。アプリの id は `uchmk.<app>`、窓と同じアイコンを
+  `icon` のモジュールの関数で渡す。Windows では通知の左と差出人の名前の横に出る）、**音**（`ito_notify::sound::play`。
   `ito_notify::SOUNDS` の chime・low・alert・default から出来事ごとに 1 つ）、**Webhook**（`ito_notify::webhook::send`。
   ntfy・Slack・JSON、`ito_notify::FORMATS`）。アドレスが空か http(s) で始まらなければ送らない。
 - Windows の集中モード・プレゼンテーション・全画面のゲームの間は音を鳴らさない（`focus_mode`、既定は入り。`sound::quiet_time`）。
@@ -302,6 +303,7 @@ scale: 100%           # 書くなら倍率を % で
 | コマンドパレット `<C-S-p>` | ○ | × | × |
 | 設定の画面（`ito_prefs`） | ○ | ○ | ○ |
 | 通知のページ（`notify_page`・`[notify]`） | ○（0.110） | ○（0.59） | △（独自のページ。行が多い。minato も独自） |
+| 通知にアイコン（`show_with_icon`） | ○（0.110） | ○（0.59.1） | ○（独自。minato は 0.42.1） |
 | 字体の並び（`ito_common::fonts`） | ○ | ○ | ○ |
 | 窓 1280×800 | ○（config で変えられる） | ○ | ○ |
 | 窓の位置と大きさを覚える | × | ○（kura 0.107） | × |

@@ -93,7 +93,7 @@ fn arg_of(t: &Toast, printed: &str) -> Option<String> {
 #[cfg(windows)]
 mod os {
     use super::{Click, Toast};
-    use crate::toast::{os::register, xml_escape, App};
+    use crate::toast::{logo_xml, os::register, xml_escape, App};
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::mpsc;
@@ -131,9 +131,7 @@ mod os {
     }
 
     fn make(id: &str, t: &Toast, logo: Option<&std::path::Path>, click: Click) -> windows::core::Result<ToastNotification> {
-        let image = logo.map_or_else(String::new, |p| {
-            format!("<image placement=\"appLogoOverride\" src=\"file:///{}\"/>", xml_escape(&p.display().to_string().replace('\\', "/")))
-        });
+        let image = logo_xml(logo);
         let actions: String = t
             .actions
             .iter()

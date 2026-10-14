@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.31.0] - 2026-10-14
+
+### 追加
+
+- ito-notify: アイコン付きのシステムの通知（`toast::show_with_icon`）。アプリの `icon` のモジュールの関数（`toast::Icon`、
+  一辺の画素から RGBA）を渡すと、128 画素の PNG を利用者のキャッシュ（Windows は `%LOCALAPPDATA%\uchmk\notify\<id>.png`）に
+  起動ごとに 1 回書き、Windows では通知の左と差出人の名前の横に、`notify-send` では通知のアイコンに出す。macOS は今までどおり。
+  使う側は `toast::show` を `toast::show_with_icon(app, icon::pixels, …)` に変える。PNG のために `png` に依るようになった。
+- 共通の仕様の「通知」に、通知にアイコンを出すことと対応の行。
+
 ## [0.30.0] - 2026-10-14
 
 ### 追加
