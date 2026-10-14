@@ -239,6 +239,20 @@ impl Key {
     /// notation: `<C-S-p>` is `Ctrl+Shift+P` on Windows and Linux and `⇧⌘P`
     /// on macOS, where `C` is Cmd.
     pub fn human(&self) -> String {
+        self.human_on(cfg!(target_os = "macos"), false)
+    }
+
+    /// [`Key::human`] for an app that keeps Ctrl and Cmd apart on macOS
+    /// (`C` Ctrl, `D` Cmd) when `apart`: there Ctrl is `⌃` and only Cmd is
+    /// `⌘` (`⌃⌥⇧⌘` in that order). Elsewhere, or not `apart`, it is
+    /// [`Key::human`].
+    pub fn human_for(&self, apart: bool) -> String {
+        self.human_on(cfg!(target_os = "macos"), apart)
+    }
+
+    /// [`Key::human_for`] with `mac` named, so either spelling can be tested
+    /// anywhere.
+    fn human_on(&self, mac: bool, apart: bool) -> String {
         let name = match self.code {
             Code::Char(' ') => "Space".to_string(),
             Code::Char(c) if self.ctrl || self.alt || self.sup => c.to_uppercase().to_string(),
@@ -247,9 +261,10 @@ impl Key {
             Code::Named(n) => n.label(),
         };
         let shift = self.shift || self.code == Code::Named(Named::BackTab);
-        if cfg!(target_os = "macos") {
+        if mac {
             let mut out = String::new();
-            for (on, sign) in [(self.alt, '⌥'), (shift, '⇧'), (self.ctrl || self.sup, '⌘')] {
+            let (ctrl, cmd) = if apart { (self.ctrl, self.sup) } else { (false, self.ctrl || self.sup) };
+            for (on, sign) in [(ctrl, '⌃'), (self.alt, '⌥'), (shift, '⇧'), (cmd, '⌘')] {
                 if on {
                     out.push(sign);
                 }
@@ -267,7 +282,12 @@ impl Key {
 /// A chord sequence the way the OS names its keys ([`Key::human`]), one
 /// space between the keys (`g h`).
 pub fn human_seq(keys: &[Key]) -> String {
-    keys.iter().map(Key::human).collect::<Vec<_>>().join(" ")
+    human_seq_for(keys, false)
+}
+
+/// [`human_seq`] with each key as [`Key::human_for`] has it.
+pub fn human_seq_for(keys: &[Key], apart: bool) -> String {
+    keys.iter().map(|k| k.human_for(apart)).collect::<Vec<_>>().join(" ")
 }
 
 /// A chord sequence the way a reader of a help or a status line sees it: on
@@ -391,6 +411,14 @@ pub fn from_egui(key: egui::Key, mods: &egui::Modifiers) -> Option<Key> {
 /// Ctrl+Insert comes back as Ctrl+C: egui gives the two one event.
 #[cfg(feature = "egui")]
 pub fn from_clipboard(events: &[egui::Event], at: usize, now: &egui::Modifiers) -> Option<Key> {
+    from_clipboard_for(events, at, now, false)
+}
+
+/// [`from_clipboard`] for an app that keeps Ctrl and Cmd apart (`apart`):
+/// Cmd, which is what egui turns into the clipboard's events on a Mac, comes
+/// back as `sup` (`<D-v>`), and Ctrl as `ctrl`.
+#[cfg(feature = "egui")]
+pub fn from_clipboard_for(events: &[egui::Event], at: usize, now: &egui::Modifiers, apart: bool) -> Option<Key> {
     use egui::Key as K;
     let (letter, bare) = match events.get(at)? {
         egui::Event::Copy => (K::C, K::Insert),
@@ -407,7 +435,12 @@ pub fn from_clipboard(events: &[egui::Event], at: usize, now: &egui::Modifiers) 
         .unwrap_or(*now);
     let ctrl = held.ctrl || held.command || held.mac_cmd;
     let mods = egui::Modifiers { ctrl, shift: held.shift || !ctrl, ..held };
-    from_egui(if ctrl { letter } else { bare }, &mods)
+    let mut key = from_egui(if ctrl { letter } else { bare }, &mods)?;
+    if apart && ctrl {
+        key.ctrl = held.ctrl;
+        key.sup = held.mac_cmd;
+    }
+    Some(key)
 }
 
 /// The character a key types without Shift (letters lowercase), for keys
@@ -530,6 +563,13 @@ mod tests {
         // Another key's release says nothing about this one.
         assert_eq!(key(&[paste(), up(egui::Key::A, none)], ctrl), Some("<C-v>".into()));
         assert_eq!(key(&[egui::Event::Text("v".into())], ctrl), None);
+        // Where Ctrl and Cmd are apart, Cmd is `D`.
+        let cmd = egui::Modifiers { mac_cmd: true, command: true, ..Default::default() };
+        let apart = |events: &[egui::Event], now| from_clipboard_for(events, 0, &now, true).map(|k| k.to_string());
+        assert_eq!(apart(&[paste()], cmd), Some("<D-v>".into()));
+        assert_eq!(apart(&[egui::Event::Copy], cmd | shift), Key::parse("<D-S-c>").map(|k| k.to_string()));
+        assert_eq!(apart(&[paste()], ctrl), Some("<C-v>".into()));
+        assert_eq!(apart(&[paste()], shift), Some("<S-Insert>".into()));
     }
 
     #[test]
@@ -632,6 +672,20 @@ mod tests {
         }
         assert_eq!(show("<F1>"), "F1");
         assert_eq!(human_seq(&[Key::char('g'), Key::char('h')]), "g h");
+    }
+
+    /// Where Ctrl and Cmd are apart on macOS, the two read apart too.
+    #[test]
+    fn ctrl_and_cmd_read_apart_where_they_are() {
+        let mac = |s: &str, apart| Key::parse(s).unwrap().human_on(true, apart);
+        assert_eq!(mac("<C-k>", false), "⌘K");
+        assert_eq!(mac("<D-k>", false), "⌘K");
+        assert_eq!(mac("<C-k>", true), "⌃K");
+        assert_eq!(mac("<D-k>", true), "⌘K");
+        assert_eq!(mac("<C-A-S-D-k>", true), "⌃⌥⇧⌘K");
+        let pc = |s: &str| Key::parse(s).unwrap().human_on(false, true);
+        assert_eq!(pc("<C-k>"), "Ctrl+K");
+        assert_eq!(pc("<D-k>"), "Win+K");
     }
 
     #[test]

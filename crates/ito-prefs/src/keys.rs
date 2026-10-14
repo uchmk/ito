@@ -7,7 +7,7 @@
 
 use egui::{Color32, FontId, RichText};
 use ito_keymap::{clashes, common, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
-use ito_keys::{human_seq, render_seq, Code, Key, Named};
+use ito_keys::{human_seq_for, render_seq, Code, Key, Named};
 
 use crate::{select, switch, Look};
 
@@ -231,17 +231,39 @@ enum Press {
 }
 
 /// The keys the menu puts in: the ones pressed alone set or stop, and the
-/// clipboard's, which egui hands over only when there is text to paste.
-fn special() -> [Key; 7] {
+/// clipboard's, which egui hands over only when there is text to paste (with
+/// Cmd on a Mac, `D` where Ctrl and Cmd are apart).
+fn special(sup: bool) -> [Key; 7] {
     let named = |n| Key::plain(Code::Named(n));
-    [named(Named::Enter), named(Named::Esc), named(Named::Backspace), named(Named::Tab), Key::ctrl('c'), Key::ctrl('x'), Key::ctrl('v')]
+    let clip = |c| {
+        let mut k = Key::ctrl(c);
+        if sup && cfg!(target_os = "macos") {
+            (k.ctrl, k.sup) = (false, true);
+        }
+        k
+    };
+    [named(Named::Enter), named(Named::Esc), named(Named::Backspace), named(Named::Tab), clip('c'), clip('x'), clip('v')]
+}
+
+/// The key every app keeps that `keys` starts with: where Ctrl and Cmd are
+/// apart on macOS (`sup`), the common keys are Cmd's (`<D-,>`), not Ctrl's.
+fn common_of(keys: &[Key], sup: bool) -> Option<usize> {
+    if !(sup && cfg!(target_os = "macos")) {
+        return common(keys);
+    }
+    let mut first = *keys.first()?;
+    if first.ctrl {
+        return None;
+    }
+    (first.ctrl, first.sup) = (first.sup, false);
+    common(&[first])
 }
 
 /// The keys pressed this frame, taken out of egui's input so nothing else
 /// sees them.
 fn presses(ui: &egui::Ui, sup: bool) -> Vec<Press> {
     ui.input_mut(|i| {
-        let clip: Vec<_> = (0..i.events.len()).map(|n| ito_keys::from_clipboard(&i.events, n, &i.modifiers)).collect();
+        let clip: Vec<_> = (0..i.events.len()).map(|n| ito_keys::from_clipboard_for(&i.events, n, &i.modifiers, sup)).collect();
         let mut clip = clip.into_iter();
         let mut out = Vec::new();
         // The text a key press brings with it when the key is taken already
@@ -272,7 +294,7 @@ fn presses(ui: &egui::Ui, sup: bool) -> Vec<Press> {
                                         k.ctrl = modifiers.ctrl;
                                         k.sup = modifiers.mac_cmd;
                                     }
-                                    skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl;
+                                    skip_text = matches!(k.code, Code::Char(_)) && k.alt && !k.ctrl && !k.sup;
                                     out.push(Press::Key(k));
                                 }
                             }
@@ -422,7 +444,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         crate::focus_ring(ui, &r);
         ui.add_space(8.0);
         if st.listening {
-            let words = if st.by_key.is_empty() { w.listening.to_owned() } else { format!("{} …", human_seq(&st.by_key)) };
+            let words = if st.by_key.is_empty() { w.listening.to_owned() } else { format!("{} …", human_seq_for(&st.by_key, t.sup)) };
             chip(ui, l, &words, true, false);
             if crate::button(ui, l, w.clear) {
                 st.listening = false;
@@ -435,7 +457,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                 st.capture = None;
             }
             if !st.by_key.is_empty() {
-                chip(ui, l, &human_seq(&st.by_key), false, false);
+                chip(ui, l, &human_seq_for(&st.by_key, t.sup), false, false);
                 if crate::button(ui, l, w.clear) {
                     st.by_key.clear();
                 }
@@ -467,7 +489,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         .filter_map(|r| {
             let desc = if r.desc.is_empty() { r.run.clone() } else { (t.tr)(&r.desc) };
             let layer = (t.layer_name)(&r.layer);
-            let keys: Vec<String> = r.keys.iter().flat_map(|k| [human_seq(&k.on), render_seq(&k.on)]).collect();
+            let keys: Vec<String> = r.keys.iter().flat_map(|k| [human_seq_for(&k.on, t.sup), render_seq(&k.on)]).collect();
             let hay = format!("{desc}\n{}\n{}\n{layer}\n{}", r.desc, r.run, keys.join("\n")).to_lowercase();
             let capturing = st.capture.as_ref().is_some_and(|cap| cap.layer == r.layer && cap.run == r.run);
             let keep = capturing
@@ -562,7 +584,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
     let this = st.capture.as_ref().filter(|cap| cap.layer == row.layer && cap.run == row.run).cloned();
     let tr_desc = |desc: &str, run: &str| if desc.is_empty() { run.to_owned() } else { (t.tr)(desc) };
     let capture_chip = |ui: &mut egui::Ui, cap: &Capture| {
-        let words = if cap.keys.is_empty() { w.press.to_owned() } else { format!("{} …", human_seq(&cap.keys)) };
+        let words = if cap.keys.is_empty() { w.press.to_owned() } else { format!("{} …", human_seq_for(&cap.keys, t.sup)) };
         chip(ui, l, &words, true, false);
     };
     let start = |st: &mut KeysEdit, replace: Option<Vec<Key>>| {
@@ -585,7 +607,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             // A default taken away comes back by taking out what the page's
             // file put in front of it; another file's is changed there.
             let back = cell.removed && first.is_some_and(|(_, _, f)| own(f));
-            let mut words = human_seq(&cell.on);
+            let mut words = human_seq_for(&cell.on, t.sup);
             if from != BUILT_IN {
                 words.push_str(" •");
             }
@@ -630,8 +652,8 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                     capture_chip(ui, cap);
                 }
                 ui.menu_button(RichText::new(w.special).size(12.0).color(c.fg), |ui| {
-                    for k in special() {
-                        if ui.button(k.human()).clicked() {
+                    for k in special(t.sup) {
+                        if ui.button(k.human_for(t.sup)).clicked() {
                             if let Some(cap) = &mut st.capture {
                                 cap.keys.push(k);
                             }
@@ -666,7 +688,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
         }
     });
     if row.changed() {
-        let d: Vec<String> = row.defaults.iter().map(|d| human_seq(d)).collect();
+        let d: Vec<String> = row.defaults.iter().map(|d| human_seq_for(d, t.sup)).collect();
         let d = if d.is_empty() { w.none.to_owned() } else { d.join(", ") };
         ui.label(RichText::new(fill(w.default_is, &[&d])).size(11.5).color(c.faint()));
     }
@@ -674,7 +696,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
         ui.label(RichText::new(w.hint).size(11.5).color(c.dim));
         if !cap.keys.is_empty() {
             let bindings: &[Binding<A>] = t.now.iter().find(|(n, _)| *n == cap.layer).map_or(&[], |(_, b)| b);
-            let keys = human_seq(&cap.keys);
+            let keys = human_seq_for(&cap.keys, t.sup);
             let mut said: Vec<String> = Vec::new();
             let mut prefixes = 0;
             for cl in clashes(bindings, &cap.keys, &cap.run, t.noop) {
@@ -684,7 +706,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                     Clash::Prefix { run, desc, on } => {
                         prefixes += 1;
                         if prefixes <= PREFIXES_SHOWN {
-                            said.push(fill(w.clash_prefix, &[&human_seq(&on), &tr_desc(&desc, &run)]));
+                            said.push(fill(w.clash_prefix, &[&human_seq_for(&on, t.sup), &tr_desc(&desc, &run)]));
                         }
                     }
                 }
@@ -692,8 +714,8 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             if prefixes > PREFIXES_SHOWN {
                 said.push(fill(w.more, &[&(prefixes - PREFIXES_SHOWN).to_string()]));
             }
-            if let Some(k) = common(&cap.keys) {
-                let first = human_seq(&cap.keys[..1]);
+            if let Some(k) = common_of(&cap.keys, t.sup) {
+                let first = human_seq_for(&cap.keys[..1], t.sup);
                 said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
             }
             said.extend((t.extra)(&cap.layer, &cap.keys));

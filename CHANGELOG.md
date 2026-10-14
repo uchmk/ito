@@ -11,6 +11,8 @@
   - `unbound`: 既定でキーの無い操作 `(層, run, desc)` の並び。その層の行の後ろに、キーの無い行として出し、＋でキーを足せる。
   - `sup`: Mac の Cmd を Ctrl（`C`）と分けて `D` と書く。Cmd と Ctrl を別のキーとして扱うアプリ（tsumugi）のため。
   - 使う側がやること: `KeyTable` を作るところに `unbound: &[]` と `sup: false` を足す（今までと同じ動き）。
+  - `sup` のとき、Mac では Ctrl を `⌃`、Cmd を `⌘` と分けて見せる。Cmd+C・X・V（egui ではクリップボードの出来事になる）も `D` で受け取り、「特別なキー」の Cmd+C・X・V も `D` にする。みんなのキー（`Cmd+,` など）とのぶつかりも Cmd で見る。
+- ito-keys: `Key::human_for`・`human_seq_for`・`from_clipboard_for` を足した。Ctrl と Cmd を分けるアプリのための形。
 
 ### 修正
 
