@@ -11,13 +11,13 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-layout` | Splitting a rectangle into panes: a tree of splits, and its dividers in egui |
 | `ito-i18n` | The words on screen by key, and the language setting the apps share (`common.toml`) |
 | `ito-keys` | yazi's key notation (`<C-a>`, `<A-S-Up>` …; `C` is Cmd on macOS): parsing, printing, and egui's key events |
-| `ito-keymap` | A yazi-style `keymap.toml`: layers of bindings over the built-in defaults, resolved key by key, with warnings for keys that can never run |
+| `ito-keymap` | A yazi-style `keymap.toml`: layers of bindings over the built-in defaults, resolved key by key, with warnings for keys that can never run; the rows and edits of a settings screen's Keys page |
 | `ito-match` | How a search query matches text: a regular expression with smart case, or fzf-style fuzzy letters |
 | `ito-ipc` | A per-user local door into a running app (Unix socket / named pipe) and framed serde messages |
 | `ito-mcp` | A small MCP server over stdio: JSON-RPC, `tools/list` and `tools/call`, without an async runtime |
 | `ito-common` | What every app shares: the config folder, `common.toml` (language, theme, clock), editing a TOML file in place and watching it |
 | `ito-theme` | The themes: the thirteen built in, a theme file's colours, and the one in force |
-| `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares |
+| `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys) |
 
 What the apps keep the same (`common.toml`, the settings screen, the themes,
 the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).

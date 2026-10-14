@@ -243,3 +243,180 @@ fn a_list_of_commands_runs_in_turn() {
     assert_eq!(km.take("help").len(), 2);
     assert!(km.layer("help").is_empty());
 }
+
+// ------------------------------------------------- the settings screen
+
+fn names(k: &Keymap<String>) -> Vec<(String, Vec<Binding<String>>)> {
+    k.layers.iter().map(|(n, b)| (n.clone(), b.clone())).collect()
+}
+
+fn table_of(files: &[(&str, &str)]) -> Vec<Row> {
+    rows(&names(&load_with(files)), &names(&load_with(&[])), "noop")
+}
+
+fn row<'a>(rows: &'a [Row], run: &str) -> &'a Row {
+    rows.iter().find(|r| r.run == run).unwrap_or_else(|| panic!("no row runs `{run}`"))
+}
+
+#[test]
+fn the_defaults_alone_are_a_row_per_run_in_their_order_and_none_changed() {
+    let rows = table_of(&[]);
+    let runs: Vec<&str> = rows.iter().map(|r| r.run.as_str()).collect();
+    assert_eq!(runs, ["quit", "top", "bottom", "settings", "mark save", "mark take", "close", "down"]);
+    assert!(rows.iter().all(|r| !r.changed() && r.keys.iter().all(|k| k.state == State::Live)));
+    assert_eq!(row(&rows, "top").defaults, [keys("g g")]);
+}
+
+#[test]
+fn a_users_key_comes_first_and_a_noop_strikes_a_default_out() {
+    let file = r#"
+[[main.prepend_keymap]]
+on = "<C-t>"
+run = "top"
+
+[[main.prepend_keymap]]
+on = "q"
+run = "noop"
+
+[[main.prepend_keymap]]
+on = "x"
+run = "mine"
+"#;
+    let rows = table_of(&[("km.toml", file)]);
+    let top = row(&rows, "top");
+    assert!(top.changed());
+    assert_eq!(top.keys.iter().map(|k| k.on.clone()).collect::<Vec<_>>(), [keys("<C-t>"), keys("g g")]);
+    assert_eq!(&*top.keys[0].from, "km.toml");
+    let quit = row(&rows, "quit");
+    assert!(quit.changed() && quit.keys[0].removed);
+    assert!(rows.iter().all(|r| r.run != "noop"), "a noop is a mark, not a row");
+    // An operation only the file binds comes after the defaults of its layer.
+    let runs: Vec<&str> = rows.iter().filter(|r| r.layer == "main").map(|r| r.run.as_str()).collect();
+    assert_eq!(runs.last(), Some(&"mine"));
+}
+
+#[test]
+fn a_key_a_shorter_one_runs_first_is_shadowed_by_it() {
+    let file = "[[main.prepend_keymap]]\non = \"g\"\nrun = \"quit\"\n";
+    let rows = table_of(&[("km.toml", file)]);
+    let top = row(&rows, "top");
+    assert!(matches!(&top.keys[0].state, State::Shadowed { run, .. } if run == "quit"));
+    assert!(top.changed(), "the file took its key");
+    assert!(!top.keys[0].removed);
+}
+
+#[test]
+fn clashes_name_what_the_new_keys_would_shut_out() {
+    let km = load_with(&[("km.toml", "[[main.prepend_keymap]]\non = \"z\"\nrun = \"noop\"\n")]);
+    let main = km.layer("main");
+    assert_eq!(clashes(main, &keys("q"), "top", "noop"), [Clash::Same { run: "quit".into(), desc: String::new() }]);
+    let prefix: Vec<String> = clashes(main, &keys("g"), "quit", "noop")
+        .into_iter()
+        .map(|c| match c {
+            Clash::Prefix { run, .. } => run,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(prefix, ["top", "bottom"]);
+    assert!(clashes(main, &keys("g g h"), "quit", "noop").len() == 1, "`g g` runs first");
+    assert!(clashes(main, &keys("g g"), "top", "noop").is_empty(), "its own key");
+    assert!(clashes(main, &keys("z"), "top", "noop").is_empty(), "a noop is nothing to lose");
+    assert_eq!(common(&keys("<C-,>")), Some("the settings"));
+    assert_eq!(common(&keys("<C-t>")), None);
+}
+
+fn edited(text: &str, edits: &[Edit]) -> String {
+    edit(text, &SPEC, edits, "noop").unwrap()
+}
+
+fn add(on: &str, run: &str) -> Edit {
+    Edit::Add { layer: "main".into(), on: keys(on), run: run.into(), desc: String::new() }
+}
+
+fn remove(on: &str, run: &str) -> Edit {
+    Edit::Remove { layer: "main".into(), on: keys(on), run: run.into() }
+}
+
+fn reset(run: &str) -> Edit {
+    Edit::Reset { layer: "main".into(), run: run.into() }
+}
+
+fn top_keys(text: &str) -> Vec<Vec<Key>> {
+    let km = load_with(&[("km.toml", text)]);
+    assert!(km.warnings.is_empty(), "{:?}", km.warnings);
+    let rows = rows(&names(&km), &names(&load_with(&[])), "noop");
+    row(&rows, "top").keys.iter().filter(|k| k.state == State::Live).map(|k| k.on.clone()).collect()
+}
+
+#[test]
+fn nothing_changed_writes_nothing() {
+    assert_eq!(edited("", &[reset("top")]), "");
+    assert_eq!(edited("", &[add("g g", "top")]), "", "a default key is already there");
+    let mine = "# my keys\n";
+    assert_eq!(edited(mine, &[remove("<C-t>", "top")]), mine);
+}
+
+#[test]
+fn a_key_added_is_prepended_and_works() {
+    let out = edited("", &[Edit::Add { layer: "main".into(), on: keys("<C-S-Enter>"), run: "top".into(), desc: "Go top".into() }]);
+    assert_eq!(out, "[[main.prepend_keymap]]\non = \"<C-S-Enter>\"\nrun = \"top\"\ndesc = \"Go top\"\n");
+    assert_eq!(top_keys(&out), [keys("<C-S-Enter>"), keys("g g")]);
+    // Keys pressed in turn are a list.
+    let out = edited("", &[add("g h", "top")]);
+    assert!(out.contains("on = [\"g\", \"h\"]"), "{out}");
+}
+
+#[test]
+fn a_default_key_taken_away_is_a_noop_and_given_back_is_nothing() {
+    let out = edited("", &[remove("g g", "top")]);
+    assert_eq!(out, "[[main.prepend_keymap]]\non = \"g\"\nrun = \"noop\"\n".replace("\"g\"", "[\"g\", \"g\"]"));
+    assert!(top_keys(&out).is_empty());
+    let back = edited(&out, &[add("g g", "top")]);
+    assert!(!back.contains("prepend_keymap"), "{back}");
+    assert_eq!(top_keys(&back), [keys("g g")]);
+}
+
+#[test]
+fn a_users_own_key_taken_away_leaves_no_line() {
+    let out = edited("", &[add("<C-t>", "top"), add("<C-y>", "top")]);
+    let out = edited(&out, &[remove("<C-t>", "top")]);
+    assert!(!out.contains("<C-t>") && out.contains("<C-y>"), "{out}");
+}
+
+#[test]
+fn a_key_given_to_another_run_leaves_its_old_one() {
+    let out = edited("", &[add("<C-t>", "quit")]);
+    let out = edited(&out, &[add("<C-t>", "top")]);
+    assert_eq!(out.matches("<C-t>").count(), 1, "{out}");
+    assert!(out.contains("run = \"top\""), "{out}");
+}
+
+#[test]
+fn a_reset_takes_the_runs_lines_out_and_keeps_the_rest() {
+    let start = "# my keys\n\n[[main.prepend_keymap]]\non = \"x\"\nrun = \"mine\" # kept\n";
+    let out = edited(start, &[add("<C-t>", "top"), remove("g g", "top")]);
+    assert!(top_keys(&out) == [keys("<C-t>")], "{out}");
+    let back = edited(&out, &[reset("top")]);
+    assert_eq!(back, start);
+    // Everything reset: no list left, the comments still there.
+    let none = edited(&edited("# mine\n", &[add("<C-t>", "top")]), &[reset("top")]);
+    assert!(!none.contains("prepend_keymap") && none.contains("# mine"), "{none}");
+}
+
+#[test]
+fn an_alias_section_is_written_where_it_is() {
+    let start = "[[manager.prepend_keymap]]\non = \"x\"\nrun = \"mine\"\n";
+    let out = edited(start, &[add("<C-t>", "top")]);
+    assert!(!out.contains("[[main."), "{out}");
+    assert_eq!(out.matches("[[manager.prepend_keymap]]").count(), 2, "{out}");
+}
+
+#[test]
+fn a_file_the_screen_cannot_write_back_is_left_alone() {
+    assert!(edit("[[main.keymap]]\non = \"q\"\nrun = \"quit\"\n", &SPEC, &[add("<C-t>", "top")], "noop").is_err());
+    assert!(edit("[[main.prepend_keymap]\n", &SPEC, &[add("<C-t>", "top")], "noop").is_err());
+    assert!(edit("", &SPEC, &[Edit::Reset { layer: "nope".into(), run: "x".into() }], "noop").is_err());
+    // A line for some machines only is the person's: kept as written.
+    let only = "[[main.prepend_keymap]]\non = \"<C-t>\"\nfor = \"macos\"\nrun = \"quit\"\n";
+    assert_eq!(edited(only, &[add("<C-t>", "top")]).matches("for = \"macos\"").count(), 1);
+}

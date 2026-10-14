@@ -33,6 +33,12 @@ use std::sync::Arc;
 use ito_keys::{render_seq, Code, Key};
 use serde::Deserialize;
 
+mod edit;
+mod table;
+
+pub use edit::{edit, Edit};
+pub use table::{clashes, common, reach, rows, Cell, Clash, Row, State, COMMON};
+
 /// One binding: the keys, the commands they run, and where it was written.
 #[derive(Clone, Debug)]
 pub struct Binding<A> {

@@ -17,6 +17,8 @@ use egui::{Color32, FontId, RichText};
 use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
 
+mod keys;
+pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
 pub use notify::{format_name, notify_index, notify_page, sound_name, End, Notify};
 

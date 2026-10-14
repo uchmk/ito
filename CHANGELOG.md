@@ -3,6 +3,27 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.33.0] - 2026-10-15
+
+### 追加
+
+- ito-prefs: 設定の「キー」のページ（`keys_page`）。1 行に 1 つの操作、キーをチップで並べ、＋で足し、× で外し、チップを押して
+  変え、↺ で既定に戻す。変えた行には「既定: …」、自分で変えたキーに •、届かないキーに ⚠、外した既定のキーは取り消し線（押すと戻る）。
+  文字の検索・「⌨ キーで探す」・場面の絞り込み・「変えたものだけ」。キーは押して入れ、続けて押せば並びになり、修飾キーの無い
+  Enter で決める（Esc でやめる、Backspace で 1 つ戻す）。修飾キーの無い Enter・Esc・Backspace・Tab は「特別なキー ▾」から。
+  決める前にぶつかりを文で出す。語は `KeyWords`（`KEYS_EN`・`KEYS_JA`）、検索の言葉は `keys_index`。
+- ito-keymap: 設定の画面のための `rows`（操作ごとの行、キーごとの出どころと届くかどうか、外した既定のキー）、`clashes`、
+  `reach`、共通のキーの表 `COMMON` と `common`、keymap.toml を書き換える `edit`（`Edit::Add`・`Remove`・`Reset`）。
+  書くのは既定と違う分だけで、`prepend_keymap` の頭に `{ on, run, desc }`、外した既定のキーは `{ on, run = "noop" }`。
+  既定に戻れば行を消す。コメントは残る。
+- 共通の仕様の「キー」に「設定の画面から変えるとき」、標準のページにキー。
+
+### 使う側がやること
+
+- キーを変えられるアプリは、設定にページ「キー」（アプリの設定と通知の間）を足し、`KeyTable`（今の keymap と既定だけの keymap の層、
+  何もしないコマンド、自分の keymap.toml のパス、場面と説明の訳）と `KeysEdit` で `keys_page` を描く。`KeysEdit::busy()` の間は
+  `show` に `Keys::default()` を渡す。返った `Edit` を UI ではないスレッドで `ito_keymap::edit` に当てて書き、keymap を読み直す。
+
 ## [0.32.2] - 2026-10-14
 
 ### 修正

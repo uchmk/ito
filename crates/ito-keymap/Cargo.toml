@@ -8,6 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# set_tables: a change from the settings screen keeps the file's comments.
+ito-common = { path = "../ito-common" }
 ito-keys = { path = "../ito-keys" }
 # The same versions as ito-common, both Pure Rust.
 serde = { version = "1", features = ["derive"] }

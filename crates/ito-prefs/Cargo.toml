@@ -1,6 +1,6 @@
 [package]
 name = "ito-prefs"
-description = "uchmk's settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications)"
+description = "uchmk's settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,8 @@ repository.workspace = true
 egui = { version = "0.36", default-features = false }
 ito-common = { path = "../ito-common" }
 ito-i18n = { path = "../ito-i18n" }
+ito-keymap = { path = "../ito-keymap" }
+ito-keys = { path = "../ito-keys", features = ["egui"] }
 ito-notify = { path = "../ito-notify" }
 ito-theme = { path = "../ito-theme" }
 
