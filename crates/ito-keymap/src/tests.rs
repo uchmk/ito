@@ -405,8 +405,10 @@ fn a_reset_takes_the_runs_lines_out_and_keeps_the_rest() {
     let back = edited(&out, &[reset("top")]);
     assert_eq!(back, start);
     // Everything reset: no list left, the comments still there.
-    let none = edited(&edited("# mine\n", &[add("<C-t>", "top")]), &[reset("top")]);
-    assert!(!none.contains("prepend_keymap") && none.contains("# mine"), "{none}");
+    let mine = edited("# mine\n", &[add("<C-t>", "top")]);
+    assert!(mine.starts_with("# mine\n\n[[main.prepend_keymap]]\n"), "a file of comments keeps them on top: {mine}");
+    let none = edited(&mine, &[reset("top")]);
+    assert!(!none.contains("prepend_keymap") && none.starts_with("# mine\n"), "{none:?}");
 }
 
 #[test]

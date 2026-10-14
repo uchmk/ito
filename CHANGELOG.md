@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.33.1] - 2026-10-15
+
+### 修正
+
+- ito-keymap: コメントだけの keymap.toml に `edit` で書くと、足した表がコメントの上に入っていた（toml_edit がコメントを
+  文書の末尾として持つため）。コメントを頭に残し、その下に書く。全部を既定に戻したときも、残ったコメントがファイルの頭から始まる。
+
 ## [0.33.0] - 2026-10-15
 
 ### 追加

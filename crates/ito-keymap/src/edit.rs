@@ -74,7 +74,13 @@ pub fn edit(text: &str, spec: &Spec, edits: &[Edit], noop: &str) -> Result<Strin
             .unwrap_or_else(|| run.into());
         apply(&mut layers[at].1, e, &d, &value, noop);
     }
-    let mut out = text.to_owned();
+    // A file of comments only keeps them at the top: toml_edit would hold
+    // them as the document's tail and put the new tables above.
+    let only_comments = text.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with('#'));
+    let (head, mut out) = match only_comments {
+        true if !text.trim().is_empty() => (format!("{}\n\n", text.trim_end()), String::new()),
+        _ => (String::new(), text.to_owned()),
+    };
     for (_, secs) in &layers {
         for s in secs.iter().filter(|s| s.changed) {
             for (l, list) in LISTS.iter().zip(&s.lists) {
@@ -88,6 +94,15 @@ pub fn edit(text: &str, spec: &Spec, edits: &[Edit], noop: &str) -> Result<Strin
                 out = ito_common::set_tables(&out, &path, &blocks)?;
             }
         }
+    }
+    if !head.is_empty() {
+        // Nothing written under the comments leaves the file as it was.
+        return Ok(if out.trim().is_empty() { text.to_owned() } else { head + &out });
+    }
+    // Every table taken out: the comments left start the file again.
+    let rest = out.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with('#'));
+    if rest && out != text && !out.trim().is_empty() {
+        return Ok(format!("{}\n", out.trim_matches('\n').trim_end()));
     }
     Ok(out)
 }
