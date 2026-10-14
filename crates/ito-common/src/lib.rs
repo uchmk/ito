@@ -546,6 +546,13 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
                     kept.set_position(Some(place));
                     at = Some(place);
                 }
+                // A blank line between it and a new one put in front of it.
+                if i > 0 && pick[i - 1].is_none() {
+                    let was = kept.decor().prefix().and_then(|s| s.as_str()).unwrap_or("").to_owned();
+                    if !was.starts_with('\n') {
+                        kept.decor_mut().set_prefix(format!("\n{was}"));
+                    }
+                }
                 kept.retain(|k, _| keys.iter().any(|(name, _)| name == k));
                 for (k, mut v) in keys {
                     match kept.get_mut(&k).and_then(toml_edit::Item::as_value_mut) {
@@ -606,7 +613,9 @@ pub fn set_tables(text: &str, name: &str, blocks: &[Vec<(&str, String)>]) -> Res
             }
         }
     }
-    Ok(doc.to_string())
+    // The table that comes first now keeps no blank line it had above it.
+    let out = doc.to_string();
+    Ok(if text.starts_with('\n') { out } else { out.trim_start_matches('\n').to_owned() })
 }
 
 /// The lines of a table's `prefix` up to its last blank line, when they hold
@@ -937,7 +946,12 @@ mod tests {
         let x = vec![("on", quote("x"))];
         let t = set_tables(bare, "bind", &[x, vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap();
         assert!(t.contains("# zoom\n[[bind]]\non = \"z\"\n") && t.contains("# help\n[[bind]]\non = \"h\"\n"), "{t}");
-        assert!(t.find("on = \"x\"") < t.find("# zoom"), "the new one first: {t}");
+        assert_eq!(t, format!("[[bind]]\non = \"x\"\n\n{bare}"), "the new one first, a blank line after it");
+        assert_eq!(set_tables(&t, "bind", &[vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap(), bare, "and back");
+        let plain = "[[bind]]\non = \"z\"\n";
+        let t = set_tables(plain, "bind", &[vec![("on", quote("x"))], vec![("on", quote("z"))]]).unwrap();
+        assert_eq!(t, "[[bind]]\non = \"x\"\n\n[[bind]]\non = \"z\"\n");
+        assert_eq!(set_tables(&t, "bind", &[vec![("on", quote("z"))]]).unwrap(), plain, "and back");
         let headed = format!("# my keys\n\n{bare}");
         let t = set_tables(&headed, "bind", &[vec![("on", quote("x"))], vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap();
         assert!(
