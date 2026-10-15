@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.7] - 2026-10-16
+
+### 追加
+
+- ito-common: `window::screens()`（今ある画面の位置・大きさ（ピクセル）・倍率・主の画面か。Windows だけ。ほかの OS は空）と、
+  `Window::seen_on(screens, grab)`・`Window::reachable_now(guess, grab)`。`reachable_now` は、今ある画面のどれかにタイトルバーが
+  `grab` だけ出るときだけ通す。画面を聞けない OS では今までの `reachable(guess, grab)` と同じ。
+
+### 修正
+
+- 窓の位置を戻すとき、主の画面の 4 倍までの位置を通していたので、外した 2 つ目の画面の上で閉じた窓が、どの画面にも出ない所に開いていた
+  （kura #357。2560×1440 の画面 1 つで (5000, 3000) や (2700, 100)）。使う側がやること: `rev` を上げ、
+  `read(..).filter(|w| w.reachable(PRIMARY_GUESS, 100.0))` を `reachable_now(PRIMARY_GUESS, 100.0)` に変える（kura・yagura）。
+
 ## [0.37.6] - 2026-10-16
 
 ### 修正
