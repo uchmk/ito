@@ -15,7 +15,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`） | tsumugi、yagura |
 | `ito-theme` | 組み込みの 13 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
-| `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / JSON）） | yagura（tsumugi も載せ替える） |
+| `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON）） | yagura（tsumugi も載せ替える） |
 | `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |

@@ -54,6 +54,7 @@ pub fn sound_name<'a>(w: &'a Words, sound: &str) -> &'a str {
 pub fn format_name(format: &str) -> &'static str {
     match format {
         "slack" => "Slack",
+        "discord" => "Discord",
         "json" => "JSON",
         _ => "ntfy",
     }
@@ -332,7 +333,7 @@ mod tests {
         }
         assert_eq!(sound_name(&JA, "low"), "低い音");
         assert_eq!(sound_name(&EN, "nope"), "System default");
-        assert_eq!(FORMATS.map(format_name), ["ntfy", "Slack", "JSON"]);
+        assert_eq!(FORMATS.map(format_name), ["ntfy", "Slack", "Discord", "JSON"]);
         assert!(notify_index(&JA).contains(&"Windows の集中モードに従う"));
     }
 }

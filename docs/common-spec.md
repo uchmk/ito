@@ -277,7 +277,9 @@ scale: 100%           # 書くなら倍率を % で
 - 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast::show_with_icon`。アプリの id は `uchmk.<app>`、窓と同じアイコンを
   `icon` のモジュールの関数で渡す。Windows では通知の左と差出人の名前の横に出る）、**音**（`ito_notify::sound::play`。
   `ito_notify::SOUNDS` の chime・low・alert・default から出来事ごとに 1 つ）、**Webhook**（`ito_notify::webhook::send`。
-  ntfy・Slack・JSON、`ito_notify::FORMATS`）。アドレスが空か http(s) で始まらなければ送らない。
+  ntfy・Slack・Discord・JSON、`ito_notify::FORMATS`）。アドレスが空か http(s) で始まらなければ送らない。
+  `curl -f` で送るので、相手が 400 以上で断ったとき（アドレスの誤り・回数の制限）も失敗として、30 秒後に 1 回だけ送り直す。
+  Discord は太字の題と本文を `content` に入れ（2000 字で切る）、`allowed_mentions` を空にして `@everyone` などで誰も呼ばない。
 - Windows の集中モード・プレゼンテーション・全画面のゲームの間は音を鳴らさない（`focus_mode`、既定は入り。`sound::quiet_time`）。
 - ページ（`notify_page`。出来事は `End` の並びでアプリが渡す）:
   - 上に「試しに送る」（3 つとも。Webhook はアドレスがあるときだけ）と「既定に戻す」（Webhook のアドレスと形式は残す）。

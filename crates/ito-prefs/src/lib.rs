@@ -115,7 +115,8 @@ pub const EN: Words = Words {
     notify_reset: "Reset to defaults",
     webhook: "WEBHOOK",
     webhook_url: "Address",
-    webhook_url_note: "An ntfy topic for the phone, a Slack webhook or any address that takes JSON; nothing is sent while it is empty",
+    webhook_url_note:
+        "An ntfy topic for the phone, a Slack or Discord webhook, or any address that takes JSON; nothing is sent while it is empty",
     webhook_bad: "Start the address with http:// or https://; nothing is sent until then",
     webhook_format: "Format",
     webhook_format_note: "What the address takes",
@@ -163,7 +164,7 @@ pub const JA: Words = Words {
     notify_reset: "既定に戻す",
     webhook: "Webhook",
     webhook_url: "アドレス",
-    webhook_url_note: "ntfy のトピック・Slack の webhook・JSON を受けるアドレス。空なら送りません",
+    webhook_url_note: "ntfy のトピック・Slack や Discord の webhook・JSON を受けるアドレス。空なら送りません",
     webhook_bad: "http:// か https:// で始めてください。それまでは送りません",
     webhook_format: "形式",
     webhook_format_note: "アドレスが受ける形",

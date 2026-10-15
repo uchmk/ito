@@ -1,7 +1,7 @@
 //! Telling a person from an app, three ways: the system's notification
 //! ([`toast`]), a sound ([`sound`]) and a message sent elsewhere
-//! ([`webhook`]: an ntfy topic, a Slack incoming webhook, or any address that
-//! takes JSON). Each runs on a thread of its own and a failure only goes to
+//! ([`webhook`]: an ntfy topic, a Slack or Discord incoming webhook, or any
+//! address that takes JSON). Each runs on a thread of its own and a failure only goes to
 //! stderr, so a caller never waits on the system. No HTTP client is built in:
 //! the webhook goes through the system's `curl`.
 //!
@@ -17,7 +17,7 @@ pub mod webhook;
 pub const SOUNDS: [&str; 4] = ["chime", "low", "alert", "default"];
 
 /// The addresses [`webhook::send`] speaks to, by their words.
-pub const FORMATS: [&str; 3] = ["ntfy", "slack", "json"];
+pub const FORMATS: [&str; 4] = ["ntfy", "slack", "discord", "json"];
 
 /// Whether `url` is an address a webhook may be sent to.
 pub fn is_http(url: &str) -> bool {

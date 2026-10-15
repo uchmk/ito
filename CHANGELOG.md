@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.38.0] - 2026-10-16
+
+### 追加
+
+- ito-notify: Webhook の形式に `discord`（Discord の incoming webhook）を足した。太字の題と本文を `content` に入れ
+  （Discord が受ける 2000 字で切る）、`allowed_mentions` を空にするので、プログラムが `@everyone` と書いても誰も呼ばない。
+  `ito_notify::FORMATS` は `["ntfy", "slack", "discord", "json"]` の 4 つになった。
+- ito-prefs: 形式の名前 `format_name("discord")` は「Discord」。アドレスの説明（`webhook_url_note`）に Discord を足した。
+
+### 変更
+
+- ito-notify: Webhook を `curl -f` で送る。相手が 400 以上で断ったとき（アドレスの誤り・回数の制限）も失敗として stderr に出し、
+  30 秒後に 1 回だけ送り直す。今までは網が切れたときだけを失敗としていた。
+  使う側がやること: `rev` を上げる。`FORMATS` を写した自前の表（minato の `minato_core::prefs::FORMATS`、tsumugi の設定の画面の
+  形式の並び）と、「ntfy, slack or json」と書いた文言・設定の例に `discord` を足す。`ito_notify::FORMATS` で確かめているアプリ
+  （kura・yagura・tsumugi のサーバ）は、`rev` を上げるだけで `webhook_format = "discord"` を受ける。
+
 ## [0.37.9] - 2026-10-16
 
 ### 修正

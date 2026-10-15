@@ -1,6 +1,6 @@
 [package]
 name = "ito-notify"
-description = "Telling a person from an app: the system's notification, a sound, and a webhook (ntfy, Slack or JSON)"
+description = "Telling a person from an app: the system's notification, a sound, and a webhook (ntfy, Slack, Discord or JSON)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
