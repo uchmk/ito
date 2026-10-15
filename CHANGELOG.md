@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.9] - 2026-10-16
+
+### 修正
+
+- ito-keyscript: `--keys` の `<C-c>` と `<C-x>` が、キーボードの Ctrl+C・Ctrl+X と違う届き方をしていた（kura #383）。
+  egui-winit はこの 2 つを `Event::Copy`・`Event::Cut` に変えてキーの押下を送らないが、スクリプトはキーの押下を送っていたので、
+  アプリの Copy の受け口（選んだ文字を先にコピーする所）を通らず、keymap の `<C-c>` がすぐ走った。キーボードと同じく
+  `Copy` / `Cut` と、Ctrl を押したままのキーの離し（`ito_keys::from_clipboard` が組み合わせを読む所）を送る。
+  macOS ではクリップボードの組み合わせが Cmd なので、今までどおりキーの押下のまま。Shift や Alt が付いたものもキーの押下のまま
+  （イベントは修飾キーを持たず、アプリはフレームで押している修飾キーから Shift を読むが、スクリプトは押していない）。
+  使う側がやること: `keyscript::Press` を自分で回すアプリ（kura）は何もしなくてよい（`Press::Events` で届く）。
+  Copy の受け口が選んだものが無いときに `<C-c>` に戻すことを確かめる（kura・tsumugi・ito-pane はそうなっている）。
+
 ## [0.37.8] - 2026-10-16
 
 ### 修正

@@ -163,7 +163,7 @@ pub enum Press {
 pub fn press(step: &Step) -> Option<Press> {
     match step {
         Step::Key(k) if k.code == Code::Char('v') && k.ctrl && !k.alt && !k.sup => Some(Press::Paste),
-        Step::Key(k) => events(k).map(Press::Events),
+        Step::Key(k) => clipboard_chord(k).or_else(|| events(k)).map(Press::Events),
         Step::Paste => Some(Press::Paste),
         Step::PasteText(t) => Some(Press::PasteText(t.clone())),
         Step::Read { tag, name } => Some(Press::Read { tag: tag.clone(), name: name.clone() }),
@@ -564,6 +564,28 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
         }
     }
     Ok(out)
+}
+
+/// `<C-c>` and `<C-x>` as a keyboard's Ctrl+C and Ctrl+X arrive: egui-winit
+/// turns the press into `Copy` or `Cut` and never sends it, and the key's
+/// release follows with Ctrl held, which is where `ito_keys::from_clipboard`
+/// reads the chord from. As a key press they ran the app's `<C-c>` at once,
+/// where the keyboard copies a selection first (kura #383). On a Mac the
+/// clipboard's chords are Cmd, which a script cannot press, so Ctrl+C stays a
+/// key there. With Shift (which egui-winit also turns into `Copy`) they stay
+/// key presses: the event carries no modifiers, and an app reads Shift from
+/// the ones held in the frame, which a script does not hold.
+fn clipboard_chord(key: &Key) -> Option<Vec<egui::Event>> {
+    if cfg!(target_os = "macos") || !key.ctrl || key.alt || key.shift || key.sup {
+        return None;
+    }
+    let (event, letter) = match key.code {
+        Code::Char('c') => (egui::Event::Copy, egui::Key::C),
+        Code::Char('x') => (egui::Event::Cut, egui::Key::X),
+        _ => return None,
+    };
+    let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+    Some(vec![event, egui::Event::Key { key: letter, physical_key: None, pressed: false, repeat: false, modifiers }])
 }
 
 /// The events one press of `key` arrives as. `None` for a key no keyboard
@@ -1045,5 +1067,31 @@ mod tests {
         assert_eq!(press(&Step::Key(Key::parse("<C-v>").unwrap())), Some(Press::Paste));
         assert_eq!(parse("<Paste>").unwrap(), [Step::Paste]);
         assert_eq!(paste_text_event("x"), egui::Event::Paste("x".into()));
+    }
+
+    /// kura #383: Ctrl+C and Ctrl+X are the copy and cut events and the key's
+    /// release, which `from_clipboard` reads back as the chord; with Shift or
+    /// Alt they are key presses as before.
+    #[test]
+    fn ctrl_c_and_x_are_the_clipboard_events() {
+        let press_of = |token: &str| press(&Step::Key(Key::parse(token).unwrap())).unwrap();
+        for (token, event) in [("<C-c>", egui::Event::Copy), ("<C-x>", egui::Event::Cut)] {
+            let Press::Events(evs) = press_of(token) else { panic!("{token}") };
+            if cfg!(target_os = "macos") {
+                assert!(matches!(evs[0], egui::Event::Key { pressed: true, .. }), "{token}: Ctrl is not the clipboard's on a Mac");
+                continue;
+            }
+            assert_eq!(evs[0], event, "{token}");
+            assert!(matches!(evs[1], egui::Event::Key { pressed: false, .. }), "{token}: {evs:?}");
+            let back = keys::from_clipboard(&evs, 0, &egui::Modifiers::NONE).map(|k| k.to_string());
+            assert_eq!(back.as_deref(), Some(token));
+        }
+        for token in ["<C-S-c>", "<C-A-x>", "<C-v>", "<C-a>"] {
+            let got = press_of(token);
+            assert!(
+                !matches!(&got, Press::Events(evs) if evs.iter().any(|e| matches!(e, egui::Event::Copy | egui::Event::Cut))),
+                "{token}: {got:?}"
+            );
+        }
     }
 }
