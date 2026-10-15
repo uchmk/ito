@@ -99,6 +99,9 @@ mod native {
         goto: Option<String>,
         /// What the view's handlers saw, read on the next frame.
         seen: Rc<RefCell<Seen>>,
+        /// Windows: the window's menu kept out while the view is there.
+        #[cfg(windows)]
+        menu: Option<menu::KeepOut>,
     }
 
     /// Told by the WebView between frames.
@@ -125,6 +128,8 @@ mod native {
                 context: None,
                 failed: None,
                 seen: Default::default(),
+                #[cfg(windows)]
+                menu: None,
             }
         }
 
@@ -214,7 +219,8 @@ mod native {
                 let _ = view.set_visible(!hidden);
                 // A click in the window outside the page gives the keys back
                 // to the window (the address field, the app's keys): the
-                // page keeps them from its own click on.
+                // page keeps them from its own click on. On Windows the
+                // window does it too, before egui sees the click (`menu`).
                 if ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))) {
                     let _ = view.focus_parent();
                 }
@@ -262,8 +268,131 @@ mod native {
                 Ok(view) => {
                     self.view = Some(view);
                     self.context = context;
+                    #[cfg(windows)]
+                    if let Ok(raw_window_handle::RawWindowHandle::Win32(h)) = window.window_handle().map(|h| h.as_raw()) {
+                        self.menu = Some(menu::KeepOut::new(h.hwnd.get()));
+                    }
                 }
                 Err(e) => self.failed = Some(format!("{}: {e}", words.failed)),
+            }
+        }
+    }
+
+    /// A lone Alt (or F10) tapped while the page has the keys: WebView2 hands
+    /// the keys the page does not use to the window, and the system would put
+    /// the window, which has no menu, in its menu mode. The next click would
+    /// only end that mode and never reach egui, so the keys stayed with the
+    /// page (tsumugi #109). winit leaves the menu out for its own keys; this
+    /// does the same for the page's, and gives the keys back to the window on
+    /// a click in it before egui sees the click: the page covers its own
+    /// room, so a click the window gets is outside the page.
+    #[cfg(windows)]
+    mod menu {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
+        use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SC_KEYMENU, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCDESTROY, WM_RBUTTONDOWN, WM_SYSCOMMAND, WM_XBUTTONDOWN,
+        };
+
+        /// The subclasses' ids on the window, one for each browser ("itob"
+        /// and up): a second browser in the window, or a new one made before
+        /// the old is dropped, keeps its own.
+        static NEXT: AtomicUsize = AtomicUsize::new(0x6974_6f62);
+
+        /// The subclass on the app's window, taken off when dropped (with the
+        /// browser) or when the window goes.
+        pub struct KeepOut(HWND, usize);
+
+        impl KeepOut {
+            pub fn new(window: isize) -> Self {
+                let (window, id) = (HWND(window as *mut _), NEXT.fetch_add(1, Ordering::Relaxed));
+                // SAFETY: the window is the app's and lives on this thread, the
+                // UI thread; the browser holding this is not `Send`, so it is
+                // dropped (and the subclass taken off) on the same thread.
+                unsafe {
+                    let _ = SetWindowSubclass(window, Some(subclass), id, 0);
+                }
+                Self(window, id)
+            }
+        }
+
+        impl Drop for KeepOut {
+            fn drop(&mut self) {
+                // SAFETY: as in `new`; a window already gone has none to take off.
+                unsafe {
+                    let _ = RemoveWindowSubclass(self.0, Some(subclass), self.1);
+                }
+            }
+        }
+
+        unsafe extern "system" fn subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, id: usize, _: usize) -> LRESULT {
+            match msg {
+                WM_SYSCOMMAND if bare_menu_key(wparam.0, lparam.0) => return LRESULT(0),
+                WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN if unsafe { GetFocus() } != hwnd => {
+                    let _ = unsafe { SetFocus(Some(hwnd)) };
+                }
+                WM_NCDESTROY => {
+                    let _ = unsafe { RemoveWindowSubclass(hwnd, Some(subclass), id) };
+                }
+                _ => {}
+            }
+            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        }
+
+        /// The menu the system opens for a lone Alt or F10 (`SC_KEYMENU` with
+        /// no letter). Alt+Space (the window's menu) and Alt+letter keep
+        /// theirs. The low 4 bits of `wparam` are the system's own.
+        pub(super) fn bare_menu_key(wparam: usize, lparam: isize) -> bool {
+            wparam & 0xFFF0 == SC_KEYMENU as usize && lparam == 0
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use windows::Win32::UI::WindowsAndMessaging::{SC_CLOSE, SC_MOVE};
+
+            #[test]
+            fn only_a_lone_menu_key_is_kept_out() {
+                assert!(bare_menu_key(SC_KEYMENU as usize, 0));
+                assert!(bare_menu_key(SC_KEYMENU as usize | 0x3, 0));
+                assert!(!bare_menu_key(SC_KEYMENU as usize, ' ' as isize));
+                assert!(!bare_menu_key(SC_KEYMENU as usize, 'f' as isize));
+                assert!(!bare_menu_key(SC_CLOSE as usize, 0));
+                assert!(!bare_menu_key(SC_MOVE as usize | 0x2, 0));
+            }
+
+            #[test]
+            fn the_subclass_goes_on_and_comes_off() {
+                use windows::core::w;
+                use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_POPUP};
+
+                // Taken off and put back: `GetWindowSubclass` has no name in
+                // the comctl32 a binary without a manifest loads (5.82).
+                let on = |window, id| unsafe {
+                    let on = RemoveWindowSubclass(window, Some(subclass), id).as_bool();
+                    if on {
+                        let _ = SetWindowSubclass(window, Some(subclass), id, 0);
+                    }
+                    on
+                };
+                // A hidden window of the test's own, on this thread.
+                let window =
+                    unsafe { CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), None, WS_POPUP, 0, 0, 10, 10, None, None, None, None) }
+                        .expect("a window");
+                let first = KeepOut::new(window.0 as isize);
+                let second = KeepOut::new(window.0 as isize);
+                assert_ne!(first.1, second.1);
+                assert!(on(window, first.1) && on(window, second.1));
+                let id = first.1;
+                drop(first);
+                assert!(!on(window, id));
+                assert!(on(window, second.1));
+                let id = second.1;
+                drop(second);
+                assert!(!on(window, id));
+                unsafe { DestroyWindow(window) }.expect("the window goes");
             }
         }
     }
