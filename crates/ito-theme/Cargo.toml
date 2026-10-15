@@ -14,4 +14,5 @@ pane = ["dep:ito-pane", "ito-pane/egui"]
 [dependencies]
 egui = { version = "0.36", default-features = false }
 toml = "1.1"
+ito-select = { path = "../ito-select" }
 ito-pane = { path = "../ito-pane", optional = true }

@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.0] - 2026-10-15
+
+### 変更
+
+- ito-select: 選択の仕様を tsumugi の端末に合わせた。
+  - 選択の色を ito-select で決める: `ito_select::fill(ground, accent, light)`（tsumugi の色。地の色に強調の色を暗いテーマで 25%、明るいテーマで 18% 混ぜる。不透明）。
+    ito-theme の `Colors::selection()` はこれを呼ぶようになった（値は前と同じ）ので、ito-theme の色を使うアプリ（tsumugi の端末・`visuals()` の選択）は何もしなくてよい。
+  - 選択を文字の後ろに塗る: `Select::note` と `note_inline` が描く `Painter` を受け取り、その時点に場所を取る。`paint` はそこへ塗るので、
+    文字の下に塗った帯（コードブロックの地など）の上・文字の下に選択が来る。
+  - ドラッグを離したとき・ダブルクリック・トリプルクリックで、選んだ文字を `Driven::copy` で返す（tsumugi の copy on select。アプリがクリップボードに入れる）。
+  - ダブルクリックがウェブアドレスの上なら、アドレス全体（前の括弧と後ろの句読点を除く）を選ぶ。アドレスの前の括弧の上では、`url_at` はもうアドレスを返さない。
+  - 使う側がやること:
+    - `s.note(pos, &galley)` → `s.note(&painter, pos, &galley)`（`note_inline` も）。その galley を描く直前に呼ぶ。
+    - `s.drive(&resp, view)` は `Option<String>` ではなく `Driven { copy, open }` を返す。`open` が前の戻り値（Ctrl+クリックしたアドレス）。
+      `copy` が `Some` ならクリップボードに入れる（設定で copy on select を切れるアプリはそれに従う）。
+    - `s.paint(&painter, fill)` → `s.paint(fill)`。色は半透明にせず `ito_select::fill(…)` か `ito_theme::colors().selection()` を渡す。
+  - ito-select の egui は `default-features = false` にした（ほかの ito のクレートと同じ）。
+- ito-pane: `Palette::selection` の説明を直した（アプリは ito-select の色を渡す）。
+
 ## [0.36.1] - 2026-10-15
 
 ### 追加

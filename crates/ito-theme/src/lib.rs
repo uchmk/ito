@@ -195,9 +195,10 @@ impl Colors {
             self.bg
         }
     }
-    /// Behind the selected cells and the tab shown.
+    /// Behind the selected cells and the tab shown: ito-select's colour, the
+    /// one every app's selection takes.
     pub fn selection(&self) -> Color32 {
-        mix(self.panel, self.run, if self.light { 0.18 } else { 0.25 })
+        ito_select::fill(self.panel, self.run, self.light)
     }
 
     /// The terminal's sixteen: black and white from the theme's own text

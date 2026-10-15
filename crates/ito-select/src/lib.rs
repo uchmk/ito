@@ -6,20 +6,50 @@
 //! number and a character in it. Copying takes what lies between, a line for
 //! each text.
 //!
+//! It behaves as tsumugi's terminal does: the selection is [`fill`]ed behind
+//! the letters (over what the pane painted under them), a drag, a double click
+//! (a word, or the whole web address under it) or a triple click (a line)
+//! hands the app what it picked up to copy, and a click lets it go.
+//!
 //! One frame of use:
 //!
 //! 1. [`Select::begin`] with what the pane shows (another item drops the
 //!    selection);
-//! 2. [`Select::note`] each galley as it is painted, top to bottom;
+//! 2. [`Select::note`] each galley just before painting it, top to bottom,
+//!    with the painter it is painted with: its selection goes there;
 //! 3. [`Select::drive`] with the pane's `Response` (made with
-//!    `Sense::click_and_drag()`), then [`Select::paint`] over the texts;
-//! 4. [`Select::copy`] to answer egui's `Copy` event (Ctrl+C or Cmd+C), or
-//!    [`Select::text`] to take the selection yourself.
+//!    `Sense::click_and_drag()`), then [`Select::paint`] once the texts are
+//!    painted;
+//! 4. copy [`Driven::copy`] (copy on select), and answer egui's `Copy` event
+//!    (Ctrl+C or Cmd+C) with [`Select::copy`], or take [`Select::text`].
 
 use std::sync::Arc;
 
 use egui::epaint::text::cursor::CCursor;
-use egui::{Color32, Context, Event, Galley, Painter, PointerButton, Pos2, Rect, Response};
+use egui::layers::ShapeIdx;
+use egui::{Color32, Context, Event, Galley, Painter, PointerButton, Pos2, Rect, Response, Shape};
+
+/// The selection's colour: tsumugi's. The accent mixed into the ground the
+/// text sits on (a pane's or a panel's), a quarter of the way on a dark theme
+/// and less on a light one. Opaque, so it goes behind the letters
+/// ([`Select::note`] keeps the place); the text keeps its own colour on it.
+pub fn fill(ground: Color32, accent: Color32, light: bool) -> Color32 {
+    let t = if light { 0.18 } else { 0.25 };
+    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(m(ground.r(), accent.r()), m(ground.g(), accent.g()), m(ground.b(), accent.b()))
+}
+
+/// What a frame's mouse did ([`Select::drive`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Driven {
+    /// A selection was just made (a drag let go, a double or a triple click):
+    /// its text, for the app to copy (tsumugi's copy on select) and to offer
+    /// as the primary selection where there is one.
+    pub copy: Option<String>,
+    /// The web address that Ctrl (Cmd on a Mac) and a click landed on: the
+    /// pane opens it.
+    pub open: Option<String>,
+}
 
 /// A place in the painted texts: which one, and the character in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -33,6 +63,11 @@ struct Run {
     galley: Arc<Galley>,
     /// Painted on the same line as the text before it (a span of a line).
     inline: bool,
+    /// The place kept just before the text in its painter's list: its
+    /// selection goes there, over what lies under the text and under the text.
+    slot: (Painter, ShapeIdx),
+    /// The pass it was painted in: a place in another pass's list is not its.
+    pass: u64,
 }
 
 impl Run {
@@ -63,16 +98,24 @@ impl Select {
         }
     }
 
-    /// A text painted with its top left at `pos`. Note them in reading order.
-    pub fn note(&mut self, pos: Pos2, galley: &Arc<Galley>) {
-        self.runs.push(Run { pos, galley: galley.clone(), inline: false });
+    /// A text about to be painted with `p`, its top left at `pos`. Note them in
+    /// reading order, each just before painting it (after what goes under it,
+    /// such as a code block's band): its selection is painted at this point.
+    pub fn note(&mut self, p: &Painter, pos: Pos2, galley: &Arc<Galley>) {
+        self.push(p, pos, galley, false);
     }
 
     /// A text painted on the same line as the one noted before it (the spans
     /// of a line, each placed by itself): a copy joins them, with a space where
     /// they do not touch, instead of breaking the line between them.
-    pub fn note_inline(&mut self, pos: Pos2, galley: &Arc<Galley>) {
-        self.runs.push(Run { pos, galley: galley.clone(), inline: true });
+    pub fn note_inline(&mut self, p: &Painter, pos: Pos2, galley: &Arc<Galley>) {
+        self.push(p, pos, galley, true);
+    }
+
+    fn push(&mut self, p: &Painter, pos: Pos2, galley: &Arc<Galley>, inline: bool) {
+        let slot = (p.clone(), p.add(Shape::Noop));
+        let pass = p.ctx().cumulative_pass_nr();
+        self.runs.push(Run { pos, galley: galley.clone(), inline, slot, pass });
     }
 
     /// The place at `at` among the texts of the last frame that show in
@@ -153,6 +196,11 @@ impl Select {
     /// The web address under `at` (`http://`, `https://`, `ftp://`, or `www.`
     /// made into `https://`), without the marks a sentence puts after it.
     pub fn url_at(&self, at: Pos2, view: Rect) -> Option<String> {
+        self.url_span(at, view).map(|(_, _, url)| url)
+    }
+
+    /// The web address under `at`, and the two places around it as written.
+    fn url_span(&self, at: Pos2, view: Rect) -> Option<(At, At, String)> {
         let (run, c) = self.char_at(at, view)?;
         let chars: Vec<char> = self.last[run].galley.text().chars().collect();
         let stop = |ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '`' | '|');
@@ -167,62 +215,82 @@ impl Select {
         while hi < chars.len() && !stop(chars[hi]) {
             hi += 1;
         }
-        let mut tok: String = chars[lo..hi].iter().collect();
         // A bracket or quote that opens before the address is not part of it.
-        while tok.starts_with(['(', '[', '{', '\'', '\u{300c}']) {
-            tok.remove(0);
+        while lo < hi && matches!(chars[lo], '(' | '[' | '{' | '\'' | '\u{300c}') {
+            lo += 1;
         }
-        while tok.ends_with(['.', ',', ';', ':', '!', '?', '\'', ')', ']', '}', '\u{3002}', '\u{3001}', '\u{300d}']) {
+        let count = |ch: char, lo: usize, hi: usize| chars[lo..hi].iter().filter(|&&x| x == ch).count();
+        while hi > lo
+            && matches!(chars[hi - 1], '.' | ',' | ';' | ':' | '!' | '?' | '\'' | ')' | ']' | '}' | '\u{3002}' | '\u{3001}' | '\u{300d}')
+        {
             // Keep a closing bracket that the address itself opened.
-            if tok.ends_with(')') && tok.matches('(').count() >= tok.matches(')').count() {
+            if chars[hi - 1] == ')' && count('(', lo, hi) >= count(')', lo, hi) {
                 break;
             }
-            tok.pop();
+            hi -= 1;
         }
+        if !(lo..hi).contains(&c) {
+            return None;
+        }
+        let tok: String = chars[lo..hi].iter().collect();
         let lower = tok.to_ascii_lowercase();
-        if ["http://", "https://", "ftp://"].iter().any(|p| lower.starts_with(p) && tok.len() > p.len()) {
-            Some(tok)
+        let url = if ["http://", "https://", "ftp://"].iter().any(|p| lower.starts_with(p) && tok.len() > p.len()) {
+            tok
         } else if lower.starts_with("www.") && tok.len() > 4 {
-            Some(format!("https://{tok}"))
+            format!("https://{tok}")
         } else {
-            None
-        }
+            return None;
+        };
+        Some((At { run, ch: lo }, At { run, ch: hi }, url))
     }
 
-    /// Follow the mouse on the pane: a press and drag picks text up, a click
-    /// drops the selection, a double click takes the word and a triple click
-    /// the line. `view` is the part of the pane that shows texts.
+    /// Follow the mouse on the pane as tsumugi's terminal does: a press and
+    /// drag picks text up from where it was pressed, a click drops the
+    /// selection, a double click takes the word (the whole web address over
+    /// one) and a triple click the line. `view` is the part of the pane that
+    /// shows texts.
     ///
-    /// Returns the web address that Ctrl (Cmd on a Mac) and a click landed on:
-    /// the pane opens it. [`Select::url_at`] says whether the pointer is over
-    /// one, for the cursor.
-    pub fn drive(&mut self, resp: &Response, view: Rect) -> Option<String> {
+    /// Says what to copy when a selection was just made, and the web address
+    /// that Ctrl (Cmd on a Mac) and a click landed on, for the pane to open.
+    /// [`Select::url_at`] says whether the pointer is over one, for the cursor.
+    pub fn drive(&mut self, resp: &Response, view: Rect) -> Driven {
+        let mut out = Driven::default();
         if resp.drag_started_by(PointerButton::Primary) {
             let from = resp.ctx.input(|i| i.pointer.press_origin()).and_then(|p| self.place(p, view));
             self.sel = from.map(|a| (a, a));
         }
-        if resp.dragged_by(PointerButton::Primary) {
+        if resp.dragged_by(PointerButton::Primary) || resp.drag_stopped_by(PointerButton::Primary) {
             if let (Some((a, _)), Some(p)) = (self.sel, resp.interact_pointer_pos()) {
                 if let Some(b) = self.place(p, view) {
                     self.sel = Some((a, b));
                 }
             }
         }
+        if resp.drag_stopped_by(PointerButton::Primary) {
+            out.copy = self.text();
+        }
         let at = resp.interact_pointer_pos();
         if resp.clicked() {
             self.sel = None;
             if resp.ctx.input(|i| i.modifiers.command) {
-                return at.and_then(|p| self.url_at(p, view));
+                out.open = at.and_then(|p| self.url_at(p, view));
+                return out;
             }
         }
         if let Some(p) = at {
-            if resp.triple_clicked() {
-                self.sel = self.line_at(p, view);
+            let picked = if resp.triple_clicked() {
+                Some(self.line_at(p, view))
             } else if resp.double_clicked() {
-                self.sel = self.word_at(p, view);
+                Some(self.url_span(p, view).map(|(a, b, _)| (a, b)).or_else(|| self.word_at(p, view)))
+            } else {
+                None
+            };
+            if let Some(sel) = picked {
+                self.sel = sel;
+                out.copy = self.text();
             }
         }
-        None
+        out
     }
 
     /// Select between two places (for a caller with its own gestures).
@@ -285,10 +353,10 @@ impl Select {
         }
     }
 
-    /// Paint the selection over the texts noted this frame, with a translucent
-    /// `fill` (the texts are under it); drops it when the
-    /// texts are no longer there (the pane changed under it).
-    pub fn paint(&mut self, p: &Painter, fill: Color32) {
+    /// Paint the selection behind the texts noted this frame, each in the
+    /// place its [`Select::note`] kept, with `fill` (see [`fill`]); drops it
+    /// when the texts are no longer there (the pane changed under it).
+    pub fn paint(&mut self, fill: Color32) {
         let Some((a, b)) = self.span() else { return };
         if b.run >= self.runs.len() {
             self.sel = None;
@@ -296,6 +364,7 @@ impl Select {
         }
         for run in a.run..=b.run {
             let r = &self.runs[run];
+            let mut rects = Vec::new();
             let total: usize = r.galley.rows.iter().map(|row| row.char_count_including_newline().0).sum();
             let from = if run == a.run { a.ch } else { 0 };
             let to = if run == b.run { b.ch } else { total };
@@ -316,10 +385,15 @@ impl Select {
                     }
                     if x1 > x0 {
                         let y = row.rect().y_range();
-                        p.rect_filled(Rect::from_x_y_ranges(x0..=x1, y).translate(r.pos.to_vec2()), 0.0, fill);
+                        let rect = Rect::from_x_y_ranges(x0..=x1, y).translate(r.pos.to_vec2());
+                        rects.push(Shape::rect_filled(rect, 0.0, fill));
                     }
                 }
                 at += row.char_count_including_newline().0;
+            }
+            let (p, idx) = &r.slot;
+            if p.ctx().cumulative_pass_nr() == r.pass {
+                p.set(*idx, Shape::Vec(rects));
             }
         }
     }
@@ -328,31 +402,48 @@ impl Select {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{pos2, vec2, FontId};
+    use egui::{pos2, vec2, FontId, Modifiers, RawInput};
 
-    /// Lay the lines out in a headless frame and note them one under another.
-    fn frame(s: &mut Select, owner: &str, lines: &[&str]) {
-        let ctx = Context::default();
-        pass(&ctx, |ui| {
-            let p = ui.painter().clone();
-            s.begin(owner);
-            for (i, l) in lines.iter().enumerate() {
-                let g = p.layout_no_wrap(l.to_string(), FontId::monospace(14.0), Color32::WHITE);
-                s.note(pos2(10.0, 10.0 + i as f32 * 20.0), &g);
-            }
-        });
+    /// Note the lines one under another and paint them, as a pane does.
+    fn lines(s: &mut Select, p: &Painter, lines: &[&str]) {
+        for (i, l) in lines.iter().enumerate() {
+            let g = p.layout_no_wrap(l.to_string(), FontId::monospace(14.0), Color32::WHITE);
+            let at = pos2(10.0, 10.0 + i as f32 * 20.0);
+            s.note(p, at, &g);
+            p.galley(at, g, Color32::WHITE);
+        }
     }
 
-    /// One headless pass; how many shapes it painted.
-    fn pass(ctx: &Context, f: impl FnMut(&mut egui::Ui)) -> usize {
-        let out = ctx.run_ui(Default::default(), f);
-        let n = out.shapes.len();
+    /// Lay the lines out in a headless frame.
+    fn frame(s: &mut Select, owner: &str, texts: &[&str]) {
+        painted(s, owner, texts, None);
+    }
+
+    /// A headless frame of the lines, painting the selection with `fill`:
+    /// the shapes it painted.
+    fn painted(s: &mut Select, owner: &str, texts: &[&str], fill: Option<Color32>) -> Vec<Shape> {
+        let ctx = Context::default();
+        let out = ctx.run_ui(Default::default(), |ui| {
+            s.begin(owner);
+            lines(s, ui.painter(), texts);
+            if let Some(fill) = fill {
+                s.paint(fill);
+            }
+        });
+        let shapes = out.shapes.iter().map(|c| c.shape.clone()).collect();
         out.drop_without_applying_deltas();
-        n
+        shapes
     }
 
     fn view() -> Rect {
         Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 400.0))
+    }
+
+    #[test]
+    fn the_fill_is_tsumugis_accent_mixed_into_the_ground() {
+        let (ground, accent) = (Color32::from_rgb(0, 0, 0), Color32::from_rgb(200, 100, 40));
+        assert_eq!(fill(ground, accent, false), Color32::from_rgb(50, 25, 10));
+        assert_eq!(fill(ground, accent, true), Color32::from_rgb(36, 18, 7));
     }
 
     #[test]
@@ -375,6 +466,12 @@ mod tests {
         r.pos + vec2(x + w / 2.0, 6.0)
     }
 
+    /// The point just after the boundary before character `ch` of text `run`.
+    fn before(s: &Select, run: usize, ch: usize) -> Pos2 {
+        let r = &s.last[run];
+        r.pos + vec2(r.galley.pos_from_cursor(CCursor::new(ch)).min.x + 1.0, 6.0)
+    }
+
     fn two_frames(lines: &[&str]) -> Select {
         let mut s = Select::default();
         frame(&mut s, "a", lines);
@@ -395,9 +492,13 @@ mod tests {
     fn a_url_loses_the_marks_after_it() {
         let s = two_frames(&["go (https://a.example/x_(y)). ok", "www.example.org, and", "plain words"]);
         assert_eq!(s.url_at(over(&s, 0, 10), view()).as_deref(), Some("https://a.example/x_(y)"));
+        assert_eq!(s.url_span(over(&s, 0, 10), view()).map(|(a, b, _)| (a.ch, b.ch)), Some((4, 27)));
         assert_eq!(s.url_at(over(&s, 1, 3), view()).as_deref(), Some("https://www.example.org"));
         assert_eq!(s.url_at(over(&s, 2, 2), view()), None);
         assert_eq!(s.url_at(over(&s, 0, 1), view()), None);
+        // The bracket before it and the marks after it are not the address.
+        assert_eq!(s.url_at(over(&s, 0, 3), view()), None);
+        assert_eq!(s.url_at(over(&s, 0, 28), view()), None);
     }
 
     #[test]
@@ -405,15 +506,16 @@ mod tests {
         let ctx = Context::default();
         let mut s = Select::default();
         for _ in 0..2 {
-            pass(&ctx, |ui| {
+            let out = ctx.run_ui(Default::default(), |ui| {
                 let p = ui.painter().clone();
                 s.begin("a");
                 let g = |t: &str| p.layout_no_wrap(t.to_string(), FontId::monospace(14.0), Color32::WHITE);
-                s.note(pos2(10.0, 10.0), &g("ab"));
-                s.note_inline(pos2(18.0, 10.0), &g("cd"));
-                s.note_inline(pos2(100.0, 10.0), &g("ef"));
-                s.note(pos2(10.0, 30.0), &g("gh"));
+                s.note(&p, pos2(10.0, 10.0), &g("ab"));
+                s.note_inline(&p, pos2(18.0, 10.0), &g("cd"));
+                s.note_inline(&p, pos2(100.0, 10.0), &g("ef"));
+                s.note(&p, pos2(10.0, 30.0), &g("gh"));
             });
+            out.drop_without_applying_deltas();
         }
         s.set(Some((At { run: 0, ch: 0 }, At { run: 3, ch: 2 })));
         assert_eq!(s.text().as_deref(), Some("abcd ef\ngh"));
@@ -454,14 +556,99 @@ mod tests {
     }
 
     #[test]
-    fn the_selection_is_painted_and_dropped_when_the_texts_go() {
+    fn the_selection_goes_behind_its_text_and_is_dropped_when_the_texts_go() {
         let mut s = Select::default();
         frame(&mut s, "a", &["alpha", "beta"]);
         s.set(Some((At { run: 0, ch: 1 }, At { run: 1, ch: 2 })));
-        let ctx = Context::default();
-        assert!(pass(&ctx, |ui| s.paint(ui.painter(), Color32::RED)) > 0);
-        frame(&mut s, "a", &["alpha"]);
-        pass(&ctx, |ui| s.paint(ui.painter(), Color32::RED));
+        let shapes = painted(&mut s, "a", &["alpha", "beta"], Some(Color32::RED));
+        let fill = |sh: &Shape| matches!(sh, Shape::Vec(v) if !v.is_empty());
+        let text = |sh: &Shape| matches!(sh, Shape::Text(_));
+        // Each line's fill comes just before its text: over what lies under
+        // the text, under the letters.
+        let order: Vec<bool> = shapes.iter().filter(|sh| fill(sh) || text(sh)).map(fill).collect();
+        assert_eq!(order, [true, false, true, false]);
+        painted(&mut s, "a", &["alpha"], Some(Color32::RED));
         assert_eq!(s.get(), None);
+    }
+
+    /// A pane of lines, driven by the mouse a pass at a time.
+    struct Pane {
+        ctx: Context,
+        s: Select,
+        lines: Vec<&'static str>,
+        t: f64,
+    }
+
+    impl Pane {
+        fn new(lines: &[&'static str]) -> Self {
+            let mut pane = Pane { ctx: Context::default(), s: Select::default(), lines: lines.to_vec(), t: 0.0 };
+            pane.step(Modifiers::NONE, vec![]);
+            pane.step(Modifiers::NONE, vec![]);
+            pane
+        }
+
+        fn step(&mut self, modifiers: Modifiers, events: Vec<Event>) -> Driven {
+            self.t += 0.05;
+            let mut events = events;
+            events.insert(0, Event::ModifiersChanged(modifiers));
+            let input = RawInput { time: Some(self.t), events, ..Default::default() };
+            let (s, texts) = (&mut self.s, &self.lines);
+            let mut driven = Driven::default();
+            let out = self.ctx.run_ui(input, |ui| {
+                s.begin("a");
+                lines(s, ui.painter(), texts);
+                let resp = ui.interact(view(), ui.id().with("pane"), egui::Sense::click_and_drag());
+                driven = s.drive(&resp, view());
+                s.paint(Color32::RED);
+            });
+            out.drop_without_applying_deltas();
+            driven
+        }
+
+        fn button(&mut self, at: Pos2, down: bool, modifiers: Modifiers) -> Driven {
+            let e = Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: down, modifiers };
+            self.step(modifiers, vec![Event::PointerMoved(at), e])
+        }
+
+        fn click(&mut self, at: Pos2, modifiers: Modifiers) -> Driven {
+            assert_eq!(self.button(at, true, modifiers), Driven::default());
+            self.button(at, false, modifiers)
+        }
+    }
+
+    #[test]
+    fn letting_a_drag_go_hands_over_what_it_picked_up() {
+        let mut pane = Pane::new(&["alpha", "beta"]);
+        let (from, to) = (before(&pane.s, 0, 1), before(&pane.s, 1, 2));
+        pane.step(Modifiers::NONE, vec![Event::PointerMoved(from)]);
+        assert_eq!(pane.button(from, true, Modifiers::NONE), Driven::default());
+        let moving = pane.step(Modifiers::NONE, vec![Event::PointerMoved(to)]);
+        assert_eq!(moving.copy, None, "nothing is copied while the drag goes on");
+        assert_eq!(pane.s.text().as_deref(), Some("lpha\nbe"));
+        assert_eq!(pane.button(to, false, Modifiers::NONE).copy.as_deref(), Some("lpha\nbe"));
+        // A click lets it go.
+        pane.t += 1.0;
+        let later = pane.click(over(&pane.s, 0, 2), Modifiers::NONE);
+        assert_eq!(later, Driven::default());
+        assert_eq!(pane.s.get(), None);
+    }
+
+    #[test]
+    fn a_double_click_on_an_address_takes_all_of_it_and_a_triple_the_line() {
+        let mut pane = Pane::new(&["go https://a.example/x_y ok", "next"]);
+        let at = over(&pane.s, 0, 9);
+        assert_eq!(pane.click(at, Modifiers::NONE).copy, None);
+        assert_eq!(pane.click(at, Modifiers::NONE).copy.as_deref(), Some("https://a.example/x_y"));
+        assert_eq!(pane.click(at, Modifiers::NONE).copy.as_deref(), Some("go https://a.example/x_y ok"));
+        // Ctrl+click opens it.
+        pane.t += 1.0;
+        let opened = pane.click(at, Modifiers::COMMAND);
+        assert_eq!(opened.open.as_deref(), Some("https://a.example/x_y"));
+        assert_eq!(opened.copy, None);
+        // Off an address, a double click takes the word.
+        pane.t += 1.0;
+        let word = over(&pane.s, 1, 1);
+        pane.click(word, Modifiers::NONE);
+        assert_eq!(pane.click(word, Modifiers::NONE).copy.as_deref(), Some("next"));
     }
 }

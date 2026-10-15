@@ -28,7 +28,9 @@ pub struct Palette {
     pub fg: Color32,
     /// Bright black, and the outline of the cursor when the pane is not focused.
     pub fg_dim: Color32,
-    /// Behind selected cells (a drag, or what a search found).
+    /// Behind selected cells (a drag, or what a search found). The apps give
+    /// ito-select's colour (`ito_theme::Colors::selection` is it), the one
+    /// their painted text is selected in too.
     pub selection: Color32,
     /// The focused cursor, and the "lines back" note.
     pub cursor: Color32,
@@ -397,9 +399,9 @@ pub fn show_faces<P: Pane + ?Sized>(
         let painted = |x: usize| paint.get(x).copied().flatten();
         let mut run: Option<(usize, Color32)> = None;
         for (x, cell) in row.iter().enumerate() {
-            // A selected cell takes the same background the list gives the row
-            // under the cursor: already proven to carry text in this palette,
-            // and already the colour that means "this one" everywhere else.
+            // A selected cell takes the palette's selection (ito-theme gives
+            // ito-select's colour, the one painted text takes too) in place of
+            // its own background; its letters keep their colour on it.
             let bg = match (cell.selected, painted(x).and_then(|p| p.1)) {
                 (true, _) => pal.selection,
                 (false, Some([r, g, b])) => Color32::from_rgb(r, g, b),
