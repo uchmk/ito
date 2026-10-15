@@ -1,0 +1,11 @@
+[package]
+name = "ito-select"
+description = "Picking up painted text with the mouse and copying it: for panes drawn with a painter, not made of widgets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"

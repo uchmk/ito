@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.35.0] - 2026-10-15
+
+### 追加
+
+- ito-select: 新しいクレート。`Painter` で描いた文字（プレビューや詳細欄）をマウスのドラッグで範囲選択してコピーする。egui は `Label` の文字は選べるが、
+  `painter.galley` で描いた文字は選べない。描いた順に `Select::note` で文字を覚え、`Select::drive` がドラッグを受けて 2 つの位置（何番目の文字列の何文字目）に直し、
+  `Select::paint` が選択を塗り、`Select::copy` が egui の `Copy`（Ctrl+C・Cmd+C）に答えてクリップボードへ渡す。選んだ文字は文字列ごとに 1 行。
+  使う側は kura（プレビュー）と minato（詳細欄）。既存のクレートは変えていないので、使う側がすることは無い。
+
 ## [0.34.3] - 2026-10-15
 
 ### 修正
