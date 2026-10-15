@@ -31,6 +31,8 @@ pub struct At {
 struct Run {
     pos: Pos2,
     galley: Arc<Galley>,
+    /// Painted on the same line as the text before it (a span of a line).
+    inline: bool,
 }
 
 impl Run {
@@ -63,7 +65,14 @@ impl Select {
 
     /// A text painted with its top left at `pos`. Note them in reading order.
     pub fn note(&mut self, pos: Pos2, galley: &Arc<Galley>) {
-        self.runs.push(Run { pos, galley: galley.clone() });
+        self.runs.push(Run { pos, galley: galley.clone(), inline: false });
+    }
+
+    /// A text painted on the same line as the one noted before it (the spans
+    /// of a line, each placed by itself): a copy joins them, with a space where
+    /// they do not touch, instead of breaking the line between them.
+    pub fn note_inline(&mut self, pos: Pos2, galley: &Arc<Galley>) {
+        self.runs.push(Run { pos, galley: galley.clone(), inline: true });
     }
 
     /// The place at `at` among the texts of the last frame that show in
@@ -123,15 +132,26 @@ impl Select {
     /// the one the user saw).
     pub fn text(&self) -> Option<String> {
         let (a, b) = self.span()?;
-        let mut parts = Vec::new();
+        let mut out = String::new();
         for run in a.run..=b.run {
-            let g = &self.last.get(run)?.galley;
+            let r = self.last.get(run)?;
+            let g = &r.galley;
             let chars: Vec<char> = g.text().chars().collect();
             let from = if run == a.run { a.ch.min(chars.len()) } else { 0 };
             let to = if run == b.run { b.ch.min(chars.len()) } else { chars.len() };
-            parts.push(chars[from..to.max(from)].iter().collect::<String>());
+            if run > a.run {
+                let prev = &self.last[run - 1];
+                out.push_str(if !r.inline {
+                    "\n"
+                } else if r.pos.x - prev.rect().right() > 1.0 {
+                    " "
+                } else {
+                    ""
+                });
+            }
+            out.extend(&chars[from..to.max(from)]);
         }
-        Some(parts.join("\n")).filter(|t| !t.is_empty())
+        Some(out).filter(|t| !t.trim_matches('\n').is_empty())
     }
 
     /// Answer egui's `Copy` event (Ctrl+C, Cmd+C): put the selection on the
@@ -168,7 +188,9 @@ impl Select {
                 let n = row.char_count_excluding_newline().0;
                 let (lo, hi) = (from.max(at), to.min(at + n));
                 // A row the selection runs through to its end is filled a little past it.
-                let through = run != b.run || to > at + n;
+                // (Not where the next text carries on the same line.)
+                let ends_line = !self.runs.get(run + 1).is_some_and(|next| next.inline);
+                let through = ends_line && (run != b.run || to > at + n);
                 if lo < hi || (through && from <= at + n && to > at + n) {
                     let lo = lo.min(at + n);
                     let x0 = r.galley.pos_from_cursor(CCursor::new(lo)).min.x;
@@ -227,6 +249,25 @@ mod tests {
         // Backwards is the same selection.
         s.set(Some((At { run: 2, ch: 3 }, At { run: 0, ch: 2 })));
         assert_eq!(s.text().as_deref(), Some("pha\nbeta\ngam"));
+    }
+
+    #[test]
+    fn inline_texts_join_into_their_line() {
+        let ctx = Context::default();
+        let mut s = Select::default();
+        for _ in 0..2 {
+            pass(&ctx, |ui| {
+                let p = ui.painter().clone();
+                s.begin("a");
+                let g = |t: &str| p.layout_no_wrap(t.to_string(), FontId::monospace(14.0), Color32::WHITE);
+                s.note(pos2(10.0, 10.0), &g("ab"));
+                s.note_inline(pos2(18.0, 10.0), &g("cd"));
+                s.note_inline(pos2(100.0, 10.0), &g("ef"));
+                s.note(pos2(10.0, 30.0), &g("gh"));
+            });
+        }
+        s.set(Some((At { run: 0, ch: 0 }, At { run: 3, ch: 2 })));
+        assert_eq!(s.text().as_deref(), Some("abcd ef\ngh"));
     }
 
     #[test]

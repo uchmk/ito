@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.35.1] - 2026-10-15
+
+### 追加
+
+- ito-select: `Select::note_inline`。1 行を何度かに分けて描くもの（Markdown の整形表示の span）を、前の文字列と同じ行として覚える。コピーでは行を
+  区切らずにつなぎ、離れていれば空白 1 つを挟む。範囲選択の塗りも、同じ行の続きがある文字列の右端は伸ばさない。既存の API は変えていない。
+
 ## [0.35.0] - 2026-10-15
 
 ### 追加
