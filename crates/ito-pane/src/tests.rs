@@ -877,6 +877,39 @@ ghi jkl",
         assert!(left.is_empty(), "console hosts left behind: {left:?}");
     }
 
+    /// kura #354: `^C` in a pane did not stop `ping` when the app had been
+    /// started by a process that ignores Ctrl+C (a scheduled task's chain,
+    /// Claude Code's tools). Windows hands that down to every process started
+    /// after, the pane's shell and what it runs among them. The test ignores
+    /// Ctrl+C itself first, as such an app does, then sends the pane `^C`.
+    #[cfg(windows)]
+    #[test]
+    fn ctrl_c_stops_a_program_when_the_app_was_started_ignoring_it() {
+        use windows::Win32::System::Console::SetConsoleCtrlHandler;
+        let _ = unsafe { SetConsoleCtrlHandler(None, true) };
+        let dir = crate::util::test_dir("term-ctrl-c");
+        let shell = Some(("cmd".to_owned(), vec!["/c".to_owned(), "ping -n 30 127.0.0.1".to_owned()]));
+        let mut t = Terminal::spawn(&dir, Size::new(80, 24), (8, 16), shell, None, || {}).expect("the terminal starts");
+        let shell_pid = t.shell_pid.expect("the PTY says which process the shell is");
+        let ping = || descendants(&process_table(), shell_pid).iter().find(|p| p.name.eq_ignore_ascii_case("ping")).map(|p| p.pid);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut found = None;
+        while found.is_none() && Instant::now() < deadline {
+            t.drain();
+            std::thread::sleep(Duration::from_millis(50));
+            found = ping();
+        }
+        let pid = found.expect("ping starts in the pane");
+        t.send(b"\x03".to_vec());
+        let running = || process_table().iter().any(|p| p.pid == pid);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while running() && Instant::now() < deadline {
+            t.drain();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(!running(), "ping {pid} ran on after ^C");
+    }
+
     /// filer #243: a key sent as a win32-input-mode record is named after it in
     /// the log, so `\e[66;48;98;1;2;1_` reads as `Alt+b` without a table.
     #[test]

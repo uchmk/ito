@@ -90,3 +90,7 @@ pub fn children(_pid: u32) -> Vec<u32> {
 /// Nothing to restrict off Windows: there `conpty.dll` is not a thing.
 #[cfg(not(windows))]
 pub fn restrict_dll_search() {}
+
+/// Off Windows a shell starts with Ctrl+C as the terminal sets it.
+#[cfg(not(windows))]
+pub fn let_ctrl_c_through() {}

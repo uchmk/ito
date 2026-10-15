@@ -386,9 +386,11 @@ pub(crate) fn pane_env() -> std::collections::HashMap<String, String> {
 pub(crate) static SPAWNING: Mutex<()> = Mutex::new(());
 
 /// `tty::new`, but a shell that fails to start does not leave its
-/// pseudoconsole running on Windows; see `sys::end_new_consoles`. The caller
-/// holds [`SPAWNING`].
+/// pseudoconsole running on Windows (see `sys::end_new_consoles`), and `^C`
+/// stops what the shell runs even when the app was started ignoring Ctrl+C
+/// (see `sys::let_ctrl_c_through`). The caller holds [`SPAWNING`].
 pub(crate) fn new_pty(options: &tty::Options, window: WindowSize) -> io::Result<tty::Pty> {
+    crate::sys::let_ctrl_c_through();
     let consoles = crate::sys::consoles();
     tty::new(options, window, 0).inspect_err(|_| crate::sys::end_new_consoles(&consoles))
 }

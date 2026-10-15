@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.6] - 2026-10-16
+
+### 修正
+
+- ito-pane（Windows）: Ctrl+C を無視するプロセス（タスク スケジューラの連なりや Claude Code の道具など）から起動したアプリでは、
+  ペインで `^C` を送っても `ping` や `Start-Sleep` が止まらなかった（kura #354）。Ctrl+C を無視する印は、起動したプロセスに、
+  そこから先に起動するものすべてに受け継がれ、ペインのシェルとその子もそれを持っていた。ペインを作るたびに、その印をアプリから外す
+  （`SetConsoleCtrlHandler(NULL, FALSE)`）。自分のコンソールで動くアプリは、ほかのプログラムと同じく、そこの Ctrl+C で止まるようになる。
+  使う側がやることは `rev` を上げるだけ（tsumugi のサーバのように自分で外していたら、それは消してよい）。
+
 ## [0.37.5] - 2026-10-16
 
 ### 修正

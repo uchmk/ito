@@ -51,4 +51,4 @@ miniz_oxide = "0.9"
 regex = "1"
 
 [target."cfg(windows)".dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Threading"] }

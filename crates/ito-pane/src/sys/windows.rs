@@ -160,3 +160,14 @@ pub fn restrict_dll_search() {
     // not run on either; there the old search order simply stays.
     let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
 }
+
+/// Let Ctrl+C through to what the panes start. A process started by one that
+/// ignores Ctrl+C ignores it too, and so does everything it starts: an app
+/// started from such a chain (a scheduled task's, Claude Code's tools) gave
+/// every pane a shell that `^C` stopped nothing in (kura #354). Run again
+/// before each pane, as the flag belongs to the whole process. An app with a
+/// console of its own can be stopped from it again, as any program can.
+pub fn let_ctrl_c_through() {
+    use windows::Win32::System::Console::SetConsoleCtrlHandler;
+    let _ = unsafe { SetConsoleCtrlHandler(None, false) };
+}
