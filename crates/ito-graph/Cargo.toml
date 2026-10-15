@@ -1,0 +1,15 @@
+[package]
+name = "ito-graph"
+description = "A commit graph laid out row by row: lanes, edges, a colour per branch, the curves, and the drawing in egui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The edges and dots painted in egui (`ui::paint`).
+egui = ["dep:egui"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }

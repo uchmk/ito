@@ -19,6 +19,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-theme` | The themes: the thirteen built in, a theme file's colours, and the one in force |
 | `ito-select` | Picking up painted text with the mouse and copying it: for panes drawn with a painter, not made of widgets |
 | `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys) |
+| `ito-graph` | A commit graph laid out row by row: lanes, edges, a colour per branch and the curves between rows, and the drawing in egui |
 
 What the apps keep the same (`common.toml`, the settings screen, the themes,
 the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
@@ -29,6 +30,7 @@ the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
 - [kura](https://github.com/uchmk/kura) (蔵): a keyboard-driven file manager in the spirit of yazi
 - [yagura](https://github.com/uchmk/yagura) (櫓): a keyboard-driven system monitor
 - [minato](https://github.com/uchmk/minato) (港): a keyboard-driven GitHub app for several repositories at once
+- [michi](https://github.com/uchmk/michi) (道): a keyboard-driven Git client for a repository with many worktrees
 - [fuda](https://github.com/uchmk/fuda) (札, to come): a keyboard-driven to-do list
 - [fude](https://github.com/uchmk/fude) (筆, to come): a keyboard-driven text editor
 
