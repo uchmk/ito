@@ -69,7 +69,7 @@ impl Notifier {
 /// The `notify-send --action` arguments for a notification: a click on its
 /// body is `default`, and each button that is not the system's own dismiss is
 /// named by its `arg` (the `launch` one is the body's already).
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 fn notify_send_actions(t: &Toast) -> Vec<String> {
     let mut out = vec!["--action=default=Open".to_owned()];
     for a in t.actions.iter().filter(|a| !a.dismiss && a.arg != t.launch) {
@@ -81,7 +81,7 @@ fn notify_send_actions(t: &Toast) -> Vec<String> {
 
 /// What `notify-send --wait` printed (the name of the action clicked) as the
 /// `arg` to call back with.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 fn arg_of(t: &Toast, printed: &str) -> Option<String> {
     let said = printed.trim();
     if said == "default" {

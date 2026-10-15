@@ -1164,7 +1164,7 @@ mod alt_screen_tests {
 
 /// What runs under a pane, and what it listens on.
 mod processes {
-    use crate::sys::{descendants, listening_ports, stem, Proc};
+    use crate::sys::{descendants, stem, Proc};
 
     fn p(pid: u32, ppid: u32, name: &str) -> Proc {
         Proc { pid, ppid, name: name.into(), args: Vec::new() }
@@ -1198,8 +1198,8 @@ mod processes {
     fn a_port_listened_on_is_found() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        assert!(listening_ports(&[std::process::id()]).contains(&port), "port {port}");
-        assert!(listening_ports(&[]).is_empty());
+        assert!(crate::sys::listening_ports(&[std::process::id()]).contains(&port), "port {port}");
+        assert!(crate::sys::listening_ports(&[]).is_empty());
     }
 
     /// A shell named in Japanese is no panic (four bytes from the end fell

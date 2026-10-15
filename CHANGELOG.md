@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.2] - 2026-10-16
+
+### 修正
+
+- ito-notify: macOS の clippy が `notify_send_actions` と `arg_of`（`notify-send` のためのもの。macOS は `osascript` で出す）を
+  使われていないと言っていた。Windows と同じく macOS でも使わないものとして扱う。使う側がやることは無い（依存の警告は使う側では出ない）。
+- ito-pane: テストの `listening_ports` の `use` が、そのテストを回さない macOS で使われていないと言われていた。そのテストの中で呼ぶ。
+- `scripts/verify.sh`: Linux・Windows・macOS の clippy を、どの機械から回しても回す。macOS は objc2 が Objective-C をコンパイルするので、
+  Mac でないときは cargo-zigbuild（無ければ PyPI から入れる）を通す。zig のキャッシュは Cargo の出力の隣に置く。
+  これまで macOS は CI 任せで、ここの CI には Mac が無いため、上の警告に気づかなかった。
+
 ## [0.37.1] - 2026-10-16
 
 ### 追加
