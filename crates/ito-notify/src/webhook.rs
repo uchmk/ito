@@ -44,17 +44,27 @@ fn json_string(text: &str) -> String {
     out
 }
 
-/// The most a Discord message holds, in characters.
+/// The most a Discord message holds, in characters. It is counted here in
+/// UTF-16 units, which are never fewer than characters, so the cut fits
+/// whichever way Discord counts an emoji.
 const DISCORD_MAX: usize = 2000;
 
 /// `title` in bold over `message`, cut to what Discord takes (a longer
 /// message is refused whole).
 fn discord_content(title: &str, message: &str) -> String {
     let text = format!("**{title}**\n{message}");
-    if text.chars().count() <= DISCORD_MAX {
+    if text.encode_utf16().count() <= DISCORD_MAX {
         return text;
     }
-    let mut cut: String = text.chars().take(DISCORD_MAX - 1).collect();
+    let mut cut = String::new();
+    let mut units = 0;
+    for c in text.chars() {
+        units += c.len_utf16();
+        if units > DISCORD_MAX - 1 {
+            break;
+        }
+        cut.push(c);
+    }
     cut.push('\u{2026}');
     cut
 }
@@ -63,7 +73,7 @@ fn discord_content(title: &str, message: &str) -> String {
 /// with `--data-raw`: with `-d`, a message starting `@` (a program's own
 /// notification can say anything) has curl send the file it names (the
 /// source review, 2026-10-07). `-f` makes an answer of 400 or more (a wrong
-/// address, a full rate limit) a failure, so it is tried again and said on
+/// address, too many notices at once) a failure, so it is tried again and said on
 /// stderr, where before only a network that was out was.
 pub fn args(format: &str, level: Level, title: &str, message: &str, folder: &str) -> Vec<String> {
     let json = |fields: Vec<(&str, &str)>| {
@@ -196,6 +206,12 @@ mod tests {
         assert_eq!(cut.chars().count(), DISCORD_MAX);
         assert!(cut.starts_with("**t**\n\u{3042}") && cut.ends_with('\u{2026}'));
         assert_eq!(discord_content("t", "m"), "**t**\nm");
+        // An emoji is two UTF-16 units: the cut stays inside 2000 of those.
+        let faces = discord_content("t", &"\u{1F600}".repeat(1500));
+        assert!(faces.encode_utf16().count() <= DISCORD_MAX && faces.encode_utf16().count() >= DISCORD_MAX - 2, "{}", faces.len());
+        assert!(faces.ends_with("\u{1F600}\u{2026}"));
+        let just = "x".repeat(DISCORD_MAX - "**t**\n".len());
+        assert_eq!(discord_content("t", &just), format!("**t**\n{just}"), "exactly 2000 is not cut");
     }
 
     /// The address answers `status` to one request and gives back what it
@@ -206,7 +222,20 @@ mod tests {
         let url = format!("http://{}/hook", listener.local_addr().unwrap());
         let status = status.to_owned();
         let got = std::thread::spawn(move || {
-            let (mut s, _) = listener.accept().unwrap();
+            // Not for ever: a curl that never comes (a proxy in the way)
+            // fails the test instead of hanging it.
+            listener.set_nonblocking(true).unwrap();
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut s = loop {
+                match listener.accept() {
+                    Ok((s, _)) => break s,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && std::time::Instant::now() < until => {
+                        std::thread::sleep(std::time::Duration::from_millis(20))
+                    }
+                    Err(e) => panic!("no request came: {e}"),
+                }
+            };
+            s.set_nonblocking(false).unwrap();
             s.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
             let mut buf = Vec::new();
             let mut chunk = [0u8; 4096];

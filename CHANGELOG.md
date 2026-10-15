@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.38.1] - 2026-10-16
+
+### 修正
+
+- ito-notify: Discord に送る本文の長さを UTF-16 の数で数えて切る。絵文字のような 2 単位の字が多い本文でも 2000 を超えず、
+  Discord に断られない（ソースのレビュー）。今までは字の数で数えていた。使う側は、次に `rev` を上げたときに入る。
+- ito-notify: `an_http_error_is_a_failure` のテストは、curl が来ないとき（プロキシが間にあるなど）に止まらず 30 秒で落ちる。
+
 ## [0.38.0] - 2026-10-16
 
 ### 追加
