@@ -752,6 +752,13 @@ impl Terminal {
         term.selection = Some(Selection::new(SelectionType::Semantic, point, Side::Left));
     }
 
+    /// Select the whole line under a cell (a wrapped one with it) — a triple click.
+    pub fn select_line(&self, cell: (usize, usize)) {
+        let point = self.point(cell);
+        let mut term = self.term.lock();
+        term.selection = Some(Selection::new(SelectionType::Lines, point, Side::Left));
+    }
+
     /// Something is selected, on the screen or scrolled off it.
     pub fn has_selection(&self) -> bool {
         self.term.lock().selection.as_ref().is_some_and(|s| !s.is_empty())

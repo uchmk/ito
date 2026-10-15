@@ -45,6 +45,11 @@ pub trait Pane {
         self.select(cell, right_half, true)
     }
     fn select_word(&self, cell: (usize, usize));
+    /// Select the whole line under a cell (a triple click). A pane that has
+    /// no line selection takes the word.
+    fn select_line(&self, cell: (usize, usize)) {
+        self.select_word(cell)
+    }
     fn clear_selection(&self);
     /// The selected text, when the pane has it to hand. A pane across a
     /// process boundary may answer later through its own channel instead.
@@ -140,6 +145,10 @@ impl Pane for Terminal {
 
     fn select_word(&self, cell: (usize, usize)) {
         Terminal::select_word(self, cell)
+    }
+
+    fn select_line(&self, cell: (usize, usize)) {
+        Terminal::select_line(self, cell)
     }
 
     fn clear_selection(&self) {

@@ -720,7 +720,11 @@ pub fn show_faces<P: Pane + ?Sized>(
         }
     }
     if let Some(p) = pointer {
-        if resp.double_clicked() {
+        if resp.triple_clicked() {
+            // The whole line, wrapped rows with it.
+            let (col, line, _) = cell_at(p);
+            term.select_line((col, line));
+        } else if resp.double_clicked() {
             let (col, line, _) = cell_at(p);
             // A link is one word however many separators it holds
             // (`https://host/a?b=c`), so the whole of it is taken rather than
@@ -776,7 +780,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     }
     // Letting go of a selection copies it, which is what a terminal means by
     // selecting: there is no other step -- unless the app turned that off.
-    if resp.drag_stopped() || resp.double_clicked() {
+    if resp.drag_stopped() || resp.double_clicked() || resp.triple_clicked() {
         shown.selected = true;
         if opts.copy_on_select {
             shown.copy = term.selection();

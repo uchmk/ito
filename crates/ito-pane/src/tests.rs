@@ -557,6 +557,21 @@ mod pane {
         assert_eq!(text.lines().collect::<Vec<_>>(), ["bcd", "hij", "nop"]);
     }
 
+    /// A triple click: the whole line under the cell, not what lies near it.
+    #[test]
+    fn a_line_selection_takes_the_whole_line() {
+        use alacritty_terminal::index::{Column, Line, Point, Side};
+        use alacritty_terminal::selection::{Selection, SelectionType};
+        let mut t = term(20, 4);
+        feed(
+            &mut t,
+            "abc def
+ghi jkl",
+        );
+        t.selection = Some(Selection::new(SelectionType::Lines, Point::new(Line(0), Column(5)), Side::Left));
+        assert_eq!(t.selection_to_string().unwrap_or_default().trim_end(), "abc def");
+    }
+
     fn s(bytes: Vec<u8>) -> String {
         String::from_utf8(bytes).unwrap().replace('\x1b', "<ESC>")
     }

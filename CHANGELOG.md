@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.36.1] - 2026-10-15
+
+### 追加
+
+- ito-pane: トリプルクリックで端末の 1 行（折り返した行ごと）を選ぶ。`Pane::select_line`（既定は `select_word`）と `Terminal::select_line`。
+  `view` が `triple_clicked` で呼び、離したときのコピー（`copy_on_select`）にも乗る。`Pane` を実装する側は何もしなくても通る
+  （行選択を持つなら `select_line` を実装する）。
+
 ## [0.36.0] - 2026-10-15
 
 ### 追加
