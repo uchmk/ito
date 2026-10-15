@@ -35,10 +35,10 @@ jobs:
       - run: cargo test --workspace --all-features
 
   # Linux, Windows and macOS, all from this Linux runner (as verify.sh does):
-  # clippy only type-checks and links nothing, so no macOS runner, whose
-  # minutes cost ten times these. objc2 compiles a little Objective-C for
-  # macOS (its exception helper, which wry turns on), so the macOS clippy goes
-  # through cargo-zigbuild, whose zig is a C compiler for macOS. Since 2026-10-16.
+  # clippy only type-checks and links nothing, so it needs no macOS runner.
+  # objc2 compiles a little Objective-C for macOS (its exception helper, which
+  # wry turns on), so the macOS clippy goes through cargo-zigbuild, whose zig
+  # is a C compiler for macOS. Since 2026-10-16.
   # cargo-zigbuild and its zig come from PyPI, as verify.sh installs them, into
   # a venv (the runner's Python may refuse pip, PEP 668) whose bin goes on
   # PATH, where cargo-zigbuild finds zig as `python3 -m ziglang`.
