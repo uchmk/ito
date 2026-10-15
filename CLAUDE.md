@@ -38,7 +38,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 `ito-i18n` の直しは、その後の tsumugi v0.81.0（a26aefd）から写した（0.2.0）。それより前のペインの履歴は kura にある。
 
 - Cargo の workspace。クレートは `crates/` の下に置く。版はルートの `Cargo.toml` の `[workspace.package]` で 1 つ。
-- **push の前に `scripts/verify.sh` を 1 回回す。**最後の行が `ALL OK: …` なら push してよい（`cargo fmt --check`、build `--locked`、test、clippy を Linux と `x86_64-pc-windows-msvc` の両方で `-D warnings`）。
+- **push の前に `scripts/verify.sh` を 1 回回す。**最後の行が `ALL OK: …` なら push してよい（`cargo fmt --check`、build `--locked`、test、clippy を Linux・`x86_64-pc-windows-msvc`・`aarch64-apple-darwin` の 3 つで `-D warnings`。どの機械からでも 3 つとも回る。Mac の外の macOS は objc2 が C を要るので cargo-zigbuild で（無ければ PyPI から入れる））。
 
 ## 作業ルール
 
