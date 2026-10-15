@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.35.2] - 2026-10-15
+
+### 追加
+
+- ito-select: ダブルクリックで単語、トリプルクリックで行（`note_inline` でつないだ文字列も含む）を選ぶ（`word_at`・`line_at`）。
+  Ctrl（Mac は Cmd）+ クリックで、その下の URL を `drive` が返す（`url_at`。`http://`・`https://`・`ftp://`・`www.`。文末の句読点や閉じ括弧は含めない）。
+  呼ぶ側は返った URL を開く。
+
+### 変更
+
+- `Select::drive` が `Option<String>`（開く URL）を返すようになった。戻り値を使わない呼び方はそのまま通る。
+- `Select::paint` の `fill` は半透明にする（塗りは文字の上に重なる）。文書に明記した。
+
 ## [0.35.1] - 2026-10-15
 
 ### 追加

@@ -91,9 +91,112 @@ impl Select {
         Some(At { run, ch: c.index.0 })
     }
 
+    /// The character under `at` (not the boundary nearest to it): its text's
+    /// number and its index in it. None over an empty text.
+    fn char_at(&self, at: Pos2, view: Rect) -> Option<(usize, usize)> {
+        let p = self.place(at, view)?;
+        let r = &self.last[p.run];
+        let len = r.galley.text().chars().count();
+        if len == 0 {
+            return None;
+        }
+        let x = at.x - r.pos.x;
+        let mut c = p.ch.min(len);
+        if c > 0 && x < r.galley.pos_from_cursor(CCursor::new(c)).min.x {
+            c -= 1;
+        }
+        Some((p.run, c.min(len - 1)))
+    }
+
+    /// The word under `at`, as two places: a run of letters and digits, of
+    /// blanks, or of other marks.
+    pub fn word_at(&self, at: Pos2, view: Rect) -> Option<(At, At)> {
+        let (run, c) = self.char_at(at, view)?;
+        let chars: Vec<char> = self.last[run].galley.text().chars().collect();
+        let class = |ch: char| {
+            if ch.is_alphanumeric() || ch == '_' {
+                0
+            } else if ch.is_whitespace() {
+                1
+            } else {
+                2
+            }
+        };
+        let k = class(chars[c]);
+        let mut lo = c;
+        while lo > 0 && class(chars[lo - 1]) == k {
+            lo -= 1;
+        }
+        let mut hi = c + 1;
+        while hi < chars.len() && class(chars[hi]) == k {
+            hi += 1;
+        }
+        Some((At { run, ch: lo }, At { run, ch: hi }))
+    }
+
+    /// The line under `at`: its text, and the texts that carry on the same line
+    /// ([`Select::note_inline`]).
+    pub fn line_at(&self, at: Pos2, view: Rect) -> Option<(At, At)> {
+        let run = self.place(at, view)?.run;
+        let mut first = run;
+        while first > 0 && self.last[first].inline {
+            first -= 1;
+        }
+        let mut last = run;
+        while self.last.get(last + 1).is_some_and(|r| r.inline) {
+            last += 1;
+        }
+        let ch = self.last[last].galley.text().chars().count();
+        Some((At { run: first, ch: 0 }, At { run: last, ch }))
+    }
+
+    /// The web address under `at` (`http://`, `https://`, `ftp://`, or `www.`
+    /// made into `https://`), without the marks a sentence puts after it.
+    pub fn url_at(&self, at: Pos2, view: Rect) -> Option<String> {
+        let (run, c) = self.char_at(at, view)?;
+        let chars: Vec<char> = self.last[run].galley.text().chars().collect();
+        let stop = |ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '`' | '|');
+        if stop(chars[c]) {
+            return None;
+        }
+        let mut lo = c;
+        while lo > 0 && !stop(chars[lo - 1]) {
+            lo -= 1;
+        }
+        let mut hi = c + 1;
+        while hi < chars.len() && !stop(chars[hi]) {
+            hi += 1;
+        }
+        let mut tok: String = chars[lo..hi].iter().collect();
+        // A bracket or quote that opens before the address is not part of it.
+        while tok.starts_with(['(', '[', '{', '\'', '\u{300c}']) {
+            tok.remove(0);
+        }
+        while tok.ends_with(['.', ',', ';', ':', '!', '?', '\'', ')', ']', '}', '\u{3002}', '\u{3001}', '\u{300d}']) {
+            // Keep a closing bracket that the address itself opened.
+            if tok.ends_with(')') && tok.matches('(').count() >= tok.matches(')').count() {
+                break;
+            }
+            tok.pop();
+        }
+        let lower = tok.to_ascii_lowercase();
+        if ["http://", "https://", "ftp://"].iter().any(|p| lower.starts_with(p) && tok.len() > p.len()) {
+            Some(tok)
+        } else if lower.starts_with("www.") && tok.len() > 4 {
+            Some(format!("https://{tok}"))
+        } else {
+            None
+        }
+    }
+
     /// Follow the mouse on the pane: a press and drag picks text up, a click
-    /// drops the selection. `view` is the part of the pane that shows texts.
-    pub fn drive(&mut self, resp: &Response, view: Rect) {
+    /// drops the selection, a double click takes the word and a triple click
+    /// the line. `view` is the part of the pane that shows texts.
+    ///
+    /// Returns the web address that Ctrl (Cmd on a Mac) and a click landed on:
+    /// the pane opens it. [`Select::url_at`] says whether the pointer is over
+    /// one, for the cursor.
+    pub fn drive(&mut self, resp: &Response, view: Rect) -> Option<String> {
         if resp.drag_started_by(PointerButton::Primary) {
             let from = resp.ctx.input(|i| i.pointer.press_origin()).and_then(|p| self.place(p, view));
             self.sel = from.map(|a| (a, a));
@@ -105,9 +208,21 @@ impl Select {
                 }
             }
         }
+        let at = resp.interact_pointer_pos();
         if resp.clicked() {
             self.sel = None;
+            if resp.ctx.input(|i| i.modifiers.command) {
+                return at.and_then(|p| self.url_at(p, view));
+            }
         }
+        if let Some(p) = at {
+            if resp.triple_clicked() {
+                self.sel = self.line_at(p, view);
+            } else if resp.double_clicked() {
+                self.sel = self.word_at(p, view);
+            }
+        }
+        None
     }
 
     /// Select between two places (for a caller with its own gestures).
@@ -170,7 +285,8 @@ impl Select {
         }
     }
 
-    /// Paint the selection over the texts noted this frame; drops it when the
+    /// Paint the selection over the texts noted this frame, with a translucent
+    /// `fill` (the texts are under it); drops it when the
     /// texts are no longer there (the pane changed under it).
     pub fn paint(&mut self, p: &Painter, fill: Color32) {
         let Some((a, b)) = self.span() else { return };
@@ -249,6 +365,39 @@ mod tests {
         // Backwards is the same selection.
         s.set(Some((At { run: 2, ch: 3 }, At { run: 0, ch: 2 })));
         assert_eq!(s.text().as_deref(), Some("pha\nbeta\ngam"));
+    }
+
+    /// The point over character `ch` of text `run`, after two frames.
+    fn over(s: &Select, run: usize, ch: usize) -> Pos2 {
+        let r = &s.last[run];
+        let x = r.galley.pos_from_cursor(CCursor::new(ch)).min.x;
+        let w = r.galley.pos_from_cursor(CCursor::new(ch + 1)).min.x - x;
+        r.pos + vec2(x + w / 2.0, 6.0)
+    }
+
+    fn two_frames(lines: &[&str]) -> Select {
+        let mut s = Select::default();
+        frame(&mut s, "a", lines);
+        frame(&mut s, "a", lines);
+        s
+    }
+
+    #[test]
+    fn a_double_click_takes_the_word_and_a_triple_click_the_line() {
+        let s = two_frames(&["see foo_bar, now", "next"]);
+        let (a, b) = s.word_at(over(&s, 0, 6), view()).unwrap();
+        assert_eq!((a, b), (At { run: 0, ch: 4 }, At { run: 0, ch: 11 }));
+        let (a, b) = s.line_at(over(&s, 0, 6), view()).unwrap();
+        assert_eq!((a, b), (At { run: 0, ch: 0 }, At { run: 0, ch: 16 }));
+    }
+
+    #[test]
+    fn a_url_loses_the_marks_after_it() {
+        let s = two_frames(&["go (https://a.example/x_(y)). ok", "www.example.org, and", "plain words"]);
+        assert_eq!(s.url_at(over(&s, 0, 10), view()).as_deref(), Some("https://a.example/x_(y)"));
+        assert_eq!(s.url_at(over(&s, 1, 3), view()).as_deref(), Some("https://www.example.org"));
+        assert_eq!(s.url_at(over(&s, 2, 2), view()), None);
+        assert_eq!(s.url_at(over(&s, 0, 1), view()), None);
     }
 
     #[test]
