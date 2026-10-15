@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.5] - 2026-10-16
+
+### 修正
+
+- `scripts/lanes/merge-lanes.py`: レーンの報告の Proposals・Queue・Votes に「無い」とだけ書いた行（`None.`、`(none)`、
+  ``No open `vote` issues.``、`Nothing in the queue needs to change.` など）からも `finding` の issue を立てていた
+  （tsumugi #65・#72・#75・#108・#121）。その行は飛ばす。「None of the toasts show.」のように中身のある行はそのまま立てる。
+  使う側がやること: `rev` を上げて `scripts/lanes.sh sync`。
+
 ## [0.37.4] - 2026-10-16
 
 ### 修正
