@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.34.3] - 2026-10-15
+
+### 修正
+
+- ito-palette: コマンドパレットで日本語が入力できなかった。欄にキーを渡す `request_focus` を毎フレーム呼んでいて、変換中の入力（IME）が
+  そのたびに打ち切られていた。キーを持っていないときだけ頼む。
+
 ## [0.34.2] - 2026-10-15
 
 ### 修正

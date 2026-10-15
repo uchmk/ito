@@ -166,7 +166,11 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                             .desired_width(f32::INFINITY)
                             .lock_focus(true),
                     );
-                    edit.request_focus();
+                    // Only when it has lost it: asking again every frame ends an IME
+                    // composition, so Japanese could not be typed here.
+                    if !edit.has_focus() {
+                        edit.request_focus();
+                    }
                     if view.query != before {
                         view.selected = 0;
                     }
