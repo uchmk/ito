@@ -3,15 +3,23 @@
 # output; the last line is `ALL OK: ...` when everything passed. The same as
 # tsumugi's scripts/verify.sh, less its checklists and test lanes.
 #
-# The Windows clippy is a type check only -- it never runs Windows code, so
-# read path strings by eye. `cargo fmt --check` only looks; run `cargo fmt`
-# yourself when it fails.
+# Besides the host's own clippy, the other CI target (Linux or Windows) gets
+# one. It is a type check only -- it never runs that code, so read Windows
+# path strings by eye. Before 2026-10-15 the second clippy was always
+# Windows, so a run on the Windows PC never compiled Linux and still said
+# ALL OK (yagura's v0.62.0 went red on Linux that way).
+# `cargo fmt --check` only looks; run `cargo fmt` yourself when it fails.
 
 set -o pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-msvc \
-    || rustup target add x86_64-pc-windows-msvc >/dev/null 2>&1
+host=$(rustc -vV | sed -n 's/^host: //p')
+others=
+for t in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+    [ "$t" = "$host" ] && continue
+    others="$others $t"
+    rustup target list --installed 2>/dev/null | grep -qx "$t" || rustup target add "$t" >/dev/null 2>&1
+done
 
 run() {
     local out rc
@@ -30,7 +38,9 @@ run cargo build -q --locked --workspace --all-features
 run cargo test -q --workspace --all-features
 tests=$(echo "$last" | grep 'test result' | awk '{p+=$4; f+=$6} END {print p " passed; " f " failed"}')
 run cargo +stable clippy -q --workspace --all-targets --all-features -- -D warnings
-run cargo +stable clippy -q --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- -D warnings
+for t in $others; do
+    run cargo +stable clippy -q --workspace --all-targets --all-features --target "$t" -- -D warnings
+done
 run cargo +stable clippy -q --workspace --all-targets -- -D warnings
 # The lanes' scripts (scripts/lanes/FILES): they run in the apps, so here they
 # are only parsed, and merge-lanes.py's self-test run.
