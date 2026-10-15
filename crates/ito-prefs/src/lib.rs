@@ -373,6 +373,16 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     let file = nav_ui.put(foot, file);
     focus_ring(&nav_ui, &file);
     out.open_file = file.clicked();
+    // Tab off the file, the last stop, leaves egui with nothing to hand the
+    // keys to until the next frame comes round to the search: hand them
+    // over now, so no frame has nothing (tsumugi #61, #106). The file is
+    // named again after, so Shift+Tab from the search still comes to it.
+    if ui.memory(|m| m.focused().is_none()) && ui.input(|i| i.modifiers.is_none() && i.key_pressed(egui::Key::Tab)) {
+        ui.memory_mut(|m| {
+            m.interested_in_focus(searched.id, nav_ui.layer_id());
+            m.interested_in_focus(file.id, nav_ui.layer_id());
+        });
+    }
     state.held = ui.memory(|m| m.focused().is_some());
     out
 }
@@ -1089,6 +1099,36 @@ mod tests {
         form(&ctx, &mut state, &mut drafts, Vec::new());
         form(&ctx, &mut state, &mut drafts, vec![egui::Event::Text("abc".into())]);
         assert_eq!(form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter)), Some("abc".into()));
+    }
+
+    /// Tab walks the ring with something always holding the keys: off the
+    /// file, the last stop, it comes straight round to the search, and
+    /// Shift+Tab from there goes back to the file (tsumugi #61, #106).
+    #[test]
+    fn tab_off_the_file_comes_straight_to_the_search() {
+        let ctx = egui::Context::default();
+        let (mut state, mut drafts) = (State::default(), Drafts::new());
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        let search = egui::Id::new("prefs-search");
+        let mut walk = Vec::new();
+        for _ in 0..5 {
+            form(&ctx, &mut state, &mut drafts, tap(egui::Key::Tab));
+            walk.push(focused(&ctx));
+        }
+        assert!(walk.iter().all(Option::is_some), "no frame with nothing: {walk:?}");
+        assert_eq!(walk[0], Some(search));
+        assert_eq!(walk[4], Some(search), "round again after the field, the switch and the file: {walk:?}");
+        let file = walk[3];
+        let back = vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        }];
+        form(&ctx, &mut state, &mut drafts, back);
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        assert_eq!(focused(&ctx), file, "Shift+Tab from the search to the file");
     }
 
     /// Enter in the search hands the keys to the first row it lights.
