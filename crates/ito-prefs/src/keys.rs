@@ -432,8 +432,9 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
     // The filter's place in the menu: 0 for all.
     let layer_at = layers.iter().position(|n| *n == st.layer).map_or(0, |k| k + 1);
 
-    // The search and the filters.
-    ui.horizontal(|ui| {
+    // The search and the filters. Wrapped: the words while keys are taken
+    // are long, and a narrow page puts them on a line of their own.
+    ui.horizontal_wrapped(|ui| {
         let search = egui::TextEdit::singleline(&mut st.query)
             .id(egui::Id::new("prefs-keys-search"))
             .hint_text(w.search)
