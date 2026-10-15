@@ -34,6 +34,17 @@ pub fn select_at<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), rig
     select_kind(term, cell, right_half, start.then_some(SelectionType::Simple));
 }
 
+/// Begin a selection at a cell, or carry it on to it, with the whole cell
+/// at both ends whichever way it runs: the keys' selection (copy mode),
+/// where there is no pointer to pick a half. The cell it began on stays in
+/// when it runs back past it, as in vim and Windows Terminal's mark mode.
+pub fn select_cells<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), start: bool) {
+    select_at(term, cell, false, start);
+    if let Some(sel) = term.selection.as_mut() {
+        sel.include_all();
+    }
+}
+
 /// [`select_at`] with the kind of selection a press begins (`Some`): a
 /// block is the rectangle between the two corners, as Alt+drag makes in
 /// every terminal. `None` carries the selection there is on, whatever its

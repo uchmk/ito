@@ -39,6 +39,13 @@ pub trait Pane {
     fn scroll(&self, by: Scroll);
     /// Begin a selection at a cell (`start`), or carry one on to it.
     fn select(&self, cell: (usize, usize), right_half: bool, start: bool);
+    /// Begin a selection at a cell, or carry it on to it, taking the whole
+    /// cell at both ends whichever way it runs: the keys' selection (copy
+    /// mode), with no pointer half to go by. A pane that has none selects
+    /// as a drag to the right does.
+    fn select_cells(&self, cell: (usize, usize), start: bool) {
+        self.select(cell, !start, start)
+    }
     /// Begin a block selection (a rectangle, Alt+drag) at a cell; `select`
     /// carries it on. A pane that has none begins a plain one.
     fn select_block(&self, cell: (usize, usize), right_half: bool) {
@@ -137,6 +144,10 @@ impl Pane for Terminal {
 
     fn select(&self, cell: (usize, usize), right_half: bool, start: bool) {
         Terminal::select(self, cell, right_half, start)
+    }
+
+    fn select_cells(&self, cell: (usize, usize), start: bool) {
+        Terminal::select_cells(self, cell, start)
     }
 
     fn select_block(&self, cell: (usize, usize), right_half: bool) {

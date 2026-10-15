@@ -544,6 +544,27 @@ mod pane {
         assert_eq!(selected(&t), "ello", "the cell the drag started past is not in it");
     }
 
+    /// The keys' selection takes the cell it began on and the one it is
+    /// carried to, whichever way round: `KLMNOPQRST` marked on N and taken
+    /// back two cells is `LMN`, not `LM` (tsumugi #57). A single cell is a
+    /// selection of its own, and a selection run back past where it began
+    /// and forward again keeps both ends.
+    #[test]
+    fn a_keys_selection_keeps_both_ends_either_way() {
+        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
+        let mut t = term(20, 4);
+        feed(&mut t, "KLMNOPQRST");
+        crate::grid::select_cells(&mut t, (3, 0), true);
+        assert_eq!(selected(&t), "N", "the mark alone");
+        crate::grid::select_cells(&mut t, (1, 0), false);
+        assert_eq!(selected(&t), "LMN", "back from the mark");
+        assert_eq!(t.selection_to_string().unwrap_or_default(), "LMN");
+        crate::grid::select_cells(&mut t, (5, 0), false);
+        assert_eq!(selected(&t), "NOP", "and forward past it again");
+        crate::grid::select_cells(&mut t, (3, 0), false);
+        assert_eq!(selected(&t), "N", "back onto it");
+    }
+
     /// Alt+drag: the rectangle between the corners, and copied a row a line.
     #[test]
     fn a_block_selection_is_the_rectangle() {

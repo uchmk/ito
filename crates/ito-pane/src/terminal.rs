@@ -739,6 +739,12 @@ impl Terminal {
         select_at(&mut self.term.lock(), cell, right_half, start);
     }
 
+    /// Begin a selection at a cell, or carry it on to it, with the whole
+    /// cell at both ends whichever way it runs (the keys' selection).
+    pub fn select_cells(&self, cell: (usize, usize), start: bool) {
+        select_cells(&mut self.term.lock(), cell, start);
+    }
+
     /// Begin a block selection at a cell: the rectangle from here to where
     /// the drag goes on ([`Terminal::select`] carries it).
     pub fn select_block(&self, cell: (usize, usize), right_half: bool) {

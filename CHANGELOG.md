@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.1] - 2026-10-16
+
+### 追加
+
+- ito-pane: キーで作る選択（コピー モード）のための `Pane::select_cells(cell, start)` と `Terminal::select_cells`・`grid::select_cells`。
+  どちら向きに伸ばしても、始めたマスと今のマスの両方を含める（vim や Windows Terminal のマーク モードと同じ。alacritty の `include_all`）。
+  前はマウスと同じ `select` を使っていたので、始めたマスより前へ伸ばすと、始めたマスが落ちていた（tsumugi #57）。
+  始めただけでも、そのマスが 1 つ選ばれる。`Pane` を実装する側は何もしなくても通る（既定は右へのドラッグと同じ `select`）。
+
 ## [0.37.0] - 2026-10-15
 
 ### 変更
