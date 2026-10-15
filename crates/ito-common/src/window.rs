@@ -124,7 +124,9 @@ mod sys {
         unsafe {
             let was = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut out as *mut Vec<Screen> as isize));
-            if !was.is_invalid() {
+            // Only null is a failure: `is_invalid` also refuses -1, which is
+            // DPI_AWARENESS_CONTEXT_UNAWARE, the one an unaware thread had.
+            if !was.0.is_null() {
                 SetThreadDpiAwarenessContext(was);
             }
         }
@@ -141,6 +143,9 @@ mod sys {
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         // SAFETY: `info` is a MONITORINFO with its size set.
         if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            // A screen left out would refuse a place on it: an empty one
+            // makes the whole answer broken instead.
+            out.push(Screen { x: 0.0, y: 0.0, w: 0.0, h: 0.0, scale: 0.0, primary: false });
             return BOOL(1);
         }
         let (mut dx, mut dy) = (96u32, 96u32);
@@ -240,6 +245,7 @@ mod tests {
         assert!(win(100.0, -50.0, 900.0, 600.0).seen_on(&one, 100.0), "a little above the top");
         assert!(!win(-32000.0, -32000.0, 900.0, 600.0).seen_on(&one, 100.0));
         assert!(!win(100.0, 80.0, 900.0, 600.0).seen_on(&[], 100.0));
+        assert!(win(-8.0, -8.0, 2576.0, 1416.0).seen_on(&one, 100.0), "a maximized window's outer rect");
         // A second screen to the left (at 150%) and one above the primary:
         // the place is in the primary's points.
         let three = [
@@ -250,6 +256,11 @@ mod tests {
         assert!(win(-1800.0, 300.0, 900.0, 600.0).seen_on(&three, 100.0), "on the left screen");
         assert!(!win(-1800.0, 50.0, 900.0, 600.0).seen_on(&three, 100.0), "above the left screen, left of the primary");
         assert!(win(300.0, -1000.0, 900.0, 600.0).seen_on(&three, 100.0), "on the screen above");
+        // The primary need not come first.
+        let [p, l, a] = three;
+        let shuffled = [l, a, p];
+        assert!(win(-1800.0, 300.0, 900.0, 600.0).seen_on(&shuffled, 100.0));
+        assert!(!win(-1800.0, 50.0, 900.0, 600.0).seen_on(&shuffled, 100.0));
         // A primary at 150%: 2000 points is 3000 pixels, off a 2560-pixel screen.
         let big = [screen(0.0, 0.0, 2560.0, 1440.0, 1.5, true)];
         assert!(!win(2000.0, 100.0, 900.0, 600.0).seen_on(&big, 100.0));

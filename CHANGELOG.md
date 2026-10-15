@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.37.8] - 2026-10-16
+
+### 修正
+
+- ito-common: `window::screens()` が、DPI を意識しないスレッド（winit より前のアプリ）で呼ばれたとき、スレッドの DPI の扱いを
+  元に戻していなかった（戻り値の `DPI_AWARENESS_CONTEXT_UNAWARE`（-1）を失敗と取り違えていた）。winit がすぐプロセスを
+  Per-Monitor V2 にするので、目に見える違いは無い。
+- ito-common: `window::screens()` で、`GetMonitorInfoW` が答えない画面を黙って抜かしていたので、その画面の上で閉じた窓を
+  既定の位置に開くことがあった。答えない画面があれば、壊れた答えとして空を返す（`reachable_now` は今までの見当で見る）。
+  使う側がやることは無い（`rev` を上げるだけ）。
+
 ## [0.37.7] - 2026-10-16
 
 ### 追加
