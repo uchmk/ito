@@ -34,17 +34,31 @@ jobs:
       - run: cargo build --locked --workspace --all-features
       - run: cargo test --workspace --all-features
 
+  # Linux, Windows and macOS, all from this Linux runner (as verify.sh does):
+  # clippy only type-checks and links nothing, so no macOS runner, whose
+  # minutes cost ten times these. objc2 compiles a little Objective-C for
+  # macOS (its exception helper, which wry turns on), so the macOS clippy goes
+  # through cargo-zigbuild, whose zig is a C compiler for macOS. Since 2026-10-16.
+  # cargo-zigbuild and its zig come from PyPI, as verify.sh installs them, into
+  # a venv (the runner's Python may refuse pip, PEP 668) whose bin goes on
+  # PATH, where cargo-zigbuild finds zig as `python3 -m ziglang`.
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: rustup target add x86_64-pc-windows-msvc
+      - run: rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-zigbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zigbuild"
+          "$RUNNER_TEMP/zigbuild/bin/pip" install -q cargo-zigbuild
+          echo "$RUNNER_TEMP/zigbuild/bin" >> "$GITHUB_PATH"
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- -D warnings
+      - run: cargo-zigbuild clippy --workspace --all-targets --all-features --target aarch64-apple-darwin -- -D warnings
 
   # The lanes' scripts the apps copy (scripts/lanes/FILES): parsed, and
   # merge-lanes.py's self-test run. Nothing of them runs against a repository.

@@ -50,6 +50,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
   `use_small_heuristics = "Max"`）で、手で整形していた形（`Self { a, b, c }` を 1 行）に近い。CI と verify.sh が `cargo fmt --check` で見る。
   切り出しの後に 1 回だけ全体を整形したコミットは `.git-blame-ignore-revs` に載せてある（`git config blame.ignoreRevsFile .git-blame-ignore-revs`）。
 - clippy は `--all-targets -- -D warnings` で警告ゼロを保つ。検証は CI と同じ stable で回す。
+  CI の `clippy` も Linux の機械から Linux・`x86_64-pc-windows-msvc`・`aarch64-apple-darwin` の 3 つを見る（macOS は 2026-10-16 から、verify.sh と同じく cargo-zigbuild で）。
 
 ## 版と変更ログ
 
