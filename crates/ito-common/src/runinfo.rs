@@ -89,10 +89,10 @@ impl RunInfo {
         Some(format!("{:.0} x {:.0} px ({:.0} x {:.0} pt @ {})", w * self.ppp, h * self.ppp, w, h, (self.ppp * 1000.0).round() / 1000.0))
     }
 
-    /// `[backend, device, adapter]` for the Rendering row; `None` when no
+    /// `[adapter, backend, device]` for the Rendering row; `None` when no
     /// window has chosen an adapter.
     pub fn rendering(&self) -> Option<[&str; 3]> {
-        (!self.adapter.is_empty()).then_some([self.backend.as_str(), self.device.as_str(), self.adapter.as_str()])
+        (!self.adapter.is_empty()).then_some([self.adapter.as_str(), self.backend.as_str(), self.device.as_str()])
     }
 }
 
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(RunInfo::default().started_ago(at), None);
         assert_eq!(RunInfo::default().rendering(), None);
         let r = RunInfo { adapter: "GPU".into(), backend: "Gl".into(), device: "Cpu".into(), ..Default::default() };
-        assert_eq!(r.rendering(), Some(["Gl", "Cpu", "GPU"]));
+        assert_eq!(r.rendering(), Some(["GPU", "Gl", "Cpu"]));
     }
 
     #[test]

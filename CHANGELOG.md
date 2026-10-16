@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.51.1] - 2026-10-16
+
+### 変更
+
+- `runinfo::RunInfo::rendering()` が返す順を `[adapter, backend, device]` にした。`ito_bugreport::Context.rendering` と同じ順なので、そのまま渡せる (#4)。
+  - 使う側がやること: 手で組み直していれば `info.rendering()` を直接 `Context.rendering` に渡す。
+
 ## [0.51.0] - 2026-10-16
 
 ### 追加
