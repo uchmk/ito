@@ -1,0 +1,82 @@
+name: Checklists
+
+# ito has no checklist of its own; it has the generator of kura's.
+# ito-testcheck turns kura's TESTING.md and keymap into the checklists kura's
+# lanes tick (TESTING-CHECKS.md, TESTING-LINUX.md, TESTING-KEYS.md), and kura's
+# own Checklists fails when a file no longer matches what generating it gives.
+# That check runs ito-testcheck at the rev kura pins, so a change here that
+# alters the output used to come to light only when kura raised its rev.
+#
+# This runs kura's three checks from kura's main, with this checkout's
+# ito-testcheck patched in (`[patch]`, as CLAUDE.md shows for working on ito
+# and an app together). Red means this ito-testcheck writes kura's
+# checklists differently from the one kura pins: a bug here, or an intended
+# change, which kura takes in when it raises its rev and regenerates (the run
+# stays red until then). tsumugi, minato and michi generate theirs with their
+# own make-testcheck, not with this crate.
+#
+# No `--locked`: the patch rewrites kura's Cargo.lock in the runner's checkout.
+# ito-testcheck depends on no other ito crate, so the rest of ito comes from
+# the rev kura pins.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/ito-testcheck/**'
+      - '.github/workflows/checklists.yml'
+  pull_request:
+    paths:
+      - 'crates/ito-testcheck/**'
+      - '.github/workflows/checklists.yml'
+  # Or by hand, say after kura has regenerated its checklists.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  kura:
+    runs-on: ubuntu-latest
+    steps:
+      # Side by side: kura inside ito's checkout would find ito's workspace
+      # above it and refuse to build.
+      - uses: actions/checkout@v7
+        with:
+          path: ito
+      - uses: actions/checkout@v7
+        with:
+          repository: uchmk/kura
+          path: kura
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kura
+          key: checklists-kura
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # In a config file rather than `--config`, so the `cargo metadata` that
+      # make-testcheck runs itself (to find ito-pane's tests) sees it too.
+      - name: Patch in this ito-testcheck
+        run: |
+          mkdir -p kura/.cargo
+          cat >> kura/.cargo/config.toml <<EOF
+          [patch."https://github.com/uchmk/ito"]
+          ito-testcheck = { path = "$GITHUB_WORKSPACE/ito/crates/ito-testcheck" }
+          EOF
+          cat kura/.cargo/config.toml
+      - name: kura's key checklist
+        working-directory: kura
+        run: cargo run --example make-keycheck -- --check
+      - name: kura's manual checklist
+        working-directory: kura
+        run: cargo run --example make-testcheck -- --check
+      - name: kura's Linux checklist
+        working-directory: kura
+        run: cargo run --example make-testcheck -- --lane linux --check
+      # The patch took: the tree names this checkout, not the git rev.
+      - name: The ito-testcheck used is this one
+        working-directory: kura
+        run: cargo tree -i ito-testcheck --target all | grep -F "$GITHUB_WORKSPACE/ito/crates/ito-testcheck"

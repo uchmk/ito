@@ -1,0 +1,75 @@
+name: Build
+
+# Every crate, its tests and its examples, built and linked for the six
+# targets the apps ship: Windows x64 and ARM64, macOS ARM64 and x64, Linux x64
+# and ARM64. ci.yml tests on Windows x64 and Linux x64 and type-checks macOS
+# with clippy, which links nothing; linking is where a platform's own
+# frameworks come in (objc2 and wry against AppKit and WebKit on macOS).
+# Before this (2026-10-16) an ito commit was first linked for macOS or ARM64
+# by an app, after the app had pinned it.
+#
+# Nothing is uploaded: ito is libraries, and the apps' Build workflows make
+# the binaries. Nor is anything run: the tests stay where ci.yml runs them, as
+# the apps keep their macOS tests off GitHub's runners (kura v0.75.25).
+#
+# The matrix is kura's build.yml: both Windows targets on the x64 runner (the
+# ARM64 one cross-built, which is cheap), the macOS x64 target cross-built on
+# the ARM runner (Apple's SDK carries both), and Linux on a runner of each
+# architecture. Free because the repository is public: standard runners bill a
+# public repository nothing (GitHub's billing docs, checked 2026-10-16).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE-*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Which target broke, and whether the rest still build, is the point.
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-14
+            target: x86_64-apple-darwin
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # A no-op where the target is the runner's own.
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # One entry per target, so the jobs on one runner image do not keep
+          # evicting each other's.
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build
+        run: cargo build --locked --workspace --all-targets --all-features --target ${{ matrix.target }}

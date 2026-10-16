@@ -53,6 +53,12 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
   CI の `clippy` も Linux の機械から Linux・`x86_64-pc-windows-msvc`・`aarch64-apple-darwin` の 3 つを見る（macOS は 2026-10-16 から、verify.sh と同じく cargo-zigbuild で）。
   macOS で C が要るのは objc2-exception-helper（wry が objc2 の `exception` を入れ、`setURLSchemeHandler` の呼び出しを包む）だけ。
   Rust の代わりは無い（stable の Rust は Objective-C の例外を捕まえられない）ので、Mac の外では zig を C のコンパイラーにする。
+- `Build`（`.github/workflows/build.yml`、2026-10-16 から）は main への push で、全部のクレートとそのテスト・例を 6 つのターゲット
+  （Windows x64・ARM64、macOS ARM64・x64、Linux x64・ARM64）でビルドしてリンクする。clippy はリンクしないので、macOS と ARM64 のリンクはここでしか見ない。
+  何も上げず、テストも回さない（テストは ci.yml、macOS のテストは回さない。kura v0.75.25 の持ち主の判断）。
+- `Checklists`（`.github/workflows/checklists.yml`、2026-10-16 から）は ito-testcheck を変えたときに、kura の main の 3 つの確認
+  （`make-keycheck`・`make-testcheck`・`--lane linux`、どれも `--check`）を、この ito-testcheck を `[patch]` で差し込んで回す。
+  赤なら、kura のチェックリストの書き方が変わる。間違いなら直す。意図した変更なら、kura が `rev` を上げて作り直すまで赤のまま（手で回し直す）。
 
 ## 版と変更ログ
 
