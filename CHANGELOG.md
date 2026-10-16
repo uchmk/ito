@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.44.0] - 2026-10-16
+
+### 追加
+
+- ito-prefs: 設定の画面の行を、設定ファイルのキー（`ui.font_size`・`clock.show`）でも検索で見つける `keyed_row(ui, l, key, label, note, control)`。
+  キーは画面に出さない。日本語の画面でも `font_size` で行が光り、Enter でその部品に入るので、`--keys` の台本が言語によらず行に届く（kura #388）。
+  `row` は空のキーの `keyed_row`。共通の行（`language_row`・`scale_row`・`clock_card`）は common.toml のキー（`language`・`scale`・
+  `clock.show` など）を持ち、`Nav::index` に足すための `GENERAL_KEYS` を置いた。
+- docs/common-spec.md: 「設定の画面」の検索に、行をキーでも見つけることを書いた。
+
+使う側がやること: 設定ファイルに値のある自分の行を `keyed_row` にし、そのキーを index に足す。General のページの index に
+`GENERAL_KEYS` を足す。
+
+### 修正
+
+- scripts/lanes/merge-lanes.py: 報告の Proposals が `None new.`・`None this run.`・`None filed this run.` だけのとき、仕分けの issue を
+  立てていた（kura の #366・#368・#370・#376・#386・#395）。`NOTHING` がこの形（`new`・`filed`、後ろの `this run`）も「何も無い」と読む。
+  `None this run passed 2.4.` のように後ろに中身が続くものは、これまでどおり拾う（kura #403）。
+
 ## [0.43.0] - 2026-10-16
 
 ### 追加

@@ -302,6 +302,9 @@ scale: 100%           # 書くなら倍率を % で
   - Ctrl+F（macOS は Cmd+F）で検索へ。Tab で部品を移る（帯とページの一覧には止まらない）。Space でスイッチを切り替える。
   - 画面の中のキーは後ろ（ペインや一覧）に届けない。
 - 検索は `Nav::index`（ページ番号と、そのページの行の言葉）で絞る。行を足したら index にも足す（tsumugi のテストが食い違いを落とす）。
+  - 設定ファイルに値のある行は `keyed_row` で描き、そのキー（アプリの設定なら `ui.font_size`、common.toml なら `clock.show`。表の名前とキーを `.` でつなぐ）でも見つかるようにする（ito 0.44.0 から）。キーは画面に出さず、index にも足す。
+    どの言語の画面でも同じ文字で行に届くので、`--keys` の台本が検索から行へ入れる（kura #388）。共通の行のキーは `GENERAL_KEYS`。
+    通知のページ（`notify_page`）の行はまだキーを持たない（言葉でだけ見つかる）。
 - 共通の行は共通のクレートが描き、`CommonChange` を返す。アプリは `ito_common::edit_common` で UI ではないスレッドから書く。
   - General: **Language**（`language_row`）・**Scale**（`scale_row`）と **CLOCK** のカード（`clock_card`）。
   - Theme: 上にモード（Follow OS / Light / Dark）、左にテーマの一覧、右に見本（`theme_page` の閉包でアプリが描く）。

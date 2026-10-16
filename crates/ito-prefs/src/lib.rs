@@ -427,8 +427,16 @@ pub fn sep(ui: &mut egui::Ui, l: Look) {
 /// A row: its label and note on the left, its control on the right. Lit
 /// when the search's words are in it.
 pub fn row<R>(ui: &mut egui::Ui, l: Look, label: &str, note: &str, control: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    keyed_row(ui, l, "", label, note, control)
+}
+
+/// A [`row`] the search also finds by its key in the settings file
+/// (`ui.font_size`, `clock.show`), which it does not show: the same words
+/// reach it whatever the language, as a `--keys` script needs (kura #388).
+/// Put the key in [`Nav::index`] too.
+pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &str, control: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let c = l.c;
-    let hit = !l.q.is_empty() && (label.to_lowercase().contains(l.q) || note.to_lowercase().contains(l.q));
+    let hit = !l.q.is_empty() && [key, label, note].iter().any(|w| w.to_lowercase().contains(l.q));
     let behind = ui.painter().add(egui::Shape::Noop);
     let mut r = None;
     let shown = ui.horizontal(|ui| {
@@ -680,12 +688,16 @@ fn common(table: Option<&'static str>, key: &'static str, value: String) -> Comm
     CommonChange { table, key, value }
 }
 
+/// The keys of the General page's shared rows ([`language_row`],
+/// [`scale_row`], [`clock_card`]) in common.toml, for [`Nav::index`].
+pub const GENERAL_KEYS: [&str; 7] = ["language", "scale", "clock.show", "clock.hour24", "clock.date", "clock.date_format", "clock.weekday"];
+
 /// The language row, common.toml's `language` (`now`; `auto` when unset).
 /// The note is the app's: what its own words do.
 pub fn language_row(ui: &mut egui::Ui, l: Look, w: &Words, now: &str, note: &str) -> Option<CommonChange> {
     let options: Vec<(&str, &str)> =
         ito_i18n::LANGUAGES.iter().map(|(code, name)| (*code, if *code == "auto" { w.auto } else { *name })).collect();
-    let code = row(ui, l, w.language, note, |ui| select(ui, "language", now, &options))?;
+    let code = keyed_row(ui, l, "language", w.language, note, |ui| select(ui, "language", now, &options))?;
     Some(common(None, "language", quote(code)))
 }
 
@@ -704,7 +716,7 @@ pub fn scale_row(ui: &mut egui::Ui, l: Look, w: &Words, now: f32, note: &str) ->
     }
     let names: Vec<String> = percents.iter().map(|p| format!("{p}%")).collect();
     let options: Vec<(i32, &str)> = percents.iter().zip(&names).map(|(p, n)| (*p, n.as_str())).collect();
-    let picked = row(ui, l, w.scale, note, |ui| select(ui, "scale", now, &options))?;
+    let picked = keyed_row(ui, l, "scale", w.scale, note, |ui| select(ui, "scale", now, &options))?;
     Some(scale_change(picked as f32 / 100.0))
 }
 
@@ -713,24 +725,27 @@ pub fn clock_card(ui: &mut egui::Ui, l: Look, w: &Words, k: &Clock) -> Vec<Commo
     let mut out = Vec::new();
     section(ui, l, w.clock, |ui| {
         let set = |key: &'static str, v: bool| common(Some("clock"), key, v.to_string());
-        if row(ui, l, w.show_time, w.show_time_note, |ui| switch(ui, l, k.show)) {
+        if keyed_row(ui, l, "clock.show", w.show_time, w.show_time_note, |ui| switch(ui, l, k.show)) {
             out.push(set("show", !k.show));
         }
         sep(ui, l);
-        if let Some(h) = row(ui, l, w.time_format, "", |ui| select(ui, "clock-hours", k.hour24, &[(true, w.hour24), (false, w.hour12)])) {
+        let hours = [(true, w.hour24), (false, w.hour12)];
+        if let Some(h) = keyed_row(ui, l, "clock.hour24", w.time_format, "", |ui| select(ui, "clock-hours", k.hour24, &hours)) {
             out.push(set("hour24", h));
         }
         sep(ui, l);
-        if row(ui, l, w.show_date, w.show_date_note, |ui| switch(ui, l, k.date)) {
+        if keyed_row(ui, l, "clock.date", w.show_date, w.show_date_note, |ui| switch(ui, l, k.date)) {
             out.push(set("date", !k.date));
         }
         sep(ui, l);
         let formats: Vec<(&str, &str)> = DATE_FORMATS.iter().map(|f| (*f, *f)).collect();
-        if let Some(f) = row(ui, l, w.date_format, "", |ui| select(ui, "clock-date", k.date_format.as_str(), &formats)) {
+        if let Some(f) =
+            keyed_row(ui, l, "clock.date_format", w.date_format, "", |ui| select(ui, "clock-date", k.date_format.as_str(), &formats))
+        {
             out.push(common(Some("clock"), "date_format", quote(f)));
         }
         sep(ui, l);
-        if row(ui, l, w.weekday, "", |ui| switch(ui, l, k.weekday)) {
+        if keyed_row(ui, l, "clock.weekday", w.weekday, "", |ui| switch(ui, l, k.weekday)) {
             out.push(set("weekday", !k.weekday));
         }
     });
@@ -992,7 +1007,7 @@ mod tests {
 
     /// One frame of a page of a field and a switch: what the field wrote.
     fn form(ctx: &egui::Context, state: &mut State, drafts: &mut Drafts, events: Vec<egui::Event>) -> Option<String> {
-        let nav = Nav { pages: &[("Form", "")], index: &[(0, "Width"), (0, "Wrap")], words: &EN, file: "config.toml" };
+        let nav = Nav { pages: &[("Form", "")], index: &[(0, "Width"), (0, "list.width"), (0, "Wrap")], words: &EN, file: "config.toml" };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
             events,
@@ -1003,7 +1018,7 @@ mod tests {
             egui::CentralPanel::default().show(ui, |ui| {
                 show(ui, ito_theme::colors(), state, &nav, Keys::default(), |ui, _, l| {
                     section(ui, l, "LIST", |ui| {
-                        wrote = row(ui, l, "Width", "", |ui| field(ui, drafts, "width", "14", "", 80.0));
+                        wrote = keyed_row(ui, l, "list.width", "Width", "", |ui| field(ui, drafts, "width", "14", "", 80.0));
                         sep(ui, l);
                         row(ui, l, "Wrap", "", |ui| switch(ui, l, false));
                     });
@@ -1155,6 +1170,15 @@ mod tests {
         form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter));
         form(&ctx, &mut state, &mut drafts, Vec::new());
         assert_eq!(focused(&ctx), Some(egui::Id::new(("prefs-field", "width"))));
+        // And by its key in the file, which is not on the screen.
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Escape));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("prefs-search")));
+        state.query = "LIST.W".into();
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        form(&ctx, &mut state, &mut drafts, tap(egui::Key::Enter));
+        form(&ctx, &mut state, &mut drafts, Vec::new());
+        assert_eq!(focused(&ctx), Some(egui::Id::new(("prefs-field", "width"))), "found by its key");
     }
 
     /// A click on a theme writes it into common.toml; the keys walk the
