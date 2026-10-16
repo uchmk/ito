@@ -13,7 +13,7 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
 
 | クレート | 持つもの |
 | --- | --- |
-| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）、OS の明暗（`OsLight`）、窓の場所（`window`。`window.toml` の読み書き・戻し方・`Tracker`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono）、機能 `egui` で egui から窓の様子を読む（`window::Seen::of`） |
+| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）、OS の明暗（`OsLight`）、窓の場所（`window`。`window.toml` の読み書き（古い形も読む `load`）・戻し方・`Tracker`・アプリの手順を束ねる `Saved`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono）、機能 `egui` で egui から窓の様子を読む（`window::Seen::of`・`Tracker::follow`・`Saved::viewport`） |
 | `ito-theme` | テーマ（`Colors`・`Theme`・組み込みの 13 個・`from_table`・`pick`・`mix`・`contrast`）。egui の `ecolor` だけに依る。機能 `pane` でターミナルの `Palette` |
 | `ito-prefs` | 設定の画面の枠と部品、共通のページ（`language_row`・`scale_row`・`clock_card`・`theme_page`）。文字は `Words`（`EN`・`JA`、`Words::of(lang)`） |
 | `ito-i18n` | 言語の表（`tr`）。`base_dir` などは `ito-common` の再エクスポート |
@@ -277,15 +277,18 @@ scale: 100%           # 書くなら倍率を % で
 
 - 最初の窓の大きさは **1280×800**（論理ピクセル）。
 - 窓の位置と大きさは、動いたときにアプリの状態のフォルダ（`state_dir`）の `window.toml` に書き（`ito_common::window`）、次に開くときに戻す。
-  戻す位置が今の画面の外なら既定に戻す。外かどうかは今ある画面で見る（`Window::reachable_now`。タイトルバーが 100 ポイント以上
-  どれかの画面に出ること。画面を聞けない OS では主の画面の大きさの見当で見る）。
+  戻す位置が今の画面の外なら既定に戻す。外かどうかは今ある画面で見る（`Window::reachable_now`。タイトルバーが 100 ポイント（`GRAB`）以上
+  どれかの画面に出ること。画面を聞けない OS では主の画面の大きさの見当（`PRIMARY_GUESS`＝1920×1080）で見る）。
 - 場所は、取ったときの倍率（`scale`＝egui の `pixels_per_point`）とアプリの拡大（`zoom`）と一緒に書く。戻すときは拡大を抜いた値で窓を作り
   （`Window::opening`）、Windows では窓を表示する前に閉じた画素へ動かす（`Window::put`。倍率の違う画面で閉じても、その画面に開く）。
   最大化して閉じた窓は、閉じた画面で最大化して開く。
+- 読むのは `window::load`（アプリごとに作らない）。`zoom` の無い古い `window.toml`（ito 0.38 までの形と tsumugi v0.113.1 までの形）は、
+  common.toml の `scale` で取ったものとして読み、今の形で書き直す（拡大していても前に見えていた大きさで開く）。
 - いつ書くかは `window::Tracker` が決める（アプリごとに作らない）。窓が動いて 0.8 秒（`SETTLE`）止まったら UI ではないスレッドで書き、
   閉じるときはすぐに書く（`Tracker::close`）。最大化している間は前の場所を保ち、最小化と全画面の間は追わない。
-  アプリは開いた場所（`read` の値）で `Tracker::new(state_dir, loaded)` を作り、毎フレーム `see(Seen::of(ctx))` を呼んで、
-  待ちの時間が返れば `request_repaint_after` する（ito-common の機能 `egui`）。`--keys` の台本で動かしている間は追わない。
+- アプリがやることは `window::Saved` の 5 つだけ: 起動で `Saved::load(state_dir)`（`--keys` の台本・引き剥がした窓・quake のように場所を持たない窓は
+  `None`）、`saved.viewport(viewport)` で窓を作り、eframe の creator の先頭で `saved.put(cc)`、`saved.tracker()` を持って毎フレーム
+  `tracker.follow(ctx)`（ito-common の機能 `egui`）、`on_exit` で `tracker.close(Seen::of(ctx))`。
 
 ## 設定の画面
 
@@ -386,7 +389,7 @@ scale: 100%           # 書くなら倍率を % で
 | 通知にアイコン（`show_with_icon`） | ○（0.110） | ○（0.59.1） | ○（独自。minato は 0.42.1） |
 | 字体の並び（`ito_common::fonts`） | ○ | ○ | ○ |
 | 窓 1280×800 | ○（config で変えられる） | ○ | ○ |
-| 窓の位置と大きさを覚える | × | ○（kura 0.107） | × |
+| 窓の位置と大きさを覚える（`window::Saved`。古い形も読む） | ○ | ○ | ○ |
 | `--version`・`--help` | ○ | ○ | ○ |
 | Windows の `<app>.com`（`ito_console`） | ○ | ○ | ○（minato・michi も） |
 | `--keys` | ○ | ○ | ○（0.95） |

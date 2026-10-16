@@ -9,6 +9,13 @@
 //! window looks like ([`Seen`]: logical points, with the points to pixels
 //! and its own zoom they were taken at). With the `egui` feature,
 //! [`Seen::of`] reads those off egui's context.
+//!
+//! [`Saved`] is all of that for an app: [`Saved::load`] reads the place
+//! ([`load`]: a file from before is read too, and one no screen shows is
+//! not), [`Saved::viewport`] makes the window there (feature `egui`),
+//! [`Saved::put`] puts it on its pixels in eframe's creator, and
+//! [`Saved::tracker`] follows it ([`Tracker::follow`] each frame,
+//! [`Tracker::close`] when the app closes).
 
 use raw_window_handle::HasWindowHandle;
 use serde::{Deserialize, Serialize};
@@ -51,6 +58,13 @@ const MAX_SIDE: f32 = 20000.0;
 /// at -32000, which must never be put back.
 const FAR: f32 = 16000.0;
 
+/// The primary screen where the OS is not asked for its screens (macOS and
+/// Linux): [`Window::reachable_now`]'s guess in [`load`].
+pub const PRIMARY_GUESS: (f32, f32) = (1920.0, 1080.0);
+/// How much of the title bar must be on a screen, in points, for a place to
+/// be put back ([`load`]).
+pub const GRAB: f32 = 100.0;
+
 impl Window {
     /// The numbers could be a window someone sees: finite, not tiny, not huge,
     /// not where a minimized window is parked.
@@ -78,12 +92,13 @@ impl Window {
     /// points of the top edge across, the top edge no more than `grab` above
     /// the screen's top and at least `grab` above its bottom. The points are
     /// turned into pixels at the `scale` they were taken at; a place from
-    /// before that was kept, at the primary screen's (where it was put back).
+    /// before that was kept, at the primary screen's (where it is put back)
+    /// times the zoom.
     pub fn seen_on(&self, screens: &[Screen], grab: f32) -> bool {
         let Some(first) = screens.iter().find(|s| s.primary).or(screens.first()) else {
             return false;
         };
-        let k = if self.scale > 0.0 { self.scale } else { first.scale };
+        let k = if self.scale > 0.0 { self.scale } else { first.scale * self.zoom };
         let (left, right, top, grab) = (self.x * k, (self.x + self.w) * k, self.y * k, grab * k);
         self.sane()
             && screens.iter().any(|s| {
@@ -113,8 +128,8 @@ impl Window {
     /// egui reads it at the scale of the screen the window is made on and
     /// then again at the one it reached (kura #401), so [`Window::put`] moves
     /// the window to its pixels and maximizes it there: it is not maximized
-    /// here. A place from before `scale` was kept is handed back as it was
-    /// read.
+    /// here. A place from before `scale` was kept is not moved by `put`: the
+    /// window is made at its corner, where it was put back then.
     pub fn opening(&self) -> Opening {
         self.opened(sys::PUTS)
     }
@@ -123,9 +138,6 @@ impl Window {
     /// move and maximize the window.
     fn opened(&self, puts: bool) -> Opening {
         let maximized = self.maximized && !puts;
-        if self.scale <= 0.0 {
-            return Opening { pos: [self.x, self.y], size: [self.w, self.h], maximized };
-        }
         let z = self.zoom;
         Opening { pos: [self.x * z, self.y * z], size: [self.w * z, self.h * z], maximized }
     }
@@ -289,7 +301,9 @@ pub fn path(dir: &Path) -> PathBuf {
     dir.join("window.toml")
 }
 
-/// The saved place, if there is one and it is [`Window::sane`].
+/// The saved place, if there is one and it is [`Window::sane`]. A file from
+/// before `scale` and `zoom` were kept reads with neither; [`load`] reads it
+/// at the zoom the app has now.
 pub fn read(dir: &Path) -> Option<Window> {
     let text = std::fs::read_to_string(path(dir)).ok()?;
     toml::from_str::<Window>(&text).ok().filter(Window::sane)
@@ -302,6 +316,107 @@ pub fn write(dir: &Path, w: &Window) -> Result<(), String> {
     }
     let text = toml::to_string(w).map_err(|e| e.to_string())?;
     crate::write_atomic(&path(dir), text)
+}
+
+/// The place to open the window at: the one saved in `dir`, if a screen
+/// there is now shows it ([`Window::reachable_now`] with [`PRIMARY_GUESS`]
+/// and [`GRAB`]). A file from before the zoom was kept is read at
+/// common.toml's `scale`, the zoom the app sets once it has read the file,
+/// and is written again in this form with that zoom.
+pub fn load(dir: &Path) -> Option<Window> {
+    load_with(dir, zoom_now).filter(|w| w.reachable_now(PRIMARY_GUESS, GRAB))
+}
+
+/// common.toml's `scale`, else 1.
+fn zoom_now() -> f32 {
+    crate::base_dir().and_then(|base| crate::Common::read(&base).ok()).map_or(1.0, |(common, _)| common.scale_or_one())
+}
+
+/// [`load`] where the screens are not asked, at `zoom` for a file from
+/// before. Written again because the tracker writes only a place that
+/// changed: a maximized window's would stay as it was, and a later zoom
+/// would size it anew.
+fn load_with(dir: &Path, zoom: impl FnOnce() -> f32) -> Option<Window> {
+    let text = std::fs::read_to_string(path(dir)).ok()?;
+    let table: toml::Table = text.parse().ok()?;
+    if table.contains_key("zoom") {
+        return toml::from_str::<Window>(&text).ok().filter(Window::sane);
+    }
+    let w = before(&table, zoom())?;
+    let _ = write(dir, &w);
+    Some(w)
+}
+
+/// A place written before `zoom` was kept: this file's older form (`w`,
+/// `h`; kura and yagura) or tsumugi's own (`width`, `height` and maybe
+/// `scale`; up to v0.113.1), the numbers whole or not. Those apps wrote
+/// egui's points, which have the zoom in them, and made the window at those
+/// numbers without it, so a zoomed window opened smaller each time; `zoom`
+/// is taken for the one they were taken at.
+fn before(t: &toml::Table, zoom: f32) -> Option<Window> {
+    let num = |keys: &[&str]| {
+        keys.iter().find_map(|k| t.get(*k)).and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64))).map(|f| f as f32)
+    };
+    let w = Window {
+        x: num(&["x"])?,
+        y: num(&["y"])?,
+        w: num(&["w", "width"])?,
+        h: num(&["h", "height"])?,
+        maximized: t.get("maximized").and_then(toml::Value::as_bool).unwrap_or(false),
+        // Without one, at the primary screen's, as such a place is read.
+        scale: num(&["scale"]).filter(|s| *s > 0.0).unwrap_or(0.0),
+        zoom,
+    };
+    w.sane().then_some(w)
+}
+
+/// A window's place for an app: the folder `window.toml` is in and the
+/// place read there when the app started. Without a folder (a window that
+/// keeps no place: one a script drives, one torn off another, a quake
+/// window) it reads, puts and follows nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Saved {
+    dir: Option<PathBuf>,
+    place: Option<Window>,
+}
+
+impl Saved {
+    /// The place saved in `dir` ([`load`]).
+    pub fn load(dir: Option<PathBuf>) -> Saved {
+        let place = dir.as_deref().and_then(load);
+        Saved { dir, place }
+    }
+
+    /// The place the window is made at, if there is one.
+    pub fn place(&self) -> Option<Window> {
+        self.place
+    }
+
+    /// `viewport` made at the place ([`Window::opening`]), or as it is
+    /// without one.
+    #[cfg(feature = "egui")]
+    pub fn viewport(&self, viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
+        match self.place {
+            Some(w) => {
+                let o = w.opening();
+                viewport.with_inner_size(o.size).with_position(o.pos).with_maximized(o.maximized)
+            }
+            None => viewport,
+        }
+    }
+
+    /// [`Window::put`], in eframe's creator while the window is hidden.
+    pub fn put(&self, window: &impl HasWindowHandle) {
+        if let Some(w) = self.place {
+            w.put(window);
+        }
+    }
+
+    /// The tracker that writes the place from now on, starting from the one
+    /// read; none for a window that keeps no place.
+    pub fn tracker(&self) -> Option<Tracker> {
+        self.dir.clone().map(|dir| Tracker::new(dir, self.place))
+    }
 }
 
 /// How long the window holds still before its place is written: a drag is
@@ -370,7 +485,7 @@ enum Due {
 
 impl Tracker {
     /// Writing into `dir` (as [`write`]). `loaded` is the place the window
-    /// was made with ([`read`]), so a start that moves nothing writes
+    /// was made with ([`load`]), so a start that moves nothing writes
     /// nothing, and a window that opens maximized keeps the place under it.
     pub fn new(dir: impl Into<PathBuf>, loaded: Option<Window>) -> Self {
         Tracker { dir: dir.into(), now: loaded, since: Instant::now(), saved: loaded }
@@ -395,6 +510,15 @@ impl Tracker {
                 });
                 None
             }
+        }
+    }
+
+    /// [`Tracker::see`] what egui says ([`Seen::of`]), and ask for a frame
+    /// when the wait is over. The app calls this each frame.
+    #[cfg(feature = "egui")]
+    pub fn follow(&mut self, ctx: &egui::Context) {
+        if let Some(left) = self.see(Seen::of(ctx)) {
+            ctx.request_repaint_after(left);
         }
     }
 
@@ -566,9 +690,121 @@ mod tests {
         assert!(zoomed.seen_on(&one, 100.0));
         assert_eq!(zoomed.opened(true), Opening { pos: [200.0, 100.0], size: [1250.0, 1000.0], maximized: false });
         assert_eq!(zoomed.pixel(), Some((300, 150)));
-        // An older file is handed back as it was read.
+        // An older file is handed back as it was read, at the zoom it was
+        // read at (`load`): not put on pixels, so not moved.
         let old = win(160.0, 80.0, 1000.0, 800.0);
         assert_eq!(old.opened(true), Opening { pos: [160.0, 80.0], size: [1000.0, 800.0], maximized: false });
+        let old = Window { zoom: 1.25, ..old };
+        assert_eq!(old.opened(true), Opening { pos: [200.0, 100.0], size: [1250.0, 1000.0], maximized: false });
+        assert_eq!(old.pixel(), None);
+        // Its pixels are the primary screen's points to pixels times the
+        // zoom: 1000 points at 150% and 125% is pixel 1875.
+        assert!(Window { zoom: 1.25, ..win(1000.0, 80.0, 900.0, 600.0) }.seen_on(&one, 100.0));
+        assert!(!Window { zoom: 1.25, ..win(2000.0, 80.0, 900.0, 600.0) }.seen_on(&one, 100.0), "pixel 3750, off the screen");
+        assert!(win(2000.0, 80.0, 900.0, 600.0).seen_on(&one, 100.0), "pixel 3000 unzoomed");
+    }
+
+    /// A temporary folder for one test.
+    fn fresh(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ito-window-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn table(text: &str) -> toml::Table {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn a_place_from_before_is_read_at_the_zoom_now() {
+        // yagura before v0.66: closed maximized at common.toml's 130%, its
+        // points the zoomed ones (1280x800 / 1.3).
+        let text = "x = 19.48718\ny = 19.48718\nw = 984.6154\nh = 615.38464\nmaximized = true\n";
+        let w = before(&table(text), 1.3).unwrap();
+        assert_eq!(w, Window { maximized: true, zoom: 1.3, ..win(19.48718, 19.48718, 984.6154, 615.38464) });
+        let o = w.opened(false);
+        assert!((o.size[0] - 1280.0).abs() < 0.01 && (o.size[1] - 800.0).abs() < 0.01, "made at 1280x800 again: {o:?}");
+        // tsumugi #176, v0.113.1 and older: `width`, `height`, whole numbers,
+        // the scale it was taken at.
+        let text = "x = 4493\ny = 280\nwidth = 1102\nheight = 721\nscale = 1\nmaximized = false\n";
+        let w = before(&table(text), 1.0).unwrap();
+        assert_eq!(w, Window { scale: 1.0, ..win(4493.0, 280.0, 1102.0, 721.0) });
+        assert_eq!(w.opened(true).size, [1102.0, 721.0]);
+        // At common.toml's 125%: made that much bigger, as it was seen.
+        let w = before(&table("x = 100\ny = 80\nwidth = 1000\nheight = 640\nscale = 1.875\nmaximized = true\n"), 1.25).unwrap();
+        assert_eq!((w.scale, w.zoom, w.maximized), (1.875, 1.25, true));
+        assert_eq!(w.opened(true).size, [1250.0, 800.0]);
+        // No scale: read at the primary screen's.
+        assert_eq!(before(&table("x = 1\ny = 2\nwidth = 900\nheight = 700\n"), 1.0).map(|w| w.scale), Some(0.0));
+    }
+
+    #[test]
+    fn a_bad_file_from_before_gives_nothing() {
+        assert_eq!(before(&table("x = 1\n"), 1.0), None);
+        assert_eq!(before(&table("x = 1\ny = 2\nwidth = \"wide\"\nheight = 5\n"), 1.0), None);
+        // A minimized window's parking spot, or a size no window has.
+        assert_eq!(before(&table("x = -32000\ny = -32000\nw = 900\nh = 700\n"), 1.0), None);
+        assert_eq!(before(&table("x = 1\ny = 2\nwidth = 50\nheight = 50\n"), 1.0), None);
+        let dir = fresh("bad");
+        std::fs::write(path(&dir), "not toml [").unwrap();
+        assert_eq!(load_with(&dir, || 1.0), None);
+        // A file in this form with a broken number is not read as one from
+        // before.
+        std::fs::write(path(&dir), "x = 120.0\ny = 80.0\nw = 1100.0\nh = 700.0\nzoom = 0.0\n").unwrap();
+        assert_eq!(load_with(&dir, || 1.0), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_from_before_is_written_again_in_this_form() {
+        let dir = fresh("again");
+        assert_eq!(load_with(&dir, || 1.0), None, "no file");
+        std::fs::write(path(&dir), "x = 3456\ny = 215\nwidth = 846\nheight = 554\nscale = 1.3\n").unwrap();
+        let w = Window { scale: 1.3, zoom: 1.3, ..win(3456.0, 215.0, 846.0, 554.0) };
+        assert_eq!(load_with(&dir, || 1.3), Some(w));
+        assert_eq!(read(&dir), Some(w), "written in this form");
+        // From then on the zoom it was read at is kept.
+        assert_eq!(load_with(&dir, || 1.0), Some(w));
+        // This file's older form too.
+        std::fs::write(path(&dir), "x = 120.0\ny = 80.0\nw = 1100.0\nh = 700.0\nmaximized = true\n").unwrap();
+        let w = Window { maximized: true, zoom: 1.5, ..win(120.0, 80.0, 1100.0, 700.0) };
+        assert_eq!(load_with(&dir, || 1.5), Some(w));
+        assert_eq!(read(&dir), Some(w));
+        // A file in this form is read as it is, whatever the zoom now.
+        let w = Window { scale: 1.875, zoom: 1.25, ..win(4493.0, 280.0, 1100.0, 700.0) };
+        write(&dir, &w).unwrap();
+        assert_eq!(load_with(&dir, || 2.0), Some(w));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_window_that_keeps_no_place_has_none() {
+        let none = Saved::load(None);
+        assert_eq!((none.place(), none.tracker().is_none()), (None, true));
+        // A folder with no file: no place yet, but one is written from now on.
+        let dir = fresh("saved");
+        let first = Saved::load(Some(dir.clone()));
+        assert_eq!(first.place(), None);
+        let mut t = first.tracker().unwrap();
+        t.close(Some(Seen { scale: 1.0, ..seen(100.0, 80.0, 1100.0, 700.0) }));
+        let w = Window { scale: 1.0, ..win(100.0, 80.0, 1100.0, 700.0) };
+        assert_eq!(read(&dir), Some(w));
+        // And read back, where a screen shows it (none asked: the guess).
+        if w.reachable_now(PRIMARY_GUESS, GRAB) {
+            assert_eq!(Saved::load(Some(dir.clone())).place(), Some(w));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn the_viewport_is_made_at_the_place() {
+        let at = Saved { dir: None, place: Some(Window { scale: 1.5, zoom: 1.25, ..win(160.0, 80.0, 1000.0, 800.0) }) };
+        let v = at.viewport(egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]));
+        assert_eq!((v.position, v.inner_size), (Some(egui::pos2(200.0, 100.0)), Some(egui::vec2(1250.0, 1000.0))));
+        let v = Saved::default().viewport(egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]));
+        assert_eq!((v.position, v.inner_size), (None, Some(egui::vec2(1280.0, 800.0))));
     }
 
     fn seen(x: f32, y: f32, w: f32, h: f32) -> Seen {

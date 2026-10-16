@@ -3,6 +3,33 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.43.0] - 2026-10-16
+
+### 追加
+
+- ito-common: 窓の場所を開くときに読む `window::load(dir)`。kura・yagura・tsumugi が同じ手順をそれぞれ持っていたもの
+  （`read` → `reachable_now(PRIMARY_GUESS, 100.0)`、tsumugi は古いファイルの読み直しも）を 1 つにした。今ある画面に出ない場所は返さない。
+  `zoom` の無い古い `window.toml`（この形の 0.38 までのもの＝`w`・`h`、kura と yagura。tsumugi v0.113.1 までの独自の形＝`width`・`height`、
+  `scale` もあり得る。数は整数でもよい）は、common.toml の `scale`（アプリが読んだ後に掛ける拡大）で取ったものとして読み、この形で書き直す
+  （最大化した窓は動かないかぎり書かれないので、後で拡大が変わっても大きさが変わらないように）。
+- ito-common: 定数 `window::PRIMARY_GUESS`（1920×1080。画面を聞けない macOS・Linux での主の画面の見当）と `window::GRAB`（100 ポイント）。
+- ito-common: アプリの窓の場所を束ねる `window::Saved`。`Saved::load(Option<dir>)`（`None` は場所を持たない窓: `--keys` の台本、
+  引き剥がした窓、quake）、`place()`、`viewport(builder)`（機能 `egui`。`opening` の位置・大きさ・最大化を `ViewportBuilder` に付ける）、
+  `put(window)`（eframe の creator で）、`tracker()`（`Tracker::new(dir, place)`、場所を持たない窓は `None`）。
+- ito-common: `Tracker::follow(ctx)`（機能 `egui`）。`see(Seen::of(ctx))` して、待ちが返れば `request_repaint_after` する。
+
+### 変更
+
+- ito-common: `scale` の無い場所（古いファイル）も `Window::opening` が `zoom` を掛ける（`zoom` が 1 なら前と同じ）。`seen_on` もその画素を
+  主の画面の倍率×`zoom` で見る。kura と yagura の古いコードは egui の点（拡大込み）を書き、拡大を抜かずに窓を作っていたので、common.toml の
+  `scale` が 1 でないと、開くたびに窓が `scale` 分小さくなっていた（yagura の持ち主のファイルは 130 % で 1280×800 が 984.6×615.4 になっていた）。
+  `load` で読めば、前に見えていた大きさで開く。
+
+使う側がやること: 自前の `PRIMARY_GUESS` と `read(...).filter(reachable_now(...))` をやめ、`let saved = Saved::load(<state_dir、場所を持たない窓は None>)`、
+`viewport = saved.viewport(viewport)`、creator の先頭で `saved.put(cc)`、`Tracker` は `saved.tracker()`（`Option<Tracker>`）、毎フレーム
+`tracker.follow(ctx)`。`on_exit` の `tracker.close(Seen::of(ctx))` はそのまま。古い形のファイルを自分で読んでいたら（tsumugi の `winplace::read`・`old`）消す。
+`window::read` は今のまま残る（古いファイルを拡大無しで読む）。
+
 ## [0.42.0] - 2026-10-16
 
 ### 追加
