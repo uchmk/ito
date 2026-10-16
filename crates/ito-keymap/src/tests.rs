@@ -357,7 +357,7 @@ fn top_keys_said(text: &str) -> Vec<Vec<Key>> {
 #[test]
 fn nothing_changed_writes_nothing() {
     assert_eq!(edited("", &[reset("top")]), "");
-    assert_eq!(edited("", &[add("g g", "top")]), "", "a default key is already there");
+    assert_eq!(edited("", &[add("gg", "top")]), "", "a default key is already there");
     let mine = "# my keys\n";
     assert_eq!(edited(mine, &[remove("<C-t>", "top")]), mine);
 }
@@ -374,10 +374,10 @@ fn a_key_added_is_prepended_and_works() {
 
 #[test]
 fn a_default_key_taken_away_is_a_noop_and_given_back_is_nothing() {
-    let out = edited("", &[remove("g g", "top")]);
+    let out = edited("", &[remove("gg", "top")]);
     assert_eq!(out, "[[main.prepend_keymap]]\non = \"g\"\nrun = \"noop\"\n".replace("\"g\"", "[\"g\", \"g\"]"));
     assert!(top_keys(&out).is_empty());
-    let back = edited(&out, &[add("g g", "top")]);
+    let back = edited(&out, &[add("gg", "top")]);
     assert!(!back.contains("prepend_keymap"), "{back}");
     assert_eq!(top_keys(&back), [keys("g g")]);
 }
@@ -400,7 +400,7 @@ fn a_key_given_to_another_run_leaves_its_old_one() {
 #[test]
 fn a_reset_takes_the_runs_lines_out_and_keeps_the_rest() {
     let start = "# my keys\n\n[[main.prepend_keymap]]\non = \"x\"\nrun = \"mine\" # kept\n";
-    let out = edited(start, &[add("<C-t>", "top"), remove("g g", "top")]);
+    let out = edited(start, &[add("<C-t>", "top"), remove("gg", "top")]);
     assert!(top_keys(&out) == [keys("<C-t>")], "{out}");
     let back = edited(&out, &[reset("top")]);
     assert_eq!(back, start);
@@ -456,10 +456,10 @@ fn a_run_written_as_a_list_is_written_back_as_one() {
 fn a_key_something_else_already_shuts_out_needs_no_noop() {
     // A shorter key in front.
     let start = "[[main.prepend_keymap]]\non = \"g\"\nrun = \"quit\"\n";
-    assert_eq!(edited(start, &[remove("g g", "top")]), start);
+    assert_eq!(edited(start, &[remove("gg", "top")]), start);
     // A longer one: a press of `g g` waits on it.
     let start = "[[main.prepend_keymap]]\non = [\"g\", \"g\", \"x\"]\nrun = \"quit\"\n";
-    assert_eq!(edited(start, &[remove("g g", "top")]), start);
+    assert_eq!(edited(start, &[remove("gg", "top")]), start);
 }
 
 #[test]
@@ -467,7 +467,7 @@ fn a_line_for_another_machine_takes_nothing_and_one_for_this_one_is_kept() {
     let (here, there) = here_and_not();
     // On another machine only: the default key here still needs its noop.
     let other = format!("[[main.prepend_keymap]]\non = \"g\"\nfor = \"{there}\"\nrun = \"quit\"\n");
-    let out = edited(&other, &[remove("g g", "top")]);
+    let out = edited(&other, &[remove("gg", "top")]);
     assert!(out.contains("run = \"noop\"") && out.contains(&format!("for = \"{there}\"")), "{out}");
     assert!(top_keys(&out).is_empty(), "{out}");
     // On this machine: left as written, a noop in front of it.
@@ -501,7 +501,7 @@ fn a_default_key_made_longer_leaves_the_short_one_away() {
     assert!(quit.keys.iter().any(|k| k.on == keys("q") && k.removed), "{out}");
     assert_eq!(edited(&out, &[reset("quit")]), "");
     // The same over a noop on a longer key: the reset clears both.
-    let out = edited("", &[remove("g g", "top"), add("g", "top")]);
+    let out = edited("", &[remove("gg", "top"), add("g", "top")]);
     assert_eq!(top_keys_said(&out), [keys("g")]);
     assert_eq!(edited(&out, &[reset("top")]), "");
 }
@@ -528,8 +528,8 @@ fn a_layer_in_two_sections_gets_its_new_line_in_the_one_read_last() {
 fn edits_in_one_go_are_made_in_turn() {
     let start = "# mine\n";
     assert_eq!(edited(start, &[add("<C-t>", "top"), remove("<C-t>", "top")]), start);
-    let both = edited(start, &[remove("g g", "top"), add("<C-t>", "top")]);
-    let one_by_one = edited(&edited(start, &[remove("g g", "top")]), &[add("<C-t>", "top")]);
+    let both = edited(start, &[remove("gg", "top"), add("<C-t>", "top")]);
+    let one_by_one = edited(&edited(start, &[remove("gg", "top")]), &[add("<C-t>", "top")]);
     assert_eq!(
         both.replace(
             "
@@ -570,4 +570,14 @@ fn a_longer_key_of_the_same_run_behind_a_shorter_one_is_not_live() {
     // A new key longer than one there: that one shuts it out.
     let km = load_with(&[]);
     assert!(matches!(&clashes(km.layer("main"), &keys("q x"), "top", "noop")[..], [Clash::Prefix { run, .. }] if run == "quit"));
+}
+
+#[test]
+fn the_help_keeps_the_live_keys_and_joins_those_that_do_the_same() {
+    let user = "[[main.prepend_keymap]]\non = \"m\"\nrun = \"bookmark\"\n\n[[main.prepend_keymap]]\non = \"Q\"\nrun = \"quit\"\n\n[[main.prepend_keymap]]\non = \"gG\"\nrun = \"noop\"\n";
+    let km = load_with(&[("/cfg/keymap.toml", user)]);
+    let lines = help_lines(km.layer("main"), "noop");
+    let shown: Vec<(&str, &str)> = lines.iter().map(|l| (l.keys.as_str(), l.run)).collect();
+    // `m` buries `m s` and `m t`; `gG` is taken away; `Q` and `q` read as one line.
+    assert_eq!(shown, [("m", "bookmark"), ("Q / q", "quit"), ("gg", "top"), ("<C-,>", "settings")]);
 }

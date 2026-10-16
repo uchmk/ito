@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.48.0] - 2026-10-16
+
+### 追加
+
+- ito-keymap: `live(layer, noop)`（キーが届く束縛だけ。`noop` に変えた束縛と、先の短いキーに隠れた束縛を除く）と
+  `help_lines(layer, noop)`（`live` を、`desc` と `run` が同じものを 1 行にまとめ、キーは ` / ` でつなぐ。`HelpLine { keys, desc, run }`）。
+  ヘルプ（F1）の一覧の材料（#3 の候補 5）。描くのはアプリの見た目のままで、ここは一覧の作り方だけ。
+  - 使う側がやること: yagura の `config::keymap::live` と `ui/help.rs` の `group`、kura のヘルプの同じ処理を、これに置き換える
+    （`noop` には各アプリの何もしない命令の文字、たとえば `"noop"`）。
+
 ## [0.47.1] - 2026-10-16
 
 ### 修正

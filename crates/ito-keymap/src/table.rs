@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ito_keys::Key;
+use ito_keys::{render_seq, Key};
 
 use crate::{resolve, Binding, Match, BUILT_IN};
 
@@ -90,6 +90,50 @@ pub fn rows<A>(now: &[(String, Vec<Binding<A>>)], built_in: &[(String, Vec<Bindi
             }
             let defaults: Vec<Vec<Key>> = defaults.iter().filter(|b| b.raw == run).map(|b| b.on.clone()).collect();
             out.push(Row { layer: layer.clone(), run: run.to_owned(), desc, keys, defaults });
+        }
+    }
+    out
+}
+
+/// The bindings of a layer that a key can reach: not `noop` (a key taken from
+/// a built-in operation) and not shadowed by an earlier binding with the same
+/// keys or a shorter one they start with. What the help and the hints name, so
+/// a key taken away is not offered.
+pub fn live<'a, A>(layer: &'a [Binding<A>], noop: &'a str) -> impl Iterator<Item = &'a Binding<A>> {
+    layer.iter().filter(move |b| {
+        b.raw != noop
+            && (1..=b.on.len()).all(|i| match resolve(layer, &b.on[..i]) {
+                Match::Exact(x) => i == b.on.len() && std::ptr::eq(x, *b),
+                Match::Pending(_) => i < b.on.len(),
+                Match::None => false,
+            })
+    })
+}
+
+/// One line of a help: the keys that do the same thing, and what it does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelpLine<'a> {
+    /// The keys as the keymap writes them, in the order the layer lists them,
+    /// joined by ` / `.
+    pub keys: String,
+    /// The binding's `desc` as written (the app translates it).
+    pub desc: &'a str,
+    /// The command text as written.
+    pub run: &'a str,
+}
+
+/// The [`live`] bindings of a layer, one line per description and command, so
+/// the keys that do the same thing sit on one line.
+pub fn help_lines<'a, A>(layer: &'a [Binding<A>], noop: &'a str) -> Vec<HelpLine<'a>> {
+    let mut out: Vec<HelpLine<'a>> = Vec::new();
+    for b in live(layer, noop) {
+        let keys = render_seq(&b.on);
+        match out.iter_mut().find(|l| l.desc == b.desc && l.run == b.raw) {
+            Some(l) => {
+                l.keys.push_str(" / ");
+                l.keys.push_str(&keys);
+            }
+            None => out.push(HelpLine { keys, desc: &b.desc, run: &b.raw }),
         }
     }
     out

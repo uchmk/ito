@@ -37,7 +37,7 @@ mod edit;
 mod table;
 
 pub use edit::{edit, Edit};
-pub use table::{clashes, common, reach, rows, Cell, Clash, Row, State, COMMON};
+pub use table::{clashes, common, help_lines, live, reach, rows, Cell, Clash, HelpLine, Row, State, COMMON};
 
 /// One binding: the keys, the commands they run, and where it was written.
 #[derive(Clone, Debug)]
