@@ -3,15 +3,17 @@
 //! window has moved or been resized. The apps put it back (position, size,
 //! maximized) so a window opens where it was closed.
 //!
-//! Nothing here knows about egui or winit: the app hands in the numbers it
-//! reads from its viewport (logical points, with the points to pixels and
-//! its own zoom they were taken at), takes out the numbers to make the
-//! window with ([`Window::opening`]) and hands the new window, still hidden,
-//! to [`Window::put`].
+//! Nothing here needs egui or winit: the app takes out the numbers to make
+//! the window with ([`Window::opening`]), hands the new window, still
+//! hidden, to [`Window::put`], and each frame hands a [`Tracker`] what the
+//! window looks like ([`Seen`]: logical points, with the points to pixels
+//! and its own zoom they were taken at). With the `egui` feature,
+//! [`Seen::of`] reads those off egui's context.
 
 use raw_window_handle::HasWindowHandle;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// The window's place. `x` / `y` are the outer position (the corner of the
 /// frame) and `w` / `h` the inner size, all in logical points. A maximized
@@ -302,6 +304,139 @@ pub fn write(dir: &Path, w: &Window) -> Result<(), String> {
     crate::write_atomic(&path(dir), text)
 }
 
+/// How long the window holds still before its place is written: a drag is
+/// one write, after it stops.
+pub const SETTLE: Duration = Duration::from_millis(800);
+
+/// What the window looks like in a frame, as egui says it: the outer corner
+/// and the inner size in points, whether it is maximized, minimized or full
+/// screen, the points to pixels (`pixels_per_point`) and the app's zoom
+/// (`zoom_factor`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seen {
+    pub corner: [f32; 2],
+    pub size: [f32; 2],
+    pub maximized: bool,
+    pub minimized: bool,
+    pub fullscreen: bool,
+    pub scale: f32,
+    pub zoom: f32,
+}
+
+#[cfg(feature = "egui")]
+impl Seen {
+    /// What the window of `ctx` looks like now; nothing until the OS has
+    /// said where it is.
+    pub fn of(ctx: &egui::Context) -> Option<Seen> {
+        let zoom = ctx.zoom_factor();
+        ctx.input(|i| {
+            let v = i.viewport();
+            let (outer, inner) = (v.outer_rect?, v.inner_rect?);
+            Some(Seen {
+                corner: [outer.min.x, outer.min.y],
+                size: [inner.width(), inner.height()],
+                maximized: v.maximized.unwrap_or(false),
+                minimized: v.minimized.unwrap_or(false),
+                fullscreen: v.fullscreen.unwrap_or(false),
+                scale: i.pixels_per_point(),
+                zoom,
+            })
+        })
+    }
+}
+
+/// Follows the window and writes its place to `window.toml` once a move or
+/// a resize has held still for [`SETTLE`]. Maximized, the place stays the
+/// one from before, so leaving the maximum goes back there; minimized or
+/// full screen, the window is not followed. The uchmk apps each kept their
+/// own, and kura #401 had to be fixed in each.
+#[derive(Debug)]
+pub struct Tracker {
+    dir: PathBuf,
+    /// Where the window is, and since when.
+    now: Option<Window>,
+    since: Instant,
+    /// What `window.toml` has, as far as this window knows.
+    saved: Option<Window>,
+}
+
+/// What [`Tracker::due`] says is next.
+#[derive(Debug, PartialEq)]
+enum Due {
+    Nothing,
+    Wait(Duration),
+    Write(Window),
+}
+
+impl Tracker {
+    /// Writing into `dir` (as [`write`]). `loaded` is the place the window
+    /// was made with ([`read`]), so a start that moves nothing writes
+    /// nothing, and a window that opens maximized keeps the place under it.
+    pub fn new(dir: impl Into<PathBuf>, loaded: Option<Window>) -> Self {
+        Tracker { dir: dir.into(), now: loaded, since: Instant::now(), saved: loaded }
+    }
+
+    /// Note what the window looks like this frame, and once its place has
+    /// changed and held still, write it on a thread of its own. While it
+    /// waits, how long for: the app asks for a frame then (egui's
+    /// `request_repaint_after`), or a window that stops is not written
+    /// until something else draws.
+    pub fn see(&mut self, seen: Option<Seen>) -> Option<Duration> {
+        let at = Instant::now();
+        self.note(seen, at);
+        match self.due(at) {
+            Due::Nothing => None,
+            Due::Wait(left) => Some(left),
+            Due::Write(place) => {
+                self.saved = Some(place);
+                let dir = self.dir.clone();
+                let _ = std::thread::Builder::new().name("window-place".into()).spawn(move || {
+                    let _ = write(&dir, &place);
+                });
+                None
+            }
+        }
+    }
+
+    /// The app is closing: note what the window looks like and write its
+    /// place now, held still or not, before the process ends.
+    pub fn close(&mut self, seen: Option<Seen>) {
+        self.note(seen, Instant::now());
+        if let Some(place) = self.now.filter(|p| self.saved != Some(*p)) {
+            self.saved = Some(place);
+            let _ = write(&self.dir, &place);
+        }
+    }
+
+    fn note(&mut self, seen: Option<Seen>, at: Instant) {
+        let Some(s) = seen.filter(|s| !s.minimized && !s.fullscreen) else {
+            return;
+        };
+        let place = match self.now.filter(|_| s.maximized) {
+            Some(was) => Window { maximized: true, ..was },
+            None => {
+                Window { x: s.corner[0], y: s.corner[1], w: s.size[0], h: s.size[1], maximized: s.maximized, scale: s.scale, zoom: s.zoom }
+            }
+        };
+        if self.now != Some(place) {
+            self.now = Some(place);
+            self.since = at;
+        }
+    }
+
+    fn due(&self, at: Instant) -> Due {
+        let Some(place) = self.now.filter(|p| self.saved != Some(*p)) else {
+            return Due::Nothing;
+        };
+        let left = SETTLE.saturating_sub(at.saturating_duration_since(self.since));
+        if left.is_zero() {
+            Due::Write(place)
+        } else {
+            Due::Wait(left)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +569,105 @@ mod tests {
         // An older file is handed back as it was read.
         let old = win(160.0, 80.0, 1000.0, 800.0);
         assert_eq!(old.opened(true), Opening { pos: [160.0, 80.0], size: [1000.0, 800.0], maximized: false });
+    }
+
+    fn seen(x: f32, y: f32, w: f32, h: f32) -> Seen {
+        Seen { corner: [x, y], size: [w, h], maximized: false, minimized: false, fullscreen: false, scale: 1.5, zoom: 1.0 }
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn a_move_is_written_once_it_holds_still() {
+        let t0 = Instant::now();
+        let mut t = Tracker::new(PathBuf::new(), None);
+        t.note(Some(seen(100.0, 80.0, 1100.0, 700.0)), t0);
+        assert_eq!(t.due(t0), Due::Wait(SETTLE));
+        assert_eq!(t.due(t0 + ms(300)), Due::Wait(SETTLE - ms(300)));
+        // Moved again: the wait starts over; seen again where it is: not.
+        t.note(Some(seen(120.0, 80.0, 1100.0, 700.0)), t0 + ms(500));
+        t.note(Some(seen(120.0, 80.0, 1100.0, 700.0)), t0 + ms(900));
+        assert_eq!(t.due(t0 + ms(1000)), Due::Wait(SETTLE - ms(500)));
+        let place = Window { scale: 1.5, ..win(120.0, 80.0, 1100.0, 700.0) };
+        assert_eq!(t.due(t0 + ms(1300)), Due::Write(place));
+        t.saved = Some(place);
+        assert_eq!(t.due(t0 + ms(5000)), Due::Nothing);
+    }
+
+    #[test]
+    fn a_start_that_moves_nothing_writes_nothing() {
+        let t0 = Instant::now();
+        let loaded = Window { scale: 1.5, ..win(100.0, 80.0, 1100.0, 700.0) };
+        let mut t = Tracker::new(PathBuf::new(), Some(loaded));
+        t.note(Some(seen(100.0, 80.0, 1100.0, 700.0)), t0);
+        assert_eq!(t.due(t0 + ms(5000)), Due::Nothing);
+        // Opened maximized: the place under it is the one read.
+        let loaded = Window { maximized: true, ..loaded };
+        let mut t = Tracker::new(PathBuf::new(), Some(loaded));
+        t.note(Some(Seen { maximized: true, ..seen(-8.0, -8.0, 2576.0, 1376.0) }), t0);
+        assert_eq!(t.due(t0 + ms(5000)), Due::Nothing);
+    }
+
+    #[test]
+    fn maximized_keeps_the_place_under_it_and_minimized_is_not_followed() {
+        let t0 = Instant::now();
+        let mut t = Tracker::new(PathBuf::new(), None);
+        // On a second screen at 100% (kura #401), then maximized there.
+        let under = Window { scale: 1.0, ..win(4493.0, 280.0, 1100.0, 720.0) };
+        t.note(Some(Seen { scale: 1.0, ..seen(4493.0, 280.0, 1100.0, 720.0) }), t0);
+        t.note(Some(Seen { maximized: true, scale: 1.0, ..seen(3832.0, -8.0, 2576.0, 1376.0) }), t0);
+        let max = Window { maximized: true, ..under };
+        assert_eq!(t.now, Some(max));
+        // Minimized, full screen, or not said yet: as it was.
+        t.note(Some(Seen { minimized: true, ..seen(-32000.0, -32000.0, 160.0, 28.0) }), t0);
+        t.note(Some(Seen { fullscreen: true, scale: 1.0, ..seen(3840.0, 0.0, 2560.0, 1440.0) }), t0);
+        t.note(None, t0);
+        assert_eq!(t.now, Some(max));
+        // Back from the maximum: where it was.
+        t.note(Some(Seen { scale: 1.0, ..seen(4493.0, 280.0, 1100.0, 720.0) }), t0);
+        assert_eq!(t.now, Some(under));
+    }
+
+    #[test]
+    fn closing_writes_at_once_with_the_scale_and_the_zoom() {
+        let dir = std::env::temp_dir().join(format!("ito-window-close-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut t = Tracker::new(&dir, None);
+        // At 125% zoom on a 150% screen.
+        t.close(Some(Seen { scale: 1.875, zoom: 1.25, ..seen(160.0, 80.0, 1000.0, 800.0) }));
+        let place = Window { scale: 1.875, zoom: 1.25, ..win(160.0, 80.0, 1000.0, 800.0) };
+        assert_eq!(read(&dir), Some(place));
+        assert_eq!(place.opened(true).size, [1250.0, 1000.0], "made at the size without the zoom");
+        // Nothing new: nothing written.
+        std::fs::remove_file(path(&dir)).unwrap();
+        t.close(Some(Seen { scale: 1.875, zoom: 1.25, ..seen(160.0, 80.0, 1000.0, 800.0) }));
+        assert_eq!(read(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn what_egui_says_is_seen() {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(1.25);
+        let mut input = egui::RawInput::default();
+        let v = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+        v.native_pixels_per_point = Some(1.5);
+        v.outer_rect = Some(egui::Rect::from_min_size(egui::pos2(160.0, 80.0), egui::vec2(1010.0, 830.0)));
+        v.inner_rect = Some(egui::Rect::from_min_size(egui::pos2(165.0, 110.0), egui::vec2(1000.0, 800.0)));
+        v.maximized = Some(false);
+        let mut got = None;
+        ctx.run_ui(input, |ui| got = Some(Seen::of(ui.ctx()))).drop_without_applying_deltas();
+        // The rectangles are in egui's points already (egui-winit divides by
+        // the zoomed points to pixels); the zoom is in the scale.
+        let want = Seen { scale: 1.875, zoom: 1.25, ..seen(160.0, 80.0, 1000.0, 800.0) };
+        assert_eq!(got, Some(Some(want)));
+        // Before the OS has said where the window is: nothing.
+        let mut got = None;
+        egui::Context::default().run_ui(egui::RawInput::default(), |ui| got = Some(Seen::of(ui.ctx()))).drop_without_applying_deltas();
+        assert_eq!(got, Some(None));
     }
 
     #[test]

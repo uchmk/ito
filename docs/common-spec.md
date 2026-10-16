@@ -13,7 +13,7 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
 
 | クレート | 持つもの |
 | --- | --- |
-| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）、OS の明暗（`OsLight`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono） |
+| `ito-common` | 設定と状態のフォルダー（`base_dir`・`app_dir`・`state_dir`・`env_dir`・`move_old`）、字体の並び（`fonts`）、common.toml の読み書き（`Common`・`CommonChange`・`edit_common`）、倍率（`tidy_scale`・`scale_step`・`parse_scale`・`scale_text`・`scale_change`）、TOML の 1 キーの書き換え（`set_key`・`remove_key`・`set_tables`、toml_edit でコメントを残す）、`write_atomic`、ファイルの見張り（`watch`）、OS の明暗（`OsLight`）、窓の場所（`window`。`window.toml` の読み書き・戻し方・`Tracker`）。機能 `clock` で時計の文字（`Clock::text`・`full`・`next_minute`、chrono）、機能 `egui` で egui から窓の様子を読む（`window::Seen::of`） |
 | `ito-theme` | テーマ（`Colors`・`Theme`・組み込みの 13 個・`from_table`・`pick`・`mix`・`contrast`）。egui の `ecolor` だけに依る。機能 `pane` でターミナルの `Palette` |
 | `ito-prefs` | 設定の画面の枠と部品、共通のページ（`language_row`・`scale_row`・`clock_card`・`theme_page`）。文字は `Words`（`EN`・`JA`、`Words::of(lang)`） |
 | `ito-i18n` | 言語の表（`tr`）。`base_dir` などは `ito-common` の再エクスポート |
@@ -265,6 +265,10 @@ scale: 100%           # 書くなら倍率を % で
 - 場所は、取ったときの倍率（`scale`＝egui の `pixels_per_point`）とアプリの拡大（`zoom`）と一緒に書く。戻すときは拡大を抜いた値で窓を作り
   （`Window::opening`）、Windows では窓を表示する前に閉じた画素へ動かす（`Window::put`。倍率の違う画面で閉じても、その画面に開く）。
   最大化して閉じた窓は、閉じた画面で最大化して開く。
+- いつ書くかは `window::Tracker` が決める（アプリごとに作らない）。窓が動いて 0.8 秒（`SETTLE`）止まったら UI ではないスレッドで書き、
+  閉じるときはすぐに書く（`Tracker::close`）。最大化している間は前の場所を保ち、最小化と全画面の間は追わない。
+  アプリは開いた場所（`read` の値）で `Tracker::new(state_dir, loaded)` を作り、毎フレーム `see(Seen::of(ctx))` を呼んで、
+  待ちの時間が返れば `request_repaint_after` する（ito-common の機能 `egui`）。`--keys` の台本で動かしている間は追わない。
 
 ## 設定の画面
 

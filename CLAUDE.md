@@ -12,7 +12,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし） | tsumugi、kura |
-| `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`） | tsumugi、yagura |
+| `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、窓の場所の保存と戻し方（`window`、追跡の `Tracker`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
 | `ito-theme` | 組み込みの 13 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
 | `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON）） | yagura（tsumugi も載せ替える） |

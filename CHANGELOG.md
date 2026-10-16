@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.41.0] - 2026-10-16
+
+### 追加
+
+- ito-common: 窓を追って `window.toml` に書く `window::Tracker` を足した。kura・yagura・tsumugi がそれぞれ持っていた追跡
+  （kura の `remember_place`、yagura の `Place`、tsumugi の `winplace::Tracker`）を 1 つにした。
+  動いて `SETTLE`（0.8 秒）止まったら名前 `window-place` のスレッドで書き、`close` はすぐに書く。最大化している間は前の場所を保ち
+  （最大化を解くとそこへ戻る）、最小化と全画面の間は追わない。場所は `scale`（`pixels_per_point`）と `zoom`（`zoom_factor`）と一緒に書くので、
+  倍率の違う 2 つ目の画面で閉じた窓もそこに開く（kura #401、yagura #58、tsumugi #176）。
+- ito-common: 1 フレームの窓の様子 `window::Seen`（外の角・内の大きさ・最大化・最小化・全画面・倍率・拡大）。
+  新しい機能 `egui`（egui 0.36）で `Seen::of(ctx)` が egui から読む。機能を入れなければ egui には依存しない。
+
+使う側がやること: ito-common に `features = ["egui"]` を足す。自前の追跡をやめ、`Tracker::new(state_dir, loaded)`（`loaded` は
+`window::read` の値で、窓を作った場所）を持ち、毎フレーム `if let Some(left) = tracker.see(Seen::of(ctx)) { ctx.request_repaint_after(left) }`、
+eframe の `on_exit` で `tracker.close(Seen::of(ctx))` を呼ぶ。`--keys` の台本で動かしている間は `Tracker` を作らない。
+
 ## [0.40.0] - 2026-10-16
 
 ### 追加

@@ -11,6 +11,8 @@ repository.workspace = true
 # The clock's words for now (`Clock::text`), with chrono; reading the
 # settings needs none of it.
 clock = ["dep:chrono"]
+# `window::Seen::of`: what the window looks like, read off egui's context.
+egui = ["dep:egui"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +29,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # The window handed to `window::Window::put` (what eframe's `CreationContext`
 # is); Pure Rust, no dependencies.
 raw-window-handle = "0.6"
+egui = { version = "0.36", optional = true }
 
 [target."cfg(windows)".dependencies]
 # The OS's light or dark from the registry (`OsLight`): winit's lags a switch.
