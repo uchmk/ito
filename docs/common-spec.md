@@ -321,20 +321,26 @@ scale: 100%           # 書くなら倍率を % で
 - 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast::show_with_icon`。アプリの id は `uchmk.<app>`、窓と同じアイコンを
   `icon` のモジュールの関数で渡す。Windows では通知の左と差出人の名前の横に出る）、**音**（`ito_notify::sound::play`。
   `ito_notify::SOUNDS` の chime・low・alert・default から出来事ごとに 1 つ）、**Webhook**（`ito_notify::webhook::send`。
-  ntfy・Slack・Discord・JSON、`ito_notify::FORMATS`）。アドレスが空か http(s) で始まらなければ送らない。
+  ntfy・Slack・Discord・JSON、`ito_notify::FORMATS`）。送り先は幾つでも持てて、それぞれ送る出来事を選ぶ
+  （`ito_notify::webhook::Place`、`send_all` が出来事の名前で選んで送る）。アドレスが空か http(s) で始まらなければ送らない。
   `curl -f` で送るので、相手が 400 以上で断ったとき（アドレスの誤り・回数の制限）も失敗として、30 秒後に 1 回だけ送り直す。
   Discord は太字の題と本文を `content` に入れ（2000 字で切る）、`allowed_mentions` を空にして `@everyone` などで誰も呼ばない。
 - Windows の集中モード・プレゼンテーション・全画面のゲームの間は音を鳴らさない（`focus_mode`、既定は入り。`sound::quiet_time`）。
 - ページ（`notify_page`。出来事は `End` の並びでアプリが渡す）:
-  - 上に「試しに送る」（3 つとも。Webhook はアドレスがあるときだけ）と「既定に戻す」（Webhook のアドレスと形式は残す）。
+  - 上に「試しに送る」（3 つとも。Webhook はアドレスのあるものすべて、`Test::All`）と「既定に戻す」（Webhook の送り先は残す）。
   - 「知らせるとき」: 出来事が 1 つなら行ごとのスイッチ、2 つ以上なら列が出来事・行が知らせ方の表。
-    Webhook の行は出来事ごとに送り分けるアプリだけ（`Notify::webhook` が空なら出さない）。
+    Webhook の行は送り先ごとに 1 つ（1 つなら「Webhook」、2 つ以上なら「Webhook 1」「Webhook 2」…）で、
+    出来事ごとに送り分けるアプリだけ（`Hook::on` が空なら出さない）。
   - 「鳴らす音」: 出来事ごとの音（▶ で鳴らしてみる）と集中モードのスイッチ。
-  - 「Webhook」: アドレス（http(s) でなければ赤い注意）と形式。
+  - 「Webhook」: 送り先ごとに名前と「外す」「ここに試しに送る」（`Test::Hook(k)`）、アドレス（http(s) でなければ赤い注意）と形式。
+    最後に「アドレスを足す」。自分のカードに置くアプリ（tsumugi）は `webhook_rows` を使う。
   - 検索の言葉は `notify_index`。
 - 設定はアプリの設定ファイルの `[notify]` に置く（minato は `minato-settings.json`）。鍵は tsumugi に揃える:
-  `system`・`sound`・`webhook_states`（出来事の名前の並び。出来事が 1 つのアプリは `system`・`sound` を真偽値にしてよい）、
-  `sound_<出来事>`、`focus_mode`、`webhook`（アドレス）、`webhook_format`。知らない値は警告して既定に戻す。
+  `system`・`sound`（出来事の名前の並び。出来事が 1 つのアプリは真偽値にしてよい）、`sound_<出来事>`、`focus_mode`。
+  Webhook の送り先は `[[notify.webhooks]]` の表を並べ、それぞれ `url`・`format`・`states`（出来事の名前の並び。省けばアプリの既定）。
+  前の 1 つだけの形（`[notify]` の `webhook`（アドレス）・`webhook_format`・`webhook_states`）も読み、1 つ目の送り先にする
+  （`webhook::places`）。設定の画面が書くときは表に移す（`ito_prefs::write_webhooks`。表はアドレスで見分け、コメントを残す）。
+  知らない値は警告して既定に戻す（送り先は `Place::problems`）。
 
 ## 時計
 

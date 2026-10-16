@@ -401,6 +401,9 @@ pub(crate) struct PromptLinks {
     says_input: bool,
     /// How many more rows the open prompt link goes on to.
     rest: usize,
+    /// The window changed size: the open link is closed before the next
+    /// character ([`resized`](Self::resized)).
+    cut: bool,
 }
 
 /// The most rows after its first a prompt is taken to have, in case a
@@ -416,10 +419,27 @@ fn open(uri: &str) -> Vec<u8> {
 }
 
 impl PromptLinks {
+    /// The window changed size. ConPTY then draws its whole screen again,
+    /// with none of the OSC 133 it was first written with, so a link left
+    /// open would mark the first rows of that as the prompt or the command
+    /// (#16): it is closed before the next character, and a prompt's rows
+    /// after it are not looked for. [`crate::remark`] puts the marks back.
+    pub(crate) fn resized(&mut self) {
+        self.cut = true;
+        self.rest = 0;
+    }
+
     /// `chunk` with the links put in, or `None` when it needs none.
     pub(crate) fn feed(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {
         let mut out: Option<Vec<u8>> = None;
         for (i, &b) in chunk.iter().enumerate() {
+            // Not inside a sequence, nor inside a character of UTF-8.
+            if self.cut && self.osc.is_none() && !self.esc && !self.csi && !(0x80..0xc0).contains(&b) {
+                self.cut = false;
+                if std::mem::take(&mut self.open) {
+                    out.get_or_insert_with(|| chunk[..i].to_vec()).extend_from_slice(CLOSE);
+                }
+            }
             let mut add: Vec<u8> = Vec::new();
             match self.osc.take() {
                 Some(mut said) => {

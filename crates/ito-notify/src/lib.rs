@@ -1,12 +1,14 @@
 //! Telling a person from an app, three ways: the system's notification
 //! ([`toast`]), a sound ([`sound`]) and a message sent elsewhere
 //! ([`webhook`]: an ntfy topic, a Slack or Discord incoming webhook, or any
-//! address that takes JSON). Each runs on a thread of its own and a failure only goes to
-//! stderr, so a caller never waits on the system. No HTTP client is built in:
-//! the webhook goes through the system's `curl`.
+//! address that takes JSON, to as many places as the settings list). Each runs
+//! on a thread of its own and a failure only goes to stderr, so a caller never
+//! waits on the system. No HTTP client is built in: the webhook goes through
+//! the system's `curl`.
 //!
-//! The words of the settings (`[notify] sound_waiting`, `webhook_format`)
-//! are the same in every app that uses this: see [`SOUNDS`] and [`FORMATS`].
+//! The words of the settings (`[notify] sound_waiting`, a
+//! `[[notify.webhooks]]`'s `format`) are the same in every app that uses
+//! this: see [`SOUNDS`] and [`FORMATS`].
 
 pub mod notifier;
 pub mod sound;

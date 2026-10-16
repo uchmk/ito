@@ -494,8 +494,8 @@ pub fn remove_key(text: &str, table: Option<&str>, key: &str) -> Result<String, 
 
 /// `text` with the `[[name]]` blocks made `blocks`, each a list of keys and
 /// their values as TOML. A block keeps the old table it matches -- the same
-/// `name`, else the same `addr`, else one with the same keys and values,
-/// else the next one left over -- with its
+/// `name`, else the same `addr`, else the same `url`, else one with the same
+/// keys and values, else the next one left over -- with its
 /// place and comments: only the values that changed are written (a comment
 /// after one stays), keys no longer there are taken out. A table nothing
 /// matches is taken out, and a new one goes after the last of them.
@@ -662,11 +662,12 @@ fn consider<'a>(sub: &'a mut toml_edit::Table, place: isize, best: &mut Option<&
 }
 
 /// Which of the `old` tables each wanted block keeps: the same `name`, else
-/// the same `addr`, else the next one no block has taken.
+/// the same `addr` (`[[host]]`), else the same `url` (`[[notify.webhooks]]`),
+/// else the next one no block has taken.
 fn match_tables(old: &[toml_edit::Table], want: &[Vec<(String, toml_edit::Value)>]) -> Vec<Option<usize>> {
     let mut used = vec![false; old.len()];
     let mut pick = vec![None; want.len()];
-    for key in ["name", "addr"] {
+    for key in ["name", "addr", "url"] {
         for (i, keys) in want.iter().enumerate() {
             let Some(w) = keys.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_str()) else { continue };
             if pick[i].is_some() {
@@ -959,6 +960,24 @@ mod tests {
             "the file's comment stays at the top: {t}"
         );
         assert_eq!(set_tables(&t, "bind", &[vec![("on", quote("z"))], vec![("on", quote("h"))]]).unwrap(), headed, "and back");
+    }
+
+    /// A webhook taken out of the middle of the list leaves the others
+    /// their comments: they are known by their address.
+    #[test]
+    fn webhooks_are_known_by_their_address() {
+        let text = "[notify]\nsystem = true\n\n# the phone\n[[notify.webhooks]]\nurl = \"https://ntfy.sh/a\"\n\n\
+                    [[notify.webhooks]]\nurl = \"https://ntfy.sh/b\"\n\n# the team\n[[notify.webhooks]]\n\
+                    url = \"https://discord.com/api/webhooks/c\" # chat\nformat = \"discord\"\n";
+        let a = vec![("url", quote("https://ntfy.sh/a"))];
+        let c = vec![("url", quote("https://discord.com/api/webhooks/c")), ("format", quote("discord"))];
+        let t = set_tables(text, "notify.webhooks", &[a, c]).unwrap();
+        assert_eq!(
+            t,
+            "[notify]\nsystem = true\n\n# the phone\n[[notify.webhooks]]\nurl = \"https://ntfy.sh/a\"\n\n# the team\n\
+             [[notify.webhooks]]\nurl = \"https://discord.com/api/webhooks/c\" # chat\nformat = \"discord\"\n",
+            "the middle one taken out, the others with their comments"
+        );
     }
 
     #[test]
