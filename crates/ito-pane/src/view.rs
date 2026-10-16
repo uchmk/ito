@@ -100,7 +100,10 @@ pub struct Shown {
     /// a cell (a copy mode's cursor).
     pub grid: Option<(egui::Pos2, Vec2)>,
     /// The cursor as this frame drew it; none when its cell is off the grid
-    /// (scrolled back past it) or there is no terminal.
+    /// (scrolled back past it) or there is no terminal. It is there also
+    /// while the program hides its cursor (which is drawn then too) and
+    /// while a blink has it off: it says where the cursor is, not whether
+    /// this frame painted it.
     pub cursor: Option<CursorShown>,
 }
 
@@ -124,7 +127,8 @@ pub struct Slide {
     /// The cell it went to.
     pub to: (usize, usize),
     /// How many frames drew it on the way, neither where it set off nor
-    /// where it landed: none, it jumped.
+    /// where it landed: none means it jumped once it has landed; while it is
+    /// moving, it may only have set off (or turned) this frame.
     pub between: u32,
     /// Still on its way.
     pub moving: bool,
@@ -1161,6 +1165,11 @@ mod tests {
         let g = g.drawn_at(1.0 + GLIDE / 4.0);
         let g = g.drawn_at(1.0 + GLIDE / 4.0);
         assert_eq!(g.between, 1, "the same frame twice is one");
+        // Turned on the way: it sets off again from between two cells.
+        let turned = g.toward(Vec2::new(9.0, 4.0), 1.0 + GLIDE / 2.0).drawn_at(1.0 + GLIDE / 2.0);
+        let s = turned.slide(1.0 + GLIDE / 2.0).unwrap();
+        assert!(s.from.0 > 2.0 && s.from.0 < 9.0 && s.from.1 == 1.0, "{s:?}");
+        assert_eq!((s.to, s.between, s.moving), ((9, 4), 0, true), "counted afresh");
         let g = g.drawn_at(1.0 + GLIDE / 2.0).drawn_at(1.0 + GLIDE);
         let slide = g.slide(1.0 + GLIDE).unwrap();
         assert_eq!((slide.between, slide.moving), (2, false), "landed after two frames on the way");
