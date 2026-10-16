@@ -25,6 +25,10 @@ on:
     - cron: '49 6 * * 1'
   workflow_dispatch:
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

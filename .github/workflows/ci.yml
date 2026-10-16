@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
