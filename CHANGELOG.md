@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.49.0] - 2026-10-16
+
+### 追加
+
+- ito-bugreport（新しいクレート）: 不具合の報告の URL（`url`）と、その部品。kura の `bugreport.rs` のうちアプリに依らない部分を移した
+  （#3 の候補 7）。`Spec { app, version, repo, template }`・`version_line`・`os_line`（Windows の名前・ビルド・本物のアーキ・エミュレーションの表示）・
+  `Context` と `context`（Last error・Rendering・Scale・アプリの行・Config の順）・`without_home`・`short_name`。依存は Windows の `windows` だけ。
+  - form の field の id（`version`・`os`・`context`・`what`・`backtrace`）を共通仕様に固定し、雛形 `templates/bug_report.yml` を置いた。
+  - 使う側がやること: kura は `src/bugreport.rs` を `Spec`/`Context` を渡す薄い層に替える（`context` の文面は今までと同じ）。
+    yagura・tsumugi は `.github/ISSUE_TEMPLATE/bug_report.yml` を雛形から作り、F12 から `url` を開く。
+  - runinfo（直前の起動が使った GPU・フォント・倍率の記録）の共通化は次の版。
+
 ## [0.48.0] - 2026-10-16
 
 ### 追加

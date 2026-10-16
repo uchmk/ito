@@ -348,6 +348,18 @@ scale: 100%           # 書くなら倍率を % で
 - 分が変わるときだけ再描画する（`request_repaint_after(Clock::next_minute(now))`）。
 - 言語が日本語なら曜日を「(月)」のように出す（`Clock::text(now, lang)`）。
 
+## 不具合の報告（`ito-bugreport`）
+
+どのアプリも、F12（と設定の画面のボタン）で、版・OS・アプリが知っていることを埋めた GitHub の issue form を開く。報告は全アプリで同じ形になる。
+
+- `ito_bugreport::url(&Spec { app, version, repo, template }, &[("keys", …)])` が URL を作る。アプリが持つのは名前・版・リポジトリ・テンプレートの名前だけ。
+- **form の field の `id` は固定**: `version`・`os`・`context`（共通。ここが埋める）、`what`・`backtrace`（共通。人が書く）。アプリ固有の欄（`keys`・`files`・`config` など）は足してよい。
+  雛形は `crates/ito-bugreport/templates/bug_report.yml`（`{{app}}` をアプリ名に替えて `.github/ISSUE_TEMPLATE/` へ）。
+  GitHub は知らない id を黙って捨てるので、アプリのテストで form の id と `url` が埋める id を突き合わせる。
+- `os` の行は `OS:`・`OS arch:`・`Process arch:`（Windows。エミュレーションで食い違えばそれ自体が手がかり）。ほかは `OS:`・`Process arch:`。
+- `context` は `Context` が組む `Label: text` の行で、順は **Last error・Rendering・Scale・アプリの行・Config** 。ホームのフォルダは `~` に、
+  設定ファイルはパスでなく名前（`short_name`）で書く。利用者の名前を公開の tracker に出さない。
+
 ## 新しいアプリを作るとき
 
 1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys`・`ito-keymap` を同じ `rev` で足す。
@@ -362,7 +374,8 @@ scale: 100%           # 書くなら倍率を % で
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
 8. `--version`・`--help`・`--keys "<script>"` を受ける。答えは `ito_console::out`・`err` で書き、Windows には `<app>.com` を付ける
    （上の「Windows のコンソールの前段」）。
-9. `scripts/verify.sh`・`release.yml`・`release-sums.yml` を kura か yagura から写す（下の「版とリリース」）。
+9. `ito-bugreport` で F12 の不具合の報告を付け、`.github/ISSUE_TEMPLATE/bug_report.yml` を雛形から作る（上の「不具合の報告」）。
+   `scripts/verify.sh`・`release.yml`・`release-sums.yml` を kura か yagura から写す（下の「版とリリース」）。
 10. README とその CLAUDE.md から、この文書を指す。下の「各アプリの対応」に行を足す。
 
 ## 版とリリース
