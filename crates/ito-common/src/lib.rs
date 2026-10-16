@@ -20,6 +20,7 @@ mod os_theme;
 pub mod report;
 pub mod runinfo;
 pub mod shellhook;
+pub mod text;
 pub mod update;
 pub mod window;
 

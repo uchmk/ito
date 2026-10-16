@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.52.0] - 2026-10-16
+
+### 追加
+
+- ito-common `text`: 名前の自然順（`natural_cmp`・`alpha_cmp`）、バイト数（`bytes_iec` = yagura の `512 B`/`3.4 KiB`、`bytes_short` = kura の `1.0 K`/`20 M`）、
+  待ち時間（`duration_short`）、稼働時間（`uptime`）。kura の `util.rs` と yagura の `util.rs` から移した（#3 の候補 10）。表記は 2 つのアプリで違うので、どちらも残した。
+  - 使う側がやること: kura は `natural_cmp`・`alpha_cmp`・`human_size`（= `bytes_short`）・`fmt_duration`（= `duration_short`）を、yagura は `fmt_bytes`（= `bytes_iec`）・`fmt_uptime`（= `uptime`）を置き換える。
+
 ## [0.51.1] - 2026-10-16
 
 ### 変更
