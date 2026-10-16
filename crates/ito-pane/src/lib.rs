@@ -31,6 +31,7 @@ mod link;
 mod log;
 mod osc;
 mod pane;
+mod remark;
 mod shell;
 mod sys;
 mod terminal;

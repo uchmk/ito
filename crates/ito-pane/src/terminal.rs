@@ -271,6 +271,11 @@ impl tty::EventedPty for Tapped {
 
 impl alacritty_terminal::event::OnResize for Tapped {
     fn on_resize(&mut self, window_size: WindowSize) {
+        // Here, on the reader's thread: what is read from now on is ConPTY's
+        // screen drawn again at the new size.
+        if cfg!(windows) {
+            self.marks.resized();
+        }
         self.inner.on_resize(window_size)
     }
 }
@@ -361,6 +366,10 @@ pub struct Terminal {
     pictures: crate::image::Pictures,
     /// The cell's size in pixels, as last resized.
     cell: (u16, u16),
+    /// On Windows, the screen's marks as they were before the last resize,
+    /// and when it was, to put back over ConPTY's drawing of it again; see
+    /// [`crate::remark`].
+    remark: Option<(crate::remark::Kept, Instant)>,
     /// The reader thread. It hands the PTY back when it ends, and dropping
     /// that is what ends the shell -- so [`Drop`] waits for it.
     io: Option<std::thread::JoinHandle<(EventLoop<Tapped, Proxy>, alacritty_terminal::event_loop::State)>>,
@@ -535,6 +544,7 @@ impl Terminal {
             charset,
             pictures,
             cell,
+            remark: None,
             io,
         })
     }
@@ -610,7 +620,20 @@ impl Terminal {
                 _ => {}
             }
         }
+        self.put_marks_back();
         clipboard
+    }
+
+    /// After a resize on Windows, the marks back on the lines ConPTY has
+    /// drawn again so far. Over and over, since its drawing comes in as it
+    /// is read, until a second has gone and the shell has written since.
+    fn put_marks_back(&mut self) {
+        let Some((kept, at)) = &self.remark else { return };
+        crate::remark::restore(&mut self.term.lock(), kept);
+        let heard = self.last_out.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|out| out > *at);
+        if heard && at.elapsed() >= crate::remark::REPAINT {
+            self.remark = None;
+        }
     }
 
     pub fn resize(&mut self, size: Size, cell: (u16, u16)) {
@@ -626,7 +649,20 @@ impl Terminal {
         self.size = size;
         // Both halves have to hear about it: the grid reflows, and the shell
         // is signalled so a full-screen program repaints itself.
-        self.term.lock().resize(size);
+        {
+            let mut term = self.term.lock();
+            // ConPTY draws its screen again, without the marks: they are
+            // kept to put back. A resize before the last one's drawing came
+            // keeps what the screen has of both.
+            if cfg!(windows) {
+                if let Some((kept, _)) = &self.remark {
+                    crate::remark::restore(&mut term, kept);
+                }
+                self.remark = Some((crate::remark::resize(&mut term, size), Instant::now()));
+            } else {
+                term.resize(size);
+            }
+        }
         let _ = self.sender.send(Msg::Resize(window_size(size, cell)));
         if let Some(c) = self.cast.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             c.resize(size.cols, size.lines);

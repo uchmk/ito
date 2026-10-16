@@ -1341,6 +1341,78 @@ mod prompt_marks {
         }
     }
 
+    /// After a resize, the link left open closes before the next character
+    /// (what ConPTY draws again is not the input), not inside a sequence
+    /// or a character of UTF-8; with none open, nothing is added.
+    #[test]
+    fn a_resize_closes_the_open_link() {
+        const CLOSE: &[u8] = b"\x1b]8;;\x1b\\";
+        let prompt: &[u8] = b"\x1b]133;A\x07$ \x1b]133;B\x07";
+        let mut marks = PromptLinks::default();
+        marks.feed(prompt).unwrap();
+        marks.resized();
+        assert_eq!(marks.feed(b"\x1b[H$ ").unwrap(), [CLOSE, b"\x1b[H$ "].concat());
+        assert_eq!(marks.feed(b"ls"), None);
+        let mut marks = PromptLinks::default();
+        marks.feed(&[prompt, b"\x1b[2"].concat()).unwrap();
+        marks.resized();
+        assert_eq!(marks.feed(b"5h\x1b]0;t\x07$").unwrap(), [b"5h".as_slice(), CLOSE, b"\x1b]0;t\x07$"].concat());
+        let mut marks = PromptLinks::default();
+        marks.feed(&[prompt, "あ".as_bytes()].concat()).unwrap();
+        marks.feed(&"い".as_bytes()[..1]);
+        marks.resized();
+        assert_eq!(marks.feed(&[&"い".as_bytes()[1..], b"$"].concat()).unwrap(), [&"い".as_bytes()[1..], CLOSE, b"$"].concat());
+        let mut marks = PromptLinks::default();
+        marks.feed(b"out\r\n");
+        marks.resized();
+        assert_eq!(marks.feed(b"\x1b[H$ "), None);
+    }
+
+    /// #16: the last command's output is what is copied after the window
+    /// gets narrower and wider again, and so is the next command's. ConPTY
+    /// draws its screen again at each size without the OSC 133, which left
+    /// none, or the prompts and the commands with it.
+    #[cfg(windows)]
+    #[test]
+    fn the_last_output_outlasts_a_change_of_width() {
+        /// Drained until the shell writes after `since` and then nothing
+        /// for half a second, or ten seconds have gone.
+        fn settle(t: &mut Terminal, since: Instant) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline && !(t.last_output().is_some_and(|at| at > since) && t.quiet_for(Duration::from_millis(500))) {
+                t.drain();
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        let dir = crate::util::test_dir("term-width-output");
+        // Wider than the narrow window, so it wraps there.
+        let prompt = r"prompt $e]133;D$e\$e]133;A$e\C:\some\long\folder\name\to\make\it\wrap$G$e]133;B$e\";
+        let shell = Some(("cmd".to_owned(), vec!["/k".to_owned(), prompt.to_owned()]));
+        let start = Instant::now();
+        let mut t = Terminal::spawn(&dir, Size::new(80, 12), (8, 16), shell, None, || {}).expect("the terminal starts");
+        settle(&mut t, start);
+        let run = |t: &mut Terminal, keys: &[u8]| {
+            let since = Instant::now();
+            t.send(keys.to_vec());
+            settle(t, since);
+        };
+        run(&mut t, b"echo one & echo two\r");
+        assert_eq!(t.command_output().as_deref(), Some("one\ntwo"));
+        let resize = |t: &mut Terminal, cols: usize| {
+            let since = Instant::now();
+            t.resize(Size::new(cols, 12), (8, 16));
+            settle(t, since);
+        };
+        resize(&mut t, 40);
+        assert_eq!(t.command_output().as_deref(), Some("one\ntwo"), "narrower");
+        run(&mut t, b"echo three & echo four\r");
+        assert_eq!(t.command_output().as_deref(), Some("three\nfour"), "narrower, the next command");
+        resize(&mut t, 80);
+        assert_eq!(t.command_output().as_deref(), Some("three\nfour"), "wider again");
+        run(&mut t, b"echo five & echo six\r");
+        assert_eq!(t.command_output().as_deref(), Some("five\nsix"), "wider again, the next command");
+    }
+
     /// `D;<code>` goes on the next prompt's link, and `C` opens a link on
     /// the first row of the output.
     #[test]
