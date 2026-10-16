@@ -3,6 +3,29 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.39.0] - 2026-10-16
+
+### 変更
+
+- ito-common: `window::Window` に `scale`（場所を取ったときの点から画素への倍率。egui の `pixels_per_point`）と
+  `zoom`（そのときのアプリの拡大。egui の `zoom_factor`）を足した。古い `window.toml` は `scale = 0`・`zoom = 1` として読み、
+  今までどおり主の画面の倍率で見る。`seen_on`（`reachable_now`）は場所を取った倍率で画素にして、今ある画面に出るかを見る。
+- ito-common: 窓を作る値は `Window::opening()`（`Opening { pos, size, maximized }`）で取る。アプリの拡大を抜いた位置と内側の大きさを返す。
+  Windows では、eframe の creator で隠れている窓を `Window::put(cc)` に渡すと、場所を取った画素に動かし、最大化ならそこで最大化する。
+  ほかの OS では `put` は何もせず、`opening` の値のとおりに作る。
+  使う側がやること: `Window { … }` を作るところに `scale: ctx.pixels_per_point()`・`zoom: ctx.zoom_factor()` を足す
+  （最大化している間は前の場所を `..was` で保つ）。戻すときは
+  `let o = w.opening(); viewport.with_inner_size(o.size).with_position(o.pos).with_maximized(o.maximized)` にし、
+  eframe の creator の先頭で `w.put(cc)` を呼ぶ。ito-common は `raw-window-handle` 0.6（Pure Rust）に依存する。
+
+### 修正
+
+- ito-common: 倍率の違う 2 つ目の画面で閉じた窓が、次に開くと主の画面に戻る・ずれる（kura #401）。egui は窓を作るときに
+  位置を作った画面の倍率で画素にし、作った後にもう一度、窓が移った画面の倍率で画素にし直すので、どの点の値でも両方は合わない。
+  `put` が隠れている間に画素で動かすので、主の画面 150 %・2 つ目 100 % の組でも閉じた場所に開く。最大化も閉じた画面でする。
+  上の「使う側がやること」をすると、アプリの拡大（`zoom_factor`）が 1 でないときに次に開くと窓が拡大の分だけ縮む
+  （yagura）のも直る。
+
 ## [0.38.2] - 2026-10-16
 
 ### 変更

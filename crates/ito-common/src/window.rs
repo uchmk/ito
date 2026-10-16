@@ -4,8 +4,12 @@
 //! maximized) so a window opens where it was closed.
 //!
 //! Nothing here knows about egui or winit: the app hands in the numbers it
-//! reads from its viewport (logical points) and takes the numbers out.
+//! reads from its viewport (logical points, with the points to pixels and
+//! its own zoom they were taken at), takes out the numbers to make the
+//! window with ([`Window::opening`]) and hands the new window, still hidden,
+//! to [`Window::put`].
 
+use raw_window_handle::HasWindowHandle;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -20,6 +24,20 @@ pub struct Window {
     pub h: f32,
     #[serde(default)]
     pub maximized: bool,
+    /// The points to pixels the numbers were taken at: egui's
+    /// `pixels_per_point`, the scale of the screen the window was on times
+    /// the app's zoom. 0 in a file from before it was kept: the numbers are
+    /// then taken at the primary screen's scale, as they were read then.
+    #[serde(default)]
+    pub scale: f32,
+    /// The app's own zoom when the numbers were taken (egui's
+    /// `zoom_factor`), which a new window is not made at.
+    #[serde(default = "one")]
+    pub zoom: f32,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 /// The smallest size worth restoring: a window of a few points is a broken
@@ -35,8 +53,10 @@ impl Window {
     /// The numbers could be a window someone sees: finite, not tiny, not huge,
     /// not where a minimized window is parked.
     pub fn sane(&self) -> bool {
-        let finite = [self.x, self.y, self.w, self.h].iter().all(|v| v.is_finite());
+        let finite = [self.x, self.y, self.w, self.h, self.scale, self.zoom].iter().all(|v| v.is_finite());
         finite
+            && self.scale >= 0.0
+            && self.zoom > 0.0
             && (MIN_SIDE..=MAX_SIDE).contains(&self.w)
             && (MIN_SIDE..=MAX_SIDE).contains(&self.h)
             && self.x.abs() <= FAR
@@ -54,14 +74,14 @@ impl Window {
 
     /// Whether the title bar would be on one of `screens`: at least `grab`
     /// points of the top edge across, the top edge no more than `grab` above
-    /// the screen's top and at least `grab` above its bottom. The window is
-    /// put back at the points times the primary screen's scale (it is made
-    /// there before it moves), so that is the scale the place is taken at.
+    /// the screen's top and at least `grab` above its bottom. The points are
+    /// turned into pixels at the `scale` they were taken at; a place from
+    /// before that was kept, at the primary screen's (where it was put back).
     pub fn seen_on(&self, screens: &[Screen], grab: f32) -> bool {
         let Some(first) = screens.iter().find(|s| s.primary).or(screens.first()) else {
             return false;
         };
-        let k = first.scale;
+        let k = if self.scale > 0.0 { self.scale } else { first.scale };
         let (left, right, top, grab) = (self.x * k, (self.x + self.w) * k, self.y * k, grab * k);
         self.sane()
             && screens.iter().any(|s| {
@@ -81,6 +101,56 @@ impl Window {
             self.seen_on(&screens, grab)
         }
     }
+
+    /// The corner, the inner size and the maximum to make the window with.
+    ///
+    /// A new window has no zoom yet, so the app's zoom is taken out: the size
+    /// is in the window's own points, which Windows scales when the window
+    /// reaches a screen of another scale. The corner is right where the
+    /// window is made on a screen of the scale it was closed on. On Windows
+    /// egui reads it at the scale of the screen the window is made on and
+    /// then again at the one it reached (kura #401), so [`Window::put`] moves
+    /// the window to its pixels and maximizes it there: it is not maximized
+    /// here. A place from before `scale` was kept is handed back as it was
+    /// read.
+    pub fn opening(&self) -> Opening {
+        self.opened(sys::PUTS)
+    }
+
+    /// [`Window::opening`] where [`Window::put`] does (`puts`) or does not
+    /// move and maximize the window.
+    fn opened(&self, puts: bool) -> Opening {
+        let maximized = self.maximized && !puts;
+        if self.scale <= 0.0 {
+            return Opening { pos: [self.x, self.y], size: [self.w, self.h], maximized };
+        }
+        let z = self.zoom;
+        Opening { pos: [self.x * z, self.y * z], size: [self.w * z, self.h * z], maximized }
+    }
+
+    /// Put the window made with [`Window::opening`] on the pixels the place
+    /// was taken at and maximize it there, before it is first shown: eframe
+    /// hands the window to the app's creator hidden (`CreationContext`).
+    /// Only on Windows; elsewhere the window is already where `opening` said.
+    pub fn put(&self, window: &impl HasWindowHandle) {
+        sys::put(self, window);
+    }
+
+    /// The outer corner in pixels, where the place says at what scale it was
+    /// taken.
+    #[cfg(any(windows, test))]
+    fn pixel(&self) -> Option<(i32, i32)> {
+        (self.scale > 0.0).then(|| ((self.x * self.scale).round() as i32, (self.y * self.scale).round() as i32))
+    }
+}
+
+/// How to make the window: egui's `ViewportBuilder::with_position`,
+/// `with_inner_size` and `with_maximized`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opening {
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    pub maximized: bool,
 }
 
 /// A screen: where it is and how big in pixels (the whole of it, the taskbar
@@ -103,16 +173,52 @@ pub fn screens() -> Vec<Screen> {
 
 #[cfg(windows)]
 mod sys {
-    use super::Screen;
+    use super::{Screen, Window};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::core::BOOL;
-    use windows::Win32::Foundation::{LPARAM, RECT};
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
     use windows::Win32::UI::HiDpi::{
         GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsWindowVisible, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE,
+    };
 
     /// `MONITORINFOF_PRIMARY` (in WindowsAndMessaging, not worth the feature).
     const PRIMARY: u32 = 1;
+
+    /// [`Window::put`] moves and maximizes the window.
+    pub const PUTS: bool = true;
+
+    pub fn put(place: &Window, window: &impl HasWindowHandle) {
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+            return;
+        };
+        let hwnd = HWND(raw.hwnd.get() as *mut std::ffi::c_void);
+        // SAFETY: `hwnd` is the app's window, alive while `window` is
+        // borrowed, and this is the thread that made it.
+        unsafe {
+            if let Some((x, y)) = place.pixel() {
+                // Onto a screen of another scale Windows sends WM_DPICHANGED,
+                // and winit keeps the window's size in points.
+                let _ = SetWindowPos(hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            if place.maximized {
+                // As winit maximizes a window that is not shown yet: shown
+                // maximized and hidden again. winit reads the maximum from
+                // WM_SIZE and keeps it when eframe shows the window.
+                let shown = IsWindowVisible(hwnd).as_bool();
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+                if !shown {
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
+            }
+        }
+    }
 
     pub fn screens() -> Vec<Screen> {
         let mut out: Vec<Screen> = Vec::new();
@@ -169,6 +275,11 @@ mod sys {
     pub fn screens() -> Vec<super::Screen> {
         Vec::new()
     }
+
+    /// The window is made where [`super::Window::opening`] said.
+    pub const PUTS: bool = false;
+
+    pub fn put(_: &super::Window, _: &impl raw_window_handle::HasWindowHandle) {}
 }
 
 /// `window.toml` in `dir`.
@@ -196,7 +307,7 @@ mod tests {
     use super::*;
 
     fn win(x: f32, y: f32, w: f32, h: f32) -> Window {
-        Window { x, y, w, h, maximized: false }
+        Window { x, y, w, h, maximized: false, scale: 0.0, zoom: 1.0 }
     }
 
     #[test]
@@ -212,6 +323,15 @@ mod tests {
         assert_eq!(read(&dir), Some(w));
         std::fs::write(path(&dir), "x = 1\nw = 5\n").unwrap();
         assert_eq!(read(&dir), None);
+        // With the scale and the zoom it was taken at.
+        let w = Window { scale: 1.875, zoom: 1.25, ..win(4493.0, 280.0, 1100.0, 700.0) };
+        write(&dir, &w).unwrap();
+        assert_eq!(read(&dir), Some(w));
+        // A file from before those were kept reads as unscaled and unzoomed.
+        std::fs::write(path(&dir), "x = 120.0\ny = 80.0\nw = 1100.0\nh = 700.0\n").unwrap();
+        assert_eq!(read(&dir), Some(win(120.0, 80.0, 1100.0, 700.0)));
+        std::fs::write(path(&dir), "x = 120.0\ny = 80.0\nw = 1100.0\nh = 700.0\nzoom = 0.0\n").unwrap();
+        assert_eq!(read(&dir), None, "no zoom is a broken number");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -265,6 +385,55 @@ mod tests {
         let big = [screen(0.0, 0.0, 2560.0, 1440.0, 1.5, true)];
         assert!(!win(2000.0, 100.0, 900.0, 600.0).seen_on(&big, 100.0));
         assert!(win(1500.0, 100.0, 900.0, 600.0).seen_on(&big, 100.0));
+    }
+
+    #[test]
+    fn a_place_on_a_second_screen_at_another_scale_is_kept_and_put_back() {
+        // kura #401: a 3840x2160 primary at 150% and a 2560x1440 screen at
+        // 100% to its right. Closed on the second one, at pixels 4493,280.
+        let two = [screen(0.0, 0.0, 3840.0, 2160.0, 1.5, true), screen(3840.0, 0.0, 2560.0, 1440.0, 1.0, false)];
+        let on_second = Window { scale: 1.0, ..win(4493.0, 280.0, 1102.0, 721.0) };
+        assert!(on_second.seen_on(&two, 100.0), "taken at 100%, the corner is pixel 4493");
+        assert!(!win(4493.0, 280.0, 1102.0, 721.0).seen_on(&two, 100.0), "an older file is read at 150%: pixel 6739");
+        // Put back on those pixels, whatever screen the window is made on.
+        assert_eq!(on_second.pixel(), Some((4493, 280)));
+        assert_eq!(on_second.opened(true), Opening { pos: [4493.0, 280.0], size: [1102.0, 721.0], maximized: false });
+        // Closed on the primary: pixel 152, the numbers as they were.
+        let on_first = Window { scale: 1.5, ..win(101.33, 101.33, 1102.0, 721.0) };
+        assert!(on_first.seen_on(&two, 100.0));
+        assert_eq!(on_first.pixel(), Some((152, 152)));
+        assert_eq!(on_first.opened(false).pos, [101.33, 101.33]);
+        // The other way round: a 100% primary, a 150% screen to its right.
+        let other = [screen(0.0, 0.0, 2560.0, 1440.0, 1.0, true), screen(2560.0, 0.0, 3840.0, 2160.0, 1.5, false)];
+        let on_big = Window { scale: 1.5, ..win(2000.0, 100.0, 1000.0, 700.0) };
+        assert!(on_big.seen_on(&other, 100.0), "pixel 3000, on the 150% screen");
+        assert_eq!(on_big.pixel(), Some((3000, 150)));
+        // An older file says no scale: not moved.
+        assert_eq!(win(2000.0, 100.0, 1000.0, 700.0).pixel(), None);
+    }
+
+    #[test]
+    fn a_maximized_window_is_maximized_where_it_is_put() {
+        let max = Window { maximized: true, scale: 1.0, ..win(4493.0, 280.0, 1100.0, 720.0) };
+        // Where `put` moves the window, it maximizes it there too: made
+        // maximized, it would be on the screen it was made on.
+        assert!(!max.opened(true).maximized);
+        assert!(max.opened(false).maximized);
+        assert!(Window { scale: 0.0, ..max }.opened(false).maximized);
+        assert_eq!(max.opening().maximized, !sys::PUTS);
+    }
+
+    #[test]
+    fn the_app_s_zoom_is_taken_out_of_the_place() {
+        // At 125% zoom on a 150% screen: pixel 300,150, 1875x1500 pixels.
+        let zoomed = Window { scale: 1.875, zoom: 1.25, ..win(160.0, 80.0, 1000.0, 800.0) };
+        let one = [screen(0.0, 0.0, 3840.0, 2160.0, 1.5, true)];
+        assert!(zoomed.seen_on(&one, 100.0));
+        assert_eq!(zoomed.opened(true), Opening { pos: [200.0, 100.0], size: [1250.0, 1000.0], maximized: false });
+        assert_eq!(zoomed.pixel(), Some((300, 150)));
+        // An older file is handed back as it was read.
+        let old = win(160.0, 80.0, 1000.0, 800.0);
+        assert_eq!(old.opened(true), Opening { pos: [160.0, 80.0], size: [1000.0, 800.0], maximized: false });
     }
 
     #[test]

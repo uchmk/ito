@@ -24,8 +24,12 @@ serde_json = "1"
 # and the environment), no C to build.
 sys-locale = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"], optional = true }
+# The window handed to `window::Window::put` (what eframe's `CreationContext`
+# is); Pure Rust, no dependencies.
+raw-window-handle = "0.6"
 
 [target."cfg(windows)".dependencies]
 # The OS's light or dark from the registry (`OsLight`): winit's lags a switch.
-# The screens there are now (`window::screens`), before winit has a window.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Registry", "Win32_UI_HiDpi"] }
+# The screens there are now (`window::screens`), before winit has a window,
+# and putting the new window on its pixels (`window::Window::put`).
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
