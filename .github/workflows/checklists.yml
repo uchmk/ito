@@ -15,7 +15,7 @@ name: Checklists
 # stays red until then). tsumugi, minato and michi generate theirs with their
 # own make-testcheck, not with this crate.
 #
-# No `--locked`: the patch rewrites kura's Cargo.lock in the runner's checkout.
+# No `--locked`: kura's Cargo.lock is rewritten in the runner's checkout.
 # ito-testcheck depends on no other ito crate, so the rest of ito comes from
 # the rev kura pins.
 
@@ -67,6 +67,12 @@ jobs:
           ito-testcheck = { path = "$GITHUB_WORKSPACE/ito/crates/ito-testcheck" }
           EOF
           cat kura/.cargo/config.toml
+      # Once ito's version is ahead of the rev kura pins, Cargo keeps the
+      # locked ito-testcheck and only warns that the patch went unused, so the
+      # lock is moved onto the patch first.
+      - name: Lock the patched ito-testcheck
+        working-directory: kura
+        run: cargo update -p ito-testcheck
       - name: kura's key checklist
         working-directory: kura
         run: cargo run --example make-keycheck -- --check
