@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.38.2] - 2026-10-16
+
+### 変更
+
+- `scripts/lanes/merge-lanes.py`: yagura の実機レーンの PR は、yagura の `Checklists`（`checklists.yml` の `checklists` のジョブ。
+  yagura v0.65.1 から、TESTING.md の行の形を確かめる）が緑になるまでマージしない（`required_checks`）。印を 1 つも変えない PR は今までどおり待たない。
+  分け前を main に push した後は、kura・tsumugi と同じく `ci.yml` と `checklists.yml` を `workflow_dispatch` で回す（ワークフローの token の push では何も走らない）。
+  使う側がやること: yagura は `rev` を上げて `scripts/lanes.sh sync` し、`checklists.yml` を足し、`ci.yml` に `workflow_dispatch` を足す（v0.65.1）。
+  kura・tsumugi は次に `rev` を上げたときに `scripts/lanes.sh sync` するだけ（規則は変わらない）。
+- `merge-lanes.py` の冒頭の説明から「yagura にはレーンが無い」を消した（yagura のレーンは v0.21.2 から扱っている）。
+
 ## [0.38.1] - 2026-10-16
 
 ### 修正
