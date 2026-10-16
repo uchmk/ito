@@ -1,0 +1,11 @@
+[package]
+name = "ito-console"
+description = "The console front of a windowed Windows program (<app>.com beside <app>.exe), and writers that let an answer go rather than panic on a pipe nobody reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }

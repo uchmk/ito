@@ -3,6 +3,26 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.42.0] - 2026-10-16
+
+### 追加
+
+- ito-console（新しいクレート）: Windows の窓のアプリの前に置くコンソールの前段 `front(app, answers_in_text)`（`<app>.exe` の横の
+  `<app>.com`）。kura・yagura・tsumugi・minato・michi がそれぞれ 200 行ほどずつ持っていたものを 1 つにした。文字で答えるコマンドラインは
+  `<app>.exe` を同じハンドルで走らせて待ち、ほかは窓が入力を待ち始めたら戻る（その前に終われば、断りの 1 行と終了コードを渡す）。
+  どれを文字で答えるかはアプリが決める。kura と yagura の規則（値を取るオプションの値を飛ばして左から読む）は `any_of` にした。
+  窓の出力がパイプのときは、窓にパイプでなく一時フォルダのファイル（`<app>-com-<pid>-<n>.out`・`.err`。窓が終われば消える）を渡し、
+  窓が上がった時点までの中身をパイプへ写す。これまで kura・yagura・minato・michi は窓にパイプを渡して写していたので、`.com` が
+  終わった後の窓の書き込みが誰も読まないパイプに当たり得た。tsumugi は窓にコンソールを渡していたので、パイプで受けた断りが消えていた。
+  出力がコンソールかファイルなら、窓はこれまでどおりそれを持つ。
+- ito-console: 答えを書く `out`・`err`。ファイルかパイプならそこへ、どちらでもなければ（窓のプログラムを cmd から起こしたとき）
+  親のコンソールへ UTF-16 で書く。書けなければ捨てる（`println!` は、PowerShell が読まずに閉じたパイプで panic する）。改行は足さない。
+- docs/common-spec.md: 「Windows のコンソールの前段（`<app>.com`）」の節。
+
+使う側がやること: `ito-console` を足し（ほかの ito のクレートと同じ `rev`）、`src/bin/<app>-com.rs` を `answers_in_text` と
+`fn main() { ito_console::front("<app>", answers_in_text) }` にする。答えを書く自前の関数（kura・minato・michi の `say`、tsumugi の
+`out`）の中身を `ito_console::out`・`err` にし、`println!` で書いている答えもそれにする。使わなくなった `windows` / `windows-sys` の機能を外す。
+
 ## [0.41.0] - 2026-10-16
 
 ### 追加

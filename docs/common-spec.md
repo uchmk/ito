@@ -182,6 +182,23 @@ prepend_keymap = [
 | `--help`・`-h` | 使い方を出して終わる |
 | `--keys "<script>"` | 実機のテスト用。起動したあと、アプリの中でキーを順に押す（下の「キーの台本」）。終わったら `<APP>_KEYS_DONE` のファイルに状態を書く |
 
+### Windows のコンソールの前段（`<app>.com`）
+
+`<app>.exe` は窓のプログラムなので、PowerShell はそれを待たず、出力も受け取らない（`$v = & kura --version` が空になり、`kura env` は
+次のプロンプトの後に出た。kura #160・#176・#183）。そこで Windows のリリースの zip には、横にコンソールのプログラム `<app>.com` を入れる。
+`PATHEXT` で `.COM` が `.EXE` より先なので、`<app>` と打てばこちらが動く（Visual Studio の `devenv.com` と同じ形）。
+
+- 中身は `ito-console` の `front`。`src/bin/<app>-com.rs` は `fn main() { ito_console::front("<app>", answers_in_text) }` と、
+  どのコマンドラインが文字で答えるかの関数（`answers_in_text`）だけにする。値を取るオプションの値を飛ばして左から読む規則は `ito_console::any_of`。
+- 文字で答えるもの（`--version`・`--help`・`env` など）は、`<app>.exe` を同じ引数・同じハンドルで走らせて待ち、終了コードを渡す。
+- ほかは窓を開き、窓が入力を待ち始めたら戻る。その前に `<app>.exe` が終われば（`--keys` の台本を断ったなど）、断りの 1 行と終了コードを渡す。
+- 窓には `.com` のほかのハンドルを渡さない（パイプの読み手が窓の終わりまで待たされた。kura #192）。出力がパイプなら、窓は一時フォルダの
+  自分のファイルに書き、`.com` は窓が上がった時点までの中身をパイプへ写す。ファイルは窓が終われば消える。
+- `<app>.exe` は答えを `ito_console::out`・`err` で書く（ファイルかパイプならそこへ、どちらでもなければ親のコンソールへ。書けなければ捨てる）。
+  `println!` は、PowerShell が読まずに閉じたパイプ（`$v = & <app>.exe --version`）で panic する。
+- ビルドの成果物は `<app>-com.exe`。リリースの zip と CI では `<app>.com` に写す。CI は `--version` をパイプで受けることと、
+  `<app>.exe --version` が閉じたパイプでも 0 で終わることを確かめる。
+
 ### キーの台本（`--keys`）
 
 人の手を使わずに、窓を開いたままキーとクリックを送り、画面と状態を残す。実機のテストのセッション（Agent）がこれで確かめる。
@@ -331,7 +348,8 @@ scale: 100%           # 書くなら倍率を % で
    keymap.toml の `prepend_keymap` に書き、読み直す。上の「設定の画面から変えるとき」）。TESTING.md にキーのページの行を足す。
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
-8. `--version`・`--help`・`--keys "<script>"` を受ける。
+8. `--version`・`--help`・`--keys "<script>"` を受ける。答えは `ito_console::out`・`err` で書き、Windows には `<app>.com` を付ける
+   （上の「Windows のコンソールの前段」）。
 9. `scripts/verify.sh`・`release.yml`・`release-sums.yml` を kura か yagura から写す（下の「版とリリース」）。
 10. README とその CLAUDE.md から、この文書を指す。下の「各アプリの対応」に行を足す。
 
@@ -370,5 +388,6 @@ scale: 100%           # 書くなら倍率を % で
 | 窓 1280×800 | ○（config で変えられる） | ○ | ○ |
 | 窓の位置と大きさを覚える | × | ○（kura 0.107） | × |
 | `--version`・`--help` | ○ | ○ | ○ |
+| Windows の `<app>.com`（`ito_console`） | ○ | ○ | ○（minato・michi も） |
 | `--keys` | ○ | ○ | ○（0.95） |
 | `mcp`・`shell-hook` | ○ | — | ○ |

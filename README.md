@@ -20,6 +20,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-select` | Picking up painted text with the mouse and copying it: for panes drawn with a painter, not made of widgets |
 | `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys) |
 | `ito-graph` | A commit graph laid out row by row: lanes, edges, a colour per branch and the curves between rows, and the drawing in egui |
+| `ito-console` | The console front of a windowed program on Windows (`<app>.com` beside `<app>.exe`), and writing an answer that lets go rather than panic on a pipe nobody reads |
 
 What the apps keep the same (`common.toml`, the settings screen, the themes,
 the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
