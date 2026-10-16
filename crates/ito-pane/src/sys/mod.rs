@@ -12,29 +12,56 @@ mod unix;
 pub use unix::*;
 
 /// A process as the table of them says it: its parent, the name of its
-/// program (no `.exe`), and its arguments where the system tells them
-/// (Linux, macOS; empty on Windows).
+/// program (no `.exe`), its arguments where the system tells them (Linux,
+/// macOS; empty on Windows), and when it started where that is needed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Proc {
     pub pid: u32,
     pub ppid: u32,
     pub name: String,
     pub args: Vec<String>,
+    /// When it started, in the system's own ticks (Windows: 100 ns since
+    /// 1601). 0 where unknown, as off Windows, where a process whose parent
+    /// ends is given another and `ppid` never names one that has gone.
+    pub started: u64,
 }
 
 /// Every process under `root` in `table` (children, theirs, …), `root` not
 /// among them.
+///
+/// On Windows a process keeps its parent's id after the parent ends, and the
+/// id goes to another process. A shell given the id of explorer.exe's
+/// long-gone parent had explorer.exe and all it started "under" it, and a
+/// test's shell had the test itself, which closing the pane then ended
+/// (tsumugi #175). So a process that started before the one it names as its
+/// parent is not that one's child, where both times are known.
 pub fn descendants(table: &[Proc], root: u32) -> Vec<&Proc> {
+    let since = table.iter().find(|p| p.pid == root).map_or(0, |p| p.started);
+    descendants_since(table, root, since)
+}
+
+/// [`descendants`] of a `root` that started at `since` (0: unknown), which
+/// need not be in `table`: a shell that has just ended is not.
+pub(crate) fn descendants_since(table: &[Proc], root: u32, since: u64) -> Vec<&Proc> {
     let mut out: Vec<&Proc> = Vec::new();
-    let mut parents = vec![root];
-    while let Some(parent) = parents.pop() {
-        let found: Vec<&Proc> = table.iter().filter(|p| p.ppid == parent && p.pid != root && !out.iter().any(|o| o.pid == p.pid)).collect();
+    let mut parents = vec![(root, since)];
+    while let Some((parent, since)) = parents.pop() {
+        let found: Vec<&Proc> = table
+            .iter()
+            .filter(|p| p.ppid == parent && p.pid != root && !older(p.started, since) && !out.iter().any(|o| o.pid == p.pid))
+            .collect();
         for p in found {
             out.push(p);
-            parents.push(p.pid);
+            parents.push((p.pid, p.started));
         }
     }
     out
+}
+
+/// Whether a process that started at `child` is older than one that started
+/// at `parent`, and so not its child; never when either is unknown (0).
+pub(crate) fn older(child: u64, parent: u64) -> bool {
+    child > 0 && parent > 0 && child < parent
 }
 
 /// A program's name as compared: the file's stem, lower case.

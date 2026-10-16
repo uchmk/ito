@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.45.0] - 2026-10-16
+
+### 修正
+
+- ito-pane（Windows）: ペインを閉じたときの `end_tree` が、シェルの子でないプロセスまで終わらせることがあった。Windows では親が終わっても
+  子は親の PID を持ち続け、その PID は別のプロセスに回る。シェルがたまたま、とうに終わった親の PID をもらうと、その「子」（例: explorer.exe と
+  そこから起きたもの全部）がシェルの下に見えていた。CI ではテストのサーバーが自分のテストのプロセスを終わらせ、lib のテストが
+  `test result` の行も無く exit 1 で終わっていた（tsumugi #175）。プロセスの起動の時刻（`GetProcessTimes`）を見て、親より先に起きたものは
+  その親の子と見なさない。`end_tree` は自分のプロセスも終わらせない。`children`・`named_children` も同じ見方をする。
+
+### 変更
+
+- ito-pane: `Proc` に `started: u64`（起動の時刻。Windows は 1601 年からの 100 ns、分からなければ 0。Windows 以外は常に 0）を足した。
+  `descendants` は両方の時刻が分かるとき、親より先に起きたものを子に数えない。Windows の `process_table` は 1 回につき 0.4 ms ほど（プロセス 430 個で）遅くなる。
+
+使う側がやること: `ito_pane::Proc { pid, ppid, name, args }` と書いているところに `started: 0` か `..Default::default()` を足す。
+
 ## [0.44.1] - 2026-10-16
 
 ### 修正

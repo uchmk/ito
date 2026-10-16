@@ -48,7 +48,7 @@ pub fn process_table() -> Vec<super::Proc> {
                 let args = std::fs::read(format!("/proc/{pid}/cmdline"))
                     .map(|b| b.split(|c| *c == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
                     .unwrap_or_default();
-                Some(super::Proc { pid, ppid, name, args })
+                Some(super::Proc { pid, ppid, name, args, started: 0 })
             })
             .collect()
     }
@@ -63,7 +63,7 @@ pub fn process_table() -> Vec<super::Proc> {
                 let ppid = it.next()?.parse().ok()?;
                 let args: Vec<String> = it.map(str::to_owned).collect();
                 let name = args.first().map(|a| super::stem(a)).unwrap_or_default();
-                Some(super::Proc { pid, ppid, name, args })
+                Some(super::Proc { pid, ppid, name, args, started: 0 })
             })
             .collect()
     }

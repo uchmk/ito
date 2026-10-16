@@ -5,12 +5,20 @@
 pub fn end_tree(pid: u32) {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
+    // When the shell started, asked of the shell itself: one that has just
+    // ended is not in the table, and its id is not another's yet, as the
+    // pane keeps a handle to it. One that cannot be opened has gone, and
+    // whatever has its id now is not ours to end.
+    let Some(since) = started(pid) else { return };
     // One look at the table, walked by `descendants`, which visits each
     // process once: a recursion by parent ids could loop for ever when an
     // id was used again (a dead parent's id now a child's), and asked the
-    // table afresh at every level (the source review, 2026-10-07).
-    let table = process_table();
-    let mut all: Vec<u32> = super::descendants(&table, pid).into_iter().map(|p| p.pid).collect();
+    // table afresh at every level (the source review, 2026-10-07). This
+    // process is never among them, nor what is under it only through it:
+    // a test's server ended itself so (tsumugi #175).
+    let me = std::process::id();
+    let table: Vec<super::Proc> = process_table().into_iter().filter(|p| p.pid != me).collect();
+    let mut all: Vec<u32> = super::descendants_since(&table, pid, since).into_iter().map(|p| p.pid).collect();
     all.reverse();
     all.push(pid);
     for p in all {
@@ -45,8 +53,11 @@ pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     let mut out = Vec::new();
     let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
     let mut ok = unsafe { Process32FirstW(snap, &mut e) }.is_ok();
+    // One that started before `pid` names an earlier holder of the id as
+    // its parent (see `descendants`).
+    let since = started(pid).unwrap_or(0);
     while ok {
-        if e.th32ParentProcessID == pid && e.th32ProcessID != pid {
+        if e.th32ParentProcessID == pid && e.th32ProcessID != pid && !super::older(started(e.th32ProcessID).unwrap_or(0), since) {
             let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
             out.push((e.th32ProcessID, String::from_utf16_lossy(&e.szExeFile[..len])));
         }
@@ -56,8 +67,23 @@ pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     out
 }
 
+/// When `pid` started, in 100 ns since 1601; `None` when it cannot be
+/// opened to ask (gone, or one of the system's own).
+fn started(pid: u32) -> Option<u64> {
+    use windows::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let (mut created, mut ended, mut kernel, mut user) =
+        (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    let ok = unsafe { GetProcessTimes(h, &mut created, &mut ended, &mut kernel, &mut user) }.is_ok();
+    let _ = unsafe { CloseHandle(h) };
+    let at = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    (ok && at > 0).then_some(at)
+}
+
 /// Every process, from one snapshot; Windows does not give the arguments
-/// without reading the process's memory, so they are left empty.
+/// without reading the process's memory, so they are left empty. Each one's
+/// start is asked of it, for [`super::descendants`].
 pub fn process_table() -> Vec<super::Proc> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -72,7 +98,8 @@ pub fn process_table() -> Vec<super::Proc> {
     while ok {
         let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
         let name = super::stem(&String::from_utf16_lossy(&e.szExeFile[..len]));
-        out.push(super::Proc { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, name, args: Vec::new() });
+        let pid = e.th32ProcessID;
+        out.push(super::Proc { pid, ppid: e.th32ParentProcessID, name, args: Vec::new(), started: started(pid).unwrap_or(0) });
         ok = unsafe { Process32NextW(snap, &mut e) }.is_ok();
     }
     let _ = unsafe { CloseHandle(snap) };

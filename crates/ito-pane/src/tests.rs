@@ -1197,10 +1197,51 @@ mod alt_screen_tests {
 
 /// What runs under a pane, and what it listens on.
 mod processes {
-    use crate::sys::{descendants, stem, Proc};
+    use crate::sys::{descendants, descendants_since, stem, Proc};
 
     fn p(pid: u32, ppid: u32, name: &str) -> Proc {
-        Proc { pid, ppid, name: name.into(), args: Vec::new() }
+        Proc { pid, ppid, name: name.into(), ..Proc::default() }
+    }
+
+    /// Windows keeps a parent's id after the parent ends and gives the id to
+    /// another process: one older than the process it names as its parent is
+    /// not under it, nor is what it started (tsumugi #175).
+    #[test]
+    fn a_process_older_than_its_parent_is_not_under_it() {
+        let at = |pid, ppid, name, started| Proc { started, ..p(pid, ppid, name) };
+        let table = vec![
+            at(20, 1, "pwsh", 100),
+            // explorer.exe, whose long-gone parent had the shell's id, and
+            // what was started from it.
+            at(30, 20, "explorer", 50),
+            at(31, 30, "tsumugi", 60),
+            at(40, 20, "claude", 150),
+            // A start not known: taken as before.
+            at(41, 40, "node", 0),
+        ];
+        let sorted = |found: Vec<&Proc>| {
+            let mut pids: Vec<u32> = found.iter().map(|p| p.pid).collect();
+            pids.sort_unstable();
+            pids
+        };
+        assert_eq!(sorted(descendants(&table, 20)), [40, 41]);
+        // A shell that has just ended is not in the table; its start is given.
+        assert_eq!(sorted(descendants_since(&table[1..], 20, 100)), [40, 41]);
+        // No starts known, as off Windows: every child, as before.
+        assert_eq!(sorted(descendants_since(&table[1..], 20, 0)), [30, 31, 40, 41]);
+    }
+
+    /// On Windows the table says when each process started: this test after
+    /// what started it, and so under it.
+    #[cfg(windows)]
+    #[test]
+    fn each_process_says_when_it_started() {
+        let table = crate::sys::process_table();
+        let me = table.iter().find(|p| p.pid == std::process::id()).expect("this process is in the table");
+        let parent = table.iter().find(|p| p.pid == me.ppid).expect("what started it is in the table");
+        assert!(parent.started > 0 && parent.started <= me.started, "{parent:?} then {me:?}");
+        assert!(descendants(&table, parent.pid).iter().any(|p| p.pid == me.pid));
+        assert!(crate::sys::children(parent.pid).contains(&me.pid));
     }
 
     #[test]
