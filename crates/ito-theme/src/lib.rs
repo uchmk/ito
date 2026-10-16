@@ -59,7 +59,7 @@ const BUILTIN: [(&str, bool, [u32; 12]); 13] = [
     (
         "tsumugi Light",
         true,
-        [0xf7f8fa, 0xeef0f3, 0xffffff, 0xdde1e7, 0x1f2430, 0x5a6272, 0xb07c1a, 0x137a7a, 0xc43642, 0x2e7d3a, 0x2a5db0, 0x8a3fb5],
+        [0xf7f8fa, 0xeef0f3, 0xffffff, 0xdde1e7, 0x1f2430, 0x5a6272, 0x8f6515, 0x137979, 0xc43642, 0x2d7b39, 0x2a5db0, 0x8a3fb5],
     ),
     (
         "Tokyo Night",
@@ -74,7 +74,7 @@ const BUILTIN: [(&str, bool, [u32; 12]); 13] = [
     (
         "Catppuccin Latte",
         true,
-        [0xeff1f5, 0xe6e9ef, 0xffffff, 0xccd0da, 0x4c4f69, 0x5c5f77, 0xb46a0a, 0x04769f, 0xd20f39, 0x40a02b, 0x1e66f5, 0x8839ef],
+        [0xeff1f5, 0xe6e9ef, 0xffffff, 0xccd0da, 0x4c4f69, 0x5c5f77, 0x985908, 0x047097, 0xd20f39, 0x307720, 0x0c5af4, 0x8839ef],
     ),
     (
         "Dracula",
@@ -399,6 +399,23 @@ mod tests {
             assert!(contrast(c.dim, c.bg) >= 4.5, "{name}: dim text {:.1}", contrast(c.dim, c.bg));
             for (what, s) in [("wait", c.wait), ("run", c.run), ("err", c.err), ("done", c.done)] {
                 assert!(contrast(s, c.panel) >= 3.0, "{name}: {what} {:.1}", contrast(s, c.panel));
+            }
+        }
+    }
+
+    #[test]
+    fn the_status_colours_of_the_light_themes_reach_aa() {
+        // (theme, slots that must read at 4.5:1 on bg, side and panel); the others are measured but not yet held to it.
+        let held: [(&str, &[&str]); 2] =
+            [("tsumugi Light", &["wait", "run", "done"]), ("Catppuccin Latte", &["wait", "run", "done", "blue"])];
+        for t in builtin().into_iter().filter(|t| t.colors.light) {
+            let Some((_, slots)) = held.iter().find(|(n, _)| *n == t.name) else { continue };
+            let mut c = t.colors;
+            for slot in *slots {
+                let fg = *c.slot(slot).unwrap();
+                for (on, bg) in [("bg", c.bg), ("side", c.side), ("panel", c.panel)] {
+                    assert!(contrast(fg, bg) >= 4.5, "{}: {slot} on {on} {:.2}", t.name, contrast(fg, bg));
+                }
             }
         }
     }

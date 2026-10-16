@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.46.1] - 2026-10-16
+
+### 修正
+
+- ito-theme: 明るい 2 つのテーマの状態の色を、bg・side・panel のどれの上でも WCAG AA（4.5:1）に届くまで暗くした（色相は変えず明度だけ）。
+  - tsumugi Light: wait `#b07c1a`→`#8f6515`、run `#137a7a`→`#137979`、done `#2e7d3a`→`#2d7b39`。
+  - Catppuccin Latte: wait `#b46a0a`→`#985908`、run `#04769f`→`#047097`、done `#40a02b`→`#307720`、blue `#1e66f5`→`#0c5af4`（本家の配色から少し外れる）。
+  - テスト `the_status_colours_of_the_light_themes_reach_aa` で守る。
+  - 使う側がやること: `rev` を上げて `Cargo.lock` を合わせるだけ（API の変更なし）。
+  - 未対応（測っただけ）: Gruvbox Light の wait・done、Solarized Light の wait・blue・magenta なども 4.5:1 に届かない。
+
 ## [0.46.0] - 2026-10-16
 
 ### 追加
