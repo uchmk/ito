@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.51.0] - 2026-10-16
+
+### 追加
+
+- ito-common `report::version_rows(version, os_line)`・`files_rows(app)`・`presence(path)`: `<app> env` の最初の 2 節(Version/Executable/OS/Debug と、
+  uchmk フォルダ・アプリのフォルダ・common.toml・themes・状態フォルダ・last-run.toml)を全アプリで同じ行・同じ字面にする（#3 の候補 7）。
+  - 使う側がやること: kura・yagura の `envreport.rs` の `version()` と `files()` の共通の行をこれに置き換え（`os_line` は `ito_bugreport::os_line()` を渡す）、
+    アプリ固有の行はその後ろに足す。tsumugi の `env` は `report::section` 形式（`Key : value`）に寄せる。
+
 ## [0.50.0] - 2026-10-16
 
 ### 追加
