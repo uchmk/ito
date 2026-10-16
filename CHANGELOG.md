@@ -3,6 +3,35 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.47.0] - 2026-10-16
+
+### 追加
+
+- ito-notify: Webhook の送り先を幾つでも持てる（tsumugi #164）。`webhook::Place`（`url`・`format`・`states`）が設定の
+  `[[notify.webhooks]]` の 1 つで、`states` に送る出来事の名前を並べる（例: ntfy には `["waiting", "error"]`、Discord には `["done"]`）。
+  `webhook::places(old, list)` が前の 1 つだけの形（`[notify] webhook`・`webhook_format`・`webhook_states`）を 1 つ目の送り先にして
+  表の前に置き、`webhook::send_all(places, state, …)` がその出来事を受ける送り先すべてに送る。`Place::problems` は設定の警告の文。
+- ito-prefs: 通知のページの「Webhook」のカードが送り先の一覧になった。送り先ごとに名前（1 つなら「Webhook」、2 つ以上なら
+  「Webhook 1」「Webhook 2」…）と「外す」「ここに試しに送る」、アドレスと形式。最後に「アドレスを足す」。出来事ごとに送り分けるアプリでは、
+  「知らせるとき」の表に送り先ごとの行が出る。`webhook_rows` は同じ行を自分のカードに置くアプリ（tsumugi）のため。
+  `write_webhooks(text, places, states)` が設定ファイルの `[[notify.webhooks]]` を書き、前の 1 つだけの鍵を取り去る。
+
+### 変更
+
+- ito-common: `set_tables` が表を `name`・`addr` のほかに `url` でも見分ける（`[[notify.webhooks]]` の表が、間の 1 つを外しても
+  コメントと一緒に残るように）。
+
+### 使う側がやること
+
+- `ito_prefs::Notify` の `webhook`（出来事ごとのスイッチ）・`webhook_url`・`webhook_format` が `hooks: Vec<Hook>` になった。
+  `Hook { url, format, on }` の `on` は出来事ごとのスイッチで、空なら全部の出来事を送り、表に行を出さない。
+  設定から作るときは `Hook::of(&place, events, rows)`、送るときは `hook.place(events)`。
+- `notify_page` は `bool` でなく `Option<Test>` を返す（`Test::All` は上の「試しに送る」、`Test::Hook(k)` は k 番目の送り先だけ）。
+- `Words::notify_webhook_note` は無くなった（新しい言葉は `webhook_empty`・`webhook_add`・`webhook_remove`・`webhook_test`・
+  `webhook_none`・`webhook_more`）。
+- 設定を読むときは `[[notify.webhooks]]` を読み、前の鍵を `webhook::places` で頭に足す。送るときは `webhook::send_all`、
+  書くときは `write_webhooks`（出来事が 1 つのアプリは `states` を書かなくてよい）。
+
 ## [0.46.1] - 2026-10-16
 
 ### 修正

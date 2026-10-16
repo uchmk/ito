@@ -1,7 +1,62 @@
 //! A message sent elsewhere: an ntfy topic (the phone's notification), a
 //! Slack or Discord incoming webhook, or any address that takes JSON
-//! (`[notify] webhook`). Through the system's `curl`, so no HTTP client is
-//! built in; each on a thread of its own, and a failure only goes to stderr.
+//! (`[[notify.webhooks]]`, each a [`Place`]). Through the system's `curl`, so
+//! no HTTP client is built in; each on a thread of its own, and a failure only
+//! goes to stderr.
+
+use crate::{is_http, FORMATS};
+
+/// One place notices go, a `[[notify.webhooks]]` of the settings: the
+/// address, its format (one of [`FORMATS`]) and the events sent there, by
+/// the app's words for them (tsumugi's `waiting`, kura's `failed`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Place {
+    pub url: String,
+    pub format: String,
+    pub states: Vec<String>,
+}
+
+impl Place {
+    /// Whether a notice of `state` goes here: an http(s) address that takes
+    /// it.
+    pub fn takes(&self, state: &str) -> bool {
+        is_http(&self.url) && self.states.iter().any(|s| s == state)
+    }
+
+    /// What is wrong with it, for the settings' warnings (the app puts the
+    /// file and the table in front): an address that is not http(s), a format
+    /// not in [`FORMATS`], a state not in `states` (the app's words). An empty
+    /// address is no problem: nothing is sent to it, as before.
+    pub fn problems(&self, states: &[&str]) -> Vec<String> {
+        let mut out = Vec::new();
+        if !self.url.trim().is_empty() && !is_http(&self.url) {
+            out.push(format!("`url` `{}` is not an http(s) address", self.url));
+        }
+        if !FORMATS.contains(&self.format.as_str()) {
+            out.push(format!("`format` `{}` is not {}", self.format, FORMATS.join(", ")));
+        }
+        for s in self.states.iter().filter(|s| !states.contains(&s.as_str())) {
+            out.push(format!("`states` `{s}` is not {}", states.join(", ")));
+        }
+        out
+    }
+}
+
+/// The places the settings send to: `old`, the one address of before
+/// (`[notify] webhook`, `webhook_format`, `webhook_states`), first when it has
+/// an address, then `list`, the `[[notify.webhooks]]`.
+pub fn places(old: Place, list: Vec<Place>) -> Vec<Place> {
+    let old = (!old.url.trim().is_empty()).then_some(old);
+    old.into_iter().chain(list).collect()
+}
+
+/// Send the notice of `state` to every place that takes it, each on a
+/// thread of its own (see [`send`]).
+pub fn send_all(places: &[Place], state: &str, level: Level, title: &str, message: &str, folder: &str) {
+    for p in places.iter().filter(|p| p.takes(state)) {
+        send(p.url.trim().to_owned(), p.format.clone(), level, title.to_owned(), message.to_owned(), folder.to_owned());
+    }
+}
 
 /// What kind of notice it is: the ntfy tag and priority, and the JSON's
 /// `state`.
@@ -212,6 +267,32 @@ mod tests {
         assert!(faces.ends_with("\u{1F600}\u{2026}"));
         let just = "x".repeat(DISCORD_MAX - "**t**\n".len());
         assert_eq!(discord_content("t", &just), format!("**t**\n{just}"), "exactly 2000 is not cut");
+    }
+
+    #[test]
+    fn a_place_takes_its_states_and_the_old_address_comes_first() {
+        let p = |url: &str, states: &[&str]| Place {
+            url: url.into(),
+            format: "ntfy".into(),
+            states: states.iter().map(|s| (*s).to_owned()).collect(),
+        };
+        let phone = p("https://ntfy.sh/x", &["waiting", "error"]);
+        assert!(phone.takes("waiting") && phone.takes("error") && !phone.takes("done"));
+        assert!(!p("ntfy.sh/x", &["done"]).takes("done"), "only an http(s) address is sent to");
+        let chat = p("https://discord.com/api/webhooks/1", &["done"]);
+        assert_eq!(places(p("", &["waiting"]), vec![chat.clone()]), std::slice::from_ref(&chat), "no old address, no place for it");
+        assert_eq!(places(phone.clone(), vec![chat.clone()]), [phone.clone(), chat.clone()]);
+        assert!(phone.problems(&["waiting", "error", "done"]).is_empty());
+        assert!(p("", &[]).problems(&[]).is_empty(), "an empty address is only not sent to");
+        let bad = Place { format: "xml".into(), ..p("file:///etc/passwd", &["done", "late"]) };
+        assert_eq!(
+            bad.problems(&["waiting", "done"]),
+            [
+                "`url` `file:///etc/passwd` is not an http(s) address",
+                "`format` `xml` is not ntfy, slack, discord, json",
+                "`states` `late` is not waiting, done",
+            ]
+        );
     }
 
     /// The address answers `status` to one request and gives back what it

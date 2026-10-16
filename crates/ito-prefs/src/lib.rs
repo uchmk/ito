@@ -20,7 +20,7 @@ use ito_theme::{Colors, Theme};
 mod keys;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
-pub use notify::{format_name, notify_index, notify_page, sound_name, End, Notify};
+pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
 
 /// The words the screen and the shared pages say, in one language.
 pub struct Words {
@@ -56,7 +56,6 @@ pub struct Words {
     pub notify_sound: &'static str,
     pub notify_sound_note: &'static str,
     pub notify_webhook: &'static str,
-    pub notify_webhook_note: &'static str,
     pub notify_sounds: &'static str,
     pub sound_play: &'static str,
     /// The names of [`ito_notify::SOUNDS`], in order.
@@ -71,6 +70,15 @@ pub struct Words {
     pub webhook_bad: &'static str,
     pub webhook_format: &'static str,
     pub webhook_format_note: &'static str,
+    /// A webhook whose address is still empty.
+    pub webhook_empty: &'static str,
+    pub webhook_add: &'static str,
+    pub webhook_remove: &'static str,
+    pub webhook_test: &'static str,
+    /// The row of "Add an address" when there is no webhook.
+    pub webhook_none: &'static str,
+    /// The row of "Add an address" after the webhooks.
+    pub webhook_more: &'static str,
 }
 
 pub const EN: Words = Words {
@@ -105,7 +113,6 @@ pub const EN: Words = Words {
     notify_sound: "Sound",
     notify_sound_note: "The sound picked below, once",
     notify_webhook: "Webhook",
-    notify_webhook_note: "A message to the address below",
     notify_sounds: "SOUNDS",
     sound_play: "Play",
     sound_names: ["Soft chime", "Low tone", "Alert", "System default"],
@@ -120,6 +127,12 @@ pub const EN: Words = Words {
     webhook_bad: "Start the address with http:// or https://; nothing is sent until then",
     webhook_format: "Format",
     webhook_format_note: "What the address takes",
+    webhook_empty: "The address is not filled in yet",
+    webhook_add: "Add an address",
+    webhook_remove: "Remove",
+    webhook_test: "Send a test here",
+    webhook_none: "Nothing is sent elsewhere until an address is added",
+    webhook_more: "Another address",
 };
 
 pub const JA: Words = Words {
@@ -154,7 +167,6 @@ pub const JA: Words = Words {
     notify_sound: "音",
     notify_sound_note: "下で選んだ音を 1 回",
     notify_webhook: "Webhook",
-    notify_webhook_note: "下のアドレスに送ります",
     notify_sounds: "鳴らす音",
     sound_play: "鳴らす",
     sound_names: ["やわらかいチャイム", "低い音", "警告音", "システムの既定"],
@@ -168,6 +180,12 @@ pub const JA: Words = Words {
     webhook_bad: "http:// か https:// で始めてください。それまでは送りません",
     webhook_format: "形式",
     webhook_format_note: "アドレスが受ける形",
+    webhook_empty: "アドレスがまだ空です",
+    webhook_add: "アドレスを足す",
+    webhook_remove: "外す",
+    webhook_test: "ここに試しに送る",
+    webhook_none: "アドレスを足すまで、ほかへは送りません",
+    webhook_more: "別のアドレス",
 };
 
 impl Words {
