@@ -290,7 +290,7 @@ pub fn meta_char(c: char) -> Vec<u8> {
 
 /// The visible grid as rows of cells, for a renderer that cannot hold the
 /// lock while it paints.
-pub fn snapshot<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
+pub fn cell_rows<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
     let grid = term.grid();
     let lines = grid.screen_lines();
     let cols = grid.columns();

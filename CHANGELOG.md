@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.55.0] - 2026-10-17
+
+### 変更
+
+- ito-pane: filer の頃の名前が並んでいた公開の関数を、何をするか分かる名前に改めた（TODO の「ペインの公開の API の名前を整理する」）。古い名前は残さない。
+
+  | 旧 | 新 | 中身 |
+  |---|---|---|
+  | `encode` | `key_bytes` | 名前の付いたキー（`Special`）をシェルに送るバイトにする（kitty のものは `kitty::encode` のまま） |
+  | `snapshot` | `cell_rows` | グリッドの見えている行を `CellView` の行で取り出す |
+  | `children` | `child_pids` | プロセスの子の pid |
+  | `stem` | `program_stem` | プログラムの名前（拡張子なし・小文字）。比べるために使う |
+  | `fit` | `fit_cells` | 矩形に入るセルの数（`Size`） |
+
+  - 使う側がやること: `ito_pane::encode`・`snapshot`・`children`・`stem`・`fit` を上の新しい名前に替える（`pub use ito_pane::*` で受けているなら `terminal::encode` なども）。
+    `Terminal` のメソッド（`blocks` など）と `Pane` の trait は変えていない。
+
 ## [0.54.0] - 2026-10-17
 
 ### 追加

@@ -1,5 +1,5 @@
 //! Everything that differs by OS, behind one set of names. The rest of the
-//! crate calls `sys::children` and the like and never says `cfg` itself.
+//! crate calls `sys::child_pids` and the like and never says `cfg` itself.
 
 #[cfg(windows)]
 mod windows;
@@ -65,7 +65,7 @@ pub(crate) fn older(child: u64, parent: u64) -> bool {
 }
 
 /// A program's name as compared: the file's stem, lower case.
-pub fn stem(path: &str) -> String {
+pub fn program_stem(path: &str) -> String {
     let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let file = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(file);
     file.to_lowercase()
@@ -110,7 +110,7 @@ pub fn process_cwd(_pid: u32) -> Option<std::path::PathBuf> {
 
 /// Neither: no process table to read.
 #[cfg(not(any(windows, unix)))]
-pub fn children(_pid: u32) -> Vec<u32> {
+pub fn child_pids(_pid: u32) -> Vec<u32> {
     Vec::new()
 }
 

@@ -155,7 +155,7 @@ impl Mods {
 /// `app_cursor` is the terminal's application-cursor mode, which swaps the
 /// arrows between CSI and SS3 — vim and readline both rely on it, so it is
 /// read from the terminal rather than assumed.
-pub fn encode(key: Special, mods: Mods, app_cursor: bool) -> Vec<u8> {
+pub fn key_bytes(key: Special, mods: Mods, app_cursor: bool) -> Vec<u8> {
     use Special::*;
     // A modifier turns the short forms into the parameterised ones, so the
     // two cases are kept apart rather than patched together.

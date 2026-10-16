@@ -3,7 +3,7 @@
 /// The processes whose parent is `pid`. Read when a key asks, not every frame:
 /// one snapshot of the process table on Windows, `/proc` on Linux, `pgrep` on
 /// macOS. Empty when the platform will not say.
-pub fn children(pid: u32) -> Vec<u32> {
+pub fn child_pids(pid: u32) -> Vec<u32> {
     #[cfg(target_os = "linux")]
     {
         let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
@@ -62,7 +62,7 @@ pub fn process_table() -> Vec<super::Proc> {
                 let pid = it.next()?.parse().ok()?;
                 let ppid = it.next()?.parse().ok()?;
                 let args: Vec<String> = it.map(str::to_owned).collect();
-                let name = args.first().map(|a| super::stem(a)).unwrap_or_default();
+                let name = args.first().map(|a| super::program_stem(a)).unwrap_or_default();
                 Some(super::Proc { pid, ppid, name, args, started: 0 })
             })
             .collect()
@@ -143,7 +143,7 @@ pub(crate) fn listening_in(table: &str, inodes: &std::collections::HashSet<u64>)
 /// `login`, which waits for the shell before the PTY can close.
 #[cfg(target_os = "macos")]
 pub fn hang_up_children(pid: u32) {
-    for child in children(pid) {
+    for child in child_pids(pid) {
         let _ = std::process::Command::new("/bin/kill").args(["-HUP", &child.to_string()]).status();
     }
 }

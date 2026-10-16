@@ -568,7 +568,7 @@ impl Terminal {
     }
 
     pub fn busy(&self) -> bool {
-        !self.exited && self.shell_pid.is_some_and(|pid| !crate::sys::children(pid).is_empty())
+        !self.exited && self.shell_pid.is_some_and(|pid| !crate::sys::child_pids(pid).is_empty())
     }
 
     /// What colors a program asking for the foreground and background gets.
@@ -979,7 +979,7 @@ impl Terminal {
     /// made that a matter of eyes (#229).
     pub fn screen_text(&self) -> String {
         use alacritty_terminal::term::cell::Flags;
-        let rows = self.with_grid(snapshot);
+        let rows = self.with_grid(cell_rows);
         let lines: Vec<String> = rows
             .iter()
             .map(|row| {
@@ -1050,7 +1050,7 @@ impl Terminal {
     }
 
     pub fn has_drawn(&self) -> bool {
-        self.with_grid(|t| snapshot(t).iter().flatten().any(|c| !matches!(c.c, ' ' | '\0')))
+        self.with_grid(|t| cell_rows(t).iter().flatten().any(|c| !matches!(c.c, ' ' | '\0')))
     }
 }
 

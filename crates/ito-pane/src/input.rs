@@ -200,7 +200,7 @@ pub fn key_bytes<P: Pane + ?Sized>(term: &P, key: Key, modifiers: Modifiers) -> 
         // and the release turns the key into an Alt prefix in a tcell program,
         // so `Esc` did nothing in lazygit. See `win32_key`.
         Some(Special::Escape) if cfg!(windows) => Some(crate::win32_key(0x1b, 1, 0x1b, mods)),
-        Some(s) => Some(crate::encode(s, mods, term.screen().app_cursor)),
+        Some(s) => Some(crate::key_bytes(s, mods, term.screen().app_cursor)),
         // A letter with Ctrl held is a control code; egui sends no text for it.
         // By the key's character, never its name: egui sends Shift and Ctrl
         // themselves as keys too, and `ShiftLeft` with Ctrl held went to the

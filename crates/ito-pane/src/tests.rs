@@ -186,9 +186,9 @@ mod pane {
         };
         let pid = t.shell_pid.expect("the PTY says which process the shell is");
         assert_eq!(t.scrollback().0, 0, "a fresh pane is at the bottom of its history");
-        assert!(children(std::process::id()).contains(&pid), "the shell is running first");
+        assert!(child_pids(std::process::id()).contains(&pid), "the shell is running first");
         drop(t);
-        assert!(!children(std::process::id()).contains(&pid), "the shell {pid} outlived its pane");
+        assert!(!child_pids(std::process::id()).contains(&pid), "the shell {pid} outlived its pane");
     }
 
     /// #265: a program that asks for the background (OSC 11) gets the pane's
@@ -312,7 +312,7 @@ mod pane {
         assert!(!t.has_selection());
     }
 
-    /// `children` finds a process this one started: the question `<C-S-t>`
+    /// `child_pids` finds a process this one started: the question `<C-S-t>`
     /// asks of the shell before ending it (Q21). Asserted on the child's own
     /// pid rather than on "none before, one after", because tests running
     /// beside this one start processes of their own (git, mostly).
@@ -324,7 +324,7 @@ mod pane {
             std::process::Command::new("sleep").arg("30").spawn()
         }
         .expect("a child process to look for");
-        let found = children(std::process::id());
+        let found = child_pids(std::process::id());
         let _ = child.kill();
         let _ = child.wait();
         assert!(found.contains(&child.id()), "{} among {found:?}", child.id());
@@ -332,7 +332,7 @@ mod pane {
 
     /// The scrollback keys moved the view and the screen did not follow.
     ///
-    /// `snapshot` copied `Line(0)..Line(screen_lines)`, which is the active
+    /// `cell_rows` copied `Line(0)..Line(screen_lines)`, which is the active
     /// area whatever `display_offset` says, so `<S-PageUp>` and the wheel both
     /// changed a number nothing was reading. The badge made it worse by being
     /// right: it said "16 lines back" over a screen that had not moved.
@@ -342,7 +342,7 @@ mod pane {
         for i in 0..20 {
             feed(&mut t, &format!("line{i}\r\n"));
         }
-        let row = |t: &Term<Proxy>, n: usize| -> String { snapshot(t)[n].iter().map(|c| c.c).collect::<String>().trim_end().to_string() };
+        let row = |t: &Term<Proxy>, n: usize| -> String { cell_rows(t)[n].iter().map(|c| c.c).collect::<String>().trim_end().to_string() };
 
         // The cursor sits on a fresh line below `line19`, so the top of a
         // four-line screen is `line17`, not `line16`.
@@ -390,7 +390,7 @@ mod pane {
         sel.update(Point::new(Line(row), Column(4)), Side::Right);
         t.selection = Some(sel);
 
-        let rows = snapshot(&t);
+        let rows = cell_rows(&t);
         let marked: String = rows[row as usize].iter().filter(|c| c.selected).map(|c| c.c).collect();
         assert_eq!(marked, "hello", "exactly the dragged cells");
         assert!(rows[1].iter().all(|c| !c.selected), "and nothing on other rows");
@@ -405,7 +405,7 @@ mod pane {
 
         let mut t = term(20, 4);
         feed(&mut t, "\x1b[4ma\x1b[4:3;58;2;1;2;3mb\x1b[0;9mc\x1b[4:4md\x1b[4:5me\x1b[4:2mf\x1b[0;8mg\x1b[0mh");
-        let row = &snapshot(&t)[0];
+        let row = &cell_rows(&t)[0];
         assert!(row[0].flags.contains(Flags::UNDERLINE) && row[0].ul.is_none(), "a plain underline in the text's colour");
         assert!(row[1].flags.contains(Flags::UNDERCURL), "4:3 is the curl");
         assert_eq!(row[1].ul, Some(Color::Spec(Rgb { r: 1, g: 2, b: 3 })), "58 gives its colour");
@@ -425,7 +425,7 @@ mod pane {
 
         let mut t = term(60, 2);
         feed(&mut t, "a \x1b[4mu\x1b[0m \x1b[4:2mdd\x1b[0m \x1b[4:3;58;2;255;0;0mcurl\x1b[0m \x1b[4:4mdots\x1b[0m \x1b[4:5mdash\x1b[0m \x1b[9mstrike\x1b[0m [\x1b[8mhid\x1b[0m]");
-        let row = &snapshot(&t)[0];
+        let row = &cell_rows(&t)[0];
         let text: String = row.iter().map(|c| c.c).collect();
         let at = |word: &str| text.find(word).unwrap();
         let styled = [
@@ -512,7 +512,7 @@ mod pane {
     /// line refusing to be copied.
     #[test]
     fn a_drag_selects_the_same_text_in_either_direction() {
-        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
+        let selected = |t: &Term<Proxy>| -> String { cell_rows(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
         // The pointer is on the outer half of each end: the left half of the
         // cell the drag starts from and the right half of the one it ends on,
         // whichever way round those are.
@@ -533,7 +533,7 @@ mod pane {
     /// The half the pointer is in is what makes that work, so it has to count.
     #[test]
     fn the_half_of_the_cell_decides_what_is_included() {
-        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
+        let selected = |t: &Term<Proxy>| -> String { cell_rows(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
         let mut t = term(20, 4);
         feed(&mut t, "hello world");
 
@@ -551,7 +551,7 @@ mod pane {
     /// and forward again keeps both ends.
     #[test]
     fn a_keys_selection_keeps_both_ends_either_way() {
-        let selected = |t: &Term<Proxy>| -> String { snapshot(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
+        let selected = |t: &Term<Proxy>| -> String { cell_rows(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect() };
         let mut t = term(20, 4);
         feed(&mut t, "KLMNOPQRST");
         crate::grid::select_cells(&mut t, (3, 0), true);
@@ -572,7 +572,7 @@ mod pane {
         feed(&mut t, "abcdef\r\nghijkl\r\nmnopqr");
         crate::grid::select_kind(&mut t, (1, 0), false, Some(alacritty_terminal::selection::SelectionType::Block));
         select_at(&mut t, (3, 2), true, false);
-        let rows: Vec<String> = snapshot(&t).iter().map(|r| r.iter().filter(|c| c.selected).map(|c| c.c).collect()).collect();
+        let rows: Vec<String> = cell_rows(&t).iter().map(|r| r.iter().filter(|c| c.selected).map(|c| c.c).collect()).collect();
         assert_eq!(rows[..3], ["bcd", "hij", "nop"]);
         let text = t.selection_to_string().unwrap_or_default();
         assert_eq!(text.lines().collect::<Vec<_>>(), ["bcd", "hij", "nop"]);
@@ -601,15 +601,15 @@ ghi jkl",
     fn the_plain_keys_send_what_a_terminal_expects() {
         let n = Mods::default();
         // Enter is a carriage return, not a newline, and Backspace is DEL.
-        assert_eq!(encode(Special::Enter, n, false), b"\r");
-        assert_eq!(encode(Special::Backspace, n, false), b"\x7f");
-        assert_eq!(encode(Special::Tab, n, false), b"\t");
-        assert_eq!(s(encode(Special::Escape, n, false)), "<ESC>");
-        assert_eq!(s(encode(Special::Up, n, false)), "<ESC>[A");
-        assert_eq!(s(encode(Special::Delete, n, false)), "<ESC>[3~");
-        assert_eq!(s(encode(Special::F(1), n, false)), "<ESC>OP");
-        assert_eq!(s(encode(Special::F(5), n, false)), "<ESC>[15~");
-        assert_eq!(s(encode(Special::F(12), n, false)), "<ESC>[24~");
+        assert_eq!(key_bytes(Special::Enter, n, false), b"\r");
+        assert_eq!(key_bytes(Special::Backspace, n, false), b"\x7f");
+        assert_eq!(key_bytes(Special::Tab, n, false), b"\t");
+        assert_eq!(s(key_bytes(Special::Escape, n, false)), "<ESC>");
+        assert_eq!(s(key_bytes(Special::Up, n, false)), "<ESC>[A");
+        assert_eq!(s(key_bytes(Special::Delete, n, false)), "<ESC>[3~");
+        assert_eq!(s(key_bytes(Special::F(1), n, false)), "<ESC>OP");
+        assert_eq!(s(key_bytes(Special::F(5), n, false)), "<ESC>[15~");
+        assert_eq!(s(key_bytes(Special::F(12), n, false)), "<ESC>[24~");
     }
 
     /// vim and readline put the terminal in application-cursor mode and then
@@ -617,12 +617,12 @@ ghi jkl",
     #[test]
     fn the_arrows_follow_the_terminals_cursor_mode() {
         let n = Mods::default();
-        assert_eq!(s(encode(Special::Up, n, true)), "<ESC>OA");
-        assert_eq!(s(encode(Special::Down, n, true)), "<ESC>OB");
-        assert_eq!(s(encode(Special::Right, n, true)), "<ESC>OC");
-        assert_eq!(s(encode(Special::Left, n, true)), "<ESC>OD");
+        assert_eq!(s(key_bytes(Special::Up, n, true)), "<ESC>OA");
+        assert_eq!(s(key_bytes(Special::Down, n, true)), "<ESC>OB");
+        assert_eq!(s(key_bytes(Special::Right, n, true)), "<ESC>OC");
+        assert_eq!(s(key_bytes(Special::Left, n, true)), "<ESC>OD");
         // Only the arrows change; the rest is the same either way.
-        assert_eq!(encode(Special::Enter, n, true), encode(Special::Enter, n, false));
+        assert_eq!(key_bytes(Special::Enter, n, true), key_bytes(Special::Enter, n, false));
     }
 
     #[test]
@@ -631,14 +631,14 @@ ghi jkl",
         let shift = Mods { shift: true, ..Default::default() };
         let both = Mods { ctrl: true, shift: true, ..Default::default() };
         // 1 + shift(1) + alt(2) + ctrl(4), which is xterm's numbering.
-        assert_eq!(s(encode(Special::Right, ctrl, false)), "<ESC>[1;5C");
-        assert_eq!(s(encode(Special::Right, shift, false)), "<ESC>[1;2C");
-        assert_eq!(s(encode(Special::Right, both, false)), "<ESC>[1;6C");
+        assert_eq!(s(key_bytes(Special::Right, ctrl, false)), "<ESC>[1;5C");
+        assert_eq!(s(key_bytes(Special::Right, shift, false)), "<ESC>[1;2C");
+        assert_eq!(s(key_bytes(Special::Right, both, false)), "<ESC>[1;6C");
         // Application-cursor mode gives way to the modifier form.
-        assert_eq!(s(encode(Special::Up, ctrl, true)), "<ESC>[1;5A");
+        assert_eq!(s(key_bytes(Special::Up, ctrl, true)), "<ESC>[1;5A");
         // Alt on a key with no parameterised form is the escape prefix.
         let alt = Mods { alt: true, ..Default::default() };
-        assert_eq!(s(encode(Special::Enter, alt, false)), "<ESC>\r");
+        assert_eq!(s(key_bytes(Special::Enter, alt, false)), "<ESC>\r");
     }
 
     #[test]
@@ -1197,7 +1197,7 @@ mod alt_screen_tests {
 
 /// What runs under a pane, and what it listens on.
 mod processes {
-    use crate::sys::{descendants, descendants_since, stem, Proc};
+    use crate::sys::{descendants, descendants_since, program_stem, Proc};
 
     fn p(pid: u32, ppid: u32, name: &str) -> Proc {
         Proc { pid, ppid, name: name.into(), ..Proc::default() }
@@ -1241,7 +1241,7 @@ mod processes {
         let parent = table.iter().find(|p| p.pid == me.ppid).expect("what started it is in the table");
         assert!(parent.started > 0 && parent.started <= me.started, "{parent:?} then {me:?}");
         assert!(descendants(&table, parent.pid).iter().any(|p| p.pid == me.pid));
-        assert!(crate::sys::children(parent.pid).contains(&me.pid));
+        assert!(crate::sys::child_pids(parent.pid).contains(&me.pid));
     }
 
     #[test]
@@ -1253,7 +1253,7 @@ mod processes {
         assert_eq!(under, [11, 12, 14]);
         assert!(descendants(&table, 99).is_empty());
         assert_eq!(
-            (stem("/usr/local/bin/claude"), stem(r"C:\Tools\Codex.EXE"), stem("gemini")),
+            (program_stem("/usr/local/bin/claude"), program_stem(r"C:\Tools\Codex.EXE"), program_stem("gemini")),
             ("claude".into(), "codex".into(), "gemini".into())
         );
     }
@@ -1884,7 +1884,7 @@ mod identity_tests {
         let (tx, _rx) = crossbeam_channel::unbounded();
         let mut t = Term::new(Config::default(), &Size::new(20, 4), Proxy { tx, wake: Arc::new(|| {}) });
         let mut parser = Processor::<StdSyncHandler>::default();
-        let first = |t: &Term<Proxy>| crate::snapshot(t)[0].iter().map(|c| c.c).collect::<String>().trim_end().to_owned();
+        let first = |t: &Term<Proxy>| crate::cell_rows(t)[0].iter().map(|c| c.c).collect::<String>().trim_end().to_owned();
         parser.advance(&mut t, b"\x1b[?2026hhalf");
         assert_eq!(first(&t), "", "held while the update is open");
         parser.advance(&mut t, b" done\x1b[?2026l");

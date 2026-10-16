@@ -135,7 +135,7 @@ pub struct Slide {
 }
 
 /// How many cells fit, given the space and the font.
-pub fn fit(rect: Rect, cell_w: f32, row_h: f32) -> Size {
+pub fn fit_cells(rect: Rect, cell_w: f32, row_h: f32) -> Size {
     // Both guarded: a row of no height would make `inf` rows (the source
     // review, 2026-10-07).
     Size::new((rect.width() / cell_w.max(1.0)).floor() as usize, (rect.height() / row_h.max(1.0)).floor() as usize)
@@ -383,7 +383,7 @@ pub fn show_faces<P: Pane + ?Sized>(
     painter.rect_filled(rect, CornerRadius::ZERO, pal.bg);
 
     let inner = rect.shrink2(Vec2::new(6.0, 4.0));
-    let size = fit(inner, cell_w, row_h);
+    let size = fit_cells(inner, cell_w, row_h);
     shown.grid = Some((inner.min, Vec2::new(cell_w, row_h)));
 
     let id = ui.id().with("term-pane");
@@ -878,7 +878,7 @@ pub fn show_faces<P: Pane + ?Sized>(
             let key = if whole > 0 { Special::Up } else { Special::Down };
             let bytes = match term.win32_input() {
                 true => crate::special_record(key, Mods::default()),
-                false => crate::encode(key, Mods::default(), app_cursor),
+                false => crate::key_bytes(key, Mods::default(), app_cursor),
             };
             let mut out = Vec::with_capacity(bytes.len() * whole.unsigned_abs() as usize);
             for _ in 0..whole.unsigned_abs() {
@@ -1395,12 +1395,12 @@ mod tests {
     #[test]
     fn the_grid_is_measured_in_whole_cells() {
         let r = Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(101.0, 55.0));
-        let size = fit(r, 10.0, 20.0);
+        let size = fit_cells(r, 10.0, 20.0);
         assert_eq!((size.cols, size.lines), (10, 2), "a part-cell is not a cell");
         // A pane too small to hold anything still has to answer something a
         // grid can divide by.
         let tiny = Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(1.0, 1.0));
-        let size = fit(tiny, 10.0, 20.0);
+        let size = fit_cells(tiny, 10.0, 20.0);
         assert_eq!((size.cols, size.lines), (1, 1));
     }
 }

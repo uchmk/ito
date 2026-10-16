@@ -37,11 +37,11 @@ pub fn end_tree(pid: u32) {
 /// The processes whose parent is `pid`. Read when a key asks, not every frame:
 /// one snapshot of the process table on Windows, `/proc` on Linux, `pgrep` on
 /// macOS. Empty when the platform will not say.
-pub fn children(pid: u32) -> Vec<u32> {
+pub fn child_pids(pid: u32) -> Vec<u32> {
     named_children(pid).into_iter().map(|(child, _)| child).collect()
 }
 
-/// [`children`] with each one's executable name (`OpenConsole.exe`).
+/// [`child_pids`] with each one's executable name (`OpenConsole.exe`).
 pub fn named_children(pid: u32) -> Vec<(u32, String)> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -97,7 +97,7 @@ pub fn process_table() -> Vec<super::Proc> {
     let mut ok = unsafe { Process32FirstW(snap, &mut e) }.is_ok();
     while ok {
         let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
-        let name = super::stem(&String::from_utf16_lossy(&e.szExeFile[..len]));
+        let name = super::program_stem(&String::from_utf16_lossy(&e.szExeFile[..len]));
         let pid = e.th32ProcessID;
         out.push(super::Proc { pid, ppid: e.th32ParentProcessID, name, args: Vec::new(), started: started(pid).unwrap_or(0) });
         ok = unsafe { Process32NextW(snap, &mut e) }.is_ok();

@@ -123,7 +123,7 @@ impl Pane for Terminal {
 
     fn screen(&self) -> Screen {
         self.with_grid(|t| Screen {
-            rows: crate::snapshot(t),
+            rows: crate::cell_rows(t),
             cursor: crate::cursor_cell(t),
             cursor_hidden: crate::cursor_hidden(t),
             app_cursor: crate::app_cursor(t),

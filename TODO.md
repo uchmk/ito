@@ -9,5 +9,5 @@ ito のやること。`【人】` は持ち主の作業。
 - [x] XTVERSION の応答をアプリの名前と版にする。`crates/ito-pane/src/osc.rs` の `xtversion()` は `tsumugi {CARGO_PKG_VERSION}` を返すが、
       ito に移ったので版が ito の版（0.1.0）になった。アプリが名前と版を渡す形にする（`Terminal` を作るときの引数か、プロセスで 1 回の設定）。
       kura が使うときに kura と名乗れるようにもなる。v0.10.0 の `set_identity` で済んだ（tsumugi・kura が main で呼ぶ）。
-- [ ] ペインの公開の API の名前を整理する（`encode`、`snapshot`、`children` など filer の頃の名前が並んでいる。tsumugi の `docs/pane-extraction.md`）。
+- [x] ペインの公開の API の名前を整理する（`encode`、`snapshot`、`children` など filer の頃の名前が並んでいる。tsumugi の `docs/pane-extraction.md`）。
 - [x] macOS の型検査を CI に足すかを決める（`sys/unix.rs` の `hang_up_children`）。費用は tsumugi・kura と同じ考えで。 2026-10-16 に足した（clippy と Build が cargo-zigbuild で aarch64-apple-darwin を見る）。

@@ -64,7 +64,7 @@ pub use pane::{Pane, Screen};
 /// The regular expressions triggers are written in, for an app to make them.
 pub use regex;
 pub use shell::*;
-pub use sys::{children, descendants, listening_ports, process_table, restrict_dll_search, stem, Proc};
+pub use sys::{child_pids, descendants, listening_ports, process_table, program_stem, restrict_dll_search, Proc};
 pub use terminal::*;
 pub use trigger::{highlight_row, rgb, Highlight, Paint, Triggered};
 #[cfg(feature = "egui")]
