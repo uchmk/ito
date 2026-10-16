@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.44.1] - 2026-10-16
+
+### 修正
+
+- scripts/lanes/merge-lanes.py: 報告の `None from this run.`・`Nothing from this run.` も「何も無い」と読む。
+  kura #412 は Proposals に `None from this run.` しか無いのに、仕分けの issue になっていた。
+
 ## [0.44.0] - 2026-10-16
 
 ### 追加
