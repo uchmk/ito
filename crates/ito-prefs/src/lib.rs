@@ -20,7 +20,9 @@ use ito_theme::{Colors, Theme};
 mod keys;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
+mod updates;
 pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
+pub use updates::{status as update_status, update_card, UpdateWords};
 
 /// The words the screen and the shared pages say, in one language.
 pub struct Words {

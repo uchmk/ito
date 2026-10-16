@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.54.0] - 2026-10-17
+
+### 追加
+
+- ito-prefs `update_card`（#3 の候補 7）: 設定画面の「更新を確かめる」のカード。スイッチの下に、直近の確認の結果
+  （新しい版がある・最新・確かめられない・確認中）を 1 行で出す。`update_card(ui, look, &UpdateWords, on, Option<&Update>) -> Option<bool>` が
+  押されたときの新しい状態を返し、設定ファイルへの書き込みと確認の開始はアプリが行う。文言は `UpdateWords`（`newer` の `{}` に版が入る）。
+  - 使う側がやること: yagura・kura・tsumugi の「更新」のカード（スイッチ 1 行だけ）をこれに替え、`ito_common::update::check` の結果を `Option<Update>` で持って渡す。
+
 ## [0.53.0] - 2026-10-17
 
 ### 追加
