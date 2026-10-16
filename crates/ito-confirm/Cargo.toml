@@ -1,0 +1,11 @@
+[package]
+name = "ito-confirm"
+description = "The question before something is done (kill, stop, delete): a dimmed screen, a titled box of rows, notes and buttons, as an egui overlay that returns the button clicked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"

@@ -1,0 +1,12 @@
+[package]
+name = "ito-help"
+description = "The keys help (F1 / ?): lines of headings and key-and-description rows from ito-keymap, drawn into a rect you give with a scroll bar, each text cut with an ellipsis to its column"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-keymap = { path = "../ito-keymap" }

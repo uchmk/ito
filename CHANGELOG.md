@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.53.0] - 2026-10-17
+
+### 追加
+
+- `ito-confirm`（#3 の候補 10）: 「やる前の確認」の重ね表示。暗い背景、題の付いた箱、`キー : 値` の行（何を）、折り返す本文、警告色の注（どうやって）、
+  ボタン、答えのキーのヒント。`show(ctx, &Question, &Style) -> Option<usize>` が押されたボタンの番号を返す。キーの読み取り（Enter・Esc・`y`・`n`）はアプリの keymap のまま。
+  ボタンは箱からはみ出さず折り返す（切れて見えないのに押せるボタンを作らない）。yagura の `ui/confirm.rs` と kura の `overlay::confirm` が元。
+  - 使う側がやること: 自前の箱の描画を `Question` に詰めて `show` に替える。tsumugi の許可の確認は一覧の中の行なので対象外。
+- `ito-help`（#3 の候補 5）: キーのヘルプの描画。`push_layer` が `ito_keymap::help_lines` の結果を `Line`（見出し・キーと説明・空行）に並べ、
+  `draw(painter, body, &lines, scroll, &Style) -> Drawn` が渡された矩形の中に描く（長い文字は `…` で切り、一覧が長ければ右にスクロールバー）。
+  `Drawn { visible, max, scroll }` はページ送りに使う。枠・題・背景はアプリの `panel` のまま。yagura の `ui/help.rs` が元。
+  - 使う側がやること: yagura は `Line` と `group` を `push_layer` に替える。kura は設定の出どころの行やクリックで飛ぶ行を持つので、一覧の描画だけ寄せるかは kura の判断。
+
 ## [0.52.0] - 2026-10-16
 
 ### 追加
