@@ -55,7 +55,7 @@ body:
     validations:
       required: false
 
-  - type: textarea
+{{extra}}  - type: textarea
     id: backtrace
     attributes:
       label: Backtrace, if it crashes / バックトレース（落ちる場合）

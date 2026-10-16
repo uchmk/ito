@@ -349,6 +349,47 @@ fn encode(s: &str) -> String {
     out
 }
 
+/// An app's own field in the issue form, on top of the shared ones.
+pub struct Field<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub description: &'a str,
+    pub required: bool,
+}
+
+/// The shared form every app's `.github/ISSUE_TEMPLATE/bug_report.yml` is made
+/// from, with `app` filled in and `extra` fields placed before the backtrace.
+/// GitHub reads the template only from the app's own repository, so it cannot
+/// be shared by reference; the app writes this output to the file and a test
+/// compares the two (the same way `scripts/lanes` copies are checked).
+pub fn template(app: &str, extra: &[Field]) -> String {
+    let mut fields = String::new();
+    for f in extra {
+        fields.push_str(&format!(
+            "  - type: textarea
+    id: {}
+    attributes:
+      label: \"{}\"
+      description: \"{}\"
+    validations:
+      required: {}
+
+",
+            f.id,
+            f.label.replace('"', "'"),
+            f.description.replace('"', "'"),
+            f.required
+        ));
+    }
+    include_str!("../templates/bug_report.yml").replace("{{extra}}", &fields).replace("{{app}}", app)
+}
+
+/// The `id:` of every field in a form, for a test that the ids [`url`] fills
+/// exist in the app's template (GitHub drops an unknown one silently).
+pub fn field_ids(form: &str) -> Vec<String> {
+    form.lines().filter_map(|l| l.trim().strip_prefix("id: ")).map(|s| s.trim().to_owned()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +481,17 @@ mod tests {
     fn the_version_line_names_the_architecture() {
         let v = version_line("demo", "1.2.3");
         assert!(v.starts_with("demo 1.2.3 (") && v.contains(std::env::consts::ARCH), "{v}");
+    }
+
+    #[test]
+    fn the_template_carries_the_shared_ids_and_the_apps_own() {
+        let t = template("kura", &[Field { id: "files", label: "Files", description: "which", required: false }]);
+        let ids = field_ids(&t);
+        for id in ["what", "keys", "version", "os", "context", "files", "backtrace"] {
+            assert!(ids.iter().any(|i| i == id), "{id} in {ids:?}");
+        }
+        assert!(!t.contains("{{"), "every placeholder filled");
+        assert!(t.contains("kura version"));
+        assert!(!template("kura", &[]).contains("{{extra}}"));
     }
 }

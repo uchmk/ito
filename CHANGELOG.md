@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.50.0] - 2026-10-16
+
+### 追加
+
+- ito-common `runinfo`: 直前の起動が使ったもの（GPU・フォント・窓の pt と ppp・起動時刻・バックエンドの設定）の記録。
+  kura の `runinfo.rs` の共通の部分を移した（#3 の候補 7）。`RunInfo`・`save`/`load`（`state_dir(app)/last-run.toml`）・`window_line`・`rendering`・`started_ago`・`push_recent`。
+  アプリ固有の項目は `extra`（`toml::Table`）に入れる。
+  - 使う側がやること: kura は `pane`・`launched`・`pane_shell`・`pane_failed` を `extra` へ移し、`runinfo.rs` をこれに置き換える。
+    yagura・tsumugi は最初のフレームで `RunInfo::new(version)` に埋めて `save` し、`env` の GPU の節と報告の Rendering/Scale が `load` を読む。
+- ito-bugreport `template(app, &[Field])`・`field_ids`: issue form を全アプリで ito が作る。
+  GitHub は form を別のリポジトリから読めないので、アプリは出力を `.github/ISSUE_TEMPLATE/bug_report.yml` に書き、テストで一致を見る。
+  アプリ固有の欄は `Field` で足す。`templates/bug_report.yml` は直接写さず、`template` を使う。
+
 ## [0.49.0] - 2026-10-16
 
 ### 追加

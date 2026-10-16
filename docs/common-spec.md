@@ -348,13 +348,20 @@ scale: 100%           # 書くなら倍率を % で
 - 分が変わるときだけ再描画する（`request_repaint_after(Clock::next_minute(now))`）。
 - 言語が日本語なら曜日を「(月)」のように出す（`Clock::text(now, lang)`）。
 
+## 直前の起動の記録（`ito_common::runinfo`）
+
+窓のある起動が、状態フォルダの `last-run.toml` に「使ったもの」（GPU のアダプター・バックエンド・フォント・窓の pt と ppp・起動時刻・バックエンドを選んだ設定）を書き、
+`<app> env` と不具合の報告が読む（`env` は窓を開かない）。アプリ固有の項目は `extra`（TOML の表）。`window_line`・`rendering`・`started_ago` が報告の行の元になる。
+
 ## 不具合の報告（`ito-bugreport`）
 
 どのアプリも、F12（と設定の画面のボタン）で、版・OS・アプリが知っていることを埋めた GitHub の issue form を開く。報告は全アプリで同じ形になる。
 
 - `ito_bugreport::url(&Spec { app, version, repo, template }, &[("keys", …)])` が URL を作る。アプリが持つのは名前・版・リポジトリ・テンプレートの名前だけ。
 - **form の field の `id` は固定**: `version`・`os`・`context`（共通。ここが埋める）、`what`・`backtrace`（共通。人が書く）。アプリ固有の欄（`keys`・`files`・`config` など）は足してよい。
-  雛形は `crates/ito-bugreport/templates/bug_report.yml`（`{{app}}` をアプリ名に替えて `.github/ISSUE_TEMPLATE/` へ）。
+  form は **全アプリで ito が作る**: `ito_bugreport::template(app, &[Field{…}])` が共通の form を返し、アプリ固有の欄は `extra` で足す。
+  GitHub は form をそのリポジトリの `.github/ISSUE_TEMPLATE/bug_report.yml` からしか読まない（別のリポジトリを指せない）ので、アプリは出力をそのファイルに書き、
+  テストで `template()` の出力とファイルが一致することを見る（`scripts/lanes` の写しと同じ作法）。
   GitHub は知らない id を黙って捨てるので、アプリのテストで form の id と `url` が埋める id を突き合わせる。
 - `os` の行は `OS:`・`OS arch:`・`Process arch:`（Windows。エミュレーションで食い違えばそれ自体が手がかり）。ほかは `OS:`・`Process arch:`。
 - `context` は `Context` が組む `Label: text` の行で、順は **Last error・Rendering・Scale・アプリの行・Config** 。ホームのフォルダは `~` に、
