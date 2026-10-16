@@ -99,6 +99,35 @@ pub struct Shown {
     /// Where the grid's first cell is, and a cell's size: for drawing over
     /// a cell (a copy mode's cursor).
     pub grid: Option<(egui::Pos2, Vec2)>,
+    /// The cursor as this frame drew it; none when its cell is off the grid
+    /// (scrolled back past it) or there is no terminal.
+    pub cursor: Option<CursorShown>,
+}
+
+/// Where the cursor was drawn, for a test to read what it cannot see.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CursorShown {
+    /// Its cell, column and line, as drawn: on a turned row, where the
+    /// cell is on the screen rather than in the program's order.
+    pub cell: (usize, usize),
+    /// With [`CursorStyle::glide`], its last move; none until it has moved,
+    /// or without glide.
+    pub slide: Option<Slide>,
+}
+
+/// A gliding cursor's last move, in cells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Slide {
+    /// Where it set off from, column and line: a cell, or a point between
+    /// two when it turned on the way.
+    pub from: (f32, f32),
+    /// The cell it went to.
+    pub to: (usize, usize),
+    /// How many frames drew it on the way, neither where it set off nor
+    /// where it landed: none, it jumped.
+    pub between: u32,
+    /// Still on its way.
+    pub moving: bool,
 }
 
 /// How many cells fit, given the space and the font.
@@ -207,16 +236,28 @@ fn screen_text(rows: &[Vec<crate::CellView>]) -> String {
 /// How long a gliding cursor takes to reach the cell it moved to.
 const GLIDE: f64 = 0.09;
 
-/// A gliding cursor: where it set off from and where it is going, from the
-/// pane's top left, and when it set off.
+/// A gliding cursor: where it set off from and where it is going, in cells
+/// from the pane's top left (so a new font size is no move), and when it set
+/// off.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Glide {
     from: Vec2,
     to: Vec2,
     since: f64,
+    /// Frames drawn on the way, each time counted once.
+    between: u32,
+    /// When it was last drawn.
+    drawn: f64,
+    /// It has moved since the pane first drew it.
+    moved: bool,
 }
 
 impl Glide {
+    /// Resting on `at`, as the pane first finds it.
+    fn still(at: Vec2, now: f64) -> Self {
+        Self { from: at, to: at, since: now - GLIDE, between: 0, drawn: now, moved: false }
+    }
+
     /// Where the cursor is at `now`, and whether it is still on its way. It
     /// slows as it arrives, so the eye lands with it.
     fn at(&self, now: f64) -> (Vec2, bool) {
@@ -230,8 +271,26 @@ impl Glide {
     fn toward(self, to: Vec2, now: f64) -> Self {
         match to == self.to {
             true => self,
-            false => Self { from: self.at(now).0, to, since: now },
+            false => Self { from: self.at(now).0, to, since: now, between: 0, drawn: now, moved: true },
         }
+    }
+
+    /// Drawn at `now`: a frame on the way, between setting off and landing,
+    /// is counted; a second drawing at the same time is not another frame.
+    fn drawn_at(self, now: f64) -> Self {
+        let t = (now - self.since) / GLIDE;
+        let on_the_way = now > self.drawn && t > 0.0 && t < 1.0;
+        Self { between: self.between + u32::from(on_the_way), drawn: now.max(self.drawn), ..self }
+    }
+
+    /// Its last move as a test reads it; none before the first.
+    fn slide(&self, now: f64) -> Option<Slide> {
+        self.moved.then(|| Slide {
+            from: (self.from.x, self.from.y),
+            to: (self.to.x as usize, self.to.y as usize),
+            between: self.between,
+            moving: self.at(now).1,
+        })
     }
 }
 
@@ -513,27 +572,33 @@ pub fn show_faces<P: Pane + ?Sized>(
     // not, which is the same language the split panes use.
     let (cx, cy) = cursor;
     let cx = orders.get(cy).and_then(Option::as_ref).map_or(cx, |o| o.visual(cx));
+    let style = faces.cursor;
+    let glide_id = id.with("cursor-glide");
+    // Without glide it forgets where it was: turned on again, it starts from
+    // the cursor's cell then, not from where it last slid to.
+    if !style.glide {
+        ui.ctx().data_mut(|d| d.remove::<Glide>(glide_id));
+    }
     if cy < size.lines && cx < size.cols {
-        let cell = Vec2::new(cx as f32 * cell_w, cy as f32 * row_h);
-        let style = faces.cursor;
+        let cell = Vec2::new(cx as f32, cy as f32);
         // Where the cursor is drawn: on its cell, or on the way there. The
         // way is kept from the pane's corner, so moving the pane is no move.
-        let (off, moving) = match style.glide {
+        let (off, moving, slide) = match style.glide {
             true => {
                 let now = ui.input(|i| i.time);
-                let glide_id = id.with("cursor-glide");
                 let was = ui.ctx().data(|d| d.get_temp::<Glide>(glide_id));
-                let glide = was.map_or(Glide { from: cell, to: cell, since: now - GLIDE }, |g| g.toward(cell, now));
+                let glide = was.map_or(Glide::still(cell, now), |g| g.toward(cell, now)).drawn_at(now);
                 ui.ctx().data_mut(|d| d.insert_temp(glide_id, glide));
                 let (off, moving) = glide.at(now);
                 if moving {
                     ui.ctx().request_repaint();
                 }
-                (off, moving)
+                (off, moving, glide.slide(now))
             }
-            false => (cell, false),
+            false => (cell, false, None),
         };
-        let at = Rect::from_min_size(inner.min + off, Vec2::new(cell_w, row_h));
+        shown.cursor = Some(CursorShown { cell: (cx, cy), slide });
+        let at = Rect::from_min_size(inner.min + off * Vec2::new(cell_w, row_h), Vec2::new(cell_w, row_h));
         let lit = !style.blink || {
             let now = ui.input(|i| i.time);
             let left = BLINK - now % BLINK;
@@ -1072,16 +1137,114 @@ mod tests {
     /// a second move midway starts from the middle rather than jumping back.
     #[test]
     fn the_cursor_glides_from_where_it_is() {
-        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(80.0, 0.0), Vec2::new(80.0, 40.0));
-        let g = Glide { from: a, to: a, since: 0.0 }.toward(b, 1.0);
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(8.0, 4.0));
+        let g = Glide::still(a, 0.0).toward(b, 1.0);
         assert_eq!(g.at(1.0), (a, true));
         let (mid, moving) = g.at(1.0 + GLIDE / 2.0);
-        assert!(moving && mid.x > 40.0 && mid.x < 80.0, "{mid:?}");
+        assert!(moving && mid.x > 4.0 && mid.x < 8.0, "{mid:?}");
         assert_eq!(g.at(1.0 + GLIDE), (b, false));
         assert_eq!(g.toward(b, 1.05), g);
         let turned = g.toward(c, 1.0 + GLIDE / 2.0);
         assert_eq!(turned.from, mid);
         assert_eq!(turned.at(2.0), (c, false));
+    }
+
+    /// A glide counts the frames that drew it on the way, once each, and
+    /// says nothing of a cursor that has not moved.
+    #[test]
+    fn a_glide_counts_the_frames_on_its_way() {
+        let still = Glide::still(Vec2::new(2.0, 1.0), 0.0).drawn_at(0.5);
+        assert_eq!(still.slide(0.5), None, "it has not moved");
+        let g = still.toward(Vec2::new(9.0, 1.0), 1.0).drawn_at(1.0);
+        let slide = g.slide(1.0).unwrap();
+        assert_eq!((slide.from, slide.to, slide.between, slide.moving), ((2.0, 1.0), (9, 1), 0, true), "set off, not yet on the way");
+        let g = g.drawn_at(1.0 + GLIDE / 4.0);
+        let g = g.drawn_at(1.0 + GLIDE / 4.0);
+        assert_eq!(g.between, 1, "the same frame twice is one");
+        let g = g.drawn_at(1.0 + GLIDE / 2.0).drawn_at(1.0 + GLIDE);
+        let slide = g.slide(1.0 + GLIDE).unwrap();
+        assert_eq!((slide.between, slide.moving), (2, false), "landed after two frames on the way");
+        // Drawn only once it had landed: it jumped.
+        let late = g.toward(Vec2::new(0.0, 3.0), 2.0).drawn_at(2.0 + GLIDE * 2.0);
+        assert_eq!(late.slide(2.0 + GLIDE * 2.0).map(|s| (s.from, s.between, s.moving)), Some(((9.0, 1.0), 0, false)));
+    }
+
+    /// A pane whose cursor the test moves, over a blank screen.
+    struct Moving(std::cell::Cell<(usize, usize)>);
+
+    impl crate::Pane for Moving {
+        fn resize(&mut self, _: crate::Size, _: (u16, u16)) {}
+        fn screen(&self) -> crate::Screen {
+            crate::Screen { cursor: self.0.get(), ..crate::Screen::default() }
+        }
+        fn scrolled_back(&self) -> usize {
+            0
+        }
+        fn scroll(&self, _: Scroll) {}
+        fn select(&self, _: (usize, usize), _: bool, _: bool) {}
+        fn select_word(&self, _: (usize, usize)) {}
+        fn clear_selection(&self) {}
+        fn selection(&self) -> Option<String> {
+            None
+        }
+        fn send(&self, _: Vec<u8>) {}
+        fn paste(&self, _: &str) {}
+        fn win32_input(&self) -> bool {
+            false
+        }
+    }
+
+    /// One frame of the pane at `time`, in a font of `size`, and what it
+    /// says it drew.
+    fn frame(ctx: &egui::Context, pane: &mut Moving, time: f64, glide: bool, size: f32) -> Shown {
+        let input = egui::RawInput {
+            time: Some(time),
+            screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(800.0, 600.0))),
+            ..Default::default()
+        };
+        let faces = Faces { cursor: CursorStyle { glide, ..CursorStyle::default() }, ..Faces::plain(FontId::monospace(size)) };
+        let opts = ViewOptions { focused: true, wheel: false, copy_on_select: false, highlights: &[] };
+        let mut shown = Shown::default();
+        let rect = Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(800.0, 600.0));
+        ctx.run_ui(input, |ui| {
+            shown = show_faces(ui, Some(&mut *pane), &mut ViewState::default(), rect, &faces, size * 1.25, &Palette::default(), opts);
+        })
+        .drop_without_applying_deltas();
+        shown
+    }
+
+    /// Drawn frame by frame, the pane says where the cursor is and how it
+    /// slid there; a new font size is no move, and with glide off it jumps
+    /// and forgets, so turning it on again starts where the cursor is.
+    #[test]
+    fn the_pane_says_how_its_cursor_slid() {
+        let ctx = egui::Context::default();
+        let mut pane = Moving(std::cell::Cell::new((2, 1)));
+        let first = frame(&ctx, &mut pane, 1.0, true, 14.0);
+        assert_eq!(first.cursor, Some(CursorShown { cell: (2, 1), slide: None }));
+        pane.0.set((7, 1));
+        let mut t = 2.0;
+        let set_off = frame(&ctx, &mut pane, t, true, 14.0).cursor.unwrap();
+        assert_eq!(set_off.cell, (7, 1));
+        assert_eq!(set_off.slide.map(|s| (s.from, s.to, s.between, s.moving)), Some(((2.0, 1.0), (7, 1), 0, true)));
+        let mut last = set_off;
+        while last.slide.is_some_and(|s| s.moving) {
+            t += 1.0 / 60.0;
+            last = frame(&ctx, &mut pane, t, true, 14.0).cursor.unwrap();
+        }
+        let landed = last.slide.unwrap();
+        assert!(landed.between >= 4 && !landed.moving, "a tenth of a second at 60 frames a second: {landed:?}");
+        // A bigger font moves every cell's pixels, not the cursor.
+        let bigger = frame(&ctx, &mut pane, t + 1.0, true, 20.0).cursor.unwrap();
+        assert_eq!(bigger.slide, Some(landed), "{bigger:?}");
+        // Off, it jumps and says no slide.
+        pane.0.set((0, 3));
+        assert_eq!(frame(&ctx, &mut pane, t + 2.0, false, 14.0).cursor, Some(CursorShown { cell: (0, 3), slide: None }));
+        // On again, it starts on the cursor's cell, not where it last slid to.
+        assert_eq!(frame(&ctx, &mut pane, t + 3.0, true, 14.0).cursor, Some(CursorShown { cell: (0, 3), slide: None }));
+        // A cursor off the grid is not drawn.
+        pane.0.set((0, 500));
+        assert_eq!(frame(&ctx, &mut pane, t + 4.0, true, 14.0).cursor, None);
     }
 
     /// A screen reader gets the rows as lines, without the blanks after

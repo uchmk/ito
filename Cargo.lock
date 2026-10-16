@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "ito-browser"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
  "raw-window-handle",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "ito-common"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "chrono",
  "egui",
@@ -1181,28 +1181,28 @@ dependencies = [
 
 [[package]]
 name = "ito-console"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-gpu"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui-wgpu",
 ]
 
 [[package]]
 name = "ito-graph"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-i18n"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "ito-common",
  "toml",
@@ -1211,7 +1211,7 @@ dependencies = [
 
 [[package]]
 name = "ito-ipc"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "postcard",
  "serde",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "ito-keymap"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "ito-common",
  "ito-keys",
@@ -1230,14 +1230,14 @@ dependencies = [
 
 [[package]]
 name = "ito-keys"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-keyscript"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
  "ito-keys",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "ito-layout"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
  "serde",
@@ -1254,21 +1254,21 @@ dependencies = [
 
 [[package]]
 name = "ito-match"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "fancy-regex",
 ]
 
 [[package]]
 name = "ito-mcp"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ito-notify"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "png",
  "windows",
@@ -1276,14 +1276,14 @@ dependencies = [
 
 [[package]]
 name = "ito-palette"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-pane"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "ito-prefs"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
  "ito-common",
@@ -1317,14 +1317,14 @@ dependencies = [
 
 [[package]]
 name = "ito-select"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-testcheck"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "serde",
  "toml",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "ito-theme"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "egui",
  "ito-pane",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "ito-winres"
-version = "0.45.0"
+version = "0.46.0"
 dependencies = [
  "png",
 ]

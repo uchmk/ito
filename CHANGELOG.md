@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.46.0] - 2026-10-16
+
+### 追加
+
+- ito-pane: `Shown::cursor`（`Option<CursorShown>`）。そのフレームにカーソルを描いたセル（`cell`、列・行。右から左の行では画面の上の位置）と、
+  `CursorStyle::glide` のときの最後の動き（`slide: Option<Slide>`。`from`（セル、曲がった途中なら小数）・`to`・`between`（途中で描いた
+  フレームの数。0 なら跳んだ）・`moving`）。窓の画像では滑りの途中を撮れないので（tsumugi #86、行 17.41）、アプリがこれを `--keys` の状態に出せば、
+  滑ったかどうかを文字で確かめられる。カーソルのセルが格子の外（スクロールで戻した先）か、端末が無いときは `None`。
+
+### 修正
+
+- ito-pane: カーソルの滑り（glide）を切ってから入れ直すと、次の動きが、切る前に最後に滑った先から始まっていた。切っている間は覚えていた位置を捨てる。
+- ito-pane: 字の大きさや行の高さを変えると、カーソルが同じセルのまま滑っていた。滑りの位置をピクセルではなくセルで覚える。
+
+使う側がやること: `Shown { … }` を自分で作っているところに `cursor: None` か `..Default::default()` を足す。滑りを確かめたいなら、
+`show_faces` の戻りの `shown.cursor` をアプリの状態に残して読む。
+
 ## [0.45.0] - 2026-10-16
 
 ### 修正
