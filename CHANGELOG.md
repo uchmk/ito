@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.40.0] - 2026-10-16
+
+### 追加
+
+- ito-keyscript: `Runner` に `left()`（まだ押していない語の数）、`running()`、`finish()`、`watch(ctx)` を足した。
+  `watch` は `<APP>_KEYS_DONE` があるときだけスレッドを 1 つ起こし、1 秒ごとに描画を起こす（裏にある窓でも台本が進む）。
+  待ちの分を除いて `STALL`（30 秒）何も押せなければ `stalled_report` を 1 回だけ書き、stderr にも出す（tsumugi #39）。
+  `<Quit>` は自分で台本を終わらせるので、その後に止まりの報告が上書きすることは無い。
+  使う側がやること: 最初の一歩の前に `runner.watch(ctx.clone())` を呼び、`runner.clipboard` にクリップボードの文字を返す関数を入れる
+  （既定は空の文字で、`<Paste>`・`<C-v>` は何も貼らない）。`Do::Quit` では `quit_report(runner.left())` を、台本の途中で窓が外から
+  閉じられたとき（`running()` が真）は `runner.finish()` のあと `closed_report(runner.left())` を状態の後ろに書く。
+  `--keys` の始めには `install_panic_report(done)` を呼び、拒むときは `refused_report(why)` を書く。
+- docs/common-spec.md: 「キーの台本」に、`<APP>_KEYS_DONE` の終わりの `keys:` の行（done・quit・closed・stalled・panicked・refused）と、
+  `Runner` を使うアプリがやることを書いた。
+
 ## [0.39.0] - 2026-10-16
 
 ### 変更

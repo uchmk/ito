@@ -14,10 +14,12 @@
 //! which waits for its panes to settle). The reports a run leaves in the
 //! app's `<APP>_KEYS_DONE` file ([`stalled_report`], [`quit_report`],
 //! [`closed_report`], [`refused_report`], [`install_panic_report`]) are
-//! shared too.
+//! shared too; a [`Runner`] says how many steps are left for them
+//! ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ito_keys::{self as keys, Code, Key};
@@ -671,6 +673,52 @@ fn pointer_frames(press: &Press, rect: egui::Rect) -> VecDeque<Vec<egui::Event>>
     }
 }
 
+/// How far a [`Runner`] has got, shared with the thread [`Runner::watch`]
+/// starts.
+struct Progress {
+    /// Steps not yet taken.
+    left: usize,
+    /// When the last one was.
+    at: Instant,
+    /// How long the quiet after it is meant to be (a `<Wait:N>`).
+    due: Duration,
+    /// The run has ended; the thread can stop.
+    finished: bool,
+}
+
+/// [`Runner::watch`]'s thread: nudge the frame loop once a second, and if
+/// nothing is pressed for [`STALL`] past any wait due, write
+/// [`stalled_report`] to `done`. It stops when the run ends or the runner is
+/// dropped.
+fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: PathBuf, ctx: egui::Context) {
+    let mut told = false;
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+        if Arc::strong_count(&progress) == 1 {
+            return;
+        }
+        {
+            // Held across the write: a run that finishes meanwhile waits,
+            // and its own report lands after this one.
+            let Ok(p) = progress.lock() else { return };
+            if p.finished {
+                return;
+            }
+            let quiet = p.at.elapsed();
+            if !told && quiet > p.due + STALL {
+                told = true;
+                let report = stalled_report(&labels, p.left, quiet);
+                let _ = std::fs::write(&done, &report);
+                use std::io::Write;
+                // Not `eprintln!`: started from an app's `.com` front, this can be
+                // a pipe nobody reads once the window is up, and that would panic.
+                let _ = writeln!(std::io::stderr(), "--keys: {}", report.lines().collect::<Vec<_>>().join("; "));
+            }
+        }
+        ctx.request_repaint();
+    }
+}
+
 /// A script being played.
 pub struct Runner {
     steps: VecDeque<Step>,
@@ -686,6 +734,7 @@ pub struct Runner {
     /// The clipboard's text for `<Paste>` and `<C-v>`.
     pub clipboard: fn() -> String,
     finished: bool,
+    progress: Option<Arc<Mutex<Progress>>>,
 }
 
 impl Runner {
@@ -706,6 +755,59 @@ impl Runner {
             done,
             clipboard: String::new,
             finished: false,
+            progress: None,
+        }
+    }
+
+    /// Steps not yet taken: for [`quit_report`] and [`closed_report`] when
+    /// the window closes while the script runs.
+    pub fn left(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Whether the script is still being played: not past its last step,
+    /// nor [`finish`](Self::finish)ed.
+    pub fn running(&self) -> bool {
+        !self.finished
+    }
+
+    /// The run has ended some other way than its last step (the window
+    /// closed while it ran): no more steps, and the watch stops. Called
+    /// before the app writes [`closed_report`], so a stall report cannot
+    /// land over it. A `<Quit>` finishes the run by itself.
+    pub fn finish(&mut self) {
+        self.finished = true;
+        self.note(Instant::now());
+    }
+
+    /// For a run that writes the done file: a thread nudges the frame loop
+    /// once a second (a window that gets no frames presses nothing, #168),
+    /// and if nothing is pressed for [`STALL`] past any wait due, writes
+    /// [`stalled_report`] there. A run that then goes on to finish writes its
+    /// usual report over it. Nothing without a done file, or a second time.
+    /// Called before the first [`input`](Self::input), as the report counts
+    /// the steps from there.
+    pub fn watch(&mut self, ctx: egui::Context) {
+        let Some(done) = self.done.clone() else { return };
+        if self.progress.is_some() {
+            return;
+        }
+        let labels = self.steps.iter().map(label).collect();
+        let now = Instant::now();
+        let progress = Progress { left: self.steps.len(), at: now, due: self.next.saturating_duration_since(now), finished: self.finished };
+        let progress = Arc::new(Mutex::new(progress));
+        self.progress = Some(progress.clone());
+        let _ = std::thread::Builder::new().name("keys-watch".into()).spawn(move || watch_progress(progress, labels, done, ctx));
+    }
+
+    /// Tell the watch the script has moved.
+    fn note(&self, now: Instant) {
+        let Some(progress) = &self.progress else { return };
+        if let Ok(mut p) = progress.lock() {
+            p.left = self.steps.len();
+            p.at = now;
+            p.due = self.next.saturating_duration_since(now);
+            p.finished = self.finished;
         }
     }
 
@@ -721,15 +823,24 @@ impl Runner {
         if let Some(frame) = self.pointer.pop_front() {
             raw.events.extend(frame);
             self.next = now + FRAME;
+            self.note(now);
             return None;
         }
         let Some(step) = self.steps.pop_front() else {
             self.finished = true;
+            self.note(now);
             return Some(Do::Done);
         };
         self.next = now + GAP;
+        let did = self.take(&step, ctx, raw, now);
+        self.note(now);
+        did
+    }
+
+    /// One step into this frame's input.
+    fn take(&mut self, step: &Step, ctx: &egui::Context, raw: &mut egui::RawInput, now: Instant) -> Option<Do> {
         // A key no keyboard has is skipped, as `--keys` refuses it up front.
-        match press(&step)? {
+        match press(step)? {
             Press::Events(events) => raw.events.extend(events),
             Press::Wait(d) => self.next = now + d,
             // This runner has no settling to skip.
@@ -737,7 +848,12 @@ impl Runner {
             Press::Shot(name) => self.shot = Some((name, false)),
             Press::State(name) => return Some(Do::State(name)),
             Press::Read { tag, name } => return Some(Do::Read { tag, name }),
-            Press::Quit => return Some(Do::Quit),
+            Press::Quit => {
+                // The window closes; no later step is taken, nor a stall
+                // reported over the app's quit report.
+                self.finished = true;
+                return Some(Do::Quit);
+            }
             Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
             Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
             p @ (Press::Click { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
@@ -780,7 +896,9 @@ impl Runner {
         });
         let image = image?;
         self.shot = None;
-        self.next = Instant::now() + GAP;
+        let now = Instant::now();
+        self.next = now + GAP;
+        self.note(now);
         let path = self.dir.join(format!("{name}.png"));
         save_png(&path, &image).err().map(|e| format!("Shot {name}: {e}"))
     }
@@ -1093,5 +1211,60 @@ mod tests {
                 "{token}: {got:?}"
             );
         }
+    }
+
+    /// The runner says how many steps a `<Quit>` left, for the done file's
+    /// report, and a run that quit takes no more steps.
+    #[test]
+    fn a_quit_leaves_the_steps_after_it() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("j<Quit>kl").unwrap(), None);
+        let step = |r: &mut Runner| {
+            r.next = Instant::now();
+            r.input(&ctx, &mut egui::RawInput::default())
+        };
+        assert_eq!((r.left(), r.running()), (4, true));
+        assert_eq!(step(&mut r), None);
+        assert_eq!(step(&mut r), Some(Do::Quit));
+        assert_eq!((r.left(), r.running(), step(&mut r)), (2, false, None));
+        let mut r = Runner::new(parse("j").unwrap(), None);
+        assert_eq!((step(&mut r), step(&mut r), r.running()), (None, Some(Do::Done), false));
+    }
+
+    /// #168 for the runner: a run nothing has moved for longer than the stall
+    /// allows, past the wait it is on, leaves a report saying where it
+    /// stopped; one still inside its wait does not.
+    #[test]
+    fn a_runner_that_stalls_leaves_a_report() {
+        let dir = std::env::temp_dir().join(format!("ito-keyscript-stall-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let watched = |due: Duration, name: &str| {
+            let done = dir.join(name);
+            let mut r = Runner::new(parse("j<Wait:2000>k").unwrap(), Some(done.clone()));
+            r.watch(egui::Context::default());
+            r.steps.drain(..2);
+            r.note(Instant::now());
+            {
+                let mut p = r.progress.as_ref().unwrap().lock().unwrap();
+                p.at = Instant::now().checked_sub(STALL + Duration::from_secs(5)).unwrap();
+                p.due = due;
+            }
+            // The thread looks once a second; a busy machine may be late.
+            let until = Instant::now() + if due.is_zero() { Duration::from_secs(10) } else { Duration::from_millis(1500) };
+            while Instant::now() < until && !(due.is_zero() && done.exists()) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            r.finish();
+            std::fs::read_to_string(done).ok()
+        };
+        let said = watched(Duration::ZERO, "stuck.done").expect("a report");
+        assert!(said.starts_with("keys: stalled\n"), "{said}");
+        assert!(said.contains("pressed: 2 of 3 (last: `<Wait:2000>`)\nleft: k\n"), "{said}");
+        assert_eq!(watched(Duration::from_secs(60), "waiting.done"), None, "still inside a <Wait:60000>");
+        // No done file, nothing to watch.
+        let mut r = Runner::new(parse("j").unwrap(), None);
+        r.watch(egui::Context::default());
+        assert!(r.progress.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -210,6 +210,20 @@ prepend_keymap = [
 
 - `name` は英数字と `-`・`_` だけ。ファイルは `<APP>_KEYS_DONE` のファイルと同じフォルダに書く。
 - 台本が終わったとき（`<Quit>` の前）にも `<APP>_KEYS_DONE` に状態を書く。テストはこのファイルができるのを待つ。
+- 状態の後ろの `keys:` の行が終わり方を言う。テストはこれを読み、来ないまま待ち続けない:
+
+  | 行 | いつ（作るのは `ito-keyscript`） |
+  | --- | --- |
+  | `keys: done` | 最後の語まで押した。`<Quit>` で終わったときは `quit: yes` の後（`quit_report(0)`） |
+  | `keys: quit`・`left: N not pressed` | `<Quit>` の後ろに N 語が残っていた（`quit_report(N)`） |
+  | `keys: closed`・`left: N not pressed` | 台本の途中で窓が外から閉じられた（×・Alt+F4。`closed_report(N)`）。閉じるかを問う窓で止めたときは書かない |
+  | `keys: stalled`・`pressed:`・`left:` | 待ちの分を除いて `STALL`（30 秒）何も押せていない（`Runner::watch` のスレッドが 1 回だけ書く。その後に進めば上の行で上書きする） |
+  | `keys: panicked`・`thread:`・`at:`・`why:` | アプリがパニックした（`install_panic_report(done)`） |
+  | `keys: refused`・`why:` | 窓を開く前に台本を拒んだ（読めない、打てないキー、引数の数。`refused_report`）。終了コードは 2 で、同じ文を stderr にも出す |
+
+  `Runner` を使うアプリは、最初の一歩の前に `watch(ctx)` を呼び（1 秒ごとに描画を起こすので、裏の窓でも台本が進む）、`clipboard` に
+  クリップボードの文字を返す関数を入れる。`<Quit>` では `quit_report(runner.left())` を、外から閉じられたときは `finish()` のあと
+  `closed_report(runner.left())` を状態の後ろに書く（`running()` が偽なら書かない）。
 - 上の語はすべて ito の `ito-keyscript` が解析して再生する（kura・yagura・tsumugi が同じものを使う）。`<Space>` はキーとテキストの両方で届く。
 - アプリが足してよい語（kura の `<PaneText:name>`・`<PreviewText:name>`、`<Shot:name@preview>` の `@preview` など）は `Dialect`
   （`parse_with(script, &Dialect { reads, shot_suffixes })`）で渡す。`reads` の語は `<Word:name>` の形で、`Do::Read { tag, name }` として
