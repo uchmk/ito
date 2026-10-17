@@ -1,4 +1,4 @@
-//! The dividers in egui (the `egui` feature): only a gap until the pointer
+//! The dividers (and column grips) in egui (the `egui` feature): only a gap until the pointer
 //! comes near, then a line to grab; dragged, the split follows; double-
 //! clicked, it halves. The layout is the caller's: what changes comes back
 //! as [`Moved`], so tsumugi sends it to its server and filer keeps it.
@@ -80,6 +80,48 @@ pub fn dividers<T: Clone + PartialEq>(ui: &egui::Ui, id: egui::Id, layout: &Node
     out
 }
 
+/// What a column grip did this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grip {
+    /// The edge, as its place in the `edges` given to [`grips`].
+    pub index: usize,
+    /// How far the pointer moved along x this frame; give it to
+    /// [`columns::resize`](crate::columns::resize) or `trade`.
+    pub delta: f32,
+    /// The drag ended: save the widths now.
+    pub released: bool,
+    /// Double-clicked: put the column back to its default width.
+    pub reset: bool,
+}
+
+/// Grips on a header's column edges: a strip `grab` wide at each x in `edges`,
+/// over `y`, that takes the pointer and shows the resize cursor. One edge is
+/// answered at a time (the one being dragged, else the first that has
+/// something to say); `id` tells this header's from another's.
+pub fn grips(ui: &egui::Ui, id: egui::Id, edges: &[f32], y: std::ops::Range<f32>, grab: f32) -> Option<Grip> {
+    let mut out = None;
+    for (index, &x) in edges.iter().enumerate() {
+        let strip = egui::Rect::from_min_max(egui::pos2(x - grab / 2.0, y.start), egui::pos2(x + grab / 2.0, y.end));
+        let resp = ui.interact(strip, id.with(("grip", index)), egui::Sense::click_and_drag());
+        if resp.hovered() || resp.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        let grip = if resp.double_clicked() {
+            Grip { index, delta: 0.0, released: false, reset: true }
+        } else if resp.dragged() {
+            Grip { index, delta: resp.drag_delta().x, released: false, reset: false }
+        } else if resp.drag_stopped() {
+            Grip { index, delta: 0.0, released: true, reset: false }
+        } else {
+            continue;
+        };
+        if resp.dragged() || out.is_none() {
+            out = Some(grip);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +176,43 @@ mod tests {
         // The caller must not drop the dragged layout for a button that is
         // up: on the frame of the release it already is (tsumugi, 2.3).
         assert_eq!(held_at_release, Some(false));
+    }
+
+    /// A drag on a column edge says how far it moved, the release says so,
+    /// and a double-click asks for the default.
+    #[test]
+    fn a_grip_reports_the_drag() {
+        let ctx = egui::Context::default();
+        let mut said = Vec::new();
+        let mut frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                said.extend(grips(ui, egui::Id::new("g"), &[100.0, 200.0], 0.0..30.0, 8.0));
+            });
+            out.textures_delta.clear();
+        };
+        let at = |x: f32| egui::pos2(x, 10.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at(50.0))]);
+        frame(vec![egui::Event::PointerMoved(at(200.0))]);
+        frame(vec![button(at(200.0), true)]);
+        for x in [210.0, 230.0] {
+            frame(vec![egui::Event::PointerMoved(at(x))]);
+        }
+        frame(vec![button(at(230.0), false)]);
+        frame(vec![]);
+        assert!(said.iter().all(|g| g.index == 1), "{said:?}");
+        let moved: f32 = said.iter().map(|g| g.delta).sum();
+        assert!((moved - 30.0).abs() < 0.01, "{said:?}");
+        assert!(said.iter().any(|g| g.released), "{said:?}");
     }
 }

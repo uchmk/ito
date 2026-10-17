@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.58.0] - 2026-10-17
+
+### 追加
+
+- ito-layout: 表・一覧のヘッダーの列の端のつまみ（uchmk/ito#7、michi）。
+  - `columns`（egui なしで使える）: `resize(widths, index, delta, min, max, Edge)` は 1 つの列の幅を `min..=max` に収めて動かす（`Edge::Right` は右へ、`Edge::Left` は左へ引くと広がる）。
+    `trade(widths, index, delta, min)` は隣の列と幅を分け合い、合計を保つ（残りを埋める柔軟な列）。`right_edges(start, widths)` は各列の右端の x。
+  - `ui::grips(ui, id, edges, y, grab) -> Option<Grip>`（機能 `egui`）: 各端に幅 `grab` の帯を置き、カーソルを `ResizeHorizontal` にする。
+    `Grip { index, delta, released, reset }` は、ドラッグ中は `delta`、離したときは `released`（幅を保存する）、ダブルクリックは `reset`（既定の幅へ戻す）。
+  - 使う側がやること: 幅の保存と既定の幅はアプリのもの。`grips` の `delta` を `resize` か `trade` に渡し、`released` で保存する。
+
 ## [0.57.0] - 2026-10-17
 
 ### 追加

@@ -7,6 +7,8 @@
 //! pane beside another, and answers where the dividers are. filer can take it
 //! as it is (docs/v1-scope.md, 3).
 
+pub mod columns;
+
 #[cfg(feature = "egui")]
 pub mod ui;
 
