@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.66.0] - 2026-10-17
+
+### 追加
+
+- ito-match（uchmk/ito#16、kura）: `Subst::new(pattern, replacement, all, ignore_case)` と `Subst::apply(text)`。sed 風の置換を `Matcher` と同じ正規表現（fancy-regex。先読み・後読み・後方参照、置換の `$1`）で行う。`ignore_case` は `(?i)` を前に付ける。
+
+### 使う側がやること
+
+- kura は `fancy-regex` の直接の依存と `scripts/ito-first.allow` の行を外し、`Rule::Subst` を `ito_match::Subst` に替える。それ以外は無し。
+
 ## [0.65.0] - 2026-10-17
 
 ### 追加

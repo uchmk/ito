@@ -11,5 +11,7 @@
 
 pub mod fuzzy;
 mod matcher;
+mod subst;
 
 pub use matcher::Matcher;
+pub use subst::Subst;
