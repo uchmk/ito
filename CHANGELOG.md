@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.69.0] - 2026-10-17
+
+### 変更
+
+- `templates/app`（新しいアプリの雛形）に、ito と同じ全部の確認を入れた:
+  - `scripts/verify.sh`: `cargo fmt --all --check`、build `--locked`、test、clippy `-D warnings` を手元・Linux・`x86_64-pc-windows-msvc`・`aarch64-apple-darwin`（Mac の外では cargo-zigbuild）で、`cargo audit`、`make-testcheck --check`・`make-bugform --check`、`lanes.sh check`、`ito-first.py`。
+  - `.github/workflows/ci.yml` の `clippy` を 3 つのターゲットに。`.github/workflows/audit.yml`（push・PR・毎週月曜）を追加。
+- `scripts/new-app.ps1`: `lanes.sh sync` を Git の bash で回す（PATH の先頭の `bash` が WSL の起動役で、ディストリビューションが無いと落ちた）。
+
+### 使う側がやること
+
+- 既存のアプリは、`scripts/verify.sh` と CI に同じ確認（特にターゲットごとの clippy と `cargo audit`）が入っているか見て、無ければ雛形から写す。ito の rev を上げる必要は無い。
+
 ## [0.68.0] - 2026-10-17
 
 ### 追加

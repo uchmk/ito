@@ -75,7 +75,10 @@ try {
     # The shared scripts: lanes.sh first (it copies the rest), from this checkout.
     Copy-Item (Join-Path $ito 'scripts\lanes\lanes.sh') scripts\lanes.sh
     $env:ITO_DIR = $ito
-    bash scripts/lanes.sh sync
+    # Git's bash, not the first `bash` on PATH: that is System32's WSL launcher, which fails where no distro is installed.
+    $gitBash = Join-Path (Split-Path -Parent (Split-Path -Parent (Get-Command git).Source)) 'bin\bash.exe'
+    if (-not (Test-Path $gitBash)) { $gitBash = 'bash' }
+    & $gitBash scripts/lanes.sh sync
     if ($LASTEXITCODE) { throw 'lanes.sh sync failed' }
     Remove-Item Env:\ITO_DIR
     # The bug form is ito's shared one; the example writes it.
