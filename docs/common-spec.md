@@ -39,6 +39,17 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
   - tsumugi: `<config>/tsumugi/settings.toml` → `<config>/uchmk/tsumugi/config.toml`、状態は `<local data>/tsumugi/` → `state_dir`（0.87）
   - kura: `<config>/kura/kura.toml` → `<config>/uchmk/kura/config.toml`、状態は `state_dir` へ（0.99。`KURA_CONFIG_HOME` のフォルダは動かさず、ファイルの名前だけ変える）
 
+### 設定の形式は TOML
+
+- **人が画面や手で変える設定は、`<config>/uchmk/<app>/` の中の TOML にする**（`config.toml`、`keymap.toml`）。JSON・YAML・INI などで持たない。
+  コメントと並びを残して 1 キーだけ書き換えられるのは `toml_edit`（`ito_common` の 1 キーの書き換え）で、読み方も全部のアプリで 1 つにそろう。
+- **アプリが機械的に書くもの**（印・履歴・キャッシュ・セッション）は設定ではなく状態で、`state_dir(app)` に置く。形式は問わない。
+  設定の書き出し・読み込み（`bundle`）には入らない。
+- 設定のフォルダーの直下（`<config>/uchmk/` の `common.toml` と `themes/` の外）にアプリのファイルを置かない。`bundle` が拾うのは `app_dir` の中だけ。
+- 秘密に近い値（webhook のアドレスなど）が設定に入るアプリは、書き出す前に空にするか、`keep` で外すかを決める。
+- `bundle` は互換のため `app_dir` の下の `.json` も読み書きするが、新しい設定には使わない。
+- ほかの形式（YAML・XML・INI・JSONC・JSON5・`.env`）の共通の窓口は作らない。2 つ以上のアプリで要るようになったら `crate-request` で頼む。
+
 ## 環境変数
 
 | 変数 | 意味 |
@@ -342,7 +353,7 @@ scale: 100%           # 書くなら倍率を % で
   - 「Webhook」: 送り先ごとに名前と「外す」「ここに試しに送る」（`Test::Hook(k)`）、アドレス（http(s) でなければ赤い注意）と形式。
     最後に「アドレスを足す」。自分のカードに置くアプリ（tsumugi）は `webhook_rows` を使う。
   - 検索の言葉は `notify_index`。
-- 設定はアプリの設定ファイルの `[notify]` に置く（minato は `minato-settings.json`）。鍵は tsumugi に揃える:
+- 設定はアプリの設定ファイルの `[notify]` に置く（minato は `config.toml` へ移行中。それまでは `minato-settings.json`）。鍵は tsumugi に揃える:
   `system`・`sound`（出来事の名前の並び。出来事が 1 つのアプリは真偽値にしてよい）、`sound_<出来事>`、`focus_mode`。
   Webhook の送り先は `[[notify.webhooks]]` の表を並べ、それぞれ `url`・`format`・`states`（出来事の名前の並び。省けばアプリの既定）。
   前の 1 つだけの形（`[notify]` の `webhook`（アドレス）・`webhook_format`・`webhook_states`）も読み、1 つ目の送り先にする
