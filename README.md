@@ -16,6 +16,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-ipc` | A per-user local door into a running app (Unix socket / named pipe) and framed serde messages |
 | `ito-mcp` | A small MCP server over stdio: JSON-RPC, `tools/list` and `tools/call`, without an async runtime |
 | `ito-common` | What every app shares: the config folder, `common.toml` (language, theme, clock), editing a TOML file in place and watching it |
+| `ito-fonts` | The bundled monospace font (JetBrains Mono, SIL OFL) and its registration in egui; `common.toml`'s `mono_font` picks it or the system's |
 | `ito-theme` | The themes: the twenty built in, a theme file's colours, and the one in force |
 | `ito-select` | Picking up painted text with the mouse and copying it: for panes drawn with a painter, not made of widgets |
 | `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys) |

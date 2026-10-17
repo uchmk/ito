@@ -71,6 +71,7 @@ theme = "dark"             # テーマの名前、または dark / light / syste
 dark_theme = "tsumugi Dark"   # system で OS が暗いとき
 light_theme = "tsumugi Light" # system で OS が明るいとき
 scale = 1.0                # 画面の倍率。0.2 から 5.0、0.1 刻み
+mono_font = "bundled"      # 等幅の字体。bundled（内蔵の JetBrains Mono）/ system（システムのもの）
 
 [clock]
 show = true
@@ -282,6 +283,7 @@ scale: 100%           # 書くなら倍率を % で
 - 字体の並びは `ito_common::fonts` に 1 つだけ置き（kura の順）、全部のアプリが同じ順に読む:
   - `NERD_FONTS`（HackGen35 Console NF から JetBrains Mono NF まで 6 つ）を `font_dirs`（ユーザーの字体のフォルダ → システム）で探す（`nerd_font`・`find_file`）。
   - 日本語は `JAPANESE`（Windows はメイリオ → 游ゴシック → MS ゴシック）、太字は `JAPANESE_BOLD`。`read_first` で最初に読めたものを使う。
+- 等幅は `common.toml` の `mono_font` に従う（既定 `bundled`）。`bundled` は `ito-fonts`（JetBrains Mono、SIL OFL。約 270 KB）を `ito_fonts::register` で等幅の先頭に足す。`system` は何もしない（上の並びのまま）。アプリの字体の設定が「自動」でないとき（`font.family` を決めているとき）はアプリの設定が勝つ。ライセンスの画面に `ito_fonts::LICENSE` を載せる。
 - 読むのは数十 MB なので UI ではないスレッドで。egui に渡す（等幅・プロポーショナルのどこに足すか）は各アプリ。
 
 ## 窓
@@ -326,6 +328,7 @@ scale: 100%           # 書くなら倍率を % で
   - Advanced は `advanced_card`（設定・データのフォルダーを開く、2 回押して初期化）、About は `about_page`（版・ビルド・OS・ライセンス・詳細のコピー・不具合の報告）。
   - Advanced にはバックアップのカード（`backup_card`、`ito_common::bundle`）も置く: 設定を 1 ファイルに書き出す・読み込む。common.toml・テーマ・アプリの設定が入り、state（窓の場所など）は入らない。読み込みで置き換えるファイルは `<file>.bak-<time>` に残る。アプリは `keep` で自分のフォルダーのどのファイルを束に入れ・読み込むかを決める（`.toml` と `.json`）。
   - 外観（Appearance）の字体は `fonts_card`（字体・大きさ・行の高さ・合字。値はアプリの設定ファイルなので `FontChange` を返す）。
+  - 外観には `mono_font_card`（等幅の字体。`bundled` / `system`。common.toml に書く `CommonChange` を返す）も置く。
   - シェルは `shell_card`（既定のシェル・引数・環境変数。値はアプリの設定ファイルなので `ShellChange` を返す）。フックなどはアプリに残す。
   - 共通の行の上に、アプリが自分の行やカードを足してよい。
   **新しいアプリは、キーのページ（上の「設定の画面から変えるとき」）を設定の画面の機能として必ず作る。**keymap.toml を

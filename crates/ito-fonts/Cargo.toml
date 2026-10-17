@@ -1,0 +1,16 @@
+[package]
+name = "ito-fonts"
+description = "The monospace face uchmk's apps carry inside them (JetBrains Mono, SIL OFL) and how to hand it to egui, so code and paths have the same shapes on every machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# `register`: put the face in an egui `FontDefinitions`.
+egui = ["dep:egui"]
+
+[dependencies]
+ito-common = { path = "../ito-common" }
+egui = { version = "0.36", optional = true }

@@ -121,6 +121,11 @@ pub struct MoreWords {
     pub line_height_note: &'static str,
     pub ligatures: &'static str,
     pub ligatures_note: &'static str,
+    pub mono_title: &'static str,
+    pub mono_font: &'static str,
+    pub mono_font_note: &'static str,
+    pub mono_bundled: &'static str,
+    pub mono_system: &'static str,
     pub backup: &'static str,
     pub backup_file: &'static str,
     pub backup_file_note: &'static str,
@@ -191,6 +196,11 @@ pub const MORE_EN: MoreWords = MoreWords {
     line_height_note: "1.00 is the font's own",
     ligatures: "Ligatures",
     ligatures_note: "Join characters like -> and ==",
+    mono_title: "CODE FONT",
+    mono_font: "Monospace font",
+    mono_font_note: "For code and paths, when the font above is Automatic. Every app follows this",
+    mono_bundled: "Built in (JetBrains Mono)",
+    mono_system: "From the system",
     backup: "BACKUP",
     backup_file: "File",
     backup_file_note: "Where the settings are written, or read from",
@@ -261,6 +271,11 @@ pub const MORE_JA: MoreWords = MoreWords {
     line_height_note: "1.00 が字体どおり",
     ligatures: "合字",
     ligatures_note: "-> や == をつなげて描く",
+    mono_title: "コード用の字体",
+    mono_font: "等幅の字体",
+    mono_font_note: "上の字体が「自動」のときの、コードやパスの字体。全部のアプリがこれに従う",
+    mono_bundled: "内蔵（JetBrains Mono）",
+    mono_system: "システムのもの",
     backup: "バックアップ",
     backup_file: "ファイル",
     backup_file_note: "設定を書き出す・読み込むファイル",
@@ -575,6 +590,30 @@ pub fn fonts_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, drafts: &mut crate:
     out
 }
 
+/// The key of the Code font card's row in common.toml, for [`crate::Nav::index`].
+pub const MONO_FONT_KEY: &str = "mono_font";
+
+/// The Code font card: common.toml's `mono_font` (`bundled` or `system`),
+/// which every app follows when its own font is Automatic. Put it on the
+/// Appearance page, next to [`fonts_card`]. Returns the change to write.
+pub fn mono_font_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, now: ito_common::MonoFont) -> Option<CommonChange> {
+    use ito_common::MonoFont;
+    let mut out = None;
+    section(ui, l, w.mono_title, |ui| {
+        let options = [(MonoFont::Bundled, w.mono_bundled), (MonoFont::System, w.mono_system)];
+        if let Some(m) = keyed_row(ui, l, MONO_FONT_KEY, w.mono_font, w.mono_font_note, |ui| crate::select(ui, "mono-font", now, &options))
+        {
+            out = Some(ito_common::mono_font_change(m));
+        }
+    });
+    out
+}
+
+/// The Code font card's words, for the settings' search.
+pub fn mono_font_index(w: &MoreWords) -> Vec<&'static str> {
+    vec![w.mono_title, w.mono_font, w.mono_font_note, w.mono_bundled, w.mono_system, MONO_FONT_KEY]
+}
+
 /// The Fonts card's words, for the settings' search.
 pub fn fonts_index(w: &MoreWords) -> Vec<&'static str> {
     let mut v = vec![w.text, w.font, w.font_note, w.size, w.size_note, w.line_height, w.line_height_note, w.ligatures, w.ligatures_note];
@@ -637,6 +676,24 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         assert!(forget_place(&d).is_ok());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_code_font_card_draws_and_asks_for_nothing_untouched() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+            ..Default::default()
+        };
+        let mut got = Some(ito_common::mono_font_change(ito_common::MonoFont::System));
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                got = mono_font_card(ui, Look { c: ito_theme::colors(), q: "" }, &MORE_JA, ito_common::MonoFont::Bundled);
+            });
+        });
+        out.textures_delta.clear();
+        assert_eq!(got, None);
+        assert!(mono_font_index(&MORE_EN).contains(&"mono_font"));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! a person wrote around it kept.
 //!
 //! ```text
-//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, [clock]
+//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, [clock]
 //! <config dir>/uchmk/<app>/config.toml  each app's own (`<APP>_CONFIG_HOME` moves the folder)
 //! <config dir>/uchmk/themes/*.toml      themes of one's own
 //! ```
@@ -289,6 +289,41 @@ pub fn scale_change(s: f32) -> CommonChange {
     CommonChange { table: None, key: "scale", value: format!("{:.1}", tidy_scale(s)) }
 }
 
+/// Which monospace face the apps draw code and paths in when the app's own
+/// `font.family` is automatic: the one `ito-fonts` carries, or whatever the
+/// system has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MonoFont {
+    /// JetBrains Mono, inside the app: the same shapes on every machine.
+    #[default]
+    Bundled,
+    /// The faces the app looks for on the system, as before `ito-fonts`.
+    System,
+}
+
+impl MonoFont {
+    /// Both, in the order a settings screen lists them.
+    pub const ALL: [MonoFont; 2] = [MonoFont::Bundled, MonoFont::System];
+
+    /// The word common.toml writes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MonoFont::Bundled => "bundled",
+            MonoFont::System => "system",
+        }
+    }
+
+    /// `bundled` or `system`, in any case; `None` for anything else.
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.as_str().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+/// The change that writes `m` as common.toml's `mono_font`.
+pub fn mono_font_change(m: MonoFont) -> CommonChange {
+    CommonChange { table: None, key: "mono_font", value: quote(m.as_str()) }
+}
+
 /// What `common.toml` holds; `None` for a key it does not have, so an app
 /// can fall back on its own older setting.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -303,12 +338,14 @@ pub struct Common {
     /// The size the whole window is drawn at, from [`SCALE_MIN`] to
     /// [`SCALE_MAX`]; the keys `<C-=>` `<C-->` `<C-0>` write it.
     pub scale: Option<f32>,
+    /// `bundled` (the default) or `system`: see [`MonoFont`].
+    pub mono_font: Option<MonoFont>,
     pub clock: Option<Clock>,
     pub window: Option<WindowPrefs>,
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 7] = ["language", "theme", "dark_theme", "light_theme", "scale", "clock", "window"];
+const KEYS: [&str; 8] = ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "clock", "window"];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -405,7 +442,14 @@ impl Common {
                 None
             }
         };
-        let common = Self { language, theme, dark_theme, light_theme, scale, clock, window };
+        let mono_font = text_of("mono_font", &mut warnings).and_then(|s| {
+            let m = MonoFont::parse(&s);
+            if m.is_none() {
+                warnings.push(format!("common.toml: mono_font = \"{s}\" is not `bundled` or `system`, so it is not used"));
+            }
+            m
+        });
+        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, clock, window };
         Ok((common, warnings))
     }
 
@@ -426,6 +470,11 @@ impl Common {
         let (theme, dark, light) = fallback.unwrap_or(("dark", "tsumugi Dark", "tsumugi Light"));
         let pick = |own: &Option<String>, old: &str| own.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| old.to_owned());
         (pick(&self.theme, theme), pick(&self.dark_theme, dark), pick(&self.light_theme, light))
+    }
+
+    /// The monospace face: common.toml's, else the bundled one.
+    pub fn mono_font_or_default(&self) -> MonoFont {
+        self.mono_font.unwrap_or_default()
     }
 
     /// The scale: common.toml's, else 1.0.
@@ -906,6 +955,40 @@ zzz = 1
         let (c, warnings) = Common::parse("clock = 1\n").unwrap();
         assert_eq!((c.clock, warnings.len()), (None, 1));
         assert_eq!(Common::read(&dir("none")), Ok((Common::default(), Vec::new())), "no file: nothing set");
+    }
+
+    #[test]
+    fn the_mono_font_is_bundled_unless_the_file_says_system() {
+        assert_eq!(Common::default().mono_font_or_default(), MonoFont::Bundled);
+        let (c, w) = Common::parse(
+            "mono_font = \"System\"
+",
+        )
+        .unwrap();
+        assert_eq!((c.mono_font, w.len()), (Some(MonoFont::System), 0));
+        let (c, w) = Common::parse(
+            "mono_font = \"comic\"
+",
+        )
+        .unwrap();
+        assert_eq!((c.mono_font, w.len()), (None, 1));
+        assert_eq!(
+            Common::parse(
+                "mono_font = 3
+"
+            )
+            .unwrap()
+            .0
+            .mono_font,
+            None
+        );
+        let text = mono_font_change(MonoFont::System)
+            .apply(
+                "language = \"ja\"
+",
+            )
+            .unwrap();
+        assert_eq!(Common::parse(&text).unwrap().0.mono_font, Some(MonoFont::System));
     }
 
     #[test]

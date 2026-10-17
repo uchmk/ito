@@ -13,6 +13,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし） | tsumugi、kura |
 | `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、窓の場所の保存と戻し方（`window`、古い形も読む `load`、追跡の `Tracker`、アプリの手順を束ねる `Saved`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
+| `ito-fonts` | 同梱の等幅フォント（JetBrains Mono、SIL OFL）と egui への登録（機能 `egui`）。`common.toml` の `mono_font`（`bundled` が既定、`system`）で選ぶ | kura、tsumugi、michi |
 | `ito-theme` | 組み込みの 20 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
 | `ito-openin` | 別のプログラムで開く（コマンドラインのひな形 `{path} {line} {left} {right} {base} {merged}`、窓を出さない起動、エディターの行の渡し方の表と `[line_args]`、diff / merge ツールの表と見つけ方、`[open]`・`[line_args]`・`[diff_tools.<名>]` の読み書きと設定画面の `Edit`）。設定画面のカードは `ito-prefs` の `open_card` | kura、michi |

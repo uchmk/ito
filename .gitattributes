@@ -6,3 +6,7 @@
 
 # Cargo.lock is generated; keep it out of diffs and merge conflicts.
 Cargo.lock linguist-generated=true
+
+# Fonts are binary whatever git guesses.
+*.ttf binary
+*.otf binary

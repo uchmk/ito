@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.79.0] - 2026-10-17
+
+### 追加
+
+- 新しいクレート `ito-fonts`: 等幅フォント JetBrains Mono Regular（SIL OFL 1.1）を同梱する。`JETBRAINS_MONO`（バイト列）・`NAME`・`LICENSE`・`AUTHORS`、機能 `egui` で `register(&mut FontDefinitions, MonoFont)`（uchmk/ito#25）。
+- ito-common: `MonoFont`（`Bundled` が既定 / `System`）、common.toml の `mono_font` キー、`Common::mono_font_or_default()`、`mono_font_change`。
+- ito-prefs: `mono_font_card`（等幅の字体の行。`CommonChange` を返す）、`mono_font_index`、`MONO_FONT_KEY`、`MoreWords` の `mono_*` の欄。
+
+### 使う側がやること
+
+- `MoreWords` を自分で作っているアプリは `mono_title`・`mono_font`・`mono_font_note`・`mono_bundled`・`mono_system` を足す（`MORE_EN`・`MORE_JA` を使っていれば何もない）。
+- FontDefinitions を組むとき、アプリの字体が「自動」なら `ito_fonts::register(&mut fonts, common.mono_font_or_default())` を呼ぶ（`ito-fonts` に機能 `egui` を付ける）。
+- 外観のページに `mono_font_card` を置き、返った `CommonChange` を `edit_common` で書く。
+- ライセンスの画面に `ito_fonts::LICENSE` を載せる。実行ファイルは約 270 KB 増える。
+
 ## [0.78.0] - 2026-10-17
 
 ### 追加
