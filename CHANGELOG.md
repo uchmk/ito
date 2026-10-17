@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.65.0] - 2026-10-17
+
+### 追加
+
+- ito-help（uchmk/ito#13、minato）:
+  - `Overflow::{Bar, Counts { above, below }}` と `draw_with` / `draw_plan_with`: スクロールバーの代わりに、見えない行が上にあれば最初の行を `above(n)`、下にあれば最後の行を `below(n)` の文言に置き換える（段ごと）。`draw` / `draw_plan` は今まで通り `Bar`。
+    マーカーが隠す行も `n` に数える。1 ページ（`visible`）ずつ動かすと、マーカーの下の行を飛び越すことがある。
+  - `Line::Row(Vec<String>)`: 表の行。続く `Row` の組は、各列を内容でいちばん広い幅にそろえ、入りきらなければいちばん広い列から縮めて `…` で切る。1 列目は keys の色、あとは desc の色。
+    `deal` / `plan` は `Group` しか配らないので、表は `plan.columns` の段に `Row` を足すか、`draw_with` に `Line` の並びを渡す。
+
+### 使う側がやること
+
+- `Drawn` に `above` / `below` が増えた（`Drawn { … }` を自分で作っているなら足す）。`Line` に `Row` が増えた（`match` で `Line` を網羅しているなら足す）。それ以外は無し。
+
 ## [0.64.0] - 2026-10-17
 
 ### 追加

@@ -21,6 +21,9 @@ pub enum Line {
     Bind { keys: String, desc: String },
     /// An empty line between layers.
     Blank,
+    /// A row of a table: the cells of the rows in a run line up in columns
+    /// as wide as their widest text (cut with `…` when the rect is too narrow).
+    Row(Vec<String>),
 }
 
 /// Add a layer: a blank line first if there is already something, then the
@@ -59,6 +62,22 @@ pub struct Drawn {
     pub max: usize,
     /// The scroll that was drawn, `scroll` held to `max`.
     pub scroll: usize,
+    /// Lines out of sight above and below the tallest column. With
+    /// [`Overflow::Counts`] the two rows that say so are counted in.
+    pub above: usize,
+    pub below: usize,
+}
+
+/// What shows that the list goes on past the rect.
+#[derive(Clone, Copy)]
+pub enum Overflow<'a> {
+    /// A thin scroll bar at the right edge (what [`draw`] does).
+    Bar,
+    /// No bar: the first visible row is replaced by `above(n)` when `n` lines
+    /// are out of sight above, and the last by `below(n)` for those below.
+    /// A page (`Drawn::visible`) can step over the line a marker covers; the
+    /// count says how many there are.
+    Counts { above: &'a dyn Fn(usize) -> String, below: &'a dyn Fn(usize) -> String },
 }
 
 /// The column the descriptions start at: 40% of the width, but no more than
@@ -71,22 +90,106 @@ fn key_width(width: f32, cell: f32) -> f32 {
 /// scroll. A text longer than its column ends in `…` rather than running into
 /// the next one.
 pub fn draw(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, style: &Style) -> Drawn {
+    draw_with(painter, body, lines, scroll, style, Overflow::Bar)
+}
+
+/// [`draw`], with the way to show the rest of a long list chosen.
+pub fn draw_with(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, style: &Style, overflow: Overflow) -> Drawn {
     let painter = painter.with_clip_rect(body.intersect(painter.clip_rect()));
     let visible = ((body.height() / style.row_h).floor() as usize).max(1);
     let max = lines.len().saturating_sub(visible);
     let scroll = scroll.min(max);
-    draw_rows(&painter, body, lines, scroll, visible, style);
-    bar(&painter, body, lines.len(), visible, scroll, max, style);
-    Drawn { visible, max, scroll }
+    draw_rows(&painter, body, lines, scroll, visible, style, overflow);
+    if let Overflow::Bar = overflow {
+        bar(&painter, body, lines.len(), visible, scroll, max, style);
+    }
+    drawn(visible, max, scroll, overflow)
+}
+
+fn drawn(visible: usize, max: usize, scroll: usize, overflow: Overflow) -> Drawn {
+    let (mut above, mut below) = (scroll, max - scroll);
+    if let Overflow::Counts { .. } = overflow {
+        above += usize::from(above > 0);
+        below += usize::from(below > 0);
+    }
+    Drawn { visible, max, scroll, above, below }
+}
+
+/// The widths of the columns of each run of [`Line::Row`]s, by line; a run
+/// shrinks its widest columns until it fits in `avail`.
+fn table_widths(painter: &Painter, lines: &[Line], style: &Style, avail: f32, gap: f32) -> Vec<Option<Vec<f32>>> {
+    let mut out: Vec<Option<Vec<f32>>> = vec![None; lines.len()];
+    let mut i = 0;
+    while i < lines.len() {
+        if !matches!(lines[i], Line::Row(_)) {
+            i += 1;
+            continue;
+        }
+        let end = (i..lines.len()).find(|&j| !matches!(lines[j], Line::Row(_))).unwrap_or(lines.len());
+        let mut w: Vec<f32> = Vec::new();
+        for l in &lines[i..end] {
+            if let Line::Row(cells) = l {
+                for (c, t) in cells.iter().enumerate() {
+                    let x = painter.layout_no_wrap(t.clone(), style.font.clone(), style.desc).size().x;
+                    if c == w.len() {
+                        w.push(x);
+                    } else {
+                        w[c] = w[c].max(x);
+                    }
+                }
+            }
+        }
+        let room = (avail - gap * w.len().saturating_sub(1) as f32).max(0.0);
+        while w.iter().sum::<f32>() > room + 0.01 {
+            let top = w.iter().copied().fold(0.0, f32::max);
+            let next = w.iter().copied().filter(|&x| x < top - 0.01).fold(0.0, f32::max);
+            let n = w.iter().filter(|&&x| x >= top - 0.01).count() as f32;
+            let excess = w.iter().sum::<f32>() - room;
+            let cut = (top - next).min(excess / n);
+            for x in w.iter_mut().filter(|x| **x >= top - 0.01) {
+                *x -= cut;
+            }
+        }
+        for slot in &mut out[i..end] {
+            *slot = Some(w.clone());
+        }
+        i = end;
+    }
+    out
 }
 
 /// `visible` rows of `lines` from `scroll`, into `body`; no scroll bar.
-fn draw_rows(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, visible: usize, style: &Style) {
+fn draw_rows(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, visible: usize, style: &Style, overflow: Overflow) {
     let cell = painter.layout_no_wrap("M".repeat(10), style.font.clone(), style.keys).size().x / 10.0;
     let key_w = key_width(body.width(), cell);
+    let tables = table_widths(painter, lines, style, body.width() - 16.0, cell * 2.0);
     for (i, line) in lines.iter().skip(scroll).take(visible).enumerate() {
         let y = body.top() + i as f32 * style.row_h;
+        if let Overflow::Counts { above, below } = overflow {
+            let marker = if i == 0 && scroll > 0 {
+                Some(above(scroll + 1))
+            } else if i + 1 == visible && lines.len() > scroll + visible {
+                Some(below(lines.len() - (scroll + visible) + 1))
+            } else {
+                None
+            };
+            if let Some(m) = marker {
+                let m = fit(painter, &m, &style.font, body.width() - 8.0);
+                painter.text(pos2(body.left() + 4.0, y), Align2::LEFT_TOP, m, style.font.clone(), style.desc);
+                continue;
+            }
+        }
         match line {
+            Line::Row(cells) => {
+                let widths = tables[scroll + i].as_deref().unwrap_or(&[]);
+                let mut x = body.left() + 12.0;
+                for (c, t) in cells.iter().enumerate() {
+                    let w = widths.get(c).copied().unwrap_or(0.0);
+                    let color = if c == 0 { style.keys } else { style.desc };
+                    painter.text(pos2(x, y), Align2::LEFT_TOP, fit(painter, t, &style.font, w), style.font.clone(), color);
+                    x += w + cell * 2.0;
+                }
+            }
             Line::Head(t) => {
                 painter.text(
                     pos2(body.left() + 4.0, y),
@@ -214,6 +317,12 @@ pub fn plan(groups: &[Group], room: f32, row_h: f32, max_cols: usize, floor: f32
 /// Draw a [`Plan`]'s columns side by side into `body`, from line `scroll`,
 /// with `style` scaled by `plan.scale`. The scroll bar is the body's right edge.
 pub fn draw_plan(painter: &Painter, body: Rect, plan: &Plan, scroll: usize, style: &Style) -> Drawn {
+    draw_plan_with(painter, body, plan, scroll, style, Overflow::Bar)
+}
+
+/// [`draw_plan`], with the way to show the rest of a long list chosen. Each
+/// column that runs past the rect gets its own markers.
+pub fn draw_plan_with(painter: &Painter, body: Rect, plan: &Plan, scroll: usize, style: &Style, overflow: Overflow) -> Drawn {
     let painter = painter.with_clip_rect(body.intersect(painter.clip_rect()));
     let mut st = style.clone();
     st.font.size *= plan.scale;
@@ -228,10 +337,12 @@ pub fn draw_plan(painter: &Painter, body: Rect, plan: &Plan, scroll: usize, styl
     for (i, col) in plan.columns.iter().enumerate() {
         let left = body.left() + i as f32 * (w + gutter);
         let rect = Rect::from_min_size(pos2(left, body.top()), vec2(w, body.height()));
-        draw_rows(&painter, rect, col, scroll, visible, &st);
+        draw_rows(&painter, rect, col, scroll, visible, &st, overflow);
     }
-    bar(&painter, body, total, visible, scroll, max, &st);
-    Drawn { visible, max, scroll }
+    if let Overflow::Bar = overflow {
+        bar(&painter, body, total, visible, scroll, max, &st);
+    }
+    drawn(visible, max, scroll, overflow)
 }
 
 /// `s` cut to `width` with `…`, by whole characters.
@@ -321,7 +432,7 @@ mod tests {
             });
             o.textures_delta.clear();
         }
-        assert_eq!(drawn, Some(Drawn { visible: 10, max: 40, scroll: 40 }));
+        assert_eq!(drawn, Some(Drawn { visible: 10, max: 40, scroll: 40, above: 40, below: 0 }));
     }
 
     fn group(title: &str, n: usize) -> Group {
@@ -382,5 +493,98 @@ mod tests {
         }
         let d = drawn.unwrap();
         assert_eq!((d.visible, d.max, d.scroll), (10, 21, 21), "31 lines at a scale of 0.5, 10 rows of 10");
+    }
+
+    fn lay(lines: &[Line], scroll: usize, overflow: Overflow) -> (Drawn, Vec<String>) {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0))), ..Default::default() };
+        let style = Style {
+            font: FontId::monospace(13.0),
+            row_h: 20.0,
+            head: Color32::WHITE,
+            keys: Color32::WHITE,
+            desc: Color32::GRAY,
+            bar: Color32::GRAY,
+        };
+        let (mut d, mut texts) = (None, Vec::new());
+        for _ in 0..2 {
+            let o = ctx.run_ui(input.clone(), |ui| {
+                d = Some(draw_with(
+                    ui.painter(),
+                    Rect::from_min_size(pos2(10.0, 10.0), vec2(300.0, 100.0)),
+                    lines,
+                    scroll,
+                    &style,
+                    overflow,
+                ));
+            });
+            texts = o
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+            o.drop_without_applying_deltas();
+        }
+        (d.unwrap(), texts)
+    }
+
+    #[test]
+    fn counts_replace_the_bar_and_say_how_many_lines_are_out_of_sight() {
+        let lines: Vec<Line> = (0..20).map(|i| Line::Head(format!("l{i}"))).collect();
+        let up = |n: usize| format!("up {n}");
+        let down = |n: usize| format!("down {n}");
+        let counts = Overflow::Counts { above: &up, below: &down };
+        // 5 rows fit: lines 0..5 with the last covered by "down 16" (lines 4..19 are out of sight).
+        let (d, t) = lay(&lines, 0, counts);
+        assert_eq!(t, ["l0", "l1", "l2", "l3", "down 16"]);
+        assert_eq!((d.above, d.below), (0, 16));
+        let (d, t) = lay(&lines, 4, counts);
+        assert_eq!(t, ["up 5", "l5", "l6", "l7", "down 12"]);
+        assert_eq!((d.above, d.below), (5, 12));
+        let (d, t) = lay(&lines, 99, counts);
+        assert_eq!(t, ["up 16", "l16", "l17", "l18", "l19"]);
+        assert_eq!((d.above, d.below), (16, 0));
+        // The bar shows no words.
+        assert_eq!(lay(&lines, 4, Overflow::Bar).1, ["l4", "l5", "l6", "l7", "l8"]);
+    }
+
+    #[test]
+    fn table_rows_line_their_cells_up_by_the_widest_in_the_run() {
+        let row = |a: &str, b: &str| Line::Row(vec![a.into(), b.into()]);
+        let lines = vec![row("a", "x"), row("long one", "y"), Line::Blank, row("c", "z")];
+        let (_, t) = lay(&lines, 0, Overflow::Bar);
+        assert_eq!(t, ["a", "x", "long one", "y", "c", "z"]);
+        let ctx = egui::Context::default();
+        let style = Style {
+            font: FontId::monospace(13.0),
+            row_h: 20.0,
+            head: Color32::WHITE,
+            keys: Color32::WHITE,
+            desc: Color32::GRAY,
+            bar: Color32::GRAY,
+        };
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0))), ..Default::default() };
+        let mut w = Vec::new();
+        for _ in 0..2 {
+            let o = ctx.run_ui(input.clone(), |ui| {
+                w = table_widths(ui.painter(), &lines, &style, 300.0, 20.0);
+            });
+            o.drop_without_applying_deltas();
+        }
+        let (first, last) = (w[0].clone().unwrap(), w[3].clone().unwrap());
+        assert_eq!(w[0], w[1], "one run, one set of widths");
+        assert!(first[0] > last[0], "the separate run is as wide as its own widest cell");
+        // Too narrow: the widest column gives way and the sum fits.
+        let mut narrow = Vec::new();
+        for _ in 0..2 {
+            let o = ctx.run_ui(input.clone(), |ui| {
+                narrow = table_widths(ui.painter(), &lines, &style, 60.0, 10.0);
+            });
+            o.drop_without_applying_deltas();
+        }
+        assert!(narrow[0].as_ref().unwrap().iter().sum::<f32>() <= 50.01);
     }
 }
