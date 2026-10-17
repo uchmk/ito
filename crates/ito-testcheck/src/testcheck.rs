@@ -496,16 +496,20 @@ fn lint(text: &str, src: &str) -> Vec<String> {
             in_table = false;
             continue;
         }
-        let cells = line.replace("\\|", "");
-        let cells = cells.trim().trim_start_matches('|').trim_end_matches('|');
-        let count = cells.split('|').count();
+        // Cells are split as `parse` does (on " | "), so a `|` inside a code
+        // span, like `>|`, is not a column; a row's own tick is not one either.
+        let mut cells: Vec<&str> = line.trim_start_matches("| ").trim_end().trim_end_matches('|').split(" | ").map(str::trim).collect();
+        if in_table && cells.last().is_some_and(|c| matches!(*c, "[ ]" | "[x]" | "[~]" | "[-]")) {
+            cells.pop();
+        }
+        let count = cells.len();
         if !in_table {
             width = count;
             in_table = true;
         } else if count != width {
             faults.push(format!("{src}:{n}: {count} cells in a table of {width}"));
         }
-        let id = cells.split('|').next().unwrap_or_default().trim();
+        let id = cells[0];
         if is_check_id(id) && !seen.insert(id.to_owned()) {
             faults.push(format!("{src}:{n}: check {id} appears twice in its section"));
         }
@@ -848,6 +852,29 @@ mod tests {
         ] {
             assert!(r.stderr.contains(want), "{want} not in {}", r.stderr);
         }
+    }
+
+    #[test]
+    fn strict_counts_cells_the_way_parse_splits_them() {
+        let d = dir("strict-pipe");
+        std::fs::write(
+            d.join("ja.toml"),
+            "strict = true
+",
+        )
+        .unwrap();
+        std::fs::write(
+            d.join("TESTING.md"),
+            "## 1. One
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 1.1 | run `a >| b` | `x |> y` | [ ] |
+",
+        )
+        .unwrap();
+        let r = run_with(&config(), &d, &args(&[]), BTreeSet::new());
+        assert_eq!(r.code, 0, "{}", r.stderr);
     }
 
     #[test]

@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.61.1] - 2026-10-17
+
+### 修正
+
+- ito-testcheck `strict`: 表の列の数を `parse` と同じ規則（` | ` で分ける）で数える。コード片の `>|` や `|>` を列の区切りと数えて落ちていた（tsumugi）。行の末尾の印（`[ ]` など）も列に数えない。
+
+### 使う側がやること
+
+- 無し。tsumugi は `TESTING.md` に入れた `\|` を戻してよい。
+
 ## [0.61.0] - 2026-10-17
 
 ### 追加
