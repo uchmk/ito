@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.64.0] - 2026-10-17
+
+### 追加
+
+- ito-testcheck: セクションの番号に、数字のあとの英小文字を使える（`## 3d. Disks`、id `3d.8`、注の `[section.3d]`、`--stats`。uchmk/ito#14）。
+  並びは TESTING.md に書いた順のまま（3、3a、3d、4）。数字だけのアプリ（kura・tsumugi）は変わらない。
+
+### 使う側がやること
+
+- 無し（足すだけ）。
+
 ## [0.63.2] - 2026-10-17
 
 ### 直した

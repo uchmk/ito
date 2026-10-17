@@ -101,7 +101,7 @@ pub struct Counts {
 /// One row of one of TESTING.md's tables.
 #[derive(Debug, PartialEq)]
 struct Check {
-    section: u32,
+    section: String,
     id: String,
     /// The cells after the id, in order. Two normally (`Do`, `Expect`); three
     /// where the table qualifies them first.
@@ -110,7 +110,9 @@ struct Check {
 
 #[derive(Debug)]
 struct Section {
-    n: u32,
+    /// The number as the heading writes it: digits, then lowercase letters
+    /// for a section slotted in later (`3`, `3d`).
+    n: String,
     /// The heading as TESTING.md writes it, version tag and all.
     title: String,
     checks: Vec<Check>,
@@ -253,7 +255,7 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
     for s in &sections {
         let mine: Vec<&Check> = s.checks.iter().filter(|c| !automated.contains(&c.id)).collect();
         let auto: Vec<&str> = s.checks.iter().filter(|c| automated.contains(&c.id)).map(|c| c.id.as_str()).collect();
-        let n = notes.section.get(&s.n.to_string());
+        let n = notes.section.get(&s.n);
         let title = match n.map(|n| n.title.as_str()).unwrap_or_default() {
             "" => s.title.clone(),
             ja => ja.to_owned(),
@@ -429,8 +431,8 @@ fn parse(text: &str, src: &str) -> Vec<Section> {
         if let Some(rest) = line.strip_prefix("## ") {
             skip = true;
             if let Some((num, title)) = rest.split_once(". ") {
-                if let Ok(n) = num.parse::<u32>() {
-                    out.push(Section { n, title: title.trim().to_owned(), checks: Vec::new() });
+                if is_section_label(num) {
+                    out.push(Section { n: num.to_owned(), title: title.trim().to_owned(), checks: Vec::new() });
                     skip = false;
                 }
             }
@@ -454,21 +456,14 @@ fn parse(text: &str, src: &str) -> Vec<Section> {
         // mean the heading did not parse, and silently dropping it is how a
         // whole section goes missing.
         let s = out.last_mut().unwrap_or_else(|| panic!("check {id} sits before any `## N.` heading"));
-        s.checks.push(Check { section: s.n, id: id.to_owned(), cells });
+        s.checks.push(Check { section: s.n.clone(), id: id.to_owned(), cells });
     }
     // The id must name its own section: a row numbered `13.2` inside section
     // 12 would land here as a tick on the wrong line.
     for s in &out {
         for c in &s.checks {
             let (sec, _) = c.id.split_once('.').expect("an id has a dot");
-            assert_eq!(
-                sec.parse::<u32>().ok(),
-                Some(c.section),
-                "check {} is inside section {} ({}): one of the two is wrong in {src}",
-                c.id,
-                s.n,
-                s.title,
-            );
+            assert_eq!(sec, c.section, "check {} is inside section {} ({}): one of the two is wrong in {src}", c.id, s.n, s.title,);
         }
     }
     out
@@ -517,11 +512,17 @@ fn lint(text: &str, src: &str) -> Vec<String> {
     faults
 }
 
+/// `13`, or `3d`: digits, then lowercase letters.
+fn is_section_label(s: &str) -> bool {
+    let digits = s.trim_end_matches(|c: char| c.is_ascii_lowercase());
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// `13.4`, or `11.9b` -- a section number, a dot, a count, and an optional
 /// letter for a row inserted after the fact.
 fn is_check_id(s: &str) -> bool {
     let Some((sec, rest)) = s.split_once('.') else { return false };
-    if sec.is_empty() || !sec.bytes().all(|b| b.is_ascii_digit()) {
+    if !is_section_label(sec) {
         return false;
     }
     let digits = rest.trim_end_matches(|c: char| c.is_ascii_lowercase());
@@ -897,6 +898,33 @@ mod tests {
     #[should_panic(expected = "check 2.1 is inside section 1")]
     fn a_row_in_the_wrong_section_stops_the_run() {
         parse("## 1. One\n\n| 2.1 | a | b |\n", "TESTING.md");
+    }
+
+    #[test]
+    fn a_section_may_be_numbered_with_a_letter() {
+        let text = "## 3. Disks
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 3.1 | a | b |
+
+## 3d. More disks
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 3d.1 | c | d |
+| 3d.8 | e | f |
+
+## 4. Next
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 4.1 | g | h |
+";
+        let secs = parse(text, "T.md");
+        assert_eq!(secs.iter().map(|s| s.n.as_str()).collect::<Vec<_>>(), ["3", "3d", "4"]);
+        assert_eq!(secs[1].checks.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["3d.1", "3d.8"]);
+        assert!(is_check_id("3d.8") && is_check_id("3d.8b") && !is_check_id("d3.1") && !is_check_id("3d."));
     }
 
     #[test]
