@@ -24,6 +24,46 @@ pub enum Line {
     /// A row of a table: the cells of the rows in a run line up in columns
     /// as wide as their widest text (cut with `…` when the rect is too narrow).
     Row(Vec<String>),
+    /// [`Line::Bind`] with the raw command at the right edge in the `dim`
+    /// colour (cut with `…` first when the row is short of room).
+    Cmd { keys: String, desc: String, cmd: String },
+    /// A line in the `warn` colour, indented like a binding.
+    Warn(String),
+    /// A line the app can act on: drawn like a key, and [`hit`] tells which
+    /// line the pointer is over (`target` is the app's to read back).
+    Link { text: String, target: String },
+}
+
+/// The lines as plain text, one per line, the cells of a row split by tabs
+/// (`keys<TAB>desc<TAB>cmd` for a [`Line::Cmd`]), so that "copy it all" and the
+/// drawing cannot disagree.
+pub fn text(lines: &[Line]) -> String {
+    let mut out = String::new();
+    for l in lines {
+        match l {
+            Line::Head(t) | Line::Warn(t) => out.push_str(t),
+            Line::Link { text, .. } => out.push_str(text),
+            Line::Bind { keys, desc } => out.push_str(&format!("{keys}\t{desc}")),
+            Line::Cmd { keys, desc, cmd } => out.push_str(&format!("{keys}\t{desc}\t{cmd}")),
+            Line::Row(cells) => out.push_str(&cells.join("\t")),
+            Line::Blank => {}
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// The index in `lines` of the line at `pos`, for a list drawn by [`draw`] or
+/// [`draw_with`] into `body` from `scroll` (hover and click on a
+/// [`Line::Link`]). `None` outside `body` or below the last line.
+pub fn hit(body: Rect, len: usize, scroll: usize, style: &Style, pos: Pos2) -> Option<usize> {
+    if !body.contains(pos) {
+        return None;
+    }
+    let visible = ((body.height() / style.row_h).floor() as usize).max(1);
+    let scroll = scroll.min(len.saturating_sub(visible));
+    let row = ((pos.y - body.top()) / style.row_h).floor() as usize;
+    (row < visible && scroll + row < len).then_some(scroll + row)
 }
 
 /// Add a layer: a blank line first if there is already something, then the
@@ -49,6 +89,10 @@ pub struct Style {
     pub head: Color32,
     pub keys: Color32,
     pub desc: Color32,
+    /// [`Line::Warn`].
+    pub warn: Color32,
+    /// The command of a [`Line::Cmd`].
+    pub dim: Color32,
     /// The scroll bar, drawn when the list is longer than the rect.
     pub bar: Color32,
 }
@@ -204,6 +248,25 @@ fn draw_rows(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, visib
                 painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, k, style.font.clone(), style.keys);
                 let d = fit(painter, desc, &style.font, body.width() - key_w - 8.0);
                 painter.text(pos2(body.left() + key_w, y), Align2::LEFT_TOP, d, style.font.clone(), style.desc);
+            }
+            Line::Cmd { keys, desc, cmd } => {
+                let k = fit(painter, keys, &style.font, key_w - 16.0);
+                painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, k, style.font.clone(), style.keys);
+                let room = body.width() - key_w - 8.0;
+                let natural = painter.layout_no_wrap(cmd.clone(), style.font.clone(), style.dim).size().x;
+                let cmd_w = natural.min(room * 0.4);
+                let c = fit(painter, cmd, &style.font, cmd_w);
+                painter.text(pos2(body.right() - 4.0, y), Align2::RIGHT_TOP, c, style.font.clone(), style.dim);
+                let d = fit(painter, desc, &style.font, room - cmd_w - cell);
+                painter.text(pos2(body.left() + key_w, y), Align2::LEFT_TOP, d, style.font.clone(), style.desc);
+            }
+            Line::Warn(t) => {
+                let t = fit(painter, t, &style.font, body.width() - 16.0);
+                painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, t, style.font.clone(), style.warn);
+            }
+            Line::Link { text, .. } => {
+                let t = fit(painter, text, &style.font, body.width() - 16.0);
+                painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, t, style.font.clone(), style.keys);
             }
             Line::Blank => {}
         }
@@ -417,6 +480,8 @@ mod tests {
             head: Color32::WHITE,
             keys: Color32::WHITE,
             desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
             bar: Color32::GRAY,
         };
         let lines: Vec<Line> = (0..50).map(|i| Line::Bind { keys: format!("<C-{i}>"), desc: "d".repeat(200) }).collect();
@@ -480,6 +545,8 @@ mod tests {
             head: Color32::WHITE,
             keys: Color32::WHITE,
             desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
             bar: Color32::GRAY,
         };
         let p = plan(&[group("A", 30), group("B", 30)], 100.0, 20.0, 2, 0.5);
@@ -504,6 +571,8 @@ mod tests {
             head: Color32::WHITE,
             keys: Color32::WHITE,
             desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
             bar: Color32::GRAY,
         };
         let (mut d, mut texts) = (None, Vec::new());
@@ -564,6 +633,8 @@ mod tests {
             head: Color32::WHITE,
             keys: Color32::WHITE,
             desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
             bar: Color32::GRAY,
         };
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0))), ..Default::default() };
@@ -586,5 +657,52 @@ mod tests {
             o.drop_without_applying_deltas();
         }
         assert!(narrow[0].as_ref().unwrap().iter().sum::<f32>() <= 50.01);
+    }
+
+    #[test]
+    fn commands_warnings_and_links_are_drawn_and_told_as_text() {
+        let lines = vec![
+            Line::Link { text: "/etc/kura".into(), target: "/etc/kura".into() },
+            Line::Warn("bad toml".into()),
+            Line::Cmd { keys: "gh".into(), desc: "home".into(), cmd: "cd ~".into() },
+        ];
+        let (_, t) = lay(&lines, 0, Overflow::Bar);
+        assert_eq!(t.len(), 5);
+        for want in ["/etc/kura", "bad toml", "gh", "home", "cd ~"] {
+            assert!(t.iter().any(|x| x == want), "{want}");
+        }
+        assert_eq!(
+            text(&lines),
+            "/etc/kura
+bad toml
+gh	home	cd ~
+"
+        );
+        assert_eq!(
+            text(&[Line::Bind { keys: "q".into(), desc: "quit".into() }, Line::Blank]),
+            "q	quit
+
+"
+        );
+    }
+
+    #[test]
+    fn hit_finds_the_line_under_the_pointer() {
+        let style = Style {
+            font: FontId::monospace(13.0),
+            row_h: 20.0,
+            head: Color32::WHITE,
+            keys: Color32::WHITE,
+            desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
+            bar: Color32::GRAY,
+        };
+        let body = Rect::from_min_size(pos2(10.0, 10.0), vec2(300.0, 100.0));
+        assert_eq!(hit(body, 20, 0, &style, pos2(50.0, 12.0)), Some(0));
+        assert_eq!(hit(body, 20, 3, &style, pos2(50.0, 35.0)), Some(4));
+        assert_eq!(hit(body, 2, 0, &style, pos2(50.0, 70.0)), None);
+        assert_eq!(hit(body, 20, 0, &style, pos2(5.0, 12.0)), None);
+        assert_eq!(hit(body, 20, 99, &style, pos2(50.0, 12.0)), Some(15));
     }
 }

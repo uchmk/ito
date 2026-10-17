@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.68.0] - 2026-10-17
+
+### 追加
+
+- ito-help（uchmk/ito#17、kura）:
+  - `Line::Cmd { keys, desc, cmd }`: `Bind` に、右端へ右寄せで `Style.dim` の色のコマンドを足したもの。コマンドは行の 4 割までで、入りきらなければ `…` で切り、説明がその分だけ狭くなる。
+  - `Line::Warn(String)`: `Style.warn` の色の行（`Bind` と同じ字下げ）。
+  - `Line::Link { text, target }`: keys の色の行。`hit(body, len, scroll, style, pos) -> Option<usize>` が、`draw` / `draw_with` で描いた一覧の `pos` の下の行の番号を返す（ホバーもクリックもこれで引く。ホバーの背景やカーソルの形はアプリが描く）。
+  - `text(lines)`: 行を文字にする（`keys<TAB>desc<TAB>cmd`、`Row` はタブ区切り、`Blank` は空行）。「全部コピー」と描画がずれない。
+  - `Style` に `warn` と `dim`。
+
+### 使う側がやること
+
+- `Style { … }` を自分で組み立てているなら `warn` と `dim` を足す。`Line` に `Cmd`・`Warn`・`Link` が増えた（`match` で網羅しているなら枝を足す）。それ以外は無し。
+
 ## [0.67.0] - 2026-10-17
 
 ### 追加
