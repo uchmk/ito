@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.73.0] - 2026-10-17
+
+### 追加
+
+- ito-prefs: `fonts_card`（外観のページ向け。字体の一覧・大きさ・行の高さ・合字）。値はアプリの設定ファイルのものなので、common.toml には触らず `FontChange`（`Family`・`Size`・`LineHeight`・`Ligatures`）を返す。大きさは `Fonts::size_range`、行の高さは 0.8–2.0 に丸めて返す。`line_height`・`ligatures` を `None` にするとその行は出ない。`Fonts::using` に「見つかったファイルと書体」の行を渡せる。検索用に `fonts_index` と `FONT_KEYS`（`font.family` など）。文言は `MoreWords` の英日。
+
+### 使う側がやること
+
+- tsumugi: 外観の「文字」のカードを `fonts_card` に置き換える（`[font]` の `family`・`size`・`line_height`・`ligatures` へ `FontChange` を `set_key` で書く。字体の一覧は別のスレッドで集めて `families` に渡す）。窓・タイトルバー・背景など外観のほかのカードはアプリに残す。
+- 字体の設定を持つほかのアプリ: 同じカードを使う。
+
 ## [0.72.0] - 2026-10-17
 
 ### 追加

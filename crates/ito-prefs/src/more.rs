@@ -111,6 +111,16 @@ pub struct MoreWords {
     pub copy_label: &'static str,
     pub copy_note: &'static str,
     pub copy_button: &'static str,
+    pub text: &'static str,
+    pub font: &'static str,
+    pub font_note: &'static str,
+    pub font_auto: &'static str,
+    pub size: &'static str,
+    pub size_note: &'static str,
+    pub line_height: &'static str,
+    pub line_height_note: &'static str,
+    pub ligatures: &'static str,
+    pub ligatures_note: &'static str,
 }
 
 pub const MORE_EN: MoreWords = MoreWords {
@@ -161,6 +171,16 @@ pub const MORE_EN: MoreWords = MoreWords {
     copy_label: "Copy the details",
     copy_note: "The version and system, to paste into a report",
     copy_button: "Copy",
+    text: "TEXT",
+    font: "Font",
+    font_note: "The family the text is drawn in",
+    font_auto: "Automatic",
+    size: "Font size",
+    size_note: "In points",
+    line_height: "Line height",
+    line_height_note: "1.00 is the font's own",
+    ligatures: "Ligatures",
+    ligatures_note: "Join characters like -> and ==",
 };
 
 pub const MORE_JA: MoreWords = MoreWords {
@@ -211,6 +231,16 @@ pub const MORE_JA: MoreWords = MoreWords {
     copy_label: "詳細をコピー",
     copy_note: "版と OS。報告に貼るため",
     copy_button: "コピー",
+    text: "文字",
+    font: "字体",
+    font_note: "文字を描く字体",
+    font_auto: "自動",
+    size: "文字の大きさ",
+    size_note: "ポイント",
+    line_height: "行の高さ",
+    line_height_note: "1.00 が字体どおり",
+    ligatures: "合字",
+    ligatures_note: "-> や == をつなげて描く",
 };
 
 impl MoreWords {
@@ -390,6 +420,90 @@ pub fn about_index(w: &MoreWords, words: &Words) -> Vec<&'static str> {
     v
 }
 
+/// The Fonts card's rows in the app's settings file, for [`crate::Nav::index`].
+pub const FONT_KEYS: [&str; 4] = ["font.family", "font.size", "font.line_height", "font.ligatures"];
+
+/// What the Fonts card shows. `line_height` and `ligatures` are `None` for an
+/// app that has no such setting; its row is left out.
+pub struct Fonts<'a> {
+    /// The family now; empty for the automatic one.
+    pub family: &'a str,
+    /// The families to pick from (the app lists them off the UI thread).
+    pub families: &'a [String],
+    pub size: f32,
+    pub line_height: Option<f32>,
+    pub ligatures: Option<bool>,
+    /// A line under the family (which file it found, which styles); empty for none.
+    pub using: &'a str,
+    /// The sizes the app takes.
+    pub size_range: (f32, f32),
+}
+
+/// One change of the Fonts card; the app writes it to its own settings file.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FontChange {
+    /// An empty family is the automatic one.
+    Family(String),
+    Size(f32),
+    LineHeight(f32),
+    Ligatures(bool),
+}
+
+/// The Fonts card: family, size, line height and ligatures, for the Appearance
+/// page. The values are the app's own (a terminal's, a file manager's), so the
+/// card returns [`FontChange`]s and does not touch common.toml. Numbers are
+/// clamped to the app's range here, so the app writes what it gets.
+pub fn fonts_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, drafts: &mut crate::Drafts, now: &Fonts) -> Vec<FontChange> {
+    let mut out = Vec::new();
+    section(ui, l, w.text, |ui| {
+        let mut families: Vec<(&str, &str)> = vec![("", w.font_auto)];
+        families.extend(now.families.iter().map(|n| (n.as_str(), n.as_str())));
+        if !now.family.is_empty() && !now.families.iter().any(|n| n == now.family) {
+            families.push((now.family, now.family));
+        }
+        if let Some(f) = keyed_row(ui, l, FONT_KEYS[0], w.font, w.font_note, |ui| crate::select(ui, "font-family", now.family, &families)) {
+            out.push(FontChange::Family(f.to_owned()));
+        }
+        if !now.using.is_empty() {
+            ui.label(egui::RichText::new(now.using).size(11.5).color(l.c.dim));
+            ui.add_space(6.0);
+        }
+        sep(ui, l);
+        let (lo, hi) = now.size_range;
+        if let Some(t) = keyed_row(ui, l, FONT_KEYS[1], w.size, w.size_note, |ui| {
+            crate::field(ui, drafts, "font-size", &now.size.to_string(), "13", 80.0)
+        }) {
+            if let Ok(v) = t.trim().trim_end_matches("pt").trim().parse::<f32>() {
+                out.push(FontChange::Size(v.clamp(lo, hi)));
+            }
+        }
+        if let Some(h) = now.line_height {
+            sep(ui, l);
+            if let Some(t) = keyed_row(ui, l, FONT_KEYS[2], w.line_height, w.line_height_note, |ui| {
+                crate::field(ui, drafts, "line-height", &format!("{h:.2}"), "1.00", 80.0)
+            }) {
+                if let Ok(v) = t.trim().parse::<f32>() {
+                    out.push(FontChange::LineHeight(v.clamp(0.8, 2.0)));
+                }
+            }
+        }
+        if let Some(on) = now.ligatures {
+            sep(ui, l);
+            if keyed_row(ui, l, FONT_KEYS[3], w.ligatures, w.ligatures_note, |ui| switch(ui, l, on)) {
+                out.push(FontChange::Ligatures(!on));
+            }
+        }
+    });
+    out
+}
+
+/// The Fonts card's words, for the settings' search.
+pub fn fonts_index(w: &MoreWords) -> Vec<&'static str> {
+    let mut v = vec![w.text, w.font, w.font_note, w.size, w.size_note, w.line_height, w.line_height_note, w.ligatures, w.ligatures_note];
+    v.extend(FONT_KEYS);
+    v
+}
+
 /// Whether a saved place may be used at all: the one test an app makes
 /// before `ito_common::window::Saved::load`.
 pub fn keeps_place(p: &WindowPrefs) -> bool {
@@ -445,6 +559,35 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         assert!(forget_place(&d).is_ok());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_fonts_card_draws_and_asks_for_nothing_untouched() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+            ..Default::default()
+        };
+        let families = vec!["Cascadia Mono".to_owned()];
+        let now = Fonts {
+            family: "Gone",
+            families: &families,
+            size: 13.0,
+            line_height: Some(1.0),
+            ligatures: Some(true),
+            using: "",
+            size_range: (8.0, 32.0),
+        };
+        let mut drafts = crate::Drafts::new();
+        let mut got = Vec::new();
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                got = fonts_card(ui, Look { c: ito_theme::colors(), q: "" }, &MORE_JA, &mut drafts, &now);
+            });
+        });
+        out.textures_delta.clear();
+        assert!(got.is_empty());
+        assert!(fonts_index(&MORE_EN).contains(&"font.size"));
     }
 
     #[test]
