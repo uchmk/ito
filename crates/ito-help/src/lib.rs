@@ -32,6 +32,12 @@ pub enum Line {
     /// A line the app can act on: drawn like a key, and [`hit`] tells which
     /// line the pointer is over (`target` is the app's to read back).
     Link { text: String, target: String },
+    /// A line of plain words in the `desc` colour, indented like a binding
+    /// (a note between groups, or a paragraph the app wrapped itself).
+    Text(String),
+    /// [`Line::Link`] in the `warn` colour (a link to something that needs
+    /// attention, e.g. a file that failed to load).
+    WarnLink { text: String, target: String },
 }
 
 /// The lines as plain text, one per line, the cells of a row split by tabs
@@ -41,8 +47,8 @@ pub fn text(lines: &[Line]) -> String {
     let mut out = String::new();
     for l in lines {
         match l {
-            Line::Head(t) | Line::Warn(t) => out.push_str(t),
-            Line::Link { text, .. } => out.push_str(text),
+            Line::Head(t) | Line::Warn(t) | Line::Text(t) => out.push_str(t),
+            Line::Link { text, .. } | Line::WarnLink { text, .. } => out.push_str(text),
             Line::Bind { keys, desc } => out.push_str(&format!("{keys}\t{desc}")),
             Line::Cmd { keys, desc, cmd } => out.push_str(&format!("{keys}\t{desc}\t{cmd}")),
             Line::Row(cells) => out.push_str(&cells.join("\t")),
@@ -267,6 +273,14 @@ fn draw_rows(painter: &Painter, body: Rect, lines: &[Line], scroll: usize, visib
             Line::Link { text, .. } => {
                 let t = fit(painter, text, &style.font, body.width() - 16.0);
                 painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, t, style.font.clone(), style.keys);
+            }
+            Line::Text(t) => {
+                let t = fit(painter, t, &style.font, body.width() - 16.0);
+                painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, t, style.font.clone(), style.desc);
+            }
+            Line::WarnLink { text, .. } => {
+                let t = fit(painter, text, &style.font, body.width() - 16.0);
+                painter.text(pos2(body.left() + 12.0, y), Align2::LEFT_TOP, t, style.font.clone(), style.warn);
             }
             Line::Blank => {}
         }
@@ -657,6 +671,31 @@ mod tests {
             o.drop_without_applying_deltas();
         }
         assert!(narrow[0].as_ref().unwrap().iter().sum::<f32>() <= 50.01);
+    }
+
+    #[test]
+    fn plain_text_and_warning_links_are_lines_too() {
+        let lines = vec![Line::Text("a note".into()), Line::WarnLink { text: "bad.toml".into(), target: "bad.toml".into() }];
+        let (_, t) = lay(&lines, 0, Overflow::Bar);
+        assert_eq!(t, ["a note", "bad.toml"]);
+        assert_eq!(
+            text(&lines),
+            "a note
+bad.toml
+"
+        );
+        let style = Style {
+            font: FontId::monospace(13.0),
+            row_h: 20.0,
+            head: Color32::WHITE,
+            keys: Color32::WHITE,
+            desc: Color32::GRAY,
+            warn: Color32::RED,
+            dim: Color32::DARK_GRAY,
+            bar: Color32::GRAY,
+        };
+        let body = Rect::from_min_size(pos2(10.0, 10.0), vec2(300.0, 100.0));
+        assert_eq!(hit(body, lines.len(), 0, &style, pos2(20.0, 32.0)), Some(1));
     }
 
     #[test]

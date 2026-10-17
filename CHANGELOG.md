@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.70.0] - 2026-10-17
+
+### 追加
+
+- ito-help（kura）:
+  - `Line::Text(String)`: `desc` の色の地の文の行（`Bind` と同じ字下げ）。
+  - `Line::WarnLink { text, target }`: `Line::Link` の `warn` の色版（読み込みに失敗したファイルなど、気を付けてほしいものへのリンク）。`hit` はどちらも同じように返す。`text` は `text` をそのまま出す。
+
+### 使う側がやること
+
+- `Line` を `match` で網羅しているなら、`Text`・`WarnLink` の枝を足す。それ以外は無し。
+
 ## [0.69.0] - 2026-10-17
 
 ### 変更
