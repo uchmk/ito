@@ -49,6 +49,10 @@ pub struct View {
     pub query: String,
     /// The line picked with the arrows.
     pub selected: usize,
+    /// Keys besides Enter that act on the selected line: a press answers
+    /// [`Answer::Key`] with the line. `Modifiers::COMMAND` is Ctrl, or Cmd on
+    /// macOS. Checked before Enter, so `Shift+Enter` can be one of them.
+    pub keys: Vec<(egui::Modifiers, egui::Key)>,
     /// Opened this frame: the click that opened it is not a click outside.
     opening: bool,
 }
@@ -61,7 +65,7 @@ impl Default for View {
 
 impl View {
     pub fn new() -> Self {
-        Self { query: String::new(), selected: 0, opening: true }
+        Self { query: String::new(), selected: 0, keys: Vec::new(), opening: true }
     }
 }
 
@@ -69,6 +73,9 @@ impl View {
 #[derive(Debug, PartialEq)]
 pub enum Answer<T> {
     Pick(T),
+    /// One of [`View::keys`] was pressed on the selected line. With no line
+    /// to act on (nothing matches) the press is taken and nothing is answered.
+    Key(egui::Modifiers, egui::Key, T),
     Close,
 }
 
@@ -124,15 +131,22 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
     let last = hits.len().saturating_sub(1);
     view.selected = view.selected.min(last);
 
-    let (up, down, enter, esc) = ctx.input_mut(|i| {
+    let (extra, up, down, enter, esc) = ctx.input_mut(|i| {
+        // First: `Shift+Enter` must not be taken for Enter.
+        let extra = view.keys.iter().find(|&&(m, k)| i.consume_key(m, k)).copied();
         let mut ctrl = |k| i.consume_key(egui::Modifiers::CTRL, k);
         let up = ctrl(egui::Key::P) | ctrl(egui::Key::K);
         let down = ctrl(egui::Key::N) | ctrl(egui::Key::J);
         let mut plain = |k| i.consume_key(egui::Modifiers::NONE, k);
-        (up | plain(egui::Key::ArrowUp), down | plain(egui::Key::ArrowDown), plain(egui::Key::Enter), plain(egui::Key::Escape))
+        (extra, up | plain(egui::Key::ArrowUp), down | plain(egui::Key::ArrowDown), plain(egui::Key::Enter), plain(egui::Key::Escape))
     });
     if esc {
         return Some(Answer::Close);
+    }
+    if let Some((m, k)) = extra {
+        if let Some(&e) = hits.get(view.selected) {
+            return Some(Answer::Key(m, k, entries[e].pick.clone()));
+        }
     }
     if up {
         view.selected = view.selected.saturating_sub(1);
@@ -243,6 +257,40 @@ mod tests {
         assert_eq!(score("rs", "split"), None, "out of order");
         assert_eq!(score("", "anything"), Some(0));
         assert_eq!(score("abc", "ab"), None, "ran out of text");
+    }
+
+    #[test]
+    fn a_registered_key_answers_before_enter() {
+        let ctx = egui::Context::default();
+        let mut view = View::new();
+        view.keys = vec![(egui::Modifiers::SHIFT, egui::Key::Enter), (egui::Modifiers::COMMAND, egui::Key::R)];
+        let list = [entry("main", ""), entry("dev", "")];
+        let style = Style {
+            panel: egui::Color32::BLACK,
+            border: egui::Color32::GRAY,
+            text: egui::Color32::WHITE,
+            dim: egui::Color32::GRAY,
+            selected_bg: egui::Color32::BLUE,
+            selected_text: egui::Color32::WHITE,
+        };
+        let words = Words { hint: "", none: "" };
+        let press = |mods: egui::Modifiers, key: egui::Key| egui::RawInput {
+            events: vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: mods }],
+            ..Default::default()
+        };
+        let ask = |view: &mut View, raw| {
+            let mut out = None;
+            let mut full = ctx.run_ui(raw, |ui| out = show(ui.ctx(), view, &list, &style, &words));
+            full.textures_delta.clear();
+            out
+        };
+        assert_eq!(
+            ask(&mut view, press(egui::Modifiers::SHIFT, egui::Key::Enter)),
+            Some(Answer::Key(egui::Modifiers::SHIFT, egui::Key::Enter, 0))
+        );
+        assert_eq!(ask(&mut view, press(egui::Modifiers::NONE, egui::Key::Enter)), Some(Answer::Pick(0)));
+        view.query = "zzz".into();
+        assert_eq!(ask(&mut view, press(egui::Modifiers::COMMAND, egui::Key::R)), None, "no line, nothing answered");
     }
 
     #[test]

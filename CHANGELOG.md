@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.57.0] - 2026-10-17
+
+### 追加
+
+- ito-palette: 選んだ行への Enter 以外のキー。`View::keys`（`(Modifiers, Key)` の一覧。`Modifiers::COMMAND` は Ctrl、macOS では Cmd）に入れたキーが押されると、
+  `show` が `Answer::Key(modifiers, key, T)` を返す。Enter より先に見るので `Shift+Enter` も登録できる。合う行が無いときはキーを受けるだけで何も返さない（michi の Picker）。
+
+### 使う側がやること
+
+- `Answer` に枠が 1 つ増えた。`match` で `Pick`・`Close` を網羅している所（yagura の `palette` の処理）は `Answer::Key(..)` の枠を足す（`View::keys` が空なら来ない）。
+
 ## [0.56.1] - 2026-10-17
 
 ### 修正
