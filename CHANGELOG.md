@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.59.1] - 2026-10-17
+
+### 変更
+
+- 雛形（`templates/app/CLAUDE.md`）と ito の `CLAUDE.md`: コミットと push は、`scripts/verify.sh` が `ALL OK` なら頼まれなくてもしてよい（`main` へ直接、force push はしない）。
+
 ## [0.59.0] - 2026-10-17
 
 ### 追加

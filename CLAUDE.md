@@ -49,7 +49,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 ## 作業ルール
 
 - 返答は日本語。コード・コメント・コミットメッセージは英語。
-- 頼まれるまでコミットしない。
+- コミットと push は、`scripts/verify.sh` が `ALL OK` のときに、頼まれなくてもしてよい（`main` へ直接。force push・履歴の書き換えはしない）。版と CHANGELOG はセット。push したら、使う側のセッションに rev を知らせる。
 - 改行は LF。スクリプトで書き換えるときは改行を変えない（Python なら `newline=''`）。
 - やることは [TODO.md](TODO.md) に書く（`【人】` は持ち主の作業）。
 - **整形は `cargo fmt` で揃える**（tsumugi・kura と違うところ）。設定は yagura と同じ `rustfmt.toml`（`max_width = 140`、

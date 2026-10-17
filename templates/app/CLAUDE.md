@@ -17,8 +17,8 @@
 ## 作業ルール
 
 - 返答は日本語。コード・コメント・コミットメッセージは英語。
-- 頼まれるまでコミットしない。改行は LF。
-- push の前に `scripts/verify.sh` を回す。最後の行が `ALL OK: …` なら push してよい。
+- 改行は LF。
+- コミットと push は、`scripts/verify.sh` が `ALL OK` のときに、頼まれなくてもしてよい（`main` へ直接。force push・履歴の書き換えはしない）。自分の変更だけを `git add` する。
 - 整形は `cargo fmt`（ito と同じ `rustfmt.toml`）。clippy は `-D warnings`。
 - ビルドは R:（RAM ディスク）。新しいクローンでは `pwsh -NoProfile -File %LOCALAPPDATA%\uchmk-build\cargo-ramdisk.ps1` を先に回す。
 - やることは [TODO.md](TODO.md)。版の繰り上げと CHANGELOG.md（日本語、日付は JST）はセットでコミットする。
