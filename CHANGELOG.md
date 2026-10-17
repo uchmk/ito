@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.61.0] - 2026-10-17
+
+### 追加
+
+- ito-common: `home_dir()`（Windows は `USERPROFILE`、ほかは `HOME`。空は無いものとして扱う）。`dirs` の代わり（uchmk/ito#8）。
+- ito-ipc `frame`（線の上の形は変わらない。uchmk/ito#9）:
+  - `frame(&msg)` / `frame_max(&msg, max)`: 長さ付きの 1 通を一度だけ作り、同じバイト列を何人にも送る。
+  - `read_body(r)` / `read_body_max(r, max)` と `decode(&[u8])`: 先に本体のバイトを読み、あとで読み解く。`max` は読み手が選べる上限（既定は `MAX_BODY` = 64 MB）。
+  - `head(body)`: 本体の最初の 2 つの数（enum の番号と、その次の varint = 版など）だけを、どの版が送ったものでも読む。古い・外の相手を早く断るため。
+
+### 使う側がやること
+
+- 無し（足すだけ）。yagura は `dirs::home_dir()` を `ito_common::home_dir()` に、直の `postcard` を `ito_ipc::frame` に置き換えられる。
+
 ## [0.60.0] - 2026-10-17
 
 ### 追加

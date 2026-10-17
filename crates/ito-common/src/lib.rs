@@ -50,6 +50,12 @@ pub fn env_dir(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+/// The user's home folder: `USERPROFILE` on Windows, `HOME` elsewhere; `None`
+/// when it is not set or is empty.
+pub fn home_dir() -> Option<PathBuf> {
+    env_dir(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+}
+
 /// An XDG folder variable; a relative one is ignored, as the XDG spec says.
 fn xdg(var: &str) -> Option<PathBuf> {
     env_dir(var).filter(|d| d.is_absolute())
