@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.78.0] - 2026-10-17
+
+### 追加
+
+- ito-keys: `human_text(&str) -> Cow<str>`（と、macOS かどうかを渡せる `human_text_for`）。翻訳表の固定の文言（`Ctrl+Z to undo`）の `Ctrl+` を、macOS では `Cmd+` と綴る（uchmk/ito#26）。
+  - 語の頭の `Ctrl+` だけを直す（`XCtrl+K` はそのまま）。`Ctrl+Tab`・`Ctrl+Shift+Tab` は macOS でも Control なので、そのまま残す。macOS 以外では文字列を借りて返す（コピーしない）。
+  - キーマップの割り当て（`<C-k>`）は今まで通り `human_seq` で綴る。これは文の中に書いてある文言のため。
+
+### 使う側がやること
+
+- 文言の表（i18n）の `Ctrl+` を画面に出す所で `ito_keys::human_text(text)` を通す。独自の同じ処理（michi の `keyhelp::spelled`・`native` など）は置き換えられる。
+
 ## [0.77.0] - 2026-10-17
 
 ### 追加

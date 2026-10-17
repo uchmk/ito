@@ -290,6 +290,42 @@ pub fn human_seq_for(keys: &[Key], apart: bool) -> String {
     keys.iter().map(|k| k.human_for(apart)).collect::<Vec<_>>().join(" ")
 }
 
+/// Fixed prose that names a key, the way the OS spells it: `Ctrl+Z to undo`
+/// reads `Cmd+Z to undo` on macOS, where the keymap's `C` is Cmd. [`human_seq`]
+/// is for a binding the keymap holds; this is for a sentence in a translation
+/// table that cannot be built from one.
+///
+/// Only a `Ctrl+` that starts a word is read as a key. A chord that ends in
+/// `Tab` (`Ctrl+Tab`, `Ctrl+Shift+Tab`) keeps Ctrl: switching pages is the
+/// Control key on a Mac too. Elsewhere the text is returned as it is.
+pub fn human_text(text: &str) -> std::borrow::Cow<'_, str> {
+    human_text_for(text, cfg!(target_os = "macos"))
+}
+
+/// [`human_text`] with `mac` named, so either spelling can be tested anywhere.
+pub fn human_text_for(text: &str, mac: bool) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    if !mac || !text.contains("Ctrl+") {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(i) = text[at..].find("Ctrl+").map(|i| i + at) {
+        let word_start = text[..i].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
+        // The rest of the chord: `Shift+`, `Alt+` … then the key itself.
+        let mut rest = &text[i + "Ctrl+".len()..];
+        while let Some(r) = ["Shift+", "Alt+", "Win+"].iter().find_map(|m| rest.strip_prefix(m)) {
+            rest = r;
+        }
+        let tab = rest.strip_prefix("Tab").is_some_and(|r| r.chars().next().is_none_or(|c| !c.is_alphanumeric()));
+        out.push_str(&text[at..i]);
+        out.push_str(if word_start && !tab { "Cmd+" } else { "Ctrl+" });
+        at = i + "Ctrl+".len();
+    }
+    out.push_str(&text[at..]);
+    Cow::Owned(out)
+}
+
 /// A chord sequence the way a reader of a help or a status line sees it: on
 /// macOS, where `C` is Cmd, `<C-q>` is `⌘Q` and `<C-A-x>` is `⌥⌘X`
 /// (`⌥⇧⌘` in that order, then the key); a bare named key stays `<Enter>`;
@@ -672,6 +708,22 @@ mod tests {
         }
         assert_eq!(show("<F1>"), "F1");
         assert_eq!(human_seq(&[Key::char('g'), Key::char('h')]), "g h");
+    }
+
+    /// Fixed prose says Cmd on a Mac and is left alone elsewhere.
+    #[test]
+    fn prose_names_the_native_modifier() {
+        let mac = |s: &str| human_text_for(s, true).into_owned();
+        assert_eq!(mac("Ctrl+Z to undo"), "Cmd+Z to undo");
+        assert_eq!(mac("Ctrl+Shift+P  Ctrl+V"), "Cmd+Shift+P  Cmd+V");
+        assert_eq!(mac("(Ctrl+Enter)"), "(Cmd+Enter)");
+        assert_eq!(mac("Ctrl+Tab"), "Ctrl+Tab");
+        assert_eq!(mac("Ctrl+Shift+Tab, Ctrl+K"), "Ctrl+Shift+Tab, Cmd+K");
+        assert_eq!(mac("Ctrl+Tabs"), "Cmd+Tabs");
+        assert_eq!(mac("XCtrl+K"), "XCtrl+K");
+        assert_eq!(mac("j k"), "j k");
+        assert!(matches!(human_text_for("Ctrl+Z", false), std::borrow::Cow::Borrowed("Ctrl+Z")));
+        assert!(matches!(human_text_for("j k", true), std::borrow::Cow::Borrowed("j k")));
     }
 
     /// Where Ctrl and Cmd are apart on macOS, the two read apart too.
