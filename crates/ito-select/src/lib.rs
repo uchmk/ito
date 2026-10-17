@@ -151,6 +151,21 @@ impl Select {
         Some((p.run, c.min(len - 1)))
     }
 
+    /// The selection of a drag from `from` to `to`: the characters under both
+    /// ends are in it whole, wherever in them the pointer is (a full-width
+    /// character is one unit, not two halves), as in a terminal.
+    fn dragged(&self, from: Pos2, to: Pos2, view: Rect) -> Option<(At, At)> {
+        let span = |at: Pos2| {
+            let p = self.place(at, view)?;
+            Some(match self.char_at(at, view) {
+                Some((run, c)) => (At { run, ch: c }, At { run, ch: c + 1 }),
+                None => (p, p),
+            })
+        };
+        let (f, t) = (span(from)?, span(to)?);
+        Some(if t.0 >= f.0 { (f.0, t.1) } else { (f.1, t.0) })
+    }
+
     /// The word under `at`, as two places: a run of letters and digits, of
     /// blanks, or of other marks.
     pub fn word_at(&self, at: Pos2, view: Rect) -> Option<(At, At)> {
@@ -260,9 +275,10 @@ impl Select {
             self.sel = from.map(|a| (a, a));
         }
         if resp.dragged_by(PointerButton::Primary) || resp.drag_stopped_by(PointerButton::Primary) {
-            if let (Some((a, _)), Some(p)) = (self.sel, resp.interact_pointer_pos()) {
-                if let Some(b) = self.place(p, view) {
-                    self.sel = Some((a, b));
+            let origin = resp.ctx.input(|i| i.pointer.press_origin());
+            if let (Some(_), Some(o), Some(p)) = (self.sel, origin, resp.interact_pointer_pos()) {
+                if let Some(sel) = self.dragged(o, p, view) {
+                    self.sel = Some(sel);
                 }
             }
         }
@@ -624,8 +640,8 @@ mod tests {
         assert_eq!(pane.button(from, true, Modifiers::NONE), Driven::default());
         let moving = pane.step(Modifiers::NONE, vec![Event::PointerMoved(to)]);
         assert_eq!(moving.copy, None, "nothing is copied while the drag goes on");
-        assert_eq!(pane.s.text().as_deref(), Some("lpha\nbe"));
-        assert_eq!(pane.button(to, false, Modifiers::NONE).copy.as_deref(), Some("lpha\nbe"));
+        assert_eq!(pane.s.text().as_deref(), Some("lpha\nbet"));
+        assert_eq!(pane.button(to, false, Modifiers::NONE).copy.as_deref(), Some("lpha\nbet"));
         // A click lets it go.
         pane.t += 1.0;
         let later = pane.click(over(&pane.s, 0, 2), Modifiers::NONE);
@@ -650,5 +666,27 @@ mod tests {
         let word = over(&pane.s, 1, 1);
         pane.click(word, Modifiers::NONE);
         assert_eq!(pane.click(word, Modifiers::NONE).copy.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn a_drag_takes_whole_characters_wherever_in_them_it_starts_and_ends() {
+        let mut s = two_frames(&["abあいうcd"]);
+        let near_right = |s: &Select, ch: usize| {
+            let r = &s.last[0];
+            let x = r.galley.pos_from_cursor(CCursor::new(ch)).min.x;
+            let w = r.galley.pos_from_cursor(CCursor::new(ch + 1)).min.x - x;
+            r.pos + vec2(x + w * 0.9, 6.0)
+        };
+        let (p2, p4, q3) = (near_right(&s, 2), before(&s, 0, 4), near_right(&s, 3));
+        // Pressed on the right edge of one full-width letter, released on the left edge of another.
+        let sel = s.dragged(p2, p4, view()).unwrap();
+        s.set(Some(sel));
+        assert_eq!(s.text().as_deref(), Some("あいう"));
+        let sel = s.dragged(p4, p2, view()).unwrap();
+        s.set(Some(sel));
+        assert_eq!(s.text().as_deref(), Some("あいう"));
+        let sel = s.dragged(q3, q3, view()).unwrap();
+        s.set(Some(sel));
+        assert_eq!(s.text().as_deref(), Some("い"));
     }
 }
