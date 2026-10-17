@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 
+#[cfg(feature = "dirwatch")]
+pub mod dirwatch;
 pub mod fonts;
 mod os_theme;
 pub mod report;

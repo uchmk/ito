@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.67.0] - 2026-10-17
+
+### 追加
+
+- ito-common（uchmk/ito#15、kura）: 機能 `dirwatch` の `dirwatch::DirWatcher`。画面に出ているフォルダーだけを `notify` でイベント駆動に見張る（再帰しない）。
+  `DirWatcher::new(wake)`、毎フレーム呼んでよい `sync(dirs)`（見張る集合を丸ごと渡す。新しい方が勝つ）、変わったフォルダーが届く `rx: std::sync::mpsc::Receiver<PathBuf>`。
+  `ReadDirectoryChangesW` の登録は死んだネットワーク共有で固まりうるので、`notify` のウォッチャーは専用のスレッドに置き、UI スレッドは集合を渡すだけ。既存の `watch`（mtime のポーリング）は設定ファイル向けでそのまま。
+
+### 使う側がやること
+
+- kura は `src/fs/watch.rs` と `notify` の依存・`scripts/ito-first.allow` の行を外し、`ito-common` に機能 `dirwatch` を足して `DirWatcher` を使う。`rx` が crossbeam でなく std の `Receiver` になる（`try_iter` / `try_recv` / `recv_timeout` はそのまま）。
+
 ## [0.66.0] - 2026-10-17
 
 ### 追加

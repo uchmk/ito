@@ -13,6 +13,8 @@ repository.workspace = true
 clock = ["dep:chrono"]
 # `window::Seen::of`: what the window looks like, read off egui's context.
 egui = ["dep:egui"]
+# `dirwatch::DirWatcher`: events for the directories on screen, with `notify`.
+dirwatch = ["dep:notify"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +32,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # is); Pure Rust, no dependencies.
 raw-window-handle = "0.6"
 egui = { version = "0.36", optional = true }
+notify = { version = "8", default-features = false, features = ["macos_fsevent"], optional = true }
 
 [target."cfg(windows)".dependencies]
 # The OS's light or dark from the registry (`OsLight`): winit's lags a switch.
