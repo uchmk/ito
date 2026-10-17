@@ -46,11 +46,15 @@ pub struct Theme {
 }
 
 /// The built-in themes: the design's thirteen (its 9b), Solarized Dark's
-/// red lightened a step (`#dc322f` to `#e04644`) to read on its panel. Each
+/// red lightened a step (`#dc322f` to `#e04644`) to read on its panel; then
+/// Campbell (a deep black, Windows Terminal's default) and the editors'
+/// VS Code Dark+ / Light+, GitHub Light, One Light, Rosé Pine Dawn and Tokyo
+/// Night Day, whose text or muted colour is darkened a step where the
+/// original is under the 7 and 4.5 [`tests::every_theme_reads`] holds. Each
 /// line is name,
 /// light, then bg, side, panel, border, fg, dim, wait, run, err, done,
 /// blue, magenta.
-const BUILTIN: [(&str, bool, [u32; 12]); 13] = [
+const BUILTIN: [(&str, bool, [u32; 12]); 20] = [
     (
         "tsumugi Dark",
         false,
@@ -116,6 +120,48 @@ const BUILTIN: [(&str, bool, [u32; 12]); 13] = [
         false,
         [0x191724, 0x1f1d2e, 0x26233a, 0x403d52, 0xe0def4, 0xa8a5c2, 0xf6c177, 0x9ccfd8, 0xeb6f92, 0x7fb8a4, 0x31748f, 0xc4a7e7],
     ),
+    (
+        "Campbell",
+        false,
+        [0x0c0c0c, 0x050505, 0x181818, 0x2f2f2f, 0xcccccc, 0x9a9a9a, 0xf9f1a5, 0x61d6d6, 0xe74856, 0x16c60c, 0x3b78ff, 0xb4009e],
+    ),
+    (
+        "VS Code Dark+",
+        false,
+        [0x1e1e1e, 0x181818, 0x252526, 0x3c3c3c, 0xd4d4d4, 0x9d9d9d, 0xdcdcaa, 0x4ec9b0, 0xf48771, 0x73c991, 0x569cd6, 0xc586c0],
+    ),
+    (
+        "VS Code Light+",
+        true,
+        [0xf3f3f3, 0xe8e8e8, 0xffffff, 0xd0d0d0, 0x333333, 0x616161, 0x795e26, 0x267f99, 0xcd3131, 0x098658, 0x0451a5, 0xaf00db],
+    ),
+    (
+        "GitHub Light",
+        true,
+        [0xf6f8fa, 0xeaeef2, 0xffffff, 0xd0d7de, 0x1f2328, 0x59636e, 0x9a6700, 0x1b7c83, 0xcf222e, 0x1a7f37, 0x0969da, 0x8250df],
+    ),
+    (
+        "One Light",
+        true,
+        [0xfafafa, 0xf0f0f1, 0xffffff, 0xdbdbdc, 0x383a42, 0x696c77, 0x986801, 0x0184bc, 0xe45649, 0x50a14f, 0x4078f2, 0xa626a4],
+    ),
+    (
+        "Rosé Pine Dawn",
+        true,
+        [0xfaf4ed, 0xf2e9e1, 0xfffaf3, 0xdfdad9, 0x4a456a, 0x6e6a86, 0xb07219, 0x3d8791, 0xb4637a, 0x3c7f5a, 0x286983, 0x907aa9],
+    ),
+    (
+        "Tokyo Night Day",
+        true,
+        [0xe1e2e7, 0xd0d5e3, 0xe9e9ed, 0xc4c8da, 0x343b58, 0x565f89, 0x8c6c3e, 0x007197, 0xd1345b, 0x587539, 0x2e7de9, 0x9854f1],
+    ),
+];
+
+/// Campbell's sixteen terminal colours (Windows Terminal's default scheme),
+/// black to white, then the brights.
+const CAMPBELL_ANSI: [u32; 16] = [
+    0x0c0c0c, 0xc50f1f, 0x13a10e, 0xc19c00, 0x0037da, 0x881798, 0x3a96dd, 0xcccccc, 0x767676, 0xe74856, 0x16c60c, 0xf9f1a5, 0x3b78ff,
+    0xb4009e, 0x61d6d6, 0xf2f2f2,
 ];
 
 /// The keys a theme file sets, in [`Colors`]' order after `light`.
@@ -290,7 +336,16 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
 
 /// The built-in themes, `tsumugi Dark` first.
 pub fn builtin() -> Vec<Theme> {
-    BUILTIN.iter().map(|(name, light, c)| Theme { name: (*name).into(), colors: Colors::from_list(*light, *c) }).collect()
+    BUILTIN
+        .iter()
+        .map(|(name, light, c)| {
+            let mut colors = Colors::from_list(*light, *c);
+            if *name == "Campbell" {
+                colors.ansi16 = Some(CAMPBELL_ANSI.map(rgb));
+            }
+            Theme { name: (*name).into(), colors }
+        })
+        .collect()
 }
 
 /// A theme's colours from a file's table: `light`, and any of the twelve
@@ -418,6 +473,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_built_in_set_has_unique_names_and_campbell_keeps_its_sixteen() {
+        let all = builtin();
+        let mut names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!((names.len(), all.iter().filter(|t| t.colors.light).count()), (20, 9));
+        let campbell = all.iter().find(|t| t.name == "Campbell").unwrap().colors;
+        assert_eq!((campbell.bg, campbell.ansi()[0], campbell.ansi()[1]), (rgb(0x0c0c0c), rgb(0x0c0c0c), rgb(0xc50f1f)));
+        assert!(all.iter().filter(|t| t.name != "Campbell").all(|t| t.colors.ansi16.is_none()));
     }
 
     #[test]

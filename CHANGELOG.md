@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.77.0] - 2026-10-17
+
+### 追加
+
+- ito-theme: 組み込みのテーマを 13 から 20 にした（末尾に足したので、`builtin()[0]` と今までの並びは変わらない）。
+  - ダーク: `Campbell`（背景 `#0c0c0c` の深い黒。Windows Terminal の既定の配色。端末の 16 色も本物の値を持つ）、`VS Code Dark+`。
+  - ライト: `VS Code Light+`、`GitHub Light`、`One Light`、`Rosé Pine Dawn`、`Tokyo Night Day`（ライトは 4 から 9 になった）。
+  - 元の配色で文字が 7:1、薄い文字が 4.5:1 に届かないもの（`Rosé Pine Dawn`・`Tokyo Night Day`）は、文字と薄い文字を一段暗くして `every_theme_reads` を通した。
+
+### 使う側がやること
+
+- 一覧は `builtin()` から作っているアプリは、`rev` を上げるだけで新しいテーマが出る。テーマの数や名前を決め打ちしているテスト・文言（「13 個」など）があれば直す。
+
 ## [0.76.0] - 2026-10-17
 
 ### 変更（使う側の呼び出しが変わる）

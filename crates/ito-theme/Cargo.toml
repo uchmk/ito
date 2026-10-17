@@ -1,6 +1,6 @@
 [package]
 name = "ito-theme"
-description = "uchmk's themes: the thirteen built in, a theme file's colours, and the one in force"
+description = "uchmk's themes: the twenty built in, a theme file's colours, and the one in force"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
