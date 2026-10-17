@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.56.1] - 2026-10-17
+
+### 修正
+
+- 0.56.0 は git の依存として読めなかった（`templates/app` の `Cargo.toml` の `name = "{{app}}"` を cargo がパッケージとして読み、`invalid character` で解決が落ちる。uchmk/ito#6）。
+  雛形の `Cargo.toml` を `Cargo.toml.tmpl` に改め、`scripts/new-app.ps1` が書くときに戻す。**使う側は 0.56.0 の `rev` に上げず、0.56.1 以降にする。**
+
 ## [0.56.0] - 2026-10-17
 
 ### 追加

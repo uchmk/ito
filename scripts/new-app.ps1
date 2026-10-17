@@ -55,6 +55,8 @@ $root = (Resolve-Path $template).Path
 Get-ChildItem $template -Recurse -Force -File | ForEach-Object {
     $rel = $_.FullName.Substring($root.Length + 1)
     $rel = ($rel -split '\\' | ForEach-Object { $_ -replace '^APP(-com\.rs)?$', ($Name + '$1') }) -join '\'
+    # Cargo.toml is stored as Cargo.toml.tmpl: cargo reads every Cargo.toml in a git dependency, and the placeholder name is not a package name.
+    $rel = $rel -replace '\.tmpl$', ''
     $to = Join-Path $Dest $rel
     New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
     $bytes = [IO.File]::ReadAllBytes($_.FullName)
