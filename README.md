@@ -19,6 +19,7 @@ MCP server, and the settings, themes and clock every app shares. Rust, Windows f
 | `ito-theme` | The themes: the thirteen built in, a theme file's colours, and the one in force |
 | `ito-select` | Picking up painted text with the mouse and copying it: for panes drawn with a painter, not made of widgets |
 | `ito-prefs` | The settings screen: the nav, the cards of rows and their controls, and the pages every app shares (language, clock, theme, notifications, keys) |
+| `ito-openin` | Opening things in other programs from a command-line template: a folder in a terminal or file manager, a file in an editor at a line, files in a diff / merge tool (with detection of the installed ones), and the `[open]` / `[line_args]` / `[diff_tools]` tables of config.toml |
 | `ito-graph` | A commit graph laid out row by row: lanes, edges, a colour per branch and the curves between rows, and the drawing in egui |
 | `ito-console` | The console front of a windowed program on Windows (`<app>.com` beside `<app>.exe`), and writing an answer that lets go rather than panic on a pipe nobody reads |
 

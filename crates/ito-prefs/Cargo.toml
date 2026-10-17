@@ -14,6 +14,7 @@ ito-i18n = { path = "../ito-i18n" }
 ito-keymap = { path = "../ito-keymap" }
 ito-keys = { path = "../ito-keys", features = ["egui"] }
 ito-notify = { path = "../ito-notify" }
+ito-openin = { path = "../ito-openin" }
 ito-theme = { path = "../ito-theme" }
 
 [dev-dependencies]

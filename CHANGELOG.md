@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.71.0] - 2026-10-17
+
+### 追加
+
+- 新しいクレート `ito-openin`（uchmk/ito#18・#20、kura・michi）: 別のプログラムで開く。
+  - ひな形: 語を空白で区切り、`"` でまとめる。`{path} {line} {left} {right} {base} {merged}` を 1 回の走査で置き換える（値の中の `{...}` は展開しない）。値が無い置き換えはエラー。`{path}` が無ければ最後に付け、`{left}`・`{right}` が無ければ 2 つを付ける。シェルは通さない。
+  - 起動: 標準入出力を捨て、Windows は `CREATE_NO_WINDOW`、待たずに別のスレッドで回収。`open`・`open_file`（行が渡せたかを返す）・`open_diff`・`open_merge`。
+  - 行: 組み込みの表（nvim・vim・code・sakura `-Y=`・EmEditor・hx など）と、アプリの `[line_args]`（`editor_key` で引く。`{path}` を含む語がちょうど 1 つ）。
+  - diff / merge ツール: WinMerge・Beyond Compare・Meld・KDiff3・VS Code・git difftool の表と、PATH と Windows の入れ先（`ProgramFiles` など）からの検出（`detect` は同期、`detect_in_background` は別のスレッド）。
+  - `Config::read(text)`: `[open]`（terminal・editor・explorer・diff・merge・diff_tool）、`[line_args]`、`[diff_tools.<名>]`（`diff`・`merge`）を読み、読めない行は警告を返して外す。知らないキー（kura の `[open].rules` など）は触らない。`command(tool, found)` は、書いた行 → 選んだ `diff_tool`（名前、自分で足したもの、`auto`）→ 既定の順。
+  - `Edit`（`Command`・`DiffTool`・`UserTool`・`RemoveUserTool`・`LineArg`・`RemoveLineArg`）と `Config::check` / `apply` / `Edit::writes`。
+- ito-prefs: `open_card`（コマンド 5 行・diff ツールの選択・見つかったツールの行・自分のツールと行の渡し方の追加／変更／削除）と `write_edits`（`ito_common::set_key` / `remove_key` で書く。コメントは残る）。文言は `OpenWords` でアプリが渡す。
+
+### 使う側がやること
+
+- kura: `exec.rs` の `at_line`・`editor_key`・`LineArgs`・`template_is_valid`・組み込みの表を `ito_openin::lines` / `file_argv` に置き換える（大きな移し替えなので、持ち主に確かめてから）。`[open].rules` は読み取りの対象外なので、そのまま使える。
+- michi: `michi_core::openin`・`opencfg` を `ito_openin` に置き換え、#43 の diff / merge は `Config::command(Tool::Diff / Merge, &found)` と `open_diff` / `open_merge` で開く。設定画面は `open_card` を呼び、返った `Edit` を `Config::apply` と `write_edits` に渡す。`detect_in_background` の答えは、画面を開いたときに 1 回受ける。
+- WinMerge の 3 方向の行は実機で未確認（真ん中の窓が base）。確かめるまでは表の行を信用しすぎないこと。
+
 ## [0.70.0] - 2026-10-17
 
 ### 追加
