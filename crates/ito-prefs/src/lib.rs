@@ -81,6 +81,11 @@ pub struct Words {
     pub webhook_none: &'static str,
     /// The row of "Add an address" after the webhooks.
     pub webhook_more: &'static str,
+    /// The Feedback card: its heading, the row's label and note, the button.
+    pub bug_head: &'static str,
+    pub bug_label: &'static str,
+    pub bug_note: &'static str,
+    pub bug_button: &'static str,
 }
 
 pub const EN: Words = Words {
@@ -135,6 +140,10 @@ pub const EN: Words = Words {
     webhook_test: "Send a test here",
     webhook_none: "Nothing is sent elsewhere until an address is added",
     webhook_more: "Another address",
+    bug_head: "FEEDBACK",
+    bug_label: "Report a bug",
+    bug_note: "Opens a GitHub issue with the version and system already filled in (F12)",
+    bug_button: "Report a bug",
 };
 
 pub const JA: Words = Words {
@@ -188,6 +197,10 @@ pub const JA: Words = Words {
     webhook_test: "ここに試しに送る",
     webhook_none: "アドレスを足すまで、ほかへは送りません",
     webhook_more: "別のアドレス",
+    bug_head: "フィードバック",
+    bug_label: "不具合を報告",
+    bug_note: "版と環境を埋めた GitHub の issue を開きます（F12）",
+    bug_button: "不具合を報告",
 };
 
 impl Words {
@@ -738,6 +751,21 @@ pub fn scale_row(ui: &mut egui::Ui, l: Look, w: &Words, now: f32, note: &str) ->
     let options: Vec<(i32, &str)> = percents.iter().zip(&names).map(|(p, n)| (*p, n.as_str())).collect();
     let picked = keyed_row(ui, l, "scale", w.scale, note, |ui| select(ui, "scale", now, &options))?;
     Some(scale_change(picked as f32 / 100.0))
+}
+
+/// The Feedback card: one row with the bug-report button. True when it was
+/// pressed; the app opens its report as F12 does (`ito_bugreport::url`).
+pub fn bug_card(ui: &mut egui::Ui, l: Look, w: &Words) -> bool {
+    let mut pressed = false;
+    section(ui, l, w.bug_head, |ui| {
+        pressed = row(ui, l, w.bug_label, w.bug_note, |ui| button(ui, l, w.bug_button));
+    });
+    pressed
+}
+
+/// The card's words, for the settings' search.
+pub fn bug_index(w: &Words) -> Vec<&'static str> {
+    vec![w.bug_head, w.bug_label, w.bug_note]
 }
 
 /// The CLOCK card: common.toml's `[clock]`.

@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.62.0] - 2026-10-17
+
+### 追加
+
+- ito-prefs: フィードバックのカード `bug_card(ui, look, words) -> bool`（不具合を報告のボタン 1 つ）と、検索用の `bug_index(words)`。`Words` に `bug_head`・`bug_label`・`bug_note`・`bug_button` を足した（EN・JA）。設定の画面のボタンは `docs/common-spec.md` の約束だった。
+
+### 使う側がやること
+
+- 設定の画面のどこか（Language などのページの末尾か、About のページ）で `if ito_prefs::bug_card(ui, look, words) { …F12 と同じ処理… }` を呼び、`Nav::index` に `bug_index` の語を足す。
+- `Words { … }` を自前で書いているアプリは、4 つの欄を足す（`Words::of` を使っていれば何もない）。
+
 ## [0.61.1] - 2026-10-17
 
 ### 修正
