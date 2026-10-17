@@ -314,6 +314,7 @@ scale: 100%           # 書くなら倍率を % で
   - General には `[window]`（`window_card`: 窓の場所を覚える・手前に置く・覚えた場所を忘れる）と、起動（`startup_card`: サインインで起動。状態は OS が持つ。`ito_common::startup`）も置く。
   - Advanced は `advanced_card`（設定・データのフォルダーを開く、2 回押して初期化）、About は `about_page`（版・ビルド・OS・ライセンス・詳細のコピー・不具合の報告）。
   - 外観（Appearance）の字体は `fonts_card`（字体・大きさ・行の高さ・合字。値はアプリの設定ファイルなので `FontChange` を返す）。
+  - シェルは `shell_card`（既定のシェル・引数・環境変数。値はアプリの設定ファイルなので `ShellChange` を返す）。フックなどはアプリに残す。
   - 共通の行の上に、アプリが自分の行やカードを足してよい。
   **新しいアプリは、キーのページ（上の「設定の画面から変えるとき」）を設定の画面の機能として必ず作る。**keymap.toml を
   `ito-keymap` で読み、何もしないコマンド（`noop` か `none`）を 1 つ持ち、層ごとの今のキーと既定のキーを `KeyTable` で渡す。

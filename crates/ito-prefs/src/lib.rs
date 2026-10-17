@@ -22,6 +22,7 @@ mod more;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
 mod openin;
+mod shell;
 mod updates;
 pub use more::{
     about_index, about_page, about_text, advanced_card, advanced_index, default_order, fonts_card, fonts_index, forget_place, keeps_place,
@@ -30,6 +31,7 @@ pub use more::{
 };
 pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
+pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
 pub use updates::{status as update_status, update_card, UpdateWords};
 
 /// The words the screen and the shared pages say, in one language.

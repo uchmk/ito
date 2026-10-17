@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.74.0] - 2026-10-17
+
+### 追加
+
+- ito-prefs: `shell_card`（既定のシェル・引数・環境変数）。値はアプリの設定ファイルのものなので、common.toml には触らず `ShellChange`（`Program`・`Args`・`SetVar`・`RemoveVar`）を返す。環境変数の編集は `ShellEdit`（アプリが持ち続ける）で、保存すると `env_changes` が消した名前と変えた値だけを返す。名前に `=` や空白があると保存できない。検索用に `shell_index` と `SHELL_KEYS`。文言は `ShellWords` の英日。
+- 更新の確認は 0.2x の `update_card`（`UpdateWords`）のまま。新しい共通のカードは足さない。
+
+### 使う側がやること
+
+- tsumugi: 「シェルとフック」ページの最初のカード（`prefs.head.shell`）を `shell_card` に置き換える。`ShellChange` を `[shell]` と `[shell.env]` に `set_key` / `remove_key` で書く。フックと連携のカードはアプリに残す。
+- ほかのアプリ: 子のプロセスを起こすなら同じカードを使う。
+
 ## [0.73.0] - 2026-10-17
 
 ### 追加
