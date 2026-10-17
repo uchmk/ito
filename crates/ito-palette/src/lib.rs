@@ -16,6 +16,10 @@ pub struct Style {
     pub dim: egui::Color32,
     pub selected_bg: egui::Color32,
     pub selected_text: egui::Color32,
+    /// The letters of a title that matched ([`Entry::hits`]).
+    pub hit: egui::Color32,
+    /// A title with [`Tone::Accent`].
+    pub accent: egui::Color32,
 }
 
 /// The palette's own words, in the app's language.
@@ -25,6 +29,19 @@ pub struct Words<'a> {
     pub hint: &'a str,
     /// Shown when nothing matches.
     pub none: &'a str,
+    /// A line above the list, under the search box (empty for none).
+    pub header: &'a str,
+    /// A line under the list, such as the keys (empty for none).
+    pub footer: &'a str,
+}
+
+/// How a line's title is inked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tone {
+    #[default]
+    Normal,
+    /// In [`Style::accent`]: a line that makes something ("Create …").
+    Accent,
 }
 
 /// One line of the list: what it says, the smaller words after it, the key
@@ -35,11 +52,15 @@ pub struct Entry<T> {
     pub detail: String,
     pub key: String,
     pub pick: T,
+    /// Where in `title` (by char) the query matched, drawn in [`Style::hit`].
+    /// The app fills it when it does the matching ([`View::filter`] off).
+    pub hits: Vec<usize>,
+    pub tone: Tone,
 }
 
 impl<T> Entry<T> {
     pub fn new(title: impl Into<String>, key: impl Into<String>, pick: T) -> Self {
-        Self { title: title.into(), detail: String::new(), key: key.into(), pick }
+        Self { title: title.into(), detail: String::new(), key: key.into(), pick, hits: Vec::new(), tone: Tone::Normal }
     }
 }
 
@@ -53,6 +74,11 @@ pub struct View {
     /// [`Answer::Key`] with the line. `Modifiers::COMMAND` is Ctrl, or Cmd on
     /// macOS. Checked before Enter, so `Shift+Enter` can be one of them.
     pub keys: Vec<(egui::Modifiers, egui::Key)>,
+    /// On (the default): [`show`] narrows and orders `entries` by the query
+    /// ([`search`]). Off: the entries are shown as given, all of them, in
+    /// their order, for an app that matches by its own rules and lays out its
+    /// own lines (the query is still typed and kept in [`View::query`]).
+    pub filter: bool,
     /// Opened this frame: the click that opened it is not a click outside.
     opening: bool,
 }
@@ -65,7 +91,7 @@ impl Default for View {
 
 impl View {
     pub fn new() -> Self {
-        Self { query: String::new(), selected: 0, keys: Vec::new(), opening: true }
+        Self { query: String::new(), selected: 0, keys: Vec::new(), filter: true, opening: true }
     }
 }
 
@@ -118,6 +144,30 @@ pub fn search<T>(query: &str, entries: &[Entry<T>]) -> Vec<usize> {
     found.into_iter().map(|(_, k)| k).collect()
 }
 
+/// A title as one line, the chars at `hits` in `hit` and the rest in `ink`.
+fn title_job(title: &str, hits: &[usize], font: egui::FontId, ink: egui::Color32, hit: egui::Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let mut run = String::new();
+    let mut run_hit = false;
+    let flush = |job: &mut egui::text::LayoutJob, run: &mut String, was: bool| {
+        if !run.is_empty() {
+            let color = if was { hit } else { ink };
+            job.append(run, 0.0, egui::TextFormat::simple(font.clone(), color));
+            run.clear();
+        }
+    };
+    for (k, c) in title.chars().enumerate() {
+        let h = hits.contains(&k);
+        if h != run_hit {
+            flush(&mut job, &mut run, run_hit);
+            run_hit = h;
+        }
+        run.push(c);
+    }
+    flush(&mut job, &mut run, run_hit);
+    job
+}
+
 const ROWS: usize = 10;
 const WIDTH: f32 = 560.0;
 
@@ -127,7 +177,7 @@ const WIDTH: f32 = 560.0;
 /// palette stays open.
 pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>], style: &Style, words: &Words) -> Option<Answer<T>> {
     let opening = std::mem::take(&mut view.opening);
-    let hits = search(&view.query, entries);
+    let hits = if view.filter { search(&view.query, entries) } else { (0..entries.len()).collect() };
     let last = hits.len().saturating_sub(1);
     view.selected = view.selected.min(last);
 
@@ -189,7 +239,10 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         view.selected = 0;
                     }
                     ui.add_space(4.0);
-                    if hits.is_empty() {
+                    if !words.header.is_empty() {
+                        ui.colored_label(style.dim, words.header);
+                    }
+                    if hits.is_empty() && !words.none.is_empty() {
                         ui.colored_label(style.dim, words.none);
                     }
                     // A window of ROWS lines that follows the selection.
@@ -201,7 +254,11 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         if on {
                             ui.painter().rect_filled(rect, 3.0, style.selected_bg);
                         }
-                        let ink = if on { style.selected_text } else { style.text };
+                        let ink = match (on, e.tone) {
+                            (true, _) => style.selected_text,
+                            (false, Tone::Accent) => style.accent,
+                            (false, Tone::Normal) => style.text,
+                        };
                         let font = egui::TextStyle::Body.resolve(ui.style());
                         let mid = rect.center().y;
                         // Nothing leaves the row: a long title ends in "…" so the
@@ -212,7 +269,7 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         let key_w = key.as_ref().map_or(0.0, |g| g.size().x + 12.0);
                         let detail_w = detail.as_ref().map_or(0.0, |g| g.size().x + 8.0);
                         let room = (rect.width() - 12.0 - key_w - detail_w).max(rect.width() / 2.0);
-                        let mut job = egui::text::LayoutJob::simple_singleline(e.title.clone(), font.clone(), ink);
+                        let mut job = title_job(&e.title, &e.hits, font.clone(), ink, style.hit);
                         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
                         let title = p.layout_job(job);
                         let right = rect.left() + 6.0 + title.size().x;
@@ -229,6 +286,10 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
                             view.selected = row;
                         }
+                    }
+                    if !words.footer.is_empty() {
+                        ui.add_space(4.0);
+                        ui.colored_label(style.dim, words.footer);
                     }
                 },
             );
@@ -247,7 +308,7 @@ mod tests {
     use super::*;
 
     fn entry(title: &str, detail: &str) -> Entry<u8> {
-        Entry { title: title.into(), detail: detail.into(), key: String::new(), pick: 0 }
+        Entry { title: title.into(), detail: detail.into(), key: String::new(), pick: 0, hits: Vec::new(), tone: Tone::Normal }
     }
 
     #[test]
@@ -272,8 +333,10 @@ mod tests {
             dim: egui::Color32::GRAY,
             selected_bg: egui::Color32::BLUE,
             selected_text: egui::Color32::WHITE,
+            hit: egui::Color32::YELLOW,
+            accent: egui::Color32::GREEN,
         };
-        let words = Words { hint: "", none: "" };
+        let words = Words { hint: "", none: "", header: "", footer: "" };
         let press = |mods: egui::Modifiers, key: egui::Key| egui::RawInput {
             events: vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: mods }],
             ..Default::default()
@@ -303,5 +366,56 @@ mod tests {
         // The detail counts too.
         assert_eq!(titles("main"), ["host"]);
         assert_eq!(titles("").len(), 3, "nothing typed, everything");
+    }
+
+    /// With the filter off the app's list is shown whole and in its order,
+    /// whatever is typed, and Enter picks the selected line of it.
+    #[test]
+    fn without_the_filter_the_list_is_the_apps() {
+        let ctx = egui::Context::default();
+        let mut view = View::new();
+        view.filter = false;
+        view.query = "zzz".into();
+        view.selected = 1;
+        let mut create = entry("Create zzz", "");
+        create.pick = 7;
+        create.tone = Tone::Accent;
+        create.hits = vec![0, 1];
+        let list = [entry("main", ""), create];
+        let style = Style {
+            panel: egui::Color32::BLACK,
+            border: egui::Color32::GRAY,
+            text: egui::Color32::WHITE,
+            dim: egui::Color32::GRAY,
+            selected_bg: egui::Color32::BLUE,
+            selected_text: egui::Color32::WHITE,
+            hit: egui::Color32::YELLOW,
+            accent: egui::Color32::GREEN,
+        };
+        let words = Words { hint: "", none: "", header: "head", footer: "foot" };
+        let raw = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut out = None;
+        let mut full = ctx.run_ui(raw, |ui| out = show(ui.ctx(), &mut view, &list, &style, &words));
+        full.textures_delta.clear();
+        assert_eq!(out, Some(Answer::Pick(7)));
+    }
+
+    #[test]
+    fn a_title_is_split_at_its_hits() {
+        let font = egui::FontId::default();
+        let (ink, hit) = (egui::Color32::WHITE, egui::Color32::YELLOW);
+        let job = title_job("abcd", &[1, 2], font, ink, hit);
+        assert_eq!(job.text, "abcd");
+        let colors: Vec<_> = job.sections.iter().map(|s| s.format.color).collect();
+        assert_eq!(colors, [ink, hit, ink]);
     }
 }

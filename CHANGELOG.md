@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.59.0] - 2026-10-17
+
+### 追加
+
+- ito-palette: 自分で絞り込み・並べる使い方に要るもの（michi の Picker）。
+  - `View::filter`（既定 true）。false だと `show` は `entries` を並べ替えも絞り込みもせず、渡された順に全部出す（打った文字は `View::query` に残る）。
+  - `Entry::hits`（title の何文字目が一致したか。`Style::hit` の色で描く）と `Entry::tone`（`Tone::Normal` / `Tone::Accent`。`Style::accent` の色）。
+  - `Words::header`（検索欄の下、一覧の上の 1 行）と `Words::footer`（一覧の下の 1 行。キーの一覧など）。空なら出さない。
+  - `Words::none` が空なら、合う行が無いときも何も出さない（名前の変更のように入力欄だけを出す使い方）。
+
+### 使う側がやること
+
+- `Style { … }` に `hit` と `accent`、`Words { … }` に `header` と `footer`（空文字でよい）を足す。`Entry::new` を使っていれば `Entry` は変えなくてよい（`Entry { … }` を直に書いているなら `hits: vec![]`、`tone: Tone::Normal` を足す）。
+
 ## [0.58.0] - 2026-10-17
 
 ### 追加
