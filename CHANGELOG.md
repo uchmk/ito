@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.75.0] - 2026-10-17
+
+### 追加
+
+- ito-common: `bundle`（設定を 1 つの TOML にまとめて書き出し、読み込む）。中身は `common.toml`・自分のテーマ（`themes/*.toml`）・アプリの設定のフォルダーの `.toml`（`app/…`）。窓の場所・セッション・履歴のような実行の間に残すもの（state）は入れない。`collect` / `to_text` / `parse` / `restore`、ファイルまで通す `export` / `import`。
+  - 読み込みは安全側: 名前に `..`・ドライブ・`\` があるもの、`.toml` でないもの、決まった置き場（`common.toml`・`themes/`・`app/`）の外は飛ばして `Restored::skipped` に理由を返す。TOML として読めないファイルが 1 つでもあれば何も書かない。置き換えるファイルは `<file>.bak-<time>` に残す。同じ中身は書かない（`unchanged`）。別のアプリの束の `app/…` は飛ばす（`common.toml` とテーマは読む）。形式の番号が新しすぎる束は断る。
+  - ディスクに触るので、UI のスレッドでは呼ばない。
+- ito-prefs: `backup_card`（ファイル名の欄 + 書き出す + 読み込む（2 回押す））と `backup_index`。押されたら `Backup::Export(path)` / `Backup::Import(path)` を返す。ファイル名の欄の初期値は `default_file`（例: ホームの `<app>-settings.toml`）。文言は `MoreWords` に足した（`backup`・`export_*`・`import_*`）。
+
+### 使う側がやること
+
+- Advanced ページの `advanced_card` の下に `backup_card(ui, look, words, &default_file)` を置く。返った `Backup` を UI でないスレッドで `ito_common::bundle::export(&file, &base, &app_dir, "<app>", env!("CARGO_PKG_VERSION"))` / `import(&file, &base, &app_dir, "<app>")` に渡し、結果（`usize` の件数、または `Restored` の `written` / `skipped`）を通知かステータスに出す。`base` は `ito_common::base_dir()`、`app_dir` は `ito_common::app_dir("<app>")`。
+- 読み込んだあとは、設定を読み直す（common.toml は見張りが拾う。アプリ自身の設定は、アプリの読み直しを呼ぶか、再起動を促す）。
+- 検索用に `backup_index(words)` を Advanced の語に足す。
+
 ## [0.74.0] - 2026-10-17
 
 ### 追加

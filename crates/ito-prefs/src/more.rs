@@ -4,7 +4,7 @@
 //! asked for; the app does it (writes common.toml, runs
 //! `ito_common::startup::set`, opens a folder).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ito_common::{CommonChange, WindowPrefs};
 
@@ -121,6 +121,16 @@ pub struct MoreWords {
     pub line_height_note: &'static str,
     pub ligatures: &'static str,
     pub ligatures_note: &'static str,
+    pub backup: &'static str,
+    pub backup_file: &'static str,
+    pub backup_file_note: &'static str,
+    pub export_label: &'static str,
+    pub export_note: &'static str,
+    pub export_button: &'static str,
+    pub import_label: &'static str,
+    pub import_note: &'static str,
+    pub import_button: &'static str,
+    pub import_sure: &'static str,
 }
 
 pub const MORE_EN: MoreWords = MoreWords {
@@ -181,6 +191,16 @@ pub const MORE_EN: MoreWords = MoreWords {
     line_height_note: "1.00 is the font's own",
     ligatures: "Ligatures",
     ligatures_note: "Join characters like -> and ==",
+    backup: "BACKUP",
+    backup_file: "File",
+    backup_file_note: "Where the settings are written, or read from",
+    export_label: "Export the settings",
+    export_note: "The settings, the keys and the themes, as one file",
+    export_button: "Export",
+    import_label: "Import settings",
+    import_note: "Replaces the settings; each old file is kept as .bak",
+    import_button: "Import…",
+    import_sure: "Press again to import",
 };
 
 pub const MORE_JA: MoreWords = MoreWords {
@@ -241,6 +261,16 @@ pub const MORE_JA: MoreWords = MoreWords {
     line_height_note: "1.00 が字体どおり",
     ligatures: "合字",
     ligatures_note: "-> や == をつなげて描く",
+    backup: "バックアップ",
+    backup_file: "ファイル",
+    backup_file_note: "設定を書き出す・読み込むファイル",
+    export_label: "設定を書き出す",
+    export_note: "設定・キー・テーマを 1 つのファイルに",
+    export_button: "書き出す",
+    import_label: "設定を読み込む",
+    import_note: "設定を置き換えます。元のファイルは .bak に残します",
+    import_button: "読み込む…",
+    import_sure: "もう一度押すと読み込む",
 };
 
 impl MoreWords {
@@ -353,6 +383,54 @@ pub fn advanced_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, state_dir: bool)
 /// The Advanced card's words, for the settings' search.
 pub fn advanced_index(w: &MoreWords) -> Vec<&'static str> {
     vec![w.files, w.config_dir, w.config_dir_note, w.state_dir, w.state_dir_note, w.reset, w.reset_label, w.reset_note]
+}
+
+/// What the Backup card asked for; the app runs it off the UI thread with
+/// `ito_common::bundle::export` / `import`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Backup {
+    Export(PathBuf),
+    Import(PathBuf),
+}
+
+const BACKUP_FILE: &str = "ito-prefs-backup-file";
+const IMPORT_ARMED: &str = "ito-prefs-import-armed";
+
+/// The Backup card: a file name (`default_file` until the user types one) and
+/// the two buttons. Import is pressed twice. Put it on the Advanced page.
+pub fn backup_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, default_file: &Path) -> Vec<Backup> {
+    let mut out = Vec::new();
+    section(ui, l, w.backup, |ui| {
+        let (file_id, armed_id) = (egui::Id::new(BACKUP_FILE), egui::Id::new(IMPORT_ARMED));
+        let mut file = ui.data(|d| d.get_temp::<String>(file_id)).unwrap_or_else(|| default_file.display().to_string());
+        keyed_row(ui, l, "", w.backup_file, w.backup_file_note, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut file).desired_width(260.0).font(egui::FontId::monospace(12.0)));
+        });
+        ui.data_mut(|d| d.insert_temp(file_id, file.clone()));
+        let path = PathBuf::from(file.trim());
+        let usable = !file.trim().is_empty();
+        sep(ui, l);
+        if row(ui, l, w.export_label, w.export_note, |ui| ui.add_enabled_ui(usable, |ui| button(ui, l, w.export_button)).inner) {
+            out.push(Backup::Export(path.clone()));
+        }
+        sep(ui, l);
+        let armed = ui.data(|d| d.get_temp::<bool>(armed_id)).unwrap_or(false);
+        let words = if armed { w.import_sure } else { w.import_button };
+        if row(ui, l, w.import_label, w.import_note, |ui| ui.add_enabled_ui(usable, |ui| button(ui, l, words)).inner) {
+            if armed {
+                out.push(Backup::Import(path));
+            }
+            ui.data_mut(|d| d.insert_temp(armed_id, !armed));
+        } else if armed && ui.input(|i| i.pointer.any_click()) {
+            ui.data_mut(|d| d.insert_temp(armed_id, false));
+        }
+    });
+    out
+}
+
+/// The Backup card's words, for the settings' search.
+pub fn backup_index(w: &MoreWords) -> Vec<&'static str> {
+    vec![w.backup, w.backup_file, w.backup_file_note, w.export_label, w.export_note, w.import_label, w.import_note]
 }
 
 /// What the About page shows.
@@ -599,7 +677,7 @@ mod tests {
         };
         let w = &MORE_EN;
         let a = About { version: "1.0.0", commit: None, system: "Test OS", license: Some("MIT") };
-        let mut got = (WindowOut::default(), None, Vec::new(), Vec::new());
+        let mut got = (WindowOut::default(), None, Vec::new(), Vec::new(), Vec::new());
         let mut out = ctx.run_ui(input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let l = Look { c: ito_theme::colors(), q: "" };
@@ -607,12 +685,14 @@ mod tests {
                 got.1 = startup_card(ui, l, w, Some(false));
                 got.2 = advanced_card(ui, l, w, true);
                 got.3 = about_page(ui, l, w, &crate::EN, "app", &a);
+                got.4 = backup_card(ui, l, w, Path::new("/tmp/app-settings.toml"));
             });
         });
         out.textures_delta.clear();
         assert_eq!(got.0, WindowOut::default());
         assert_eq!(got.1, None);
-        assert!(got.2.is_empty() && got.3.is_empty());
+        assert!(got.2.is_empty() && got.3.is_empty() && got.4.is_empty());
+        assert!(backup_index(w).contains(&w.export_label));
         assert!(
             !window_index(w).is_empty()
                 && !startup_index(w).is_empty()
