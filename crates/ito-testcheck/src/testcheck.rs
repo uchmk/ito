@@ -123,6 +123,18 @@ struct Section {
 #[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Notes {
+    /// The checklist has no second language: a row with no gloss is printed as
+    /// `- [ ] **id** cells`, without the `〔未訳〕` marker, the untranslated
+    /// count is 0, and the fixed lines are English. Written before the first
+    /// `[table]`, like every bare key here.
+    #[serde(default)]
+    pub plain: bool,
+    /// Report faults in `TESTING.md` (a duplicate id in a section, a control
+    /// character, a row whose cell count differs from its table's header, a line
+    /// that follows a table row without a blank line) as errors with
+    /// `file:line`, exit 1, before anything is written.
+    #[serde(default)]
+    pub strict: bool,
     #[serde(default)]
     pub section: BTreeMap<String, SectionNote>,
     /// The gloss for one check, by id.
@@ -193,13 +205,23 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
     let is_default = std::ptr::eq(lane, first);
     let src = cfg.source;
     let out_path = lane.out;
-    let sections = parse(&std::fs::read_to_string(root.join(src)).unwrap_or_else(|e| panic!("read {src}: {e}")), src);
+    let text = std::fs::read_to_string(root.join(src)).unwrap_or_else(|e| panic!("read {src}: {e}"));
+    let sections = parse(&text, src);
     let notes: Notes = match std::fs::read_to_string(root.join(cfg.notes)) {
         Ok(t) => toml::from_str(&t).unwrap_or_else(|e| panic!("parse {}: {e}", cfg.notes)),
         // Not an error: without the file this is TESTING.md rearranged, which is
         // still a working checklist. The count of untranslated rows says so.
         Err(_) => Notes::default(),
     };
+    if notes.strict {
+        let faults = lint(&text, src);
+        if !faults.is_empty() {
+            writeln!(r.stderr, "{}", faults.join("\n")).unwrap();
+            r.code = 1;
+            return r;
+        }
+    }
+    let plain = notes.plain;
     for id in &notes.manual {
         automated.remove(id);
     }
@@ -214,7 +236,9 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
     let ticked = manual.iter().filter(|c| marks.get(&c.id) == Some(&'x')).count();
     let skipped = manual.iter().filter(|c| marks.get(&c.id) == Some(&'-')).count();
     let looked = manual.iter().filter(|c| marks.get(&c.id) == Some(&'~')).count();
-    let untranslated = manual.iter().filter(|c| !notes.row.contains_key(&c.id)).count();
+    let untranslated = if plain { 0 } else { manual.iter().filter(|c| !notes.row.contains_key(&c.id)).count() };
+    // The fixed lines, in the gloss's language or in English.
+    let t = |ja: String, en: String| if plain { en } else { ja };
 
     let mut out = (lane.preamble)(&Counts { all: all.len(), manual: manual.len(), untranslated });
     // The progress, for `--stats`. Not written into the file: every pull
@@ -244,8 +268,17 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
         if mine.is_empty() {
             // Every row automated. Say so and move on: a heading with nothing
             // under it reads like a section someone forgot to fill in.
-            writeln!(out, "\n## {}. {title} — 全 {} 件が自動\n", s.n, s.checks.len()).unwrap();
-            writeln!(out, "`cargo test` が全部見ているので、押すものはありません。").unwrap();
+            let n = s.checks.len();
+            writeln!(out, "\n## {}. {title} — {}\n", s.n, t(format!("全 {n} 件が自動"), format!("all {n} automated"))).unwrap();
+            writeln!(
+                out,
+                "{}",
+                t(
+                    "`cargo test` が全部見ているので、押すものはありません。".into(),
+                    "`cargo test` covers them all; nothing to press.".into()
+                )
+            )
+            .unwrap();
             continue;
         }
         writeln!(out, "\n## {}. {title}\n", s.n).unwrap();
@@ -253,16 +286,23 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
             writeln!(out, "{note}\n").unwrap();
         }
         if !auto.is_empty() {
-            writeln!(out, "自動テスト済みなので下には出していない: {}\n", auto.join(", ")).unwrap();
+            let ids = auto.join(", ");
+            writeln!(
+                out,
+                "{}\n",
+                t(format!("自動テスト済みなので下には出していない: {ids}"), format!("Covered by tests, not listed below: {ids}"))
+            )
+            .unwrap();
         }
         if let Some(setup) = n.map(|n| n.setup.trim()).filter(|s| !s.is_empty() && lane.setup) {
-            writeln!(out, "準備:\n\n{setup}\n").unwrap();
+            writeln!(out, "{}\n\n{setup}\n", t("準備:".into(), "Setup:".into())).unwrap();
         }
         for c in mine {
             let mark = marks.get(&c.id).copied().unwrap_or(' ');
             let en = c.cells.join(" → ");
             match notes.row.get(&c.id) {
                 Some(ja) => writeln!(out, "- [{mark}] **{}** {ja} — *{en}*", c.id).unwrap(),
+                None if plain => writeln!(out, "- [{mark}] **{}** {en}", c.id).unwrap(),
                 None => writeln!(out, "- [{mark}] **{}** {en} 〔未訳〕", c.id).unwrap(),
             }
         }
@@ -275,13 +315,14 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
     let live: BTreeSet<&str> = all.iter().map(|c| c.id.as_str()).collect();
     let orphans: Vec<&String> = marks.keys().filter(|id| !live.contains(id.as_str())).collect();
     if !orphans.is_empty() {
-        writeln!(out, "\n## 済みだが {src} に無い項目\n").unwrap();
-        writeln!(
-            out,
-            "消えたか、番号が振り直されたか。**番号が動いた場合、上のチェックは別の項目に\n\
-             付いている**ので、その節はもう一度通すこと。\n"
-        )
-        .unwrap();
+        writeln!(out, "\n## {}\n", t(format!("済みだが {src} に無い項目"), format!("Checked, but not in {src}"))).unwrap();
+        let why = t(
+            "消えたか、番号が振り直されたか。**番号が動いた場合、上のチェックは別の項目に\n付いている**ので、その節はもう一度通すこと。"
+                .into(),
+            "Removed, or renumbered. **If the numbers moved, the ticks above sit on different\nchecks**, so go through that section again."
+                .into(),
+        );
+        writeln!(out, "{why}\n").unwrap();
         for o in orphans {
             writeln!(out, "- `{o}`").unwrap();
         }
@@ -354,7 +395,7 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
             .unwrap();
             return r;
         }
-        r.stdout = report_drift(&all, &automated, &old, src);
+        r.stdout = report_drift(&all, &automated, &old, src, plain);
         let flag = if is_default { String::new() } else { format!(" -- --lane {}", lane.name) };
         writeln!(r.stderr, "\n{out_path} is out of date. Regenerate it, read the diff, and commit it:\n\n    {}{flag}\n", cfg.command)
             .unwrap();
@@ -381,14 +422,21 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
 /// that needs judgement rather than transcription.
 fn parse(text: &str, src: &str) -> Vec<Section> {
     let mut out: Vec<Section> = Vec::new();
+    // Under a `##` heading that is not `## N. Title` (a "Covered by tests"
+    // table, say) the rows are not checks: they are for the reader.
+    let mut skip = false;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
+            skip = true;
             if let Some((num, title)) = rest.split_once(". ") {
                 if let Ok(n) = num.parse::<u32>() {
                     out.push(Section { n, title: title.trim().to_owned(), checks: Vec::new() });
-                    continue;
+                    skip = false;
                 }
             }
+            continue;
+        }
+        if skip {
             continue;
         }
         let Some(row) = line.strip_prefix("| ") else { continue };
@@ -424,6 +472,45 @@ fn parse(text: &str, src: &str) -> Vec<Section> {
         }
     }
     out
+}
+
+/// Faults in `TESTING.md` that the parse would read past: each as
+/// `file:line: what`.
+fn lint(text: &str, src: &str) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut width = 0;
+    let mut in_table = false;
+    for (i, line) in text.lines().enumerate() {
+        let n = i + 1;
+        if let Some(c) = line.chars().find(|c| c.is_control() && *c != '\t') {
+            faults.push(format!("{src}:{n}: control character U+{:04X}", c as u32));
+        }
+        if line.starts_with("## ") {
+            seen.clear();
+        }
+        if !line.starts_with('|') {
+            if in_table && !line.trim().is_empty() {
+                faults.push(format!("{src}:{n}: a line follows a table row without a blank line, which breaks the row"));
+            }
+            in_table = false;
+            continue;
+        }
+        let cells = line.replace("\\|", "");
+        let cells = cells.trim().trim_start_matches('|').trim_end_matches('|');
+        let count = cells.split('|').count();
+        if !in_table {
+            width = count;
+            in_table = true;
+        } else if count != width {
+            faults.push(format!("{src}:{n}: {count} cells in a table of {width}"));
+        }
+        let id = cells.split('|').next().unwrap_or_default().trim();
+        if is_check_id(id) && !seen.insert(id.to_owned()) {
+            faults.push(format!("{src}:{n}: check {id} appears twice in its section"));
+        }
+    }
+    faults
 }
 
 /// `13.4`, or `11.9b` -- a section number, a dot, a count, and an optional
@@ -576,9 +663,9 @@ fn release_ids(text: &str) -> Vec<&str> {
 /// guess; what is worth printing is which rows moved, because a row that
 /// vanished may have been removed on purpose or lost in an edit, and from here
 /// the two look identical.
-fn report_drift(all: &[&Check], automated: &BTreeSet<String>, old: &str, src: &str) -> String {
+fn report_drift(all: &[&Check], automated: &BTreeSet<String>, old: &str, src: &str, plain: bool) -> String {
     let now: BTreeMap<&str, String> = all.iter().map(|c| (c.id.as_str(), c.cells.join(" → "))).collect();
-    let was = rows_of_file(old);
+    let was = rows_of_file(old, plain);
     let mut out = String::new();
 
     for (id, en) in &now {
@@ -605,7 +692,7 @@ fn report_drift(all: &[&Check], automated: &BTreeSet<String>, old: &str, src: &s
 
 /// The rows read back out of the generated file: id to the English that follows
 /// it, which is the part [`report_drift`] can compare against TESTING.md.
-fn rows_of_file(text: &str) -> BTreeMap<&str, String> {
+fn rows_of_file(text: &str, plain: bool) -> BTreeMap<&str, String> {
     let mut out = BTreeMap::new();
     for line in text.lines() {
         let Some(rest) = ["x", " ", "-", "~"].iter().find_map(|m| line.strip_prefix(&format!("- [{m}] **"))) else {
@@ -618,6 +705,15 @@ fn rows_of_file(text: &str) -> BTreeMap<&str, String> {
         // there**" -- and reported a drift on a row nobody had touched. `run`
         // refuses to write a gloss containing the separator, which is what
         // makes the front split safe.
+        if plain {
+            // No marker, or a gloss: the body is the English.
+            let en = match body.strip_suffix(" 〔未訳〕") {
+                Some(en) => en,
+                None => body.split_once(" — *").map_or(body, |(_, en)| en.strip_suffix('*').unwrap_or(en)),
+            };
+            out.insert(id, en.to_owned());
+            continue;
+        }
         let en = match body.strip_suffix(" 〔未訳〕") {
             Some(en) => en.to_owned(),
             None => match body.split_once(" — *") {
@@ -706,6 +802,52 @@ mod tests {
         assert_eq!(s[0].title, "First (v0.1.0)");
         assert_eq!(s[0].checks.len(), 3);
         assert_eq!(s[1].checks[0].cells, ["Linux", "Run", "It runs — **and stays**"]);
+    }
+
+    #[test]
+    fn rows_under_an_unnumbered_heading_are_not_checks() {
+        let text =
+            "## 1. One\n\n| 1.1 | Do | Expect |\n\n## Covered by tests\n\n| 1.2 | a | test |\n\n## 2. Two\n\n| 2.1 | Do | Expect |\n";
+        let s = parse(text, "T.md");
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].checks.len(), 1);
+        assert_eq!(s[1].checks[0].id, "2.1");
+    }
+
+    #[test]
+    fn plain_prints_a_row_without_a_gloss_as_it_is() {
+        let d = dir("plain");
+        std::fs::write(d.join("ja.toml"), "plain = true\n").unwrap();
+        let cfg = config();
+        let r = run_with(&cfg, &d, &args(&[]), auto());
+        assert_eq!(r.code, 0, "{}", r.stderr);
+        let text = std::fs::read_to_string(d.join("CHECKS.md")).unwrap();
+        assert!(text.contains("- [ ] **1.2** Press `b` → It closes (v0.2.0)\n"), "{text}");
+        assert!(!text.contains("〔未訳〕"));
+        assert!(text.contains("Covered by tests, not listed below: 1.3"), "{text}");
+        let again = run_with(&cfg, &d, &args(&["--check"]), auto());
+        assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    }
+
+    #[test]
+    fn strict_reports_faults_with_their_lines() {
+        let d = dir("strict");
+        std::fs::write(d.join("ja.toml"), "strict = true\n").unwrap();
+        std::fs::write(
+            d.join("TESTING.md"),
+            "## 1. One\n\n| # | Do | Expect |\n| --- | --- | --- |\n| 1.1 | a | b |\n| 1.1 | c | d |\n| 1.2 | only |\n| 1.3 | bell \u{7} | x |\nprose\n",
+        )
+        .unwrap();
+        let r = run_with(&config(), &d, &args(&[]), BTreeSet::new());
+        assert_eq!(r.code, 1);
+        for want in [
+            "TESTING.md:6: check 1.1 appears twice",
+            "TESTING.md:7: 2 cells in a table of 3",
+            "TESTING.md:8: control character U+0007",
+            "TESTING.md:9: a line follows",
+        ] {
+            assert!(r.stderr.contains(want), "{want} not in {}", r.stderr);
+        }
     }
 
     #[test]
@@ -856,7 +998,7 @@ mod tests {
     #[test]
     fn rows_read_back_from_the_front() {
         let file = "- [x] **1.5** list — **and the shell is still there** 〔未訳〕\n- [ ] **2.1** 訳 — *Run → It runs — **and stays***\n";
-        let rows = rows_of_file(file);
+        let rows = rows_of_file(file, false);
         assert_eq!(rows["1.5"], "list — **and the shell is still there**");
         assert_eq!(rows["2.1"], "Run → It runs — **and stays**");
     }

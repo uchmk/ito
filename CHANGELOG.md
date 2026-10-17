@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.60.0] - 2026-10-17
+
+### 追加
+
+- ito-testcheck（tsumugi の試し読みで出た 4 つ）:
+  - `TESTING.md` の `## N. 題` でない `##` 見出し（`## Covered by tests` など）の下の表は、チェックの行として読まない（読み手のための表を残せる）。これまでは見出しの前の行として panic していた。
+  - 注釈の TOML の先頭に `plain = true`: 訳の無い行を `- [ ] **id** 中身` のまま出し（`〔未訳〕` を付けない）、未訳の数は 0、決まった文言（準備・自動・済みだが無い項目）は英語になる。英語だけのチェック表向け。
+  - 注釈の TOML の先頭に `strict = true`: `TESTING.md` の不具合（同じ節の中の id の重複、制御文字、表の見出しと違う列の数、表の行の直後に空行なしで続く行）を `file:line` 付きで出して exit 1（何も書かない）。
+  - `keycheck::run_bindings(cfg, &[Binding], root, args)` と、公開の `keycheck::Binding`: `keymap.toml` でなく Rust のデータからキーの表を作るアプリ向け。ticks・`--check`・`--stats` は `run_with` と同じ。
+
+### 使う側がやること
+
+- 無し（どれも足すだけ。`Config`・`Lane` は変わらない）。kura の `TESTING.md` に番号の無い `##` 見出しの下の表があれば、そこの行はチェックに数えなくなる。
+
 ## [0.59.1] - 2026-10-17
 
 ### 変更

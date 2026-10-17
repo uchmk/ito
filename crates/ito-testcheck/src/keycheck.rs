@@ -49,12 +49,23 @@ pub struct Config<'a> {
     pub marks: &'a [char],
 }
 
-struct Binding {
-    layer: String,
-    section: String,
-    on: String,
-    run: String,
-    desc: String,
+/// One key binding, one line of the checklist: `- [ ] `on` — desc · `run``.
+///
+/// [`run_with`] reads these from a `keymap.toml`; an app whose keys live in Rust
+/// data builds them itself and calls [`run_bindings`]. The tick is carried over
+/// by `layer` and `on`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Binding {
+    /// The `## `[layer]`` heading it sits under.
+    pub layer: String,
+    /// The `### Section` under the layer; empty for none.
+    pub section: String,
+    /// The key as pressed.
+    pub on: String,
+    /// What it runs, a command name.
+    pub run: String,
+    /// What it does, in words.
+    pub desc: String,
 }
 
 /// Run with the process's arguments, print, and exit.
@@ -65,12 +76,18 @@ pub fn run(cfg: &Config) {
 
 /// [`run`] with the arguments and the folder the paths are relative to.
 pub fn run_with(cfg: &Config, root: &Path, args: &[String]) -> Report {
+    let keymap = cfg.keymap;
+    let text = std::fs::read_to_string(root.join(keymap)).unwrap_or_else(|e| panic!("read {keymap}: {e}"));
+    run_bindings(cfg, &parse(&text), root, args)
+}
+
+/// [`run_with`] for bindings the app already has: the same file, ticks,
+/// `--check` and `--stats`, with `Config::keymap` only named in the messages.
+pub fn run_bindings(cfg: &Config, bindings: &[Binding], root: &Path, args: &[String]) -> Report {
     let mut r = Report::default();
     let check = args.iter().any(|a| a == "--check");
     let stats = args.iter().any(|a| a == "--stats");
     let (keymap, out_path) = (cfg.keymap, cfg.out);
-    let text = std::fs::read_to_string(root.join(keymap)).unwrap_or_else(|e| panic!("read {keymap}: {e}"));
-    let bindings = parse(&text);
     let old = std::fs::read_to_string(root.join(out_path)).ok();
     let done = previous_marks(old.as_deref().unwrap_or_default(), cfg.marks);
     let ticked_in = |b: &Binding| done.get(&key_of(b)) == Some(&'x');
@@ -88,7 +105,7 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String]) -> Report {
             progress[0].push_str(&format!(", {n} [{m}]"));
         }
     }
-    for b in &bindings {
+    for b in bindings {
         if b.layer != layer {
             layer = b.layer.clone();
             section.clear();
@@ -132,7 +149,7 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String]) -> Report {
     // A row with no key on it is the parser having lost one, not the keymap
     // having a nameless binding -- and it reads as an ordinary checklist line,
     // so nothing about the file says anything went wrong. Refuse to write it.
-    for b in &bindings {
+    for b in bindings {
         assert!(!b.on.trim().is_empty(), "`{}` in layer `{}` came out with no key: the `on = ` parse dropped it", b.run, b.layer);
     }
     if stats {
@@ -151,7 +168,7 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String]) -> Report {
             writeln!(r.stdout, "{out_path}: in sync with {keymap} ({ticked} / {} checked)", bindings.len()).unwrap();
             return r;
         }
-        r.stdout = report_drift(&bindings, &old);
+        r.stdout = report_drift(bindings, &old);
         r.stderr = format!("\n{out_path} is out of date. Regenerate it, read the diff, and commit it:\n\n    {}\n\n", cfg.command);
         r.code = 1;
         return r;
@@ -392,6 +409,20 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bindings_the_app_built_are_written_like_parsed_ones() {
+        let d = dir("built");
+        let cfg = config(&[]);
+        let from_file = run_with(&cfg, &d, &[]);
+        let text = std::fs::read_to_string(d.join("KEYS.md")).unwrap();
+        let _ = std::fs::remove_file(d.join("KEYS.md"));
+        let built = parse(KEYMAP);
+        let r = run_bindings(&cfg, &built, &d, &[]);
+        assert_eq!(r, from_file);
+        assert_eq!(std::fs::read_to_string(d.join("KEYS.md")).unwrap(), text);
+        assert_eq!(run_bindings(&cfg, &built, &d, &args(&["--check"])).code, 0);
     }
 
     #[test]
