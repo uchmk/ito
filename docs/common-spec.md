@@ -285,6 +285,9 @@ scale: 100%           # 書くなら倍率を % で
   - 日本語は `JAPANESE`（Windows はメイリオ → 游ゴシック → MS ゴシック）、太字は `JAPANESE_BOLD`。`read_first` で最初に読めたものを使う。
 - 等幅は `common.toml` の `mono_font` に従う（既定 `bundled`）。`bundled` は `ito-fonts`（JetBrains Mono、SIL OFL。約 270 KB）を `ito_fonts::register` で等幅の先頭に足す。`system` は何もしない（上の並びのまま）。アプリの字体の設定が「自動」でないとき（`font.family` を決めているとき）はアプリの設定が勝つ。ライセンスの画面に `ito_fonts::LICENSE` を載せる。
 - 読むのは数十 MB なので UI ではないスレッドで。egui に渡す（等幅・プロポーショナルのどこに足すか）は各アプリ。
+- **字の拡大・縮小は全部の画面に効かせる。** 端末のペインの字（font_bigger / font_smaller）だけが大きくなって、設定・ヘルプ・パレット・確認が小さいままにしない。
+  アプリは毎フレーム `ito_theme::set_text_zoom(ctx, ペインの字の大きさ / 設定の字の大きさ)` を呼び、自前の画面の字と行の高さは `ito_theme::zoomed(ctx, 値)` を通す。
+  ito-prefs・ito-browser・ito-palette は内部で掛ける。ito-help・ito-confirm は使う側が渡す `FontId`・`row_h` を `zoomed` に通す。
 
 ## 窓
 

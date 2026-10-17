@@ -9,7 +9,7 @@ use egui::{Color32, FontId, RichText};
 use ito_keymap::{clashes, common, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
 use ito_keys::{human_seq_for, render_seq, Code, Key, Named};
 
-use crate::{select, switch, Look};
+use crate::{select, switch, z, Look};
 
 /// The words of the Keys page, in one language.
 pub struct KeyWords {
@@ -342,7 +342,7 @@ fn set(cap: &Capture, row: Option<&Row>) -> Vec<Edit> {
 /// A key's cap: lit while it takes keys, struck through when taken away.
 fn chip(ui: &mut egui::Ui, l: Look, words: &str, lit: bool, removed: bool) -> egui::Response {
     let c = l.c;
-    let mut text = RichText::new(words).font(FontId::monospace(12.0)).color(if removed { c.faint() } else { c.strong() });
+    let mut text = RichText::new(words).font(FontId::monospace(z(ui, 12.0))).color(if removed { c.faint() } else { c.strong() });
     if removed {
         text = text.strikethrough();
     }
@@ -352,7 +352,7 @@ fn chip(ui: &mut egui::Ui, l: Look, words: &str, lit: bool, removed: bool) -> eg
 
 /// A small button of one sign, with a tooltip, named by it.
 fn sign(ui: &mut egui::Ui, l: Look, s: &str, tip: &str, enabled: bool) -> bool {
-    let b = egui::Button::new(RichText::new(s).size(12.5).color(l.c.dim)).fill(Color32::TRANSPARENT).frame(false);
+    let b = egui::Button::new(RichText::new(s).size(z(ui, 12.5)).color(l.c.dim)).fill(Color32::TRANSPARENT).frame(false);
     let r = ui.add_enabled(enabled, b);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
     let r = if enabled { r.on_hover_text(tip) } else { r.on_disabled_hover_text(tip) };
@@ -440,7 +440,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             .hint_text(w.search)
             .desired_width(300.0)
             .margin(egui::vec2(10.0, 6.0))
-            .font(FontId::proportional(12.5));
+            .font(FontId::proportional(z(ui, 12.5)));
         let r = ui.add(search);
         crate::focus_ring(ui, &r);
         ui.add_space(8.0);
@@ -468,7 +468,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         if !one_layer {
-            ui.label(RichText::new(w.layer).size(12.5).color(c.dim));
+            ui.label(RichText::new(w.layer).size(z(ui, 12.5)).color(c.dim));
             let names: Vec<String> = std::iter::once(w.all.to_owned()).chain(layers.iter().map(|n| (t.layer_name)(n))).collect();
             let options: Vec<(usize, &str)> = names.iter().enumerate().map(|(k, n)| (k, n.as_str())).collect();
             if let Some(k) = select(ui, "keys-layer", layer_at, &options) {
@@ -479,7 +479,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         if switch(ui, l, st.changed_only) {
             st.changed_only = !st.changed_only;
         }
-        ui.label(RichText::new(w.changed_only).size(12.5).color(c.fg));
+        ui.label(RichText::new(w.changed_only).size(z(ui, 12.5)).color(c.fg));
     });
     ui.add_space(12.0);
 
@@ -518,7 +518,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             let head = |ui: &mut egui::Ui, words: &str, w: f32| {
                 ui.allocate_ui_with_layout(egui::vec2(w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.set_width(w);
-                    ui.label(RichText::new(words).size(11.0).strong().color(c.dim));
+                    ui.label(RichText::new(words).size(z(ui, 11.0)).strong().color(c.dim));
                 });
             };
             ui.horizontal(|ui| {
@@ -533,7 +533,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             if shown.is_empty() {
                 crate::sep(ui, l);
                 ui.add_space(10.0);
-                ui.label(RichText::new(w.nothing).size(12.5).color(c.dim));
+                ui.label(RichText::new(w.nothing).size(z(ui, 12.5)).color(c.dim));
                 ui.add_space(8.0);
             }
             for (row, desc, layer, hay) in &shown {
@@ -545,9 +545,11 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                     ui.allocate_ui_with_layout(egui::vec2(op_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.set_width(op_w);
                         ui.add_space(8.0);
-                        ui.label(RichText::new(desc.as_str()).size(13.0).color(c.strong()));
+                        ui.label(RichText::new(desc.as_str()).size(z(ui, 13.0)).color(c.strong()));
                         if !row.desc.is_empty() {
-                            ui.add(egui::Label::new(RichText::new(&row.run).font(FontId::monospace(11.0)).color(c.faint())).truncate());
+                            ui.add(
+                                egui::Label::new(RichText::new(&row.run).font(FontId::monospace(z(ui, 11.0))).color(c.faint())).truncate(),
+                            );
                         }
                         ui.add_space(6.0);
                     });
@@ -561,7 +563,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                         ui.allocate_ui_with_layout(egui::vec2(layer_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                             ui.set_width(layer_w);
                             ui.add_space(9.0);
-                            ui.label(RichText::new(layer.as_str()).size(12.5).color(c.dim));
+                            ui.label(RichText::new(layer.as_str()).size(z(ui, 12.5)).color(c.dim));
                         });
                     }
                 });
@@ -652,7 +654,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                 if cap.replace.is_none() {
                     capture_chip(ui, cap);
                 }
-                ui.menu_button(RichText::new(w.special).size(12.0).color(c.fg), |ui| {
+                ui.menu_button(RichText::new(w.special).size(z(ui, 12.0)).color(c.fg), |ui| {
                     for k in special(t.sup) {
                         if ui.button(k.human_for(t.sup)).clicked() {
                             if let Some(cap) = &mut st.capture {
@@ -691,10 +693,10 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
     if row.changed() {
         let d: Vec<String> = row.defaults.iter().map(|d| human_seq_for(d, t.sup)).collect();
         let d = if d.is_empty() { w.none.to_owned() } else { d.join(", ") };
-        ui.label(RichText::new(fill(w.default_is, &[&d])).size(11.5).color(c.faint()));
+        ui.label(RichText::new(fill(w.default_is, &[&d])).size(z(ui, 11.5)).color(c.faint()));
     }
     if let Some(cap) = &this {
-        ui.label(RichText::new(w.hint).size(11.5).color(c.dim));
+        ui.label(RichText::new(w.hint).size(z(ui, 11.5)).color(c.dim));
         if !cap.keys.is_empty() {
             let bindings: &[Binding<A>] = t.now.iter().find(|(n, _)| *n == cap.layer).map_or(&[], |(_, b)| b);
             let keys = human_seq_for(&cap.keys, t.sup);
@@ -721,7 +723,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             }
             said.extend((t.extra)(&cap.layer, &cap.keys));
             for s in said {
-                ui.label(RichText::new(s).size(12.0).color(c.wait));
+                ui.label(RichText::new(s).size(z(ui, 12.0)).color(c.wait));
             }
         }
     }

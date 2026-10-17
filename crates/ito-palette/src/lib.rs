@@ -250,7 +250,8 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                     for (row, &k) in hits.iter().enumerate().skip(first).take(ROWS) {
                         let e = &entries[k];
                         let on = row == view.selected;
-                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::click());
+                        let (rect, resp) = ui
+                            .allocate_exact_size(egui::vec2(ui.available_width(), ito_theme::zoomed(ui.ctx(), 22.0)), egui::Sense::click());
                         if on {
                             ui.painter().rect_filled(rect, 3.0, style.selected_bg);
                         }

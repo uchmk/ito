@@ -179,7 +179,7 @@ mod native {
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut self.edit)
                         .desired_width((ui.available_width() - 116.0).max(60.0))
-                        .font(egui::FontId::monospace(12.0)),
+                        .font(egui::FontId::monospace(ito_theme::zoomed(ui.ctx(), 12.0))),
                 );
                 self.editing = field.has_focus();
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -203,7 +203,7 @@ mod native {
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
                     why,
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(ito_theme::zoomed(ui.ctx(), 13.0)),
                     ui.visuals().weak_text_color(),
                 );
                 return answer;

@@ -9,7 +9,7 @@ use ito_common::{quote, quote_list, remove_key, set_tables};
 use ito_notify::webhook::Place;
 use ito_notify::{is_http, FORMATS, SOUNDS};
 
-use crate::{button, row, section, select, sep, status, switch, Drafts, Look, Words};
+use crate::{button, row, section, select, sep, status, switch, z, Drafts, Look, Words};
 
 /// One of the app's events, a column of the table: its name and colour, and
 /// the label of the row that picks its sound.
@@ -318,16 +318,17 @@ fn table(ui: &mut egui::Ui, l: Look, ends: &[End], ways: Vec<(&str, &str, &mut V
         }
         out
     };
-    let (head, _) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::hover());
+    let (head, _) = ui.allocate_exact_size(egui::vec2(width, z(ui, 40.0)), egui::Sense::hover());
     for (end, r) in ends.iter().zip(&columns(head)[1..]) {
-        let text = ui.fonts_mut(|f| f.layout_no_wrap(end.name.to_owned(), FontId::proportional(13.0), end.color));
+        let font = FontId::proportional(z(ui, 13.0));
+        let text = ui.fonts_mut(|f| f.layout_no_wrap(end.name.to_owned(), font, end.color));
         let left = r.center().x - (text.size().x + 14.0) / 2.0;
         ui.painter().circle_filled(egui::pos2(left + 4.0, r.center().y), 4.0, end.color);
         ui.painter().galley(egui::pos2(left + 14.0, r.center().y - text.size().y / 2.0), text, end.color);
     }
     for (label, note, list) in ways {
         sep(ui, l);
-        let (row, _) = ui.allocate_exact_size(egui::vec2(width, 66.0), egui::Sense::hover());
+        let (row, _) = ui.allocate_exact_size(egui::vec2(width, z(ui, 66.0)), egui::Sense::hover());
         let cols = columns(row);
         let hit = !l.q.is_empty() && (label.to_lowercase().contains(l.q) || note.to_lowercase().contains(l.q));
         if hit {
@@ -338,10 +339,10 @@ fn table(ui: &mut egui::Ui, l: Look, ends: &[End], ways: Vec<(&str, &str, &mut V
         // their bottom and take back the row's room.
         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(words));
         inner.spacing_mut().item_spacing.y = 2.0;
-        inner.label(RichText::new(label).size(13.0).color(c.strong()));
-        inner.add(egui::Label::new(RichText::new(note).size(12.0).color(c.dim)).truncate());
+        inner.label(RichText::new(label).size(z(ui, 13.0)).color(c.strong()));
+        inner.add(egui::Label::new(RichText::new(note).size(z(ui, 12.0)).color(c.dim)).truncate());
         for (on, r) in list.iter_mut().zip(&cols[1..]) {
-            let at = egui::Rect::from_center_size(r.center(), egui::vec2(40.0, 22.0));
+            let at = egui::Rect::from_center_size(r.center(), egui::vec2(z(ui, 40.0), z(ui, 22.0)));
             if switch(&mut ui.new_child(egui::UiBuilder::new().max_rect(at)), l, *on) {
                 *on = !*on;
             }

@@ -295,6 +295,12 @@ pub struct Look<'a> {
     pub q: &'a str,
 }
 
+/// `size` points at the letters' zoom (`ito_theme::set_text_zoom`), for every
+/// size written in these screens.
+pub(crate) fn z(ui: &egui::Ui, size: f32) -> f32 {
+    ito_theme::zoomed(ui.ctx(), size)
+}
+
 /// The screen across all of `ui`: the nav and the page, which `body` draws
 /// (it gets the page's index and the [`Look`]).
 pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Keys, body: impl FnOnce(&mut egui::Ui, usize, Look)) -> Out {
@@ -320,7 +326,7 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         .hint_text(nav.words.search)
         .desired_width(f32::INFINITY)
         .margin(egui::vec2(10.0, 8.0))
-        .font(FontId::proportional(12.5));
+        .font(FontId::proportional(z(ui, 12.5)));
     let searched = nav_ui.add(search);
     focus_ring(&nav_ui, &searched);
     if keys.find {
@@ -352,13 +358,13 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         }
     }
     if shown.is_empty() {
-        nav_ui.label(RichText::new(nav.words.nothing).size(12.5).color(c.dim));
+        nav_ui.label(RichText::new(nav.words.nothing).size(z(ui, 12.5)).color(c.dim));
     }
     for p in shown {
         let on = state.page == p;
         // Mouse only: the keys go page to page with Ctrl+Tab, and Tab goes
         // from the search straight into the page.
-        let (r, resp) = nav_ui.allocate_exact_size(egui::vec2(nav_ui.available_width(), 32.0), egui::Sense::CLICK);
+        let (r, resp) = nav_ui.allocate_exact_size(egui::vec2(nav_ui.available_width(), z(&nav_ui, 32.0)), egui::Sense::CLICK);
         if on {
             nav_ui.painter().rect_filled(r, 6.0, c.chosen());
         } else if resp.hovered() {
@@ -369,7 +375,7 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
             egui::pos2(r.left() + 10.0, r.center().y),
             egui::Align2::LEFT_CENTER,
             nav.pages[p].0,
-            FontId::proportional(13.0),
+            FontId::proportional(z(ui, 13.0)),
             color,
         );
         if !q.is_empty() {
@@ -377,7 +383,7 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
                 egui::pos2(r.right() - 10.0, r.center().y),
                 egui::Align2::RIGHT_CENTER,
                 hits(p).to_string(),
-                FontId::proportional(11.0),
+                FontId::proportional(z(ui, 11.0)),
                 c.faint(),
             );
         }
@@ -395,9 +401,9 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     egui::ScrollArea::vertical().id_salt(("prefs-page", title)).auto_shrink([false, false]).show(&mut body_ui, |ui| {
         egui::Frame::NONE.inner_margin(egui::Margin { left: 48, right: 48, top: 28, bottom: 40 }).show(ui, |ui| {
             ui.set_max_width(ui.available_width().min(820.0));
-            ui.label(RichText::new(title).size(24.0).strong().color(c.strong()));
+            ui.label(RichText::new(title).size(z(ui, 24.0)).strong().color(c.strong()));
             ui.add_space(2.0);
-            ui.label(RichText::new(lead).size(13.5).color(c.dim));
+            ui.label(RichText::new(lead).size(z(ui, 13.5)).color(c.dim));
             ui.add_space(16.0);
             body(ui, page, l);
         });
@@ -410,7 +416,7 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         egui::pos2(side.right() - 10.0, side.bottom() - 16.0),
     );
     let words = format!("{} {}", nav.words.open, nav.file);
-    let file = egui::Button::new(RichText::new(words).size(12.5).color(c.dim))
+    let file = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(c.dim))
         .fill(Color32::TRANSPARENT)
         .stroke(egui::Stroke::new(1.0, c.border_strong()))
         .corner_radius(6.0);
@@ -447,7 +453,7 @@ fn take_keys(ui: &egui::Ui, r: &egui::Response) {
 pub fn section(ui: &mut egui::Ui, l: Look, head: &str, rows: impl FnOnce(&mut egui::Ui)) {
     let c = l.c;
     let hit = !l.q.is_empty() && head.to_lowercase().contains(l.q);
-    ui.label(RichText::new(head).size(11.0).strong().color(if hit { c.wait } else { c.dim }));
+    ui.label(RichText::new(head).size(z(ui, 11.0)).strong().color(if hit { c.wait } else { c.dim }));
     ui.add_space(6.0);
     egui::Frame::NONE
         .fill(c.panel)
@@ -483,7 +489,7 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
     let behind = ui.painter().add(egui::Shape::Noop);
     let mut r = None;
     let shown = ui.horizontal(|ui| {
-        ui.set_min_height(48.0);
+        ui.set_min_height(z(ui, 48.0));
         // The control first, on the right; the words wrap in what is left,
         // never under it.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -502,9 +508,9 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
                     // A label alone sits in the middle of the row, as the
                     // control does.
                     ui.add_space(if note.is_empty() { 15.0 } else { 8.0 });
-                    ui.label(RichText::new(label).size(13.0).color(c.strong()));
+                    ui.label(RichText::new(label).size(z(ui, 13.0)).color(c.strong()));
                     if !note.is_empty() {
-                        ui.label(RichText::new(note).size(12.0).color(c.dim));
+                        ui.label(RichText::new(note).size(z(ui, 12.0)).color(c.dim));
                     }
                     ui.add_space(6.0);
                 });
@@ -521,7 +527,7 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
 /// The design's switch: a pill with a knob, cyan when on.
 pub fn switch(ui: &mut egui::Ui, l: Look, on: bool) -> bool {
     let c = l.c;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 22.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(z(ui, 40.0), z(ui, 22.0)), egui::Sense::click());
     let p = ui.painter();
     p.rect_filled(rect, 11.0, if on { c.run } else { c.border_strong() });
     let x = if on { rect.right() - 11.0 } else { rect.left() + 11.0 };
@@ -633,11 +639,11 @@ pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options:
 
 /// The design's plain button: an outline, words in the text colour.
 pub fn button(ui: &mut egui::Ui, l: Look, words: &str) -> bool {
-    let b = egui::Button::new(RichText::new(words).size(12.5).color(l.c.fg))
+    let b = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(l.c.fg))
         .fill(Color32::TRANSPARENT)
         .stroke(egui::Stroke::new(1.0, l.c.border_strong()))
         .corner_radius(7.0)
-        .min_size(egui::vec2(0.0, 30.0));
+        .min_size(egui::vec2(0.0, z(ui, 30.0)));
     let r = ui.add(b);
     take_keys(ui, &r);
     focus_ring(ui, &r);
@@ -645,7 +651,7 @@ pub fn button(ui: &mut egui::Ui, l: Look, words: &str) -> bool {
 }
 
 pub fn status(ui: &mut egui::Ui, words: &str, color: Color32) {
-    ui.label(RichText::new(words).size(12.5).color(color));
+    ui.label(RichText::new(words).size(z(ui, 12.5)).color(color));
 }
 
 /// A text field's words while it is typed in, and just after.
@@ -679,7 +685,7 @@ pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: 
         .id(eid)
         .hint_text(hint)
         .desired_width(width)
-        .font(FontId::monospace(12.5))
+        .font(FontId::monospace(z(ui, 12.5)))
         .margin(egui::vec2(10.0, 6.0));
     let shown = edit.show(ui);
     let resp = &shown.response.response;
@@ -720,7 +726,7 @@ pub fn field_id(id: &str) -> egui::Id {
 pub fn keycap(ui: &mut egui::Ui, l: Look, words: &str, lit: bool) -> egui::Response {
     let c = l.c;
     let stroke = if lit { c.run } else { c.border_strong() };
-    let b = egui::Button::new(RichText::new(words).font(FontId::monospace(12.0)).color(c.strong()))
+    let b = egui::Button::new(RichText::new(words).font(FontId::monospace(z(ui, 12.0))).color(c.strong()))
         .fill(c.side)
         .stroke(egui::Stroke::new(1.0, stroke))
         .corner_radius(6.0);
@@ -869,7 +875,7 @@ pub fn theme_page(
     // The mode as one segmented control at the left, under the heading, in
     // a row of its own height.
     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 36.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.label(RichText::new(w.mode).size(12.0).color(c.dim));
+        ui.label(RichText::new(w.mode).size(z(ui, 12.0)).color(c.dim));
         ui.add_space(8.0);
         egui::Frame::NONE.stroke(egui::Stroke::new(1.0, c.border_strong())).corner_radius(8.0).inner_margin(egui::Margin::same(3)).show(
             ui,
@@ -878,11 +884,11 @@ pub fn theme_page(
                     ui.spacing_mut().item_spacing.x = 2.0;
                     for (k, label) in [("system", w.follow_os), ("light", w.light), ("dark", w.dark)] {
                         let on = mode == k;
-                        let b = egui::Button::new(RichText::new(label).size(12.5).color(if on { c.strong() } else { c.dim }))
+                        let b = egui::Button::new(RichText::new(label).size(z(ui, 12.5)).color(if on { c.strong() } else { c.dim }))
                             .fill(if on { c.chosen() } else { Color32::TRANSPARENT })
                             .stroke(egui::Stroke::NONE)
                             .corner_radius(6.0)
-                            .min_size(egui::vec2(84.0, 26.0));
+                            .min_size(egui::vec2(z(ui, 84.0), z(ui, 26.0)));
                         let r = ui.add(b);
                         focus_ring(ui, &r);
                         if r.clicked() && !on {
@@ -908,7 +914,7 @@ pub fn theme_page(
             // turns to it, and could not be seen here).
             let list: Vec<&Theme> =
                 themes.iter().filter(|t| t.colors.light == if mode == "system" { l.c.light } else { mode == "light" }).collect();
-            ui.label(RichText::new(format!("{} · {}", w.themes, list.len())).size(11.0).strong().color(c.dim));
+            ui.label(RichText::new(format!("{} · {}", w.themes, list.len())).size(z(ui, 11.0)).strong().color(c.dim));
             egui::Frame::NONE
                 .fill(c.panel)
                 .stroke(egui::Stroke::new(1.0, c.border))
@@ -917,7 +923,7 @@ pub fn theme_page(
                 .show(ui, |ui| {
                     for t in list {
                         let on = picked(choice, &t.name, t.colors.light);
-                        let (r, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
+                        let (r, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), z(ui, 34.0)), egui::Sense::click());
                         let p = ui.painter();
                         if on {
                             p.rect_filled(r, 7.0, c.chosen());
@@ -926,7 +932,10 @@ pub fn theme_page(
                             p.rect_filled(r, 7.0, c.hover());
                         }
                         // A small chip of four: its ground and three of its states.
-                        let chip = egui::Rect::from_min_size(egui::pos2(r.left() + 10.0, r.center().y - 9.0), egui::vec2(40.0, 18.0));
+                        let chip = egui::Rect::from_min_size(
+                            egui::pos2(r.left() + 10.0, r.center().y - z(ui, 9.0)),
+                            egui::vec2(z(ui, 40.0), z(ui, 18.0)),
+                        );
                         for (k, sw) in [t.colors.bg, t.colors.wait, t.colors.run, t.colors.err].iter().enumerate() {
                             let x = chip.left() + k as f32 * 10.0;
                             let corner = match k {
@@ -941,7 +950,7 @@ pub fn theme_page(
                             egui::pos2(r.left() + 62.0, r.center().y),
                             egui::Align2::LEFT_CENTER,
                             &t.name,
-                            FontId::proportional(13.0),
+                            FontId::proportional(z(ui, 13.0)),
                             if on { c.strong() } else { c.fg },
                         );
                         let tagged = on && mode == "system";
@@ -955,7 +964,7 @@ pub fn theme_page(
                             egui::pos2(r.right() - 10.0, r.center().y),
                             egui::Align2::RIGHT_CENTER,
                             kind.to_lowercase(),
-                            FontId::proportional(11.0),
+                            FontId::proportional(z(ui, 11.0)),
                             if tagged { c.run } else { c.faint() },
                         );
                         if resp.clicked() {
@@ -969,14 +978,14 @@ pub fn theme_page(
                         }
                     }
                 });
-            ui.label(RichText::new(note).size(12.0).color(c.dim));
+            ui.label(RichText::new(note).size(z(ui, 12.0)).color(c.dim));
         });
         ui.add_space(20.0);
         ui.vertical(|ui| {
             // By the name picked, not the colours: a theme.toml that repaints
             // the window leaves no theme with these colours (kura #321).
             let name = in_force(themes, choice, l.c.light);
-            ui.label(RichText::new(format!("{} · {name}", w.preview)).size(11.0).strong().color(c.fg));
+            ui.label(RichText::new(format!("{} · {name}", w.preview)).size(z(ui, 11.0)).strong().color(c.fg));
             preview(ui);
         });
     });

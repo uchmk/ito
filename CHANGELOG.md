@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.80.0] - 2026-10-18
+
+### 追加
+
+- ito-theme: 字の拡大率 `set_text_zoom(ctx, zoom)`・`text_zoom(ctx)`・`zoomed(ctx, size)`。端末のペインの字の拡大・縮小（font_bigger / font_smaller）に、設定・ヘルプ・パレットなどの全部の画面を追従させる（小さい字と大きい字を混ぜない）。
+
+### 変更
+
+- ito-prefs・ito-browser: 画面の字の大きさと、行・ボタン・トグルなどの高さ・幅を拡大率に掛けるようにした（拡大率 1.0 では今までと同じ）。ito-palette の行の高さも同じ。ito-browser と ito-palette は ito-theme に依る。
+
+### 使う側がやること
+
+- 毎フレーム、画面を描く前に `ito_theme::set_text_zoom(ctx, ペインの字の大きさ / 設定の字の大きさ)` を呼ぶ。
+- ito-help・ito-confirm の `FontId` と `row_h` は使う側が渡すので、`ito_theme::zoomed(ctx, 値)` を通す。アプリ自前の画面の `.size(N)` / `FontId` / 行の高さも同じ。
+
 ## [0.79.1] - 2026-10-17
 
 ### 修正

@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 egui = "0.36"
 raw-window-handle = "0.6"
+ito-theme = { path = "../ito-theme" }
 
 # Linux has no child WebView (wry's need GTK): there `EMBEDDED` is false and
 # the app opens the page in the system's browser.

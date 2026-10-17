@@ -9,7 +9,7 @@ use ito_openin::config::{Edit, UserTool, Write, AUTO};
 use ito_openin::diff::{Found, KNOWN};
 use ito_openin::{default_command, Config, Tool};
 
-use crate::{button, field, row, sep, status, Drafts, Look};
+use crate::{button, field, row, sep, status, z, Drafts, Look};
 
 /// The card's words, in the app's language.
 pub struct OpenWords<'a> {
@@ -137,7 +137,7 @@ pub fn open_card(
             edits.push(Edit::DiffTool(choices[i].0.clone()));
         }
         ui.add_space(4.0);
-        ui.label(RichText::new(found_line(w, found)).size(12.0).color(l.c.dim));
+        ui.label(RichText::new(found_line(w, found)).size(z(ui, 12.0)).color(l.c.dim));
         ui.add_space(8.0);
     });
 

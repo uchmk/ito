@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::{button, field, keyed_row, section, sep, Drafts, Look};
+use crate::{button, field, keyed_row, section, sep, z, Drafts, Look};
 
 /// The card's words, in one language.
 pub struct ShellWords {
@@ -156,9 +156,16 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
             let mut gone = None;
             for (k, (name, value)) in vars.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(name).hint_text("NAME").desired_width(160.0).font(egui::FontId::monospace(12.5)));
+                    ui.add(
+                        egui::TextEdit::singleline(name).hint_text("NAME").desired_width(160.0).font(egui::FontId::monospace(z(ui, 12.5))),
+                    );
                     ui.label("=");
-                    ui.add(egui::TextEdit::singleline(value).hint_text(w.value).desired_width(280.0).font(egui::FontId::monospace(12.5)));
+                    ui.add(
+                        egui::TextEdit::singleline(value)
+                            .hint_text(w.value)
+                            .desired_width(280.0)
+                            .font(egui::FontId::monospace(z(ui, 12.5))),
+                    );
                     if ui.small_button(w.remove).clicked() {
                         gone = Some(k);
                     }
@@ -173,7 +180,7 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
                 }
                 let bad = vars.iter().any(|(n, _)| bad_name(n.trim()));
                 if bad {
-                    ui.label(egui::RichText::new(w.bad_name).size(12.0).color(l.c.err));
+                    ui.label(egui::RichText::new(w.bad_name).size(z(ui, 12.0)).color(l.c.err));
                 }
                 if ui.add_enabled(!bad, egui::Button::new(w.save)).clicked() {
                     out.extend(env_changes(now.env, vars));

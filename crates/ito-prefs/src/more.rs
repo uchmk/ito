@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use ito_common::{CommonChange, WindowPrefs};
 
-use crate::{bug_card, button, keyed_row, row, section, sep, switch, Look, Words};
+use crate::{bug_card, button, keyed_row, row, section, sep, switch, z, Look, Words};
 
 /// The settings pages every app can have, in the order they come in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,7 +419,7 @@ pub fn backup_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, default_file: &Pat
         let (file_id, armed_id) = (egui::Id::new(BACKUP_FILE), egui::Id::new(IMPORT_ARMED));
         let mut file = ui.data(|d| d.get_temp::<String>(file_id)).unwrap_or_else(|| default_file.display().to_string());
         keyed_row(ui, l, "", w.backup_file, w.backup_file_note, |ui| {
-            ui.add(egui::TextEdit::singleline(&mut file).desired_width(260.0).font(egui::FontId::monospace(12.0)));
+            ui.add(egui::TextEdit::singleline(&mut file).desired_width(260.0).font(egui::FontId::monospace(z(ui, 12.0))));
         });
         ui.data_mut(|d| d.insert_temp(file_id, file.clone()));
         let path = PathBuf::from(file.trim());
@@ -482,7 +482,7 @@ pub fn about_page(ui: &mut egui::Ui, l: Look, w: &MoreWords, words: &Words, name
     let mut out = Vec::new();
     section(ui, l, w.about, |ui| {
         let line = |ui: &mut egui::Ui, label: &str, value: &str| {
-            row(ui, l, label, "", |ui| ui.label(egui::RichText::new(value).size(13.0).color(l.c.dim)));
+            row(ui, l, label, "", |ui| ui.label(egui::RichText::new(value).size(z(ui, 13.0)).color(l.c.dim)));
         };
         line(ui, w.version, a.version);
         if let Some(c) = a.commit.filter(|c| !c.is_empty()) {
@@ -558,7 +558,7 @@ pub fn fonts_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, drafts: &mut crate:
             out.push(FontChange::Family(f.to_owned()));
         }
         if !now.using.is_empty() {
-            ui.label(egui::RichText::new(now.using).size(11.5).color(l.c.dim));
+            ui.label(egui::RichText::new(now.using).size(z(ui, 11.5)).color(l.c.dim));
             ui.add_space(6.0);
         }
         sep(ui, l);

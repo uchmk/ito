@@ -422,6 +422,33 @@ pub fn set(c: Colors) {
     *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = c;
 }
 
+/// The key the letters' zoom is kept under in egui's context.
+fn zoom_id() -> egui::Id {
+    egui::Id::new("ito-text-zoom")
+}
+
+/// Set how much the app's own letters are zoomed (1.0 is the size the
+/// settings give): the panes' size over the settings' size, so that a
+/// screen of the window's own -- settings, help, palette, a confirm -- grows
+/// and shrinks with the panes instead of staying small beside large ones.
+/// Call it every frame, before the screens are drawn. Not the window's
+/// `scale` (`set_zoom_factor` already carries that to everything).
+pub fn set_text_zoom(ctx: &egui::Context, zoom: f32) {
+    let zoom = if zoom.is_finite() { zoom.clamp(0.25, 8.0) } else { 1.0 };
+    ctx.data_mut(|d| d.insert_temp(zoom_id(), zoom));
+}
+
+/// The letters' zoom set by [`set_text_zoom`], 1.0 until it is.
+pub fn text_zoom(ctx: &egui::Context) -> f32 {
+    ctx.data(|d| d.get_temp::<f32>(zoom_id())).unwrap_or(1.0)
+}
+
+/// `size` points of text at the letters' zoom: what every size written in a
+/// screen of the window's own goes through (`RichText::size`, `FontId`).
+pub fn zoomed(ctx: &egui::Context, size: f32) -> f32 {
+    size * text_zoom(ctx)
+}
+
 /// Which theme `choice` (the settings' `theme`) means: a theme's name, or
 /// `dark`, `light`, or `system` (the other two names following the OS).
 pub fn pick<'a>(themes: &'a [Theme], choice: &str, dark: &str, light: &str, os_light: bool) -> Result<&'a Theme, String> {
@@ -440,6 +467,16 @@ pub fn pick<'a>(themes: &'a [Theme], choice: &str, dark: &str, light: &str, os_l
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn letters_zoom_with_the_value_set() {
+        let ctx = egui::Context::default();
+        assert_eq!(zoomed(&ctx, 12.0), 12.0);
+        set_text_zoom(&ctx, 1.5);
+        assert_eq!(zoomed(&ctx, 12.0), 18.0);
+        set_text_zoom(&ctx, f32::NAN);
+        assert_eq!(text_zoom(&ctx), 1.0);
+    }
+
     use super::*;
 
     /// Every built-in theme reads: text 7 to 1 against its background, dim
