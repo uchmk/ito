@@ -313,7 +313,7 @@ scale: 100%           # 書くなら倍率を % で
   General は必ず先頭、About は必ず最後。アプリは持つページだけを `ito_prefs::default_order(&[Page::…])` に渡す（`Page::App` が固有のページの場所）。
   - General には `[window]`（`window_card`: 窓の場所を覚える・手前に置く・覚えた場所を忘れる）と、起動（`startup_card`: サインインで起動。状態は OS が持つ。`ito_common::startup`）も置く。
   - Advanced は `advanced_card`（設定・データのフォルダーを開く、2 回押して初期化）、About は `about_page`（版・ビルド・OS・ライセンス・詳細のコピー・不具合の報告）。
-  - Advanced にはバックアップのカード（`backup_card`、`ito_common::bundle`）も置く: 設定を 1 ファイルに書き出す・読み込む。common.toml・テーマ・アプリの設定が入り、state（窓の場所など）は入らない。読み込みで置き換えるファイルは `<file>.bak-<time>` に残る。
+  - Advanced にはバックアップのカード（`backup_card`、`ito_common::bundle`）も置く: 設定を 1 ファイルに書き出す・読み込む。common.toml・テーマ・アプリの設定が入り、state（窓の場所など）は入らない。読み込みで置き換えるファイルは `<file>.bak-<time>` に残る。アプリは `keep` で自分のフォルダーのどのファイルを束に入れ・読み込むかを決める（`.toml` と `.json`）。
   - 外観（Appearance）の字体は `fonts_card`（字体・大きさ・行の高さ・合字。値はアプリの設定ファイルなので `FontChange` を返す）。
   - シェルは `shell_card`（既定のシェル・引数・環境変数。値はアプリの設定ファイルなので `ShellChange` を返す）。フックなどはアプリに残す。
   - 共通の行の上に、アプリが自分の行やカードを足してよい。

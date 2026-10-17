@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.76.0] - 2026-10-17
+
+### 変更（使う側の呼び出しが変わる）
+
+- ito-common: `bundle::collect` / `restore` / `export` / `import` が、最後の引数 `keep: &dyn Fn(&str) -> bool` を取る。アプリのフォルダー（`app/…`）の中で、どのファイルを束に入れ、どのファイルを読み込むかを決める。渡されるのはアプリのフォルダーからのパス（`/` 区切り。`config.toml`・`themes/Mine.toml`）。束にほかのファイルが入っていても、`keep` が断ったものは書かず `Restored::skipped` に返す。全部でよければ `&bundle::all`。`common.toml` と共通のテーマ（`themes/`）には効かない。
+- ito-common: `app/…` に `.json` も入る（読み込みの前に JSON として読めるか見る。読めなければ何も書かない）。共通のテーマ（`themes/`）は TOML だけ。
+
+### 使う側がやること
+
+- 0.75.0 の `bundle` を呼んでいるアプリ（minato）: 呼び出しに `&bundle::all` を足す（今までと同じ動き）。アプリのフォルダーに `.json` の設定があるなら、これで束に入る。入れたくないファイルがあれば、`keep` で外す。
+- tsumugi: `export.rs` を `bundle` に替える。`keep` には今の許可リスト（`config.toml`・`keymap.toml`・`profiles.toml`・`prompts.toml`・`layouts.toml`・`theme.toml`・`themes/*.toml`）を渡す。古い書き出し（`=== パス ===`、先頭が `# tsumugi settings export`）を読む処理と、`settings.toml` を `config.toml` と読み替えること、`keymap.toml` を退けることは、tsumugi に残す（古い書き出しを `Bundle { app: "tsumugi", files: "app/<名前>" }` に変えて `restore` に渡す）。
+
 ## [0.75.0] - 2026-10-17
 
 ### 追加

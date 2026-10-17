@@ -42,11 +42,19 @@ pub struct Restored {
     pub skipped: Vec<(String, String)>,
 }
 
+/// A `.toml` or `.json` file that is not a copy this module or the app left aside.
 fn is_settings_file(name: &str) -> bool {
-    name.ends_with(".toml") && !name.contains(".bak") && !name.contains(".uchmk-new")
+    (name.ends_with(".toml") || name.ends_with(".json")) && !name.contains(".bak") && !name.contains(".uchmk-new")
 }
 
-fn walk(dir: &Path, prefix: &str, depth: usize, out: &mut BTreeMap<String, String>, total: &mut u64) -> Result<(), String> {
+/// Every settings file; what `keep` is when an app has no list of its own.
+pub fn all(_name: &str) -> bool {
+    true
+}
+
+type Keep<'a> = &'a dyn Fn(&str) -> bool;
+
+fn walk(dir: &Path, prefix: &str, depth: usize, keep: Keep, out: &mut BTreeMap<String, String>, total: &mut u64) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Ok(()) };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -56,9 +64,9 @@ fn walk(dir: &Path, prefix: &str, depth: usize, out: &mut BTreeMap<String, Strin
         let Ok(kind) = e.file_type() else { continue };
         if kind.is_dir() {
             if depth < MAX_DEPTH && !name.starts_with('.') {
-                walk(&e.path(), &key, depth + 1, out, total)?;
+                walk(&e.path(), &key, depth + 1, keep, out, total)?;
             }
-        } else if kind.is_file() && is_settings_file(&name) {
+        } else if kind.is_file() && is_settings_file(&name) && keep(key.split_once('/').map_or(key.as_str(), |(_, rest)| rest)) {
             let size = e.metadata().map_or(0, |m| m.len());
             if size > MAX_FILE {
                 continue;
@@ -78,8 +86,10 @@ fn walk(dir: &Path, prefix: &str, depth: usize, out: &mut BTreeMap<String, Strin
 }
 
 /// The settings now: `common.toml` and the themes from the `uchmk` folder
-/// `base`, and every `.toml` under the app's own folder `app_dir`.
-pub fn collect(base: &Path, app_dir: &Path, app: &str, version: &str) -> Result<Bundle, String> {
+/// `base`, and the `.toml` and `.json` files under the app's own folder
+/// `app_dir` that `keep` takes (it is given the path from `app_dir`, with `/`:
+/// `config.toml`, `themes/Mine.toml`; use [`all`] for every one).
+pub fn collect(base: &Path, app_dir: &Path, app: &str, version: &str, keep: Keep) -> Result<Bundle, String> {
     let mut files = BTreeMap::new();
     let mut total = 0;
     let common = crate::common_path(base);
@@ -87,9 +97,9 @@ pub fn collect(base: &Path, app_dir: &Path, app: &str, version: &str) -> Result<
         total += text.len() as u64;
         files.insert("common.toml".to_owned(), text);
     }
-    walk(&crate::themes_dir(base), "themes", 1, &mut files, &mut total)?;
+    walk(&crate::themes_dir(base), "themes", 1, &all, &mut files, &mut total)?;
     let mut own = BTreeMap::new();
-    walk(app_dir, "app", 0, &mut own, &mut total)?;
+    walk(app_dir, "app", 0, keep, &mut own, &mut total)?;
     files.extend(own);
     Ok(Bundle { format: FORMAT, app: app.to_owned(), version: version.to_owned(), files })
 }
@@ -120,7 +130,7 @@ fn target(base: &Path, app_dir: &Path, name: &str) -> Result<PathBuf, String> {
     }
     let (root, rest) = match parts.as_slice() {
         ["common.toml"] => return Ok(crate::common_path(base)),
-        ["themes", rest @ ..] if !rest.is_empty() => (crate::themes_dir(base), rest),
+        ["themes", rest @ ..] if !rest.is_empty() && name.ends_with(".toml") => (crate::themes_dir(base), rest),
         ["app", rest @ ..] if !rest.is_empty() => (app_dir.to_path_buf(), rest),
         _ => return Err("not a place settings go".to_owned()),
     };
@@ -132,15 +142,21 @@ fn now_secs() -> u64 {
 }
 
 /// Write the bundle's files over the settings. Nothing is written when a file
-/// is not valid TOML. A file that differs keeps its old text in
-/// `<file>.bak-<time>`. The app's own files (`app/…`) are skipped when the
-/// bundle came from another app.
-pub fn restore(b: &Bundle, base: &Path, app_dir: &Path, app: &str) -> Result<Restored, String> {
+/// is not valid TOML (or JSON, for a `.json`). A file that differs keeps its
+/// old text in `<file>.bak-<time>`. The app's own files (`app/…`) are skipped
+/// when the bundle came from another app, or when `keep` (given the path from
+/// `app_dir`) does not take them: an app lists the files it owns, so a bundle
+/// cannot put other files in its folder.
+pub fn restore(b: &Bundle, base: &Path, app_dir: &Path, app: &str, keep: Keep) -> Result<Restored, String> {
     let mut plan = Vec::new();
     let mut out = Restored::default();
     for (name, text) in &b.files {
         if name.starts_with("app/") && b.app != app {
             out.skipped.push((name.clone(), format!("made by {}", b.app)));
+            continue;
+        }
+        if name.strip_prefix("app/").is_some_and(|rest| !keep(rest)) {
+            out.skipped.push((name.clone(), "not one of this app's settings files".to_owned()));
             continue;
         }
         let path = match target(base, app_dir, name) {
@@ -154,7 +170,11 @@ pub fn restore(b: &Bundle, base: &Path, app_dir: &Path, app: &str) -> Result<Res
             out.skipped.push((name.clone(), "too big".to_owned()));
             continue;
         }
-        toml::from_str::<toml::Table>(text).map_err(|e| format!("{name} is not valid TOML: {e}"))?;
+        if name.ends_with(".json") {
+            serde_json::from_str::<serde_json::Value>(text).map_err(|e| format!("{name} is not valid JSON: {e}"))?;
+        } else {
+            toml::from_str::<toml::Table>(text).map_err(|e| format!("{name} is not valid TOML: {e}"))?;
+        }
         plan.push((name, path, text));
     }
     let stamp = now_secs();
@@ -178,18 +198,18 @@ pub fn restore(b: &Bundle, base: &Path, app_dir: &Path, app: &str) -> Result<Res
 }
 
 /// Write the settings now to `file`.
-pub fn export(file: &Path, base: &Path, app_dir: &Path, app: &str, version: &str) -> Result<usize, String> {
-    let b = collect(base, app_dir, app, version)?;
+pub fn export(file: &Path, base: &Path, app_dir: &Path, app: &str, version: &str, keep: Keep) -> Result<usize, String> {
+    let b = collect(base, app_dir, app, version, keep)?;
     crate::write_atomic(file, to_text(&b)?)?;
     Ok(b.files.len())
 }
 
 /// Read the bundle in `file` back over the settings.
-pub fn import(file: &Path, base: &Path, app_dir: &Path, app: &str) -> Result<Restored, String> {
+pub fn import(file: &Path, base: &Path, app_dir: &Path, app: &str, keep: Keep) -> Result<Restored, String> {
     if std::fs::metadata(file).map_err(|e| format!("{}: {e}", file.display()))?.len() > MAX_TOTAL {
         return Err("the file is too big to be a settings bundle".to_owned());
     }
-    restore(&parse(&crate::read_or_empty(file)?)?, base, app_dir, app)
+    restore(&parse(&crate::read_or_empty(file)?)?, base, app_dir, app, keep)
 }
 
 #[cfg(test)]
@@ -223,7 +243,7 @@ mod tests {
         std::fs::write(app.join("notes.txt"), "no").unwrap();
         std::fs::create_dir_all(base.join("tsumugi")).unwrap();
         std::fs::write(base.join("tsumugi").join("config.toml"), "b = 1\n").unwrap();
-        let b = collect(&base, &app, "kura", "1").unwrap();
+        let b = collect(&base, &app, "kura", "1", &all).unwrap();
         let names: Vec<&str> = b.files.keys().map(String::as_str).collect();
         assert_eq!(names, ["app/config.toml", "common.toml", "themes/t.toml"]);
         let _ = std::fs::remove_dir_all(root);
@@ -241,7 +261,7 @@ mod tests {
         b.files.insert("../evil.toml".into(), "x = 1\n".into());
         b.files.insert("themes/..\\evil.toml".into(), "x = 1\n".into());
         b.files.insert("other.toml".into(), "x = 1\n".into());
-        let r = restore(&b, &base, &app, "kura").unwrap();
+        let r = restore(&b, &base, &app, "kura", &all).unwrap();
         assert_eq!(r.written, ["common.toml", "themes/new.toml"]);
         assert_eq!(r.unchanged, 1);
         assert_eq!(r.skipped.len(), 3);
@@ -259,14 +279,59 @@ mod tests {
         let mut b = Bundle { format: FORMAT, app: "yagura".into(), version: "1".into(), ..Bundle::default() };
         b.files.insert("app/config.toml".into(), "a = 1\n".into());
         b.files.insert("common.toml".into(), "language = \"ja\"\n".into());
-        let r = restore(&b, &base, &app, "kura").unwrap();
+        let r = restore(&b, &base, &app, "kura", &all).unwrap();
         assert_eq!(r.written, ["common.toml"]);
         assert_eq!(r.skipped.len(), 1);
         assert!(!app.join("config.toml").exists());
         b.files.insert("themes/bad.toml".into(), "= nope".into());
         b.files.insert("common.toml".into(), "language = \"en\"\n".into());
-        assert!(restore(&b, &base, &app, "kura").is_err());
+        assert!(restore(&b, &base, &app, "kura", &all).is_err());
         assert_eq!(std::fs::read_to_string(base.join("common.toml")).unwrap(), "language = \"ja\"\n");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_app_lists_the_files_it_owns_and_json_is_checked() {
+        let (root, base, app) = dirs("keep");
+        std::fs::write(
+            app.join("config.toml"),
+            "a = 1
+",
+        )
+        .unwrap();
+        std::fs::write(app.join("state.json"), "{\"x\": 1}").unwrap();
+        std::fs::write(
+            app.join("cache.toml"),
+            "c = 1
+",
+        )
+        .unwrap();
+        let keep = |n: &str| n != "cache.toml";
+        let b = collect(&base, &app, "kura", "1", &keep).unwrap();
+        assert_eq!(b.files.keys().map(String::as_str).collect::<Vec<_>>(), ["app/config.toml", "app/state.json"]);
+        let mut b = b;
+        b.files.insert(
+            "app/cache.toml".into(),
+            "c = 2
+"
+            .into(),
+        );
+        b.files.insert("app/state.json".into(), "{\"x\": 2}".into());
+        let r = restore(&b, &base, &app, "kura", &keep).unwrap();
+        assert_eq!(r.written, ["app/state.json"]);
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(app.join("cache.toml")).unwrap(),
+            "c = 1
+"
+        );
+        // A theme of the shared folder is TOML only.
+        b.files.insert("themes/x.json".into(), "{}".into());
+        let r = restore(&b, &base, &app, "kura", &keep).unwrap();
+        assert!(r.skipped.iter().any(|(n, _)| n == "themes/x.json") && !base.join("themes/x.json").exists());
+        b.files.remove("themes/x.json");
+        b.files.insert("app/state.json".into(), "{nope".into());
+        assert!(restore(&b, &base, &app, "kura", &keep).is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 
