@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.63.0] - 2026-10-17
+
+### 追加
+
+- ito-help: 段に分けて、スクロールなしで収める見せ方（uchmk/ito#10、tsumugi）。
+  - `Group { title, rows: Vec<(keys, desc)> }`: 見出しと行の組。keymap から作らないアプリ向け（`Group::lines()` で `Line` に）。
+  - `deal(&groups, cols)`: 組を順のまま・割らずに、いちばん高い段が最も低くなるよう `cols` 段までに配る（段の中の組の間は空行）。
+  - `columns_for(width, min_col, max)`: 幅に入る段の数。
+  - `plan(&groups, room, row_h, max_cols, floor) -> Plan { columns, scale, scrolls }`: 1 段から `max_cols` 段まで増やし、それでも入らなければ字を `floor`（0.7 が目安）まで縮め、それでも入らなければ `scrolls`。
+    行は `…` で切って折り返さないので、高さは描かずに分かる（フレームをまたいで測り直す `Fit` の状態は要らない）。
+  - `draw_plan(painter, body, &plan, scroll, style) -> Drawn`: `plan` の段を横に並べて描く。スクロールの棒は全体で 1 本。
+  - 既存の `draw`・`Line`・`push_layer` はそのまま。
+
+### 使う側がやること
+
+- 無し（足すだけ）。tsumugi は `help.rs` の `deal`・`columns_for`・`most_columns` と縮める処理を `plan`・`draw_plan` に置き換え、`groups()` のデータだけ残す。枠・暗くする背景・閉じる処理はアプリのまま。
+
 ## [0.62.0] - 2026-10-17
 
 ### 追加
