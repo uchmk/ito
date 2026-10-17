@@ -51,7 +51,7 @@ pub fn select_cells<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), 
 /// kind.
 pub fn select_kind<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), right_half: bool, start: Option<SelectionType>) {
     let point = point_at(term, cell);
-    let side = if right_half { Side::Right } else { Side::Left };
+    let (point, side) = whole_wide(term, point, right_half);
     match start {
         Some(kind) => term.selection = Some(Selection::new(kind, point, side)),
         None => {
@@ -59,6 +59,29 @@ pub fn select_kind<T: EventListener>(term: &mut Term<T>, cell: (usize, usize), r
                 sel.update(point, side);
             }
         }
+    }
+}
+
+/// Which side of which cell a pointer on `point` anchors a selection to. A
+/// wide character fills two cells, and its halves are the cells: the first
+/// is the left half (`Left`) and the spacer after it the right half
+/// (`Right`), whichever half of the cell the pointer is in. Left alone, a
+/// `Right` on the first cell ends the range with the character's left cell
+/// only, so a full-width character shows half selected.
+fn whole_wide<T: EventListener>(term: &Term<T>, point: Point, right_half: bool) -> (Point, Side) {
+    use alacritty_terminal::term::cell::Flags;
+    let grid = term.grid();
+    let plain = if right_half { Side::Right } else { Side::Left };
+    if point.line < grid.topmost_line() || point.line > grid.bottommost_line() || point.column >= grid.columns() {
+        return (point, plain);
+    }
+    let flags = grid[point].flags;
+    if flags.contains(Flags::WIDE_CHAR_SPACER) {
+        (point, Side::Right)
+    } else if flags.contains(Flags::WIDE_CHAR) {
+        (point, Side::Left)
+    } else {
+        (point, plain)
     }
 }
 

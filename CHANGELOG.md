@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.79.1] - 2026-10-17
+
+### 修正
+
+- ito-pane: 端末のドラッグ選択で、全角文字の左のセルだけで範囲が終わり、文字が半分だけ選ばれて見えるのを直した（`select_at` / `select_kind`。全角文字は、左のセルを左半分、後ろの空きのセルを右半分として扱う）。使う側がやることはない。ito-select の 0.63.1 の直しは別の経路（painter で描く窓）だった。
+
 ## [0.79.0] - 2026-10-17
 
 ### 追加

@@ -530,6 +530,29 @@ mod pane {
         assert_eq!(selected(&t), "hello", "right to left, and the h is not dropped");
     }
 
+    /// A full-width character is two cells, and a drag that ends on either of
+    /// them takes the character whole or not at all: never its left cell alone.
+    #[test]
+    fn a_wide_character_is_never_half_selected() {
+        // A wide character's spacer cell reads as a blank.
+        let selected = |t: &Term<Proxy>| -> String {
+            cell_rows(t)[0].iter().filter(|c| c.selected).map(|c| c.c).collect::<String>().trim_end().to_string()
+        };
+        let drag = |from: (usize, bool), to: (usize, bool)| {
+            let mut t = term(20, 4);
+            feed(&mut t, "ab\u{30e9}\u{30a4}cd");
+            select_at(&mut t, (from.0, 0), from.1, true);
+            select_at(&mut t, (to.0, 0), to.1, false);
+            selected(&t)
+        };
+        // a=0 b=1 ra=2,3 i=4,5 c=6 d=7
+        for right in [false, true] {
+            assert_eq!(drag((0, false), (3, right)), "ab\u{30e9}", "ends in the spacer of the first wide character");
+            assert_eq!(drag((0, false), (2, right)), "ab", "ends in the first cell of the first wide character");
+            assert_eq!(drag((5, right), (7, true)), "cd", "starts in the spacer of the second wide character");
+        }
+    }
+
     /// The half the pointer is in is what makes that work, so it has to count.
     #[test]
     fn the_half_of_the_cell_decides_what_is_included() {
