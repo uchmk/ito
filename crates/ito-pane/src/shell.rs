@@ -22,6 +22,26 @@ pub(crate) fn pick_default_shell(windows: bool, have_pwsh: bool) -> Option<Strin
     (windows && have_pwsh).then(|| "pwsh".to_owned())
 }
 
+/// The shells a settings screen offers, as (label, program), in the order it
+/// lists them. A program is a bare name the pane can start.
+pub const KNOWN_SHELLS: [(&str, &str); 8] = [
+    ("PowerShell 7", "pwsh"),
+    ("Windows PowerShell", "powershell"),
+    ("Command Prompt", "cmd"),
+    ("bash", "bash"),
+    ("zsh", "zsh"),
+    ("fish", "fish"),
+    ("nushell", "nu"),
+    ("sh", "sh"),
+];
+
+/// The shells of [`KNOWN_SHELLS`] found on `PATH`, as (label, program): what
+/// `ito_prefs::Shell::shells` takes. It looks at the disk, so call it off the
+/// UI thread (once, and again when the screen opens).
+pub fn installed_shells() -> Vec<(String, String)> {
+    KNOWN_SHELLS.iter().filter(|(_, p)| crate::util::locate(p).is_some()).map(|(l, p)| (l.to_string(), p.to_string())).collect()
+}
+
 /// The program the pane starts when `[term] shell` names none: `pwsh` on
 /// Windows where it is installed, else Windows PowerShell; elsewhere the
 /// login shell in `$SHELL`, which is what the pty starts. `filer env` asked

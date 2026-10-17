@@ -1914,3 +1914,13 @@ mod identity_tests {
         assert_eq!(first(&t), "half done");
     }
 }
+
+#[test]
+fn installed_shells_lists_what_is_on_the_path() {
+    let found = installed_shells();
+    // `cmd` is on every Windows machine, `sh` on every other test machine.
+    let want = if cfg!(windows) { "cmd" } else { "sh" };
+    assert!(found.iter().any(|(_, p)| p == want), "{found:?}");
+    let order: Vec<_> = found.iter().filter_map(|(_, p)| KNOWN_SHELLS.iter().position(|(_, k)| k == p)).collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{found:?}");
+}

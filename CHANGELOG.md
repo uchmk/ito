@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.81.0] - 2026-10-18
+
+### 追加
+
+- ito-pane: `installed_shells()`（`PATH` にあるシェルを (表示名, プログラム) で返す。`ito_prefs::Shell::shells` にそのまま渡せる）と、その候補の表 `KNOWN_SHELLS`（PowerShell 7・Windows PowerShell・Command Prompt・bash・zsh・fish・nushell・sh）。tsumugi の `installed_shells` から移した（uchmk/ito#28）。ディスクを見るので UI スレッドの外で呼ぶ。
+
+### 使う側がやること
+
+- tsumugi: 自前の `KNOWN`・`installed_shells` を消して `ito_pane::installed_shells()` を使う。
+- kura: `shell_card` の `shells: &[]` に `ito_pane::installed_shells()` の結果を渡す（設定を開くときに 1 回、ワーカーで）。
+
 ## [0.80.0] - 2026-10-18
 
 ### 追加
