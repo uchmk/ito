@@ -397,7 +397,11 @@ fn parse(text: &str, src: &str) -> Vec<Section> {
         if !is_check_id(id) {
             continue; // the `| # | Do | Expect |` header, or the `| --- |` rule
         }
-        let cells: Vec<String> = cells.map(str::to_owned).collect();
+        let mut cells: Vec<String> = cells.map(str::to_owned).collect();
+        // A row's own tick (`[ ]`, `[x]`, `[~]`, `[-]`) is not a cell of the check.
+        if cells.last().is_some_and(|c| matches!(c.as_str(), "[ ]" | "[x]" | "[~]" | "[-]")) {
+            cells.pop();
+        }
         // A section heading always precedes a table; a row without one would
         // mean the heading did not parse, and silently dropping it is how a
         // whole section goes missing.
@@ -702,6 +706,22 @@ mod tests {
         assert_eq!(s[0].title, "First (v0.1.0)");
         assert_eq!(s[0].checks.len(), 3);
         assert_eq!(s[1].checks[0].cells, ["Linux", "Run", "It runs — **and stays**"]);
+    }
+
+    #[test]
+    fn a_trailing_tick_cell_is_not_a_cell_of_the_check() {
+        let s = parse(
+            "## 1. One
+
+| 1.1 | Do | Expect | [ ] |
+| 1.2 | Do | Expect | [~] |
+| 1.3 | Do | Where | Expect |
+",
+            "TESTING.md",
+        );
+        assert_eq!(s[0].checks[0].cells, ["Do", "Expect"]);
+        assert_eq!(s[0].checks[1].cells, ["Do", "Expect"]);
+        assert_eq!(s[0].checks[2].cells, ["Do", "Where", "Expect"]);
     }
 
     #[test]

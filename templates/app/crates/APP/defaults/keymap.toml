@@ -1,0 +1,20 @@
+# The built-in keys. A person's own keymap.toml (in the app's folder) lays over
+# this. The three below are the same in every uchmk app (ito_keymap::COMMON).
+# `desc` is the English text the help shows; lang/*.toml's [keydesc] translates it.
+
+# --- Common ---
+
+[[app.keymap]]
+on = "<C-,>"
+run = "settings"
+desc = "Open the settings"
+
+[[app.keymap]]
+on = "<F1>"
+run = "help"
+desc = "Show the key help"
+
+[[app.keymap]]
+on = "<C-q>"
+run = "quit"
+desc = "Quit"

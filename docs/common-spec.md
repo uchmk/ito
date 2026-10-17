@@ -369,6 +369,8 @@ scale: 100%           # 書くなら倍率を % で
 
 ## 新しいアプリを作るとき
 
+**まず `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"` で `templates/app` から作る**（下の項目の土台、ito のクレートの依存・窓の場所・テーマ・F12・`.com`・bug form・testcheck まで入る。残りは生成された `TODO.md`）。`scripts/ito-first.py` が、ito が受け持つ依存の直接の追加と、持つべき ito のクレートの欠けを落とす（外すときは `scripts/ito-first.allow` に `<crate> <理由>`）。ito に無いものは自分で書かず `crate-request` の Issue で頼む。
+
 1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys`・`ito-keymap` を同じ `rev` で足す。
 2. 設定は `ito_common::app_dir("<app>")/config.toml`、状態は `ito_common::state_dir("<app>")` に置く。
 3. 起動時と見張りのスレッドで `Common::read` を読み、テーマ・時計・言語・倍率を当てる。自分の config.toml と keymap.toml も見張る。
@@ -380,10 +382,12 @@ scale: 100%           # 書くなら倍率を % で
 6. ステータスバーの右端に時計を出す。
 7. 字体は `ito_common::fonts` の並びで読む。窓は 1280×800 で開き、位置と大きさを状態のフォルダに覚える。
 8. `--version`・`--help`・`--keys "<script>"` を受ける。答えは `ito_console::out`・`err` で書き、Windows には `<app>.com` を付ける
-   （上の「Windows のコンソールの前段」）。
+   （上の「Windows のコンソールの前段」）。`--keys` は `ito-keyscript`。
 9. `ito-bugreport` で F12 の不具合の報告を付け、`.github/ISSUE_TEMPLATE/bug_report.yml` を雛形から作る（上の「不具合の報告」）。
    `scripts/verify.sh`・`release.yml`・`release-sums.yml` を kura か yagura から写す（下の「版とリリース」）。
-10. README とその CLAUDE.md から、この文書を指す。下の「各アプリの対応」に行を足す。
+10. `?`・`F1` のヘルプは `ito-help`、通知は `ito-notify`（設定は `notify_page`）、コマンドパレット（`<C-S-p>`）は `ito-palette`、
+    TESTING.md の表は `ito-testcheck` で作る。
+11. README とその CLAUDE.md から、この文書を指す。下の「各アプリの対応」に行を足す。
 
 ## 版とリリース
 

@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.56.0] - 2026-10-17
+
+### 追加
+
+- `templates/app` と `scripts/new-app.ps1`: 新しい uchmk のアプリの雛形と生成。ito の必須のクレート（common・i18n・theme・prefs・keys・keymap・keyscript・help・notify・bugreport・testcheck・console・winres・palette）、窓の場所の保存・テーマ・言語・倍率・F12・`--version`/`--help`・`.com`・bug form・testcheck の例を入れる。残り（`--keys`・キーのページ・ヘルプ・通知・パレット）は生成された `TODO.md`。
+- `scripts/lanes/ito-first.py`（`ito-first.txt`・`ito-required.txt`）: アプリが ito の受け持つ依存を直接足す／必須の ito のクレートを欠くと落とす。例外は `scripts/ito-first.allow`。
+- `.github/ISSUE_TEMPLATE/crate-request.yml`: ito に無い機能を ito に頼む Issue の雛形。
+
+### 修正
+
+- ito-testcheck: TESTING.md の行末の印の欄（`[ ]`・`[x]`・`[~]`・`[-]`）を検査の欄として数えない（uchmk/ito#5。michi）。
+
+### 使う側がやること
+
+- `scripts/lanes/FILES` に 3 つ増えた。`lanes.conf` に `files=` を持たないアプリは `lanes.sh sync` で 3 つが入る。`ito-first.py` が落ちたら、ito のクレートに置き換えるか、`scripts/ito-first.allow` に `<crate> <理由>` を書く。`files=` を持つアプリは、使うなら名前を足す。
+
 ## [0.55.0] - 2026-10-17
 
 ### 変更

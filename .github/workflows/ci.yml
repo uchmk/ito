@@ -72,6 +72,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: for f in scripts/lanes/*.sh; do bash -n "$f"; done
       - run: python3 scripts/lanes/merge-lanes.py --self-test
+      - run: python3 scripts/lanes/ito-first.py --self-test
       - run: pwsh -NoProfile -File scripts/lanes/check-ps1.ps1
 
   fmt:

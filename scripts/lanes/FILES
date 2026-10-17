@@ -4,6 +4,9 @@
 # An app that takes only some names them in lanes.conf's `files=`.
 check-ps1.ps1
 claim.sh
+ito-first.py
+ito-first.txt
+ito-required.txt
 keys.ps1
 labels.sh
 lane-boot.ps1

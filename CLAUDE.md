@@ -29,6 +29,8 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-help` | キーのヘルプ（`ito-keymap` の一覧を見出しとキーと説明の行にして、渡された矩形に描く） | yagura、kura |
 | `ito-console` | Windows の窓のアプリの前に置くコンソールの前段（`<app>.exe` の横の `<app>.com`、`front`。文字で答えるコマンドは待って渡し、ほかは窓が開いたら戻る）と、答えを書く `out`・`err`（誰も読まないパイプでも panic せずに捨てる） | kura、yagura、tsumugi、minato、michi |
 
+**新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
+
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
 アプリの `scripts/lanes.sh sync` が、固定した `rev` のここから自分の `scripts/` へバイト単位で同じものを写し、`lanes.sh check` は写しが違えば落ちる。
 アプリごとの値（名前・クレート・実行ファイル・`--keys` の環境変数・状態のフォルダー・TODO の印）はアプリの `scripts/lanes.conf` から読むので、

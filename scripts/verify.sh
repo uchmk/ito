@@ -69,5 +69,7 @@ run cargo +stable clippy -q --workspace --all-targets -- -D warnings
 # are only parsed, and merge-lanes.py's self-test run.
 for f in scripts/lanes/*.sh; do run bash -n "$f"; done
 run python3 scripts/lanes/merge-lanes.py --self-test
+run python3 scripts/lanes/ito-first.py --self-test
+run bash -n scripts/lanes/lanes.sh
 if command -v pwsh >/dev/null; then run pwsh -NoProfile -File scripts/lanes/check-ps1.ps1; fi
 echo "ALL OK: $tests"

@@ -1,0 +1,22 @@
+name: Crate request / ito への機能の依頼
+description: Something an app needs that no ito crate does yet -- ask here instead of writing it in the app / アプリが要るのに ito に無いもの（アプリに独自に書かずここで頼む）
+labels: [crate-request]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: App / 頼むアプリ
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is needed / 要ること
+      description: What the app has to do, and which ito crate was checked (the table in CLAUDE.md) and why it does not cover it. / やりたいことと、見た ito のクレート、足りない理由。
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Shape / 形の案
+      description: The API the app would like, or "up to ito". Other apps that would use it. / 欲しい API（お任せでも可）と、ほかに使いそうなアプリ。

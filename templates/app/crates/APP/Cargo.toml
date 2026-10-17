@@ -1,0 +1,55 @@
+[package]
+name = "{{app}}"
+description = "{{description}}"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+# `{{app}}-com` (src/bin) is the console front for Windows, shipped as
+# `{{app}}.com`; plain `cargo run` still means the window.
+default-run = "{{app}}"
+
+# The checklist generator and the bug form's writer; their own tests run with the rest.
+[[example]]
+name = "make-testcheck"
+test = true
+
+[[example]]
+name = "make-bugform"
+test = true
+
+[build-dependencies]
+ito-winres = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+
+[dependencies]
+# Every ito crate at the same rev. scripts/ito-first.py says which crates an
+# app must have and which it must not replace; what ito lacks, ask ito for.
+ito-common = { git = "https://github.com/uchmk/ito", rev = "{{rev}}", features = ["clock", "egui"] }
+ito-i18n = { git = "https://github.com/uchmk/ito", rev = "{{rev}}", features = ["edit"] }
+ito-theme = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# The settings screen: language / clock / theme pages, keys_page, notify_page, update_card.
+ito-prefs = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+ito-keys = { git = "https://github.com/uchmk/ito", rev = "{{rev}}", features = ["egui"] }
+ito-keymap = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# `--keys "<script>"`: the real window driven without a person.
+ito-keyscript = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# `?` / F1: the key help.
+ito-help = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# System notification, sound, webhook.
+ito-notify = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# F12: an issue form filled with the version, OS and what the app knows.
+ito-bugreport = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# Ctrl+Shift+P. Optional: drop it when the app has no commands to list.
+ito-palette = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# `{{app}}.com` and the answers `out` and `err` write.
+ito-console = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }
+# eframe's own defaults, but for `winit/default`: that draws the title on
+# Wayland's window frame with ab_glyph, which brings the unmaintained ttf-parser.
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "links", "wayland", "web_screen_reader", "wgpu", "x11"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita-notitle"] }
+egui = "0.36"
+
+[dev-dependencies]
+# TESTING.md -> the lanes' check tables (examples/make-testcheck.rs).
+ito-testcheck = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }

@@ -1,0 +1,5 @@
+# The app's words by key (English first; ja.toml lays over it).
+[app]
+title = "{{app}}"
+hello = "Hello from {{app}}."
+bug = "Report a problem (F12)"
