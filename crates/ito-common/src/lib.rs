@@ -22,6 +22,7 @@ mod os_theme;
 pub mod report;
 pub mod runinfo;
 pub mod shellhook;
+pub mod startup;
 pub mod text;
 pub mod update;
 pub mod window;
@@ -162,6 +163,22 @@ impl Clock {
     }
 }
 
+/// The window's own settings (`[window]` in common.toml), the same in every app.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowPrefs {
+    /// Put the window back where it was (`window.toml`); off opens it at the OS's place.
+    pub remember_place: bool,
+    /// Keep the window above the others.
+    pub always_on_top: bool,
+}
+
+impl Default for WindowPrefs {
+    fn default() -> Self {
+        Self { remember_place: true, always_on_top: false }
+    }
+}
+
 #[cfg(feature = "clock")]
 mod clock {
     use chrono::{Datelike, NaiveDateTime, Timelike};
@@ -286,10 +303,11 @@ pub struct Common {
     /// [`SCALE_MAX`]; the keys `<C-=>` `<C-->` `<C-0>` write it.
     pub scale: Option<f32>,
     pub clock: Option<Clock>,
+    pub window: Option<WindowPrefs>,
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 6] = ["language", "theme", "dark_theme", "light_theme", "scale", "clock"];
+const KEYS: [&str; 7] = ["language", "theme", "dark_theme", "light_theme", "scale", "clock", "window"];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -366,7 +384,27 @@ impl Common {
                 None
             }
         };
-        let common = Self { language, theme, dark_theme, light_theme, scale, clock };
+        let window = match t.get("window") {
+            None => None,
+            Some(toml::Value::Table(c)) => {
+                let mut kept = toml::Table::new();
+                for (k, v) in c {
+                    if !["remember_place", "always_on_top"].contains(&k.as_str()) {
+                        warnings.push(format!("common.toml: `window.{k}` is not a setting uchmk's apps read"));
+                    } else if v.is_bool() {
+                        kept.insert(k.clone(), v.clone());
+                    } else {
+                        warnings.push(format!("common.toml: window.{k} must be true or false, so it is not used"));
+                    }
+                }
+                Some(WindowPrefs::deserialize(toml::Value::Table(kept)).unwrap_or_default())
+            }
+            Some(_) => {
+                warnings.push("common.toml: `window` must be a table ([window]), so it is not used".to_owned());
+                None
+            }
+        };
+        let common = Self { language, theme, dark_theme, light_theme, scale, clock, window };
         Ok((common, warnings))
     }
 
@@ -392,6 +430,11 @@ impl Common {
     /// The scale: common.toml's, else 1.0.
     pub fn scale_or_one(&self) -> f32 {
         self.scale.unwrap_or(1.0)
+    }
+
+    /// The window's settings: common.toml's, else the default.
+    pub fn window_or_default(&self) -> WindowPrefs {
+        self.window.clone().unwrap_or_default()
     }
 
     /// The clock: common.toml's, else `fallback`, else the default.
@@ -800,6 +843,21 @@ pub fn watch(paths: Vec<PathBuf>, every: Duration, mut on_change: impl FnMut(&[P
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_table_is_read_key_by_key() {
+        let (c, w) = Common::parse(
+            "[window]
+remember_place = false
+always_on_top = 3
+zzz = 1
+",
+        )
+        .unwrap();
+        assert_eq!(c.window_or_default(), WindowPrefs { remember_place: false, always_on_top: false });
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert_eq!(Common::default().window_or_default(), WindowPrefs { remember_place: true, always_on_top: false });
+    }
+
     use super::*;
 
     fn dir(label: &str) -> PathBuf {

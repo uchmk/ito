@@ -18,10 +18,15 @@ use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
 
 mod keys;
+mod more;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
 mod openin;
 mod updates;
+pub use more::{
+    about_index, about_page, about_text, advanced_card, advanced_index, default_order, forget_place, keeps_place, startup_card,
+    startup_index, window_card, window_index, About, AboutAction, Advanced, MoreWords, Page, WindowOut, MORE_EN, MORE_JA, WINDOW_KEYS,
+};
 pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
 pub use updates::{status as update_status, update_card, UpdateWords};

@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.72.0] - 2026-10-17
+
+### 追加
+
+- ito-common:
+  - `[window]`（`remember_place`・`always_on_top`）。`Common::window` と `window_or_default()`。知らないキーと bool でない値は警告して外す。
+  - `startup`: サインインでの自動起動（Windows は `HKCU\…\Run` の `uchmk-<app>`、macOS は LaunchAgent、Linux は autostart の `.desktop`）。`enabled(app)`・`set(app, exe, args, on)`。ディスクやレジストリに触るので UI スレッドでは呼ばない。
+- ito-prefs（`more`）:
+  - ページの既定の順 `Page`・`default_order`（一般 → 外観 → テーマ → アプリ → キー → 通知 → 外部ツール → 詳細 → このアプリについて。一般が先頭、このアプリについてが最後）と、その英日の題と一行 `MoreWords`。
+  - `window_card`（`CommonChange` と「覚えた場所を忘れる」を返す）、`startup_card`（OS の状態を渡し、押された後の状態を返す）、`advanced_card`（フォルダーを開く・2 回押して初期化）、`about_page`（版・OS・詳細のコピー・不具合の報告）、`forget_place`、検索用の `*_index`。
+
+### 使う側がやること
+
+- 全アプリ: `[window] remember_place = false` のときは窓の場所を戻さず、保存もしない。`always_on_top` は起動時と変更時に窓へ当てる。「忘れる」が返ったら `forget_place(状態のフォルダー)` を呼ぶ。
+- 自動起動を載せるアプリ: `startup::enabled` を別のスレッドで調べて `startup_card` に渡し、返った値を `startup::set` で別のスレッドから当てる。
+- 初期化（`Advanced::Reset`）は、アプリが設定を脇へ移して読み直す（コピーを残す）。
+- tsumugi: ページを既定の順に並べ替える（外観がテーマの前、キーと通知がアプリのページの後、Advanced は詳細）。
+
 ## [0.71.0] - 2026-10-17
 
 ### 追加

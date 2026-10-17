@@ -309,7 +309,11 @@ scale: 100%           # 書くなら倍率を % で
   - General: **Language**（`language_row`）・**Scale**（`scale_row`）と **CLOCK** のカード（`clock_card`）。
   - Theme: 上にモード（Follow OS / Light / Dark）、左にテーマの一覧、右に見本（`theme_page` の閉包でアプリが描く）。
 - アプリ自身の設定は、そのアプリの設定ファイルに `set_key` で書く（コメントと並びを残す）。書いたら読み直して当てる。
-- **ページは General・Theme・アプリの設定・キー（Keys）・通知（Notifications）・Advanced を既定にする**（下の「通知」）。
+- **ページの既定の順は 一般 General → 外観 Appearance → テーマ Theme → （アプリ固有のページ）→ キー Keys → 通知 Notifications → 外部ツール Open in → 詳細 Advanced → このアプリについて About。**
+  General は必ず先頭、About は必ず最後。アプリは持つページだけを `ito_prefs::default_order(&[Page::…])` に渡す（`Page::App` が固有のページの場所）。
+  - General には `[window]`（`window_card`: 窓の場所を覚える・手前に置く・覚えた場所を忘れる）と、起動（`startup_card`: サインインで起動。状態は OS が持つ。`ito_common::startup`）も置く。
+  - Advanced は `advanced_card`（設定・データのフォルダーを開く、2 回押して初期化）、About は `about_page`（版・ビルド・OS・ライセンス・詳細のコピー・不具合の報告）。
+  - 共通の行の上に、アプリが自分の行やカードを足してよい。
   **新しいアプリは、キーのページ（上の「設定の画面から変えるとき」）を設定の画面の機能として必ず作る。**keymap.toml を
   `ito-keymap` で読み、何もしないコマンド（`noop` か `none`）を 1 つ持ち、層ごとの今のキーと既定のキーを `KeyTable` で渡す。
 
