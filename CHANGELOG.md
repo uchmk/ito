@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.63.2] - 2026-10-17
+
+### 直した
+
+- merge-lanes.py: yagura の Windows のレーンが `TESTING-CHECKS.md`（生成した表）の印も見る（`TESTING.md` は yagura の切り替えまで残す。uchmk/ito#12）。
+
+### 使う側がやること
+
+- yagura: `lanes.sh sync`。
+
 ## [0.63.1] - 2026-10-17
 
 ### 直した
