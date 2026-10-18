@@ -43,6 +43,9 @@ pub struct Question<'a> {
     pub buttons: &'a [String],
     /// The keys that answer, shown dim under the buttons; empty for none.
     pub hint: &'a str,
+    /// The button the keyboard is on (the app moves it with Tab / Shift+Tab and
+    /// answers Enter itself); drawn with an outline in `Style::accent`/`text`.
+    pub focus: Option<usize>,
 }
 
 /// The widest the box gets, in points.
@@ -97,7 +100,10 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                 ui.add_space(10.0);
                 ui.horizontal_wrapped(|ui| {
                     for (i, label) in q.buttons.iter().enumerate() {
-                        let b = egui::Button::new(RichText::new(label).color(style.button_text)).fill(style.button_bg);
+                        let mut b = egui::Button::new(RichText::new(label).color(style.button_text)).fill(style.button_bg);
+                        if q.focus == Some(i) {
+                            b = b.stroke(Stroke::new(2.0, style.accent.unwrap_or(style.text)));
+                        }
                         if ui.add(b).clicked() {
                             clicked = Some(i);
                         }
@@ -153,11 +159,22 @@ mod tests {
         let body = vec!["a long line ".repeat(40)];
         let notes = vec!["Sends SIGTERM".to_owned()];
         let buttons = vec!["Yes".to_owned(), "No".to_owned()];
-        let q = Question { title: "End process?", rows: &rows, body: &body, notes: &notes, buttons: &buttons, hint: "Enter / Esc" };
+        let q = Question {
+            title: "End process?",
+            rows: &rows,
+            body: &body,
+            notes: &notes,
+            buttons: &buttons,
+            hint: "Enter / Esc",
+            focus: None,
+        };
         assert_eq!(run(&q, 800.0), None);
         // A narrow window still draws.
         assert_eq!(run(&q, 120.0), None);
         assert_eq!(run(&Question::default(), 800.0), None);
+        // A focused button draws too, and an out-of-range focus is harmless.
+        assert_eq!(run(&Question { focus: Some(1), ..q }, 800.0), None);
+        assert_eq!(run(&Question { focus: Some(9), ..q }, 800.0), None);
     }
 
     #[test]

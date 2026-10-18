@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.82.0] - 2026-10-18
+
+### 追加
+
+- ito-confirm: `Question.focus: Option<usize>`。キーボードが乗っているボタンを太い縁で描く（動かすのも Enter で答えるのもアプリ。Tab / Shift+Tab / Enter）。`Question` を構造体リテラルで作っているアプリは `focus: None` を足す（`..Default::default()` なら不要）。
+
 ## [0.81.1] - 2026-10-18
 
 ### 追加
