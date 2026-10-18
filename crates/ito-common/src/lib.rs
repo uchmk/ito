@@ -844,14 +844,17 @@ pub fn read_or_empty(path: &Path) -> Result<String, String> {
 }
 
 /// Write `bytes` to `path` all at once: beside it first, to the disk, then
-/// over it. A crash or a full disk leaves the old file whole.
+/// over it. A crash or a full disk leaves the old file whole. The file beside
+/// it is named for this process and write (`<file>.uchmk-<pid>-<n>.new`), so
+/// two apps (or two threads) writing the same file never share one.
 pub fn write_atomic(path: &Path, bytes: impl AsRef<[u8]>) -> Result<(), String> {
     use std::io::Write;
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
+    static WRITES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let mut aside = path.as_os_str().to_owned();
-    aside.push(".uchmk-new");
+    aside.push(format!(".uchmk-{}-{}.new", std::process::id(), WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let aside = PathBuf::from(aside);
     let written = (|| {
         let mut f = std::fs::File::create(&aside)?;
@@ -1133,11 +1136,44 @@ zzz = 1
     }
 
     #[test]
+    fn writers_of_one_file_do_not_share_a_file_beside_it() {
+        let base = dir("atomic");
+        let path = base.join("recent.txt");
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for n in 0..50 {
+                        write_atomic(
+                            &path,
+                            format!(
+                                "{t}-{n}
+"
+                            )
+                            .repeat(200),
+                        )
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let first = text.lines().next().unwrap();
+        assert!(text.lines().all(|l| l == first), "one writer's whole text, never a mix");
+        let left: Vec<_> = std::fs::read_dir(&base).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["recent.txt"], "no file left beside it");
+    }
+
+    #[test]
     fn common_toml_is_edited_whole_and_watched() {
         let base = dir("edit");
         edit_common(&base, |t| set_key(t, None, "theme", &quote("Nord"))).unwrap();
         assert_eq!(Common::read(&base).unwrap().0.theme.as_deref(), Some("Nord"));
-        assert!(!base.join("common.toml.uchmk-new").exists(), "nothing left beside it");
+        let left: Vec<_> = std::fs::read_dir(&base).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(left.iter().all(|n| !n.contains(".uchmk-")), "nothing left beside it: {left:?}");
         std::fs::write(common_path(&base), [0xFF, 0xFE, b'a', 0]).unwrap();
         assert!(edit_common(&base, |t| Ok(t.to_owned())).is_err(), "not text: refused, not taken as empty");
         let (tx, rx) = std::sync::mpsc::channel();

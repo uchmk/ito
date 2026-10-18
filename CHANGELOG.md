@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.82.1] - 2026-10-19
+
+### 修正
+
+- ito-common: `write_atomic` の横に置く一時ファイルの名前を `<file>.uchmk-new` の固定から `<file>.uchmk-<pid>-<n>.new` にした。同じファイル（`recent.txt` など）を 2 つのプロセスやスレッドが同時に書いても、一時ファイルを取り合って書き込みが壊れたり rename が失敗したりしない。`bundle` は `.uchmk-` を含む名前を引き続き除く。使う側がやることはない（一時ファイルの名前を決め打ちしていなければ）。
+
 ## [0.82.0] - 2026-10-18
 
 ### 追加

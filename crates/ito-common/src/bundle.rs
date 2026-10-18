@@ -44,7 +44,7 @@ pub struct Restored {
 
 /// A `.toml` or `.json` file that is not a copy this module or the app left aside.
 fn is_settings_file(name: &str) -> bool {
-    (name.ends_with(".toml") || name.ends_with(".json")) && !name.contains(".bak") && !name.contains(".uchmk-new")
+    (name.ends_with(".toml") || name.ends_with(".json")) && !name.contains(".bak") && !name.contains(".uchmk-")
 }
 
 /// Every settings file; what `keep` is when an app has no list of its own.
