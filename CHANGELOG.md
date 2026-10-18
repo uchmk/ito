@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.81.1] - 2026-10-18
+
+### 追加
+
+- scripts/lanes: `lane-trust.ps1`（`Set-ClaudeFolderTrust`）。レーンの一時フォルダー（`<scratch>un-<日時>\projN`）で Claude Code を起動すると「このフォルダーを信頼しますか」で止まり、Enter を押すまで進まなかった。`~/.claude.json` の `projects["<フォルダー>"].hasTrustDialogAccepted` を一時フォルダーの親に 1 回だけ書いて、下の実行用フォルダーを全部信頼済みにする（親が信頼済みなら子も通ることを実機で確かめた）。書いたら `$true`、既にある・設定が無い・書けないときは `$false`（実行は止めない）。ほかの項目は触らない。`check-ps1.ps1` に確かめを足した。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync`（`files=` を書いているアプリは `lane-trust.ps1` を足す）。`auto-wintest.ps1` で `. (Join-Path $PSScriptRoot 'lane-trust.ps1')` を読み、一時フォルダーの親を作った直後に `Set-ClaudeFolderTrust $Scratch | Out-Null` を呼ぶ。ユーザーの作業フォルダーには使わない。
+
 ## [0.81.0] - 2026-10-18
 
 ### 追加
