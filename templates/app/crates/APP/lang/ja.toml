@@ -20,3 +20,10 @@ info = "情報"
 warn = "要確認"
 err = "失敗"
 wait = "待機中"
+
+[palette]
+hint = "コマンドを入力"
+none = "一致するコマンドはありません"
+report_bug = "不具合を報告"
+reset_scale = "拡大率を戻す"
+quit = "終了"

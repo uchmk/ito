@@ -22,3 +22,10 @@ info = "info"
 warn = "check"
 err = "failed"
 wait = "waiting"
+
+[palette]
+hint = "Type a command"
+none = "No command matches"
+report_bug = "Report a problem"
+reset_scale = "Reset the scale"
+quit = "Quit"

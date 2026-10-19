@@ -37,6 +37,17 @@ struct App {
     /// The list under the bell is open, and where the bell was last drawn.
     bell_open: bool,
     bell_at: egui::Rect,
+    /// The command palette while it is open (Ctrl+Shift+P, or the bar's box).
+    palette: Option<ito_palette::View>,
+}
+
+/// What the palette can do. Add a variant and an entry in `commands` for each
+/// command the app gets.
+#[derive(Clone, Copy)]
+enum Command {
+    ReportBug,
+    ResetScale,
+    Quit,
 }
 
 impl App {
@@ -65,7 +76,7 @@ impl App {
         // The scale is common.toml's, so egui's own Ctrl+= / Ctrl+- stay out of it.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         cc.egui_ctx.set_zoom_factor(common.scale_or_one());
-        Self { table, common, tracker: saved.tracker(), lang, scale_note: None, notices: Vec::new(), bell_open: false, bell_at: egui::Rect::NOTHING }
+        Self { table, common, tracker: saved.tracker(), lang, scale_note: None, notices: Vec::new(), bell_open: false, bell_at: egui::Rect::NOTHING, palette: None }
     }
 
     /// Ctrl+wheel and Ctrl+= / Ctrl+- / Ctrl+0: the whole window's scale, one
@@ -90,7 +101,12 @@ impl App {
                 None
             }
         };
-        let Some(to) = to else { return };
+        if let Some(to) = to {
+            self.scale_to(ctx, to);
+        }
+    }
+
+    fn scale_to(&mut self, ctx: &egui::Context, to: ito_common::ScaleTo) {
         let next = ito_common::scale_step(self.common.scale_or_one(), to);
         if next == self.common.scale_or_one() {
             return;
@@ -151,9 +167,48 @@ impl App {
         if out.bell {
             self.bell_open = !self.bell_open;
         }
-        // TODO: `out.search` is the palette box being clicked (see TODO.md).
+        if out.search {
+            self.palette = Some(ito_palette::View::new());
+        }
         if let Some(op) = out.window {
             ito_titlebar::apply(&ctx, op, maximized);
+        }
+    }
+
+    fn commands(&self) -> Vec<ito_palette::Entry<Command>> {
+        let t = &self.table;
+        vec![
+            ito_palette::Entry::new(t.tr("palette.report_bug"), "F12", Command::ReportBug),
+            ito_palette::Entry::new(t.tr("palette.reset_scale"), "Ctrl+0", Command::ResetScale),
+            ito_palette::Entry::new(t.tr("palette.quit"), "", Command::Quit),
+        ]
+    }
+
+    /// Ctrl+Shift+P opens the palette; while it is open it takes the keys.
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        let open = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::P));
+        if open && self.palette.is_none() {
+            self.palette = Some(ito_palette::View::new());
+        }
+        let Some(mut view) = self.palette.take() else { return };
+        let c = ito_theme::colors();
+        let style = ito_palette::Style {
+            panel: c.raised(),
+            border: c.border,
+            text: c.fg,
+            dim: c.dim,
+            selected_bg: c.chosen(),
+            selected_text: c.strong(),
+            hit: c.wait,
+            accent: c.done,
+        };
+        let words = ito_palette::Words { hint: self.table.tr("palette.hint"), none: self.table.tr("palette.none"), header: "", footer: "" };
+        match ito_palette::show(ctx, &mut view, &self.commands(), &style, &words) {
+            None => self.palette = Some(view),
+            Some(ito_palette::Answer::Pick(Command::ReportBug)) => self.report_bug(ctx),
+            Some(ito_palette::Answer::Pick(Command::ResetScale)) => self.scale_to(ctx, ito_common::ScaleTo::Reset),
+            Some(ito_palette::Answer::Pick(Command::Quit)) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Some(_) => {}
         }
     }
 
@@ -208,6 +263,7 @@ impl eframe::App for App {
             .frame(egui::Frame::NONE.fill(ito_theme::colors().bg))
             .show(ui, |ui| self.title_bar(ui));
         self.notice_list(&ctx);
+        self.command_palette(&ctx);
         ui.heading(self.table.tr("app.hello"));
         ui.label(self.table.tr("app.bug"));
         let note = self.scale_note.clone();

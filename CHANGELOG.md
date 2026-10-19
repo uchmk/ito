@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.89.0] - 2026-10-19
+
+### 追加
+
+- `templates/app`: コマンドパレットを繋いだ（`ito-palette`）。バーの中央の箱を押すか `Ctrl+Shift+P` で開き、「不具合を報告」「拡大率を戻す」「終了」の3つが入っている。アプリのコマンドは `Command` と `commands` に足す。`lang/en.toml`・`ja.toml` に `[palette]` を足し、拡大率の変更は `rescale` から `scale_to` に分けた。
+
 ## [0.88.0] - 2026-10-19
 
 ### 変更

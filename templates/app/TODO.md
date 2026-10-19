@@ -13,8 +13,7 @@
 - [ ] 設定の画面: `ito_prefs::show`（Language・CLOCK・Theme の共通のページ + キー）。手本は minato の `settings.rs`。
 - [ ] 窓の場所を戻す: 雛形は `window::Saved` で戻し `Tracker::follow` で書く。終わるときの `Tracker::close` は未配線。
 - [ ] 通知を入れる: 雛形のベルは `notices` が空のまま。`ito_notices::Notice` を push し（`go` に飛び先の型）、`ito-notify` の `Toast::open` で押すと開くトーストにする。
-- [ ] 窓の中央の箱（`Out.search`）をコマンドパレットに繋ぐ（下の項目）。
-- [ ] コマンドパレット `<C-S-p>`: `ito-palette`（要らなければ `Cargo.toml` から外し、`ito-first.allow` に理由を書く）。手本は minato の `main.rs`。
+- [ ] コマンドパレットの中身: 箱と `<C-S-p>` は繋いである。`Command` と `commands` に、アプリのコマンドを足す（キーは `ito-keymap` から引く）。手本は minato の `main.rs`。
 - [ ] 字体（日本語が出る字体を `egui` に足す）。手本は minato の `fonts.rs`。
 - [ ] `TESTING.md` に確認の行を足し、`cargo run --example make-testcheck` で `TESTING-CHECKS.md` を作る。
 - [ ] `icon.rs` に本当のアイコンを描く。
