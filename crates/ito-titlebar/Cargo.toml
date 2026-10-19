@@ -1,0 +1,12 @@
+[package]
+name = "ito-titlebar"
+description = "The window's own title bar: drag, the three caption buttons, the command-palette box in the middle and the notification bell beside it, with slots left and right for the app; and the edges that resize a window without a frame"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-theme = { path = "../ito-theme" }

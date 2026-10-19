@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.84.0] - 2026-10-19
+
+### 追加
+
+- `ito-titlebar`: 窓の自前のタイトルバー（uchmk/ito#29）。`show` がバーの矩形を描き、空きのドラッグ・ダブルクリックの最大化、最小化/最大化/閉じる（幅 46）、窓の中央のパレットの箱（角丸 6、塗りは `ito_theme` の `panel`、ホバーで `hover()`、枠は `border`）とその右のベル（未読のバッジは `wait`、エラーがあれば `err`）、左右のアプリの枠を受け持つ。文言・キーの表示（`Ctrl+Shift+P` など）・未読数は `Words` と `Spec` で渡す。`apply` が `WindowOp` を窓へ送り、`frameless` が枠なしの viewport を作り、`resize_edges` が枠なし窓の縁での大きさ変更を受け持つ。
+- 使う側がやること: 自前のバーを `ito_titlebar::show` に置き換える（tsumugi・michi・minato）。見た目は tsumugi に揃う（バーの高さ 40、箱の角丸 6、ボタンの幅 46）。michi（36）と minato の差は見た目が変わる。
+
 ## [0.83.0] - 2026-10-19
 
 ### 追加
