@@ -12,6 +12,7 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
+pub mod door;
 pub mod frame;
 
 #[cfg(unix)]

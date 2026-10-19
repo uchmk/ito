@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.90.0] - 2026-10-19
+
+### 追加
+
+- `ito-ipc::door`（uchmk/ito#11）: 窓と `<app> mcp` のつなぎの共通部分。kura・michi・tsumugi が同じ形で書いていた「扉を 1 つのスレッドで開く（先に取った窓が持ち、ほかは 30 秒ごとに取り直す）→ 1 接続 1 リクエスト 1 返事 → リクエストを UI スレッドへチャネルで渡して、メモリの状態から答える」を `Door<Rq>` にした。
+  - アプリが持つのは `Rq`（serde の enum）、答え、`ito-mcp` のツール宣言だけ。`Door::new("<app>", "<APP>_ADDRESS", PROTO)` に、UI スレッドの外でやる検査 `check` と返事の待ち時間 `wait`（利用者の押す箱は長く）を足せる。
+  - `door.listen(|| ctx.request_repaint())` が `Receiver<Ask<Rq>>` を返す。UI スレッドは `ask.answer(Ok(text))`（`Err` で理由）で答える。`ask.expired` は待つのをやめたときに立つ。GUI は知らない（`wake` を渡す）。
+  - `ito_ipc::door::ask(&door, &request)` が `<app> mcp` 側の問い合わせ。窓が無いときは「`<app>` is not running」のツールのエラー。版（`proto`）が違えば、どちらも同じ版を使うよう伝える文を返す。
+- 使う側がやること（急がない）: kura・michi・tsumugi の `mcp.rs` の `listen`・`serve_one`・`answer`・`ask` を `Door` に置き換える。`Ask` は `std::sync::mpsc` の `Receiver`（kura は crossbeam から）。新しい扉（minato の PR / CI の問い合わせなど）は最初から `Door` で作る。
+
 ## [0.89.1] - 2026-10-19
 
 ### 修正
