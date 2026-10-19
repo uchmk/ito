@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.83.0] - 2026-10-19
+
+### 追加
+
+- templates/app: 画面全体の倍率を Ctrl+マウスホイール、`<C-=>`、`<C-+>`（JIS キーボードは `=` に Shift が要るので `+` も受ける）、`<C-->`、`<C-0>` で変えられるようにした。`scale_step` で次の値を作り、すぐ `set_zoom_factor` で当て、common.toml へは UI ではないスレッドで書く。状態の行に `scale_text` を出す。新しいアプリだけが対象で、使う側がやることはない（既存のアプリは同じ形に揃えるとよい）。
+
 ## [0.82.1] - 2026-10-19
 
 ### 修正

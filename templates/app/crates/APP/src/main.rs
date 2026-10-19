@@ -27,6 +27,9 @@ struct App {
     table: ito_i18n::Table,
     common: ito_common::Common,
     tracker: Option<Tracker>,
+    lang: String,
+    /// The last scale change, as the line the status bar shows.
+    scale_note: Option<String>,
 }
 
 impl App {
@@ -38,7 +41,8 @@ impl App {
             Some(Err(e)) => (Default::default(), vec![e]),
             None => Default::default(),
         };
-        let (table, errors) = i18n::table(&i18n::resolve(common.language.as_deref()));
+        let lang = i18n::resolve(common.language.as_deref());
+        let (table, errors) = i18n::table(&lang);
         warnings.extend(errors);
         for w in warnings {
             eprintln!("{{app}}: {w}");
@@ -54,7 +58,47 @@ impl App {
         // The scale is common.toml's, so egui's own Ctrl+= / Ctrl+- stay out of it.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         cc.egui_ctx.set_zoom_factor(common.scale_or_one());
-        Self { table, common, tracker: saved.tracker() }
+        Self { table, common, tracker: saved.tracker(), lang, scale_note: None }
+    }
+
+    /// Ctrl+wheel and Ctrl+= / Ctrl+- / Ctrl+0: the whole window's scale, one
+    /// step at a time. It is applied now and written to common.toml off the UI
+    /// thread, so the other apps at the same desk follow within 2 seconds.
+    fn rescale(&mut self, ctx: &egui::Context) {
+        use ito_common::ScaleTo;
+        let wheel = ctx.input(|i| if i.modifiers.command { i.smooth_scroll_delta.y } else { 0.0 });
+        let to = if wheel > 0.0 {
+            Some(ScaleTo::In)
+        } else if wheel < 0.0 {
+            Some(ScaleTo::Out)
+        } else {
+            let key = |k| ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, k));
+            if key(egui::Key::Equals) || key(egui::Key::Plus) {
+                Some(ScaleTo::In)
+            } else if key(egui::Key::Minus) {
+                Some(ScaleTo::Out)
+            } else if key(egui::Key::Num0) {
+                Some(ScaleTo::Reset)
+            } else {
+                None
+            }
+        };
+        let Some(to) = to else { return };
+        let next = ito_common::scale_step(self.common.scale_or_one(), to);
+        if next == self.common.scale_or_one() {
+            return;
+        }
+        self.common.scale = Some(next);
+        ctx.set_zoom_factor(next);
+        self.scale_note = Some(ito_common::scale_text(next, &self.lang));
+        if let Some(base) = ito_common::base_dir() {
+            std::thread::spawn(move || {
+                let change = ito_common::scale_change(next);
+                if let Err(e) = ito_common::edit_common(&base, |text| change.apply(text)) {
+                    eprintln!("{{app}}: {e}");
+                }
+            });
+        }
     }
 
     /// F12: the browser opens the issue form filled with the version, the OS
@@ -74,12 +118,14 @@ impl eframe::App for App {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F12)) {
             self.report_bug(&ctx);
         }
+        self.rescale(&ctx);
         if let Some(t) = &mut self.tracker {
             t.follow(&ctx);
         }
         ui.heading(self.table.tr("app.hello"));
         ui.label(self.table.tr("app.bug"));
-        ui.label(format!("scale {:.1}", self.common.scale_or_one()));
+        let note = self.scale_note.clone();
+        ui.label(note.unwrap_or_else(|| ito_common::scale_text(self.common.scale_or_one(), &self.lang)));
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
