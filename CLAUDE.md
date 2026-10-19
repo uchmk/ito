@@ -31,7 +31,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-help` | キーのヘルプ（`ito-keymap` の一覧を見出しとキーと説明の行にして、渡された矩形に描く） | yagura、kura |
 | `ito-console` | Windows の窓のアプリの前に置くコンソールの前段（`<app>.exe` の横の `<app>.com`、`front`。文字で答えるコマンドは待って渡し、ほかは窓が開いたら戻る）と、答えを書く `out`・`err`（誰も読まないパイプでも panic せずに捨てる） | kura、yagura、tsumugi、minato、michi |
 | `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
-| `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストのクリックは後の版 | michi、tsumugi |
+| `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストの押しは `ito-notify` の `Toast::open` | michi、tsumugi |
 
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 

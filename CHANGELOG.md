@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.86.0] - 2026-10-19
+
+### 追加
+
+- `ito-notify`: `Toast::open(tag, title, body, label)` と定数 `notifier::OPEN`（uchmk/ito#30）。通知の本体か「開く」ボタン（Windows）を押すと、`Notifier` の `Click` が `tag`（通知の `id`）と `OPEN` で呼ばれる。アプリは `id` から `ito_notices::Notice::go` を引いて、一覧と同じ行き先へ移る。Linux は `notify-send` 0.7.12 以降で本体の押しが戻る。macOS は AppleScript が押しを返せないので、表示だけ。`Notifier` と `launch`・`actions` はこれまでどおり使える。
+- 使う側がやること: 行き先のある通知を `Toast::open(notice.id, …)` で `Notifier::show` に渡し、`Click` で `OPEN` を受けたら `Action::Open` と同じ処理をする。
+
 ## [0.85.0] - 2026-10-19
 
 ### 追加

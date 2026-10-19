@@ -42,6 +42,29 @@ pub struct Toast {
     pub actions: Vec<Action>,
 }
 
+/// The `arg` a [`Toast::open`] calls back with, for the click on it or its
+/// button.
+pub const OPEN: &str = "open";
+
+impl Toast {
+    /// A notification that opens somewhere in the app: a click on it, or on
+    /// its `label` button (Windows), calls back with `tag` and [`OPEN`]. The
+    /// tag is the notice's id, so the app finds the notice's own place to go
+    /// to; one notice shows once, and a newer one with the same tag replaces
+    /// it. macOS cannot say a notification was clicked (see the top), so
+    /// there it only shows.
+    pub fn open(tag: impl ToString, title: &str, body: &str, label: &str) -> Self {
+        Self {
+            title: title.to_owned(),
+            body: body.to_owned(),
+            tag: tag.to_string(),
+            launch: OPEN.to_owned(),
+            actions: vec![Action { label: label.to_owned(), arg: OPEN.to_owned(), dismiss: false }],
+            ..Self::default()
+        }
+    }
+}
+
 /// Called with the tag of the notification that was clicked and the
 /// `arg` of the button (or the `launch` of the notification itself), from
 /// whichever thread the system tells it on.
@@ -251,6 +274,15 @@ mod tests {
     fn notify_send_gets_a_name_for_each_button() {
         assert_eq!(notify_send_actions(&toast()), ["--action=default=Open", "--action=allow=Allow", "--wait"]);
         assert_eq!(notify_send_actions(&Toast::default()), ["--action=default=Open", "--wait"]);
+    }
+
+    #[test]
+    fn an_openable_toast_calls_back_with_its_tag_and_open() {
+        let t = Toast::open(42, "t", "b", "Open");
+        assert_eq!((t.tag.as_str(), t.launch.as_str()), ("42", OPEN));
+        // The body is the click already: no second name for the button.
+        assert_eq!(notify_send_actions(&t), ["--action=default=Open", "--wait"]);
+        assert_eq!(arg_of(&t, "default").as_deref(), Some(OPEN));
     }
 
     #[test]
