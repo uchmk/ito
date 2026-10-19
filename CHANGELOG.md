@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.89.1] - 2026-10-19
+
+### 修正
+
+- `scripts/lanes/lane-trust.ps1`: `Set-ClaudeFolderTrust` が Linux の runner で `C:\scratch\Temp\` を相対の名前と見て、作業フォルダーを前に付けていた（`check-ps1.ps1` の「the folder trusted」が落ちた）。ドライブ文字の付いたパスはそのまま使う。
+- 使う側がやること: `rev` を上げて `scripts/lanes.sh sync`。
+
 ## [0.89.0] - 2026-10-19
 
 ### 追加
