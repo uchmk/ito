@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.85.0] - 2026-10-19
+
+### 追加
+
+- `ito-notices`: ベルが開く通知の一覧（uchmk/ito#30）。`Notice<T>`（`id`・`at`・`kind`・`title`・`note`・`go`・`read`）をアプリが古い順に持ち、`show(ctx, bell_rect, &notices, &Words)` が新しい順に描く。未読は明るく、時刻と種類（Ok・Info・Warn・Err・Wait）の色の点が付く。行を押すか Enter で `Action::Open(go, id)`、先頭の「すべて既読」で `ReadAll`、Esc か外を押すと `Close` を返す。`unread` と `any_error` が `ito_titlebar::Spec` のバッジの元になる。色は `ito_theme::colors()`。
+- 使う側がやること: 自前の一覧を `show` に置き換え、返った `Action` で既読にして `go` へ移る。文言は `Words`（`title` には未読数を入れた文）で渡す。トーストのクリックで開く対応は、OS ごとに扱いが違うので後の版にした。
+
 ## [0.84.0] - 2026-10-19
 
 ### 追加

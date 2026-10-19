@@ -1,0 +1,12 @@
+[package]
+name = "ito-notices"
+description = "The list the notification bell opens: newest first, unread ones bright, each with its age and a dot in its kind's colour, and a place to jump to when it is clicked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-theme = { path = "../ito-theme" }
