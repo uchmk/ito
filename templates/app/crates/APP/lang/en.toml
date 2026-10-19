@@ -3,3 +3,22 @@
 title = "{{app}}"
 hello = "Hello from {{app}}."
 bug = "Report a problem (F12)"
+
+[title]
+search = "Command palette"
+bell = "Notices ({0} unread)"
+minimize = "Minimize"
+maximize = "Maximize"
+restore = "Restore"
+close = "Close"
+
+[notices]
+title = "Notices ({0} unread)"
+mark_read = "Mark all read"
+empty = "No notices"
+ago = "{} ago"
+ok = "done"
+info = "info"
+warn = "check"
+err = "failed"
+wait = "waiting"

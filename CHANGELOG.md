@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.87.0] - 2026-10-19
+
+### 追加
+
+- `templates/app`: 窓の自前のタイトルバー（`ito-titlebar`）とベル（`ito-notices` の一覧）を入れた。窓は枠なし（Mac は信号機を残す）で、バーに名前・中央の箱・ベル・最小化／最大化／閉じるが付き、窓の縁で大きさを変えられる。ベルは空の一覧を開く（`notices` に `Notice` を push すれば増える）。`lang/en.toml`・`ja.toml` に `[title]`・`[notices]` を足した。箱を押したときのパレットは TODO.md に残した。
+- 必須のクレートの表（`ito-required.txt`）には、まだ足していない。足すと既存のアプリの `ito-first.py` が落ちるので、持ち主が決めてから。
+
 ## [0.86.0] - 2026-10-19
 
 ### 追加

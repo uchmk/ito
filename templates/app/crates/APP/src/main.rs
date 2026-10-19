@@ -1,7 +1,8 @@
 //! {{app}}: {{description}}
 //!
-//! What is wired here: the window (its place kept), common.toml's theme,
-//! language and scale, `--version` / `--help`, and F12 (the bug report).
+//! What is wired here: the window (its place kept, its own title bar with the
+//! bell and the notice list), common.toml's theme, language and scale,
+//! `--version` / `--help`, and F12 (the bug report).
 //! What the uchmk apps also have and is still to wire is in TODO.md, each
 //! item with the ito crate and an app that already does it.
 
@@ -30,6 +31,12 @@ struct App {
     lang: String,
     /// The last scale change, as the line the status bar shows.
     scale_note: Option<String>,
+    /// What the bell lists, oldest first. `()` is where a click goes: this app
+    /// has no place to jump to yet (use a type of the app's own for one).
+    notices: Vec<ito_notices::Notice<()>>,
+    /// The list under the bell is open, and where the bell was last drawn.
+    bell_open: bool,
+    bell_at: egui::Rect,
 }
 
 impl App {
@@ -58,7 +65,7 @@ impl App {
         // The scale is common.toml's, so egui's own Ctrl+= / Ctrl+- stay out of it.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         cc.egui_ctx.set_zoom_factor(common.scale_or_one());
-        Self { table, common, tracker: saved.tracker(), lang, scale_note: None }
+        Self { table, common, tracker: saved.tracker(), lang, scale_note: None, notices: Vec::new(), bell_open: false, bell_at: egui::Rect::NOTHING }
     }
 
     /// Ctrl+wheel and Ctrl+= / Ctrl+- / Ctrl+0: the whole window's scale, one
@@ -101,6 +108,80 @@ impl App {
         }
     }
 
+    /// The window's own bar: the name, the palette box, the bell and the
+    /// caption buttons. The bell opens the list of notices.
+    fn title_bar(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        let unread = ito_notices::unread(&self.notices);
+        let bell = self.table.trf("title.bell", &[&unread.to_string()]);
+        let spec = ito_titlebar::Spec {
+            own: !cfg!(target_os = "macos"),
+            left: if cfg!(target_os = "macos") { 76.0 } else { 0.0 },
+            maximized,
+            unread,
+            any_error: ito_notices::any_error(&self.notices),
+            centre: true,
+            words: ito_titlebar::Words {
+                search: self.table.tr("title.search"),
+                search_key: "Ctrl+Shift+P",
+                bell: &bell,
+                minimize: self.table.tr("title.minimize"),
+                maximize: self.table.tr("title.maximize"),
+                restore: self.table.tr("title.restore"),
+                close: self.table.tr("title.close"),
+            },
+        };
+        let name = self.table.tr("app.title").to_string();
+        let out = ito_titlebar::show(
+            ui,
+            &spec,
+            |ui, rect| {
+                let galley = ui.painter().layout_no_wrap(name, egui::FontId::proportional(13.0), ito_theme::colors().fg);
+                let x = rect.left() + 12.0;
+                let right = x + galley.size().x;
+                ui.painter().galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, egui::Color32::WHITE);
+                right
+            },
+            |_, _| {},
+        );
+        if let Some(r) = out.bell_rect {
+            self.bell_at = r;
+        }
+        if out.bell {
+            self.bell_open = !self.bell_open;
+        }
+        // TODO: `out.search` is the palette box being clicked (see TODO.md).
+        if let Some(op) = out.window {
+            ito_titlebar::apply(&ctx, op, maximized);
+        }
+    }
+
+    /// The list under the bell, while it is open.
+    fn notice_list(&mut self, ctx: &egui::Context) {
+        if !self.bell_open {
+            return;
+        }
+        let t = &self.table;
+        let title = t.trf("notices.title", &[&ito_notices::unread(&self.notices).to_string()]);
+        let words = ito_notices::Words {
+            title: &title,
+            mark_read: t.tr("notices.mark_read"),
+            empty: t.tr("notices.empty"),
+            ago: t.tr("notices.ago"),
+            kinds: [t.tr("notices.ok"), t.tr("notices.info"), t.tr("notices.warn"), t.tr("notices.err"), t.tr("notices.wait")],
+        };
+        match ito_notices::show(ctx, self.bell_at, &self.notices, &words) {
+            Some(ito_notices::Action::Open(_, id)) => {
+                self.notices.iter_mut().filter(|n| n.id == id).for_each(|n| n.read = true);
+                self.bell_open = false;
+            }
+            Some(ito_notices::Action::ReadAll) => self.notices.iter_mut().for_each(|n| n.read = true),
+            Some(ito_notices::Action::Close) => self.bell_open = false,
+            None => {}
+        }
+    }
+
     /// F12: the browser opens the issue form filled with the version, the OS
     /// and what the app knows.
     fn report_bug(&self, ctx: &egui::Context) {
@@ -122,10 +203,19 @@ impl eframe::App for App {
         if let Some(t) = &mut self.tracker {
             t.follow(&ctx);
         }
+        egui::Panel::top("titlebar")
+            .exact_size(ito_titlebar::HEIGHT)
+            .frame(egui::Frame::NONE.fill(ito_theme::colors().bg))
+            .show(ui, |ui| self.title_bar(ui));
+        self.notice_list(&ctx);
         ui.heading(self.table.tr("app.hello"));
         ui.label(self.table.tr("app.bug"));
         let note = self.scale_note.clone();
         ui.label(note.unwrap_or_else(|| ito_common::scale_text(self.common.scale_or_one(), &self.lang)));
+        // Last, so the edges of the frameless window win over what is under them.
+        if !cfg!(target_os = "macos") {
+            ito_titlebar::resize_edges(&ctx);
+        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -164,6 +254,8 @@ fn main() -> eframe::Result {
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([720.0, 420.0])
         .with_icon(std::sync::Arc::new(egui::IconData { rgba: icon::pixels(ICON_PX), width: ICON_PX, height: ICON_PX }));
+    // The bar is the app's own (the Mac keeps its traffic lights over it).
+    let viewport = ito_titlebar::frameless(viewport);
     let options = eframe::NativeOptions { viewport: saved.viewport(viewport), ..Default::default() };
     eframe::run_native("{{app}}", options, Box::new(move |cc| Ok(Box::new(App::new(cc, &saved)))))
 }

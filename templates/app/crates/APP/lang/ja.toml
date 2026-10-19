@@ -1,3 +1,22 @@
 [app]
 hello = "{{app}} です。"
 bug = "不具合を報告 (F12)"
+
+[title]
+search = "コマンド パレット"
+bell = "通知（未読 {0}）"
+minimize = "最小化"
+maximize = "最大化"
+restore = "元に戻す"
+close = "閉じる"
+
+[notices]
+title = "通知（未読 {0}）"
+mark_read = "すべて既読にする"
+empty = "通知はありません"
+ago = "{}前"
+ok = "完了"
+info = "情報"
+warn = "要確認"
+err = "失敗"
+wait = "待機中"
