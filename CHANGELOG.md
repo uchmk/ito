@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.88.0] - 2026-10-19
+
+### 変更
+
+- `scripts/lanes/ito-required.txt`: `ito-titlebar` と `ito-notices` を全アプリの必須にした（持ち主の指示）。`ito-first.py` は、どちらかが `Cargo.toml` に無いアプリを落とす。
+- 使う側がやること: `scripts/lanes.sh sync` で表を写したら、`ito-titlebar` と `ito-notices` を載せる（雛形 `templates/app` の `main.rs` が手本）。すぐ載せられないアプリは `scripts/ito-first.allow` に `<crate> <理由>` を書く。
+
 ## [0.87.0] - 2026-10-19
 
 ### 追加
