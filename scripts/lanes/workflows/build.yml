@@ -68,49 +68,49 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
-        run: cargo build --release --locked -p {{app}} --target ${{ matrix.target }}
+        run: cargo build --release --locked -p {{crate}} --target ${{ matrix.target }}
 
-      # The console front a release ships beside {{app}}.exe, as release.yml
+      # The console front a release ships beside {{bin}}.exe, as release.yml
       # checks it: PowerShell waits for it, so the bare forms come back whole.
-      # x64 only: the runner cannot run ARM64. Run straight, {{app}}.exe gets a
-      # pipe for `$v = & {{app}}.exe --version` and closes it without waiting.
+      # x64 only: the runner cannot run ARM64. Run straight, {{bin}}.exe gets a
+      # pipe for `$v = & {{bin}}.exe --version` and closes it without waiting.
       # The write is let go there, where println! panicked (os error 232):
-      # here the pipe is closed before {{app}}.exe has started writing.
-      - name: Check {{app}}.com
+      # here the pipe is closed before {{bin}}.exe has started writing.
+      - name: Check {{bin}}.com
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
           $dir = "target/${{ matrix.target }}/release"
-          Copy-Item "$dir/{{app}}-com.exe" "$dir/{{app}}.com"
-          $lines = & "$dir/{{app}}.com" env
-          if ($lines.Count -lt 10) { throw "`$v = & {{app}}.com env gave $($lines.Count) line(s)" }
-          $ver = & "$dir/{{app}}.com" --version
-          if (-not ($ver -match '^{{app}} \d')) { throw "& {{app}}.com --version gave: '$ver'" }
+          Copy-Item "$dir/{{bin}}-com.exe" "$dir/{{bin}}.com"
+          $lines = & "$dir/{{bin}}.com" env
+          if ($lines.Count -lt 10) { throw "`$v = & {{bin}}.com env gave $($lines.Count) line(s)" }
+          $ver = & "$dir/{{bin}}.com" --version
+          if (-not ($ver -match '^{{bin}} \d')) { throw "& {{bin}}.com --version gave: '$ver'" }
           $p = [System.Diagnostics.Process]::new()
-          $p.StartInfo.FileName = (Resolve-Path "$dir/{{app}}.exe").Path
+          $p.StartInfo.FileName = (Resolve-Path "$dir/{{bin}}.exe").Path
           $p.StartInfo.Arguments = '--version'
           $p.StartInfo.UseShellExecute = $false
           $p.StartInfo.RedirectStandardOutput = $true
           [void]$p.Start()
           $p.StandardOutput.Close()
           $p.WaitForExit()
-          if ($p.ExitCode -ne 0) { throw "{{app}}.exe --version into a closed pipe exited $($p.ExitCode)" }
-          "{{app}}.com: $($lines.Count) lines, $ver"
+          if ($p.ExitCode -ne 0) { throw "{{bin}}.exe --version into a closed pipe exited $($p.ExitCode)" }
+          "{{bin}}.com: $($lines.Count) lines, $ver"
 
-      # The files a release packs: the binary (and on Windows {{app}}.com
+      # The files a release packs: the binary (and on Windows {{bin}}.com
       # beside it) and the two licences.
       - name: Gather the files
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/{{app}}${{ runner.os == 'Windows' && '.exe' || '' }} dist/
-          if [ "${{ runner.os }}" = Windows ]; then cp target/${{ matrix.target }}/release/{{app}}-com.exe dist/{{app}}.com; fi
+          cp target/${{ matrix.target }}/release/{{bin}}${{ runner.os == 'Windows' && '.exe' || '' }} dist/
+          if [ "${{ runner.os }}" = Windows ]; then cp target/${{ matrix.target }}/release/{{bin}}-com.exe dist/{{bin}}.com; fi
           cp LICENSE-MIT LICENSE-APACHE dist/
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
           # The commit is in the name, so two downloads are never confused.
-          name: {{app}}-${{ matrix.name }}-${{ github.sha }}
+          name: {{bin}}-${{ matrix.name }}-${{ github.sha }}
           path: dist/
           if-no-files-found: error

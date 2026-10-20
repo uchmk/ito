@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.95.0] - 2026-10-20
+
+### 追加
+
+- ワークフローの雛形 `scripts/lanes/workflows/`（`build`・`arm64`・`checklists`・`release`・`release-sums`・`merge-lanes`）。`{{app}}`・`{{crate}}`・`{{bin}}` は `lanes.conf` の値で埋まる。
+  アプリの `lanes.conf` に `workflows=<名前…>` を書くと、`scripts/lanes.sh sync` が `.github/workflows/` に書き（先頭に「ito の雛形から書いた」行）、`check` が違いを落とす。書かないアプリは今までどおり自分のワークフロー。
+- `scripts/lanes/release-sums.sh`（`FILES` に追加）。`release-sums.yml` が呼ぶ。
+- `verify.sh`: 雛形の `{{…}}` が既知の 3 つだけで、YAML として読めるかを見る。
+
+### 変更
+
+- `templates/app`: 0.94.0 で足したワークフローと `release-sums.sh` は雛形に直接置かず、`lanes.conf` の `workflows=` と `files=` で `sync` が書く形にした（新しいアプリの結果は同じ）。
+
+### 使う側がやること
+
+- 既存のアプリは何も要らない（`FILES` を全部取る設定のアプリだけ、`sync` で `release-sums.sh` が増える）。ワークフローを ito に寄せたいアプリは、`lanes.conf` に `workflows=` を足し、`sync` して差分を見て、自分のものとの違いを ito に頼むか受け入れる。
+
 ## [0.94.0] - 2026-10-20
 
 ### 追加

@@ -13,6 +13,7 @@
   持つべき ito のクレート（keyscript・help・notify・bugreport …）が抜けていても落ちる。
   理由があって外すときだけ `scripts/ito-first.allow` に `<crate> <理由>` を書く（理由のない行は効かない）。
 - 全部の ito のクレートは 1 つの `rev` にそろえる。上げたら `scripts/lanes.sh sync`。
+  `.github/workflows/` の build・arm64・checklists・release・release-sums は ito の雛形から `sync` が書く（`lanes.conf` の `workflows=`）。直すなら ito で。
 
 ## 状態のファイルは TOML
 

@@ -1,6 +1,7 @@
 # What an app's scripts/lanes.sh sync copies from here into its scripts/,
 # byte for byte, one name per line. Each reads the app's own values from
 # scripts/lanes.conf beside it (app, crate, bin, keys_env, isolate, state, todo_marks).
+# (workflows/ holds workflow templates, taken by lanes.conf's `workflows=`.)
 # An app that takes only some names them in lanes.conf's `files=`.
 check-ps1.ps1
 claim.sh
@@ -18,3 +19,4 @@ push-main.sh
 todo-open.sh
 xrun.sh
 lane-trust.ps1
+release-sums.sh

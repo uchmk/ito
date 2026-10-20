@@ -1,0 +1,74 @@
+name: Merge lanes
+
+# Merges the real-machine lanes' pull requests (test/win-* and test/arm-*)
+# once they keep to the rules in scripts/merge-lanes.py and their checks are
+# green, with a merge commit pinned to the head. The merge routine
+# (.claude/merge-routine.md) used to merge them; the cloud session's auto mode
+# refused such merges once (2026-10-10). It also
+# merges a lane pull request that conflicts only in the checklists (main's
+# rows with the pull request's marks made again), and does the merger's share
+# (version, CHANGELOG) and pushes it to main (v0.76.6). Since v0.94.0 what a
+# report leaves over becomes one finding issue, its votes are copied to the
+# question issues as comments, and the pull request is labelled lane-review
+# for the merge routine; every hour it also keeps the labels in step, counts
+# the votes on question issues, and labels a lane's status issue lane-stalled
+# when the lane stops firing. The script is ito's scripts/lanes/merge-lanes.py
+# (copied by scripts/lanes.sh sync); RULES picks this repository's rules.
+#
+# It runs when a check workflow finishes (a lane's pull request turns green),
+# when a lane's pull request is opened or updated (one that changes only
+# markdown has no check to finish), every hour as a fallback, and by hand. It reads pull requests through the
+# API and git and runs only main's copy of the script, never the pull
+# request's code. Its pushes start no workflows, so it starts CI and
+# Checklists on main by workflow_dispatch after a share. A lane's pull request
+# that ticks rows waits for Checklists (TESTING.md's rows keep their form).
+
+on:
+  workflow_run:
+    workflows: [CI, Checklists, Audit]
+    types: [completed]
+  # A pull request that changes only markdown starts no CI (paths-ignore), so no
+  # check workflow finishes for it; its own update starts this instead.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Say what would be merged, merge nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  issues: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: merge-lanes
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    # Only a lane's own pull requests (Dependabot's and a fork's get a read-only token)
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'test/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          # the merge-base for a conflict, and the token for pushing to main
+          fetch-depth: 0
+      - name: Self-test
+        run: python3 scripts/merge-lanes.py --self-test
+      - name: Merge what may be merged
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_LANES_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: python3 scripts/merge-lanes.py

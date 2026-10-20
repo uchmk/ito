@@ -38,7 +38,8 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
 アプリの `scripts/lanes.sh sync` が、固定した `rev` のここから自分の `scripts/` へバイト単位で同じものを写し、`lanes.sh check` は写しが違えば落ちる。
 アプリごとの値（名前・クレート・実行ファイル・`--keys` の環境変数・状態のフォルダー・TODO の印）はアプリの `scripts/lanes.conf` から読むので、
-ここにアプリの名前を書き込まない。ここではアプリに対して走らせられないので、verify.sh と CI は構文と `merge-lanes.py --self-test`、pwsh の
+ここにアプリの名前を書き込まない。
+`scripts/lanes/workflows/*.yml` はワークフローの雛形（`{{app}}`・`{{crate}}`・`{{bin}}`）で、アプリの `lanes.conf` の `workflows=` に並べたものを `lanes.sh sync` が `.github/workflows/` に書き、`check` が違いを落とす（並べないアプリは自分のワークフローのまま）。ここではアプリに対して走らせられないので、verify.sh と CI は構文と `merge-lanes.py --self-test`、pwsh の
 `check-ps1.ps1` だけを見る。直したら push し、使う側の `rev` を上げて `scripts/lanes.sh sync` を流す。
 
 **uchmk のアプリの共通仕様**（common.toml・設定の画面・テーマ・時計）は [docs/common-spec.md](docs/common-spec.md)。全部のアプリがこれに従う。

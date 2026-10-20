@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: echo "name=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
-      # A download whose name and `{{app}} --version` disagree leaves nobody
+      # A download whose name and `{{bin}} --version` disagree leaves nobody
       # able to say which they have.
       - name: Check the tag matches Cargo.toml
         shell: bash
@@ -69,26 +69,26 @@ jobs:
         run: cargo test --locked
 
       - name: Build x64
-        run: cargo build --release --locked -p {{app}} --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked -p {{crate}} --target x86_64-pc-windows-msvc
 
-      # {{app}}.com: a console program, so PowerShell waits for it and the bare
-      # forms that come back empty from the windowed {{app}}.exe work.
-      - name: Check {{app}}.com
+      # {{bin}}.com: a console program, so PowerShell waits for it and the bare
+      # forms that come back empty from the windowed {{bin}}.exe work.
+      - name: Check {{bin}}.com
         shell: pwsh
         run: |
           $dir = "target/x86_64-pc-windows-msvc/release"
-          Copy-Item "$dir/{{app}}-com.exe" "$dir/{{app}}.com"
-          $lines = & "$dir/{{app}}.com" env
-          if ($lines.Count -lt 10) { throw "`$v = & {{app}}.com env gave $($lines.Count) line(s)" }
-          $ver = & "$dir/{{app}}.com" --version
-          if (-not ($ver -match '^{{app}} \d')) { throw "& {{app}}.com --version gave: '$ver'" }
-          "{{app}}.com: $($lines.Count) lines, $ver"
+          Copy-Item "$dir/{{bin}}-com.exe" "$dir/{{bin}}.com"
+          $lines = & "$dir/{{bin}}.com" env
+          if ($lines.Count -lt 10) { throw "`$v = & {{bin}}.com env gave $($lines.Count) line(s)" }
+          $ver = & "$dir/{{bin}}.com" --version
+          if (-not ($ver -match '^{{bin}} \d')) { throw "& {{bin}}.com --version gave: '$ver'" }
+          "{{bin}}.com: $($lines.Count) lines, $ver"
 
       - name: Build ARM64
-        run: cargo build --release --locked -p {{app}} --target aarch64-pc-windows-msvc
+        run: cargo build --release --locked -p {{crate}} --target aarch64-pc-windows-msvc
 
-      # A zip of one folder: {{app}}.exe, {{app}}.com (the console front, so that a
-      # shell waits for `{{app}} env`) and the two licence files.
+      # A zip of one folder: {{bin}}.exe, {{bin}}.com (the console front, so that a
+      # shell waits for `{{bin}} env`) and the two licence files.
       - name: Package the binaries
         shell: pwsh
         run: |
@@ -96,11 +96,11 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           foreach ($pair in @(@('x64', 'x86_64-pc-windows-msvc'), @('arm64', 'aarch64-pc-windows-msvc'))) {
             $arch, $target = $pair
-            $name = "{{app}}-$tag-windows-$arch"
+            $name = "{{bin}}-$tag-windows-$arch"
             $stage = "stage/$name"
             New-Item -ItemType Directory -Force $stage | Out-Null
-            Copy-Item "target/$target/release/{{app}}.exe", "LICENSE-MIT", "LICENSE-APACHE" $stage
-            Copy-Item "target/$target/release/{{app}}-com.exe" "$stage/{{app}}.com"
+            Copy-Item "target/$target/release/{{bin}}.exe", "LICENSE-MIT", "LICENSE-APACHE" $stage
+            Copy-Item "target/$target/release/{{bin}}-com.exe" "$stage/{{bin}}.com"
             Compress-Archive -Path $stage -DestinationPath "dist/$name.zip" -Force
           }
           Get-ChildItem dist
@@ -156,10 +156,10 @@ jobs:
           SHA-256 is in the table at the end of this page:
 
           ```powershell
-          Get-FileHash .\{{app}}-...-windows-x64.zip -Algorithm SHA256 | Format-List Hash
+          Get-FileHash .\{{bin}}-...-windows-x64.zip -Algorithm SHA256 | Format-List Hash
           ```
 
-          The Windows downloads are `.zip` holding `{{app}}.exe`, `{{app}}.com` and the licence files.
+          The Windows downloads are `.zip` holding `{{bin}}.exe`, `{{bin}}.com` and the licence files.
           The macOS and Linux downloads are `.tar.gz`, which keeps the executable bit.
           NOTE
 
@@ -216,14 +216,14 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --locked -p {{app}} --target ${{ matrix.target }}
+        run: cargo build --release --locked -p {{crate}} --target ${{ matrix.target }}
 
       - name: Pack
         run: |
           tag="${{ steps.tag.outputs.name }}"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/{{app}}" .
-          tar -czf "dist/{{app}}-$tag-${{ matrix.name }}.tar.gz" {{app}} LICENSE-MIT LICENSE-APACHE
+          cp "target/${{ matrix.target }}/release/{{bin}}" .
+          tar -czf "dist/{{bin}}-$tag-${{ matrix.name }}.tar.gz" {{bin}} LICENSE-MIT LICENSE-APACHE
           ls -l dist
 
       - name: Attach to the release
