@@ -10,9 +10,9 @@ name: Checklists
 on:
   push:
     branches: [main]
-    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'crates/{{crate}}/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
+    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'scripts/testcheck.toml', 'examples/**', 'crates/*/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
   pull_request:
-    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'crates/{{crate}}/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
+    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'scripts/testcheck.toml', 'examples/**', 'crates/*/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
   # merge-lanes.py starts it after pushing its share, since that push starts
   # no workflows.
   workflow_dispatch:
