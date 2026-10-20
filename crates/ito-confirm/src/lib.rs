@@ -46,7 +46,19 @@ pub struct Question<'a> {
     /// The button the keyboard is on (the app moves it with Tab / Shift+Tab and
     /// answers Enter itself); drawn with an outline in `Style::accent`/`text`.
     pub focus: Option<usize>,
+    /// The button that carries on with what is asked (drawn solid green with
+    /// bold white text, as the primary button of a GitHub form); the others
+    /// keep `Style::button_bg`. `None` draws them all alike.
+    pub primary: Option<usize>,
 }
+
+/// The fill of the [`Question::primary`] button.
+pub const PRIMARY_BG: Color32 = Color32::from_rgb(0x2e, 0xa0, 0x43);
+/// Its text.
+pub const PRIMARY_TEXT: Color32 = Color32::WHITE;
+
+/// How round the buttons' corners are, in points.
+const BUTTON_RADIUS: f32 = 6.0;
 
 /// The widest the box gets, in points.
 pub const MAX_WIDTH: f32 = 600.0;
@@ -98,9 +110,16 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
             }
             if !q.buttons.is_empty() {
                 ui.add_space(10.0);
-                ui.horizontal_wrapped(|ui| {
-                    for (i, label) in q.buttons.iter().enumerate() {
-                        let mut b = egui::Button::new(RichText::new(label).color(style.button_text)).fill(style.button_bg);
+                // At the box's right edge, the last button rightmost; a row too
+                // long for the box wraps to the next line, not past the edge.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true), |ui| {
+                    for (i, label) in q.buttons.iter().enumerate().rev() {
+                        let mut b = if q.primary == Some(i) {
+                            egui::Button::new(RichText::new(label).strong().color(PRIMARY_TEXT)).fill(PRIMARY_BG)
+                        } else {
+                            egui::Button::new(RichText::new(label).color(style.button_text)).fill(style.button_bg)
+                        };
+                        b = b.corner_radius(BUTTON_RADIUS);
                         if q.focus == Some(i) {
                             b = b.stroke(Stroke::new(2.0, style.accent.unwrap_or(style.text)));
                         }
@@ -167,6 +186,7 @@ mod tests {
             buttons: &buttons,
             hint: "Enter / Esc",
             focus: None,
+            primary: Some(0),
         };
         assert_eq!(run(&q, 800.0), None);
         // A narrow window still draws.
@@ -175,6 +195,9 @@ mod tests {
         // A focused button draws too, and an out-of-range focus is harmless.
         assert_eq!(run(&Question { focus: Some(1), ..q }, 800.0), None);
         assert_eq!(run(&Question { focus: Some(9), ..q }, 800.0), None);
+        // So does a primary one, in range or not, narrow or wide.
+        assert_eq!(run(&Question { primary: Some(1), focus: Some(1), ..q }, 120.0), None);
+        assert_eq!(run(&Question { primary: Some(9), ..q }, 800.0), None);
     }
 
     #[test]

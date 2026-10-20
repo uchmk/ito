@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.91.0] - 2026-10-20
+
+### 追加
+
+- `ito-confirm`: ボタンを箱の右端に寄せた（最後のボタンが一番右。箱より長い行は折り返す）。角は 6pt の丸め。`Question::primary: Option<usize>` で、進める側のボタンを緑の塗り（`PRIMARY_BG`）・太字の白（`PRIMARY_TEXT`）で描く（GitHub のコメント欄と同じ）。`None` なら全部ふつうの色。`Style` は変えていない。
+- 使う側がやること: `Question { … }` を `..Default::default()` なしで書いているところは `primary: None` を足す。全アプリで確認のボタンが左寄せから右寄せに変わる。
+
 ## [0.90.0] - 2026-10-19
 
 ### 追加
