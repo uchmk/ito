@@ -138,6 +138,7 @@ impl App {
             unread,
             any_error: ito_notices::any_error(&self.notices),
             centre: true,
+            right_min: 0.0,
             words: ito_titlebar::Words {
                 search: self.table.tr("title.search"),
                 search_key: "Ctrl+Shift+P",

@@ -77,6 +77,11 @@ pub struct Spec<'a> {
     /// False: no box and no bell, and the right slot gets everything the
     /// left leaves (a settings screen that puts its own title there).
     pub centre: bool,
+    /// Width the right slot wants kept (0.0: none), as the slot's own width
+    /// (the margins come on top). The box shrinks first,
+    /// down to the magnifier, so the slot has this much on the right of the
+    /// bell; if that is still too little, the slot folds itself.
+    pub right_min: f32,
     pub words: Words<'a>,
 }
 
@@ -132,7 +137,8 @@ pub fn show(ui: &mut Ui, spec: &Spec<'_>, left: impl FnOnce(&mut Ui, Rect) -> f3
     // the app puts at the right: as wide as there is room for on both
     // sides of the middle, then only the magnifier.
     let middle = whole.center().x;
-    let half = (middle - left_end - MARGIN).min(rect.right() - MARGIN - middle);
+    let keep = if spec.right_min > 0.0 { spec.right_min + MARGIN } else { 0.0 };
+    let half = (middle - left_end - MARGIN).min(rect.right() - MARGIN - keep - middle);
     let box_w = BOX_MAX_W.min(2.0 * half - BELL_SPAN);
     let compact = box_w < COMPACT_BELOW;
     let w = if compact { 30.0 } else { box_w };
@@ -339,7 +345,7 @@ mod tests {
     }
 
     fn spec(unread: usize, centre: bool) -> Spec<'static> {
-        Spec { own: true, left: 0.0, maximized: false, unread, any_error: false, centre, words: words() }
+        Spec { own: true, left: 0.0, maximized: false, unread, any_error: false, centre, right_min: 0.0, words: words() }
     }
 
     /// One frame of a bar `width` wide; the rects the slots were given.
@@ -375,6 +381,28 @@ mod tests {
         assert!(((box_left + span_right) / 2.0 - 800.0).abs() < 1.0, "box_left {box_left}");
         let right = right.expect("the right slot");
         assert!(right.left() > bell.right() && right.right() < 1600.0 - 3.0 * CAPTION_W);
+    }
+
+    #[test]
+    fn the_box_shrinks_first_to_leave_the_right_slot_its_minimum() {
+        let right_of = |min: f32, width: f32| {
+            let mut s = spec(0, true);
+            s.right_min = min;
+            let (out, _, right) = run(width, &s, 120.0);
+            (out.bell_rect.unwrap(), right.unwrap())
+        };
+        // Wide bar, nothing asked: the box is at its widest.
+        let (bell0, slot0) = right_of(0.0, 1700.0);
+        assert!(slot0.width() > 0.0);
+        // The same bar with 500 asked for: the slot has at least that, and the box got narrower.
+        let (bell, slot) = right_of(500.0, 1700.0);
+        assert!(slot.width() >= 500.0 - 0.5, "slot {}", slot.width());
+        assert!(bell.left() < bell0.left(), "the box did not shrink");
+        // Too little room for the minimum: the box is the magnifier, and the slot gets what is left.
+        let (bell, slot) = right_of(500.0, 720.0);
+        assert!(bell.left() - GAP - 30.0 >= 120.0 + MARGIN - 0.5);
+        assert!(slot.right() <= 720.0 - 3.0 * CAPTION_W - MARGIN + 0.5);
+        let _ = bell;
     }
 
     #[test]
