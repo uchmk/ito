@@ -1,0 +1,60 @@
+name: Finding / 所見
+description: Something a lane or a session saw that is not plainly a bug -- to sort / レーンやセッションが見つけたもので、はっきりしたバグではないもの（振り分け待ち）
+labels: [finding]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A lane opens these itself: `gh issue create -l finding,lane:win` (lane:arm from the ARM64 lane,
+        lane:cloud from a cloud session). Something plainly wrong is a `bug`; a choice the owner or the
+        two votes make is a `question`. The dev session turns a finding into a fix, a TODO.md line or nothing,
+        and closes it.
+
+        レーンは自分で立てます（`gh issue create -l finding,lane:win`。ARM64 のレーンは lane:arm、クラウドのセッションは lane:cloud）。
+        はっきり間違っているものは `bug`、持ち主か 2 票で決めることは `question` にします。
+
+  - type: dropdown
+    id: lane
+    attributes:
+      label: From / 出どころ
+      options:
+        - lane:win (x64 machine / x64 の実機)
+        - lane:arm (ARM64 machine / ARM64 の実機)
+        - lane:cloud (a cloud session / クラウドのセッション)
+    validations:
+      required: true
+
+  - type: input
+    id: rev
+    attributes:
+      label: Version or commit / 版かコミット
+      placeholder: v0.94.0 / main@abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: rows
+    attributes:
+      label: TESTING row or key / TESTING の行か鍵
+      placeholder: 2.52 / `Ctrl+Shift+T` / none
+      description: The row of TESTING.md (or the key of TESTING-KEYS.md) it is about, if any. / 関わる行か鍵（あれば）。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Steps, what was seen, what was expected / 手順・見えたもの・期待
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / 証拠
+      description: Key log lines, a picture's path, a report under qa-reports/. / ログの行・画像のパス・報告。
+
+  - type: checkboxes
+    id: retest
+    attributes:
+      label: Re-test / 再テスト
+      options:
+        - label: Fixing it changes behaviour, so its rows need a `retest` issue / 直すと動きが変わるので、その行の `retest` の issue が要る

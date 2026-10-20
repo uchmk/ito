@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.94.0] - 2026-10-20
+
+### 追加
+
+- `templates/app`: 全部のアプリが持っているのに雛形に無かったものを足した。新しいアプリは最初から持つ。
+  - `.github/ISSUE_TEMPLATE/`: `needs-pc.yml`・`finding.yml`・`question.yml`・`retest.yml`（`bug_report.yml` は従来どおり `make-bugform` が作る）。
+  - `.github/workflows/`: `build.yml`（6 ターゲットのリンク、Windows は `.com` の確認つき）・`arm64.yml`・`checklists.yml`・`release.yml`・`release-sums.yml`。`-p {{app}}` と `{{app}}-com.exe` で雛形のクレートに合わせてある。
+  - `scripts/release-sums.sh`（`release-sums.yml` が呼ぶ）。
+- まだ雛形に入れていないもの: `merge-lanes.yml`（`lanes.conf` の `files=` に `merge-lanes.py` などを足すテストのレーンとセット）、`.claude/windows-role.md`（アプリごとの色が濃い）。
+
+### 使う側がやること
+
+- 無し。新しく作るアプリにだけ効く。既存のアプリは自分の版のまま。
+
 ## [0.93.2] - 2026-10-20
 
 ### 変更

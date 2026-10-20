@@ -1,0 +1,40 @@
+name: Checklists
+
+# TESTING.md is the source and TESTING-CHECKS.md is generated from it by
+# `cargo run --example make-testcheck` (ito's ito-testcheck). This job fails
+# when the generated file is out of date or TESTING.md breaks the form the
+# generator reads (a `## N. Title` heading over each table, the row's id first,
+# no id twice). Not skipped for Markdown, unlike CI: a lane's pull request
+# changes TESTING-CHECKS.md alone, and merge-lanes.py waits for this job
+# (`checklists`) before it merges one that ticks rows.
+on:
+  push:
+    branches: [main]
+    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'crates/{{app}}/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
+  pull_request:
+    paths: ['TESTING.md', 'TESTING-CHECKS.md', 'crates/{{app}}/examples/**', '.github/workflows/checklists.yml', 'Cargo.toml', 'Cargo.lock']
+  # merge-lanes.py starts it after pushing its share, since that push starts
+  # no workflows.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  checklists:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: checklists
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo run --locked -p {{app}} --example make-testcheck -- --check

@@ -1,0 +1,116 @@
+name: Build
+
+# A downloadable binary for each of the six targets of a release, on every
+# push to main. Kept apart from ci.yml: this one produces
+# an artifact, that one is the gate, and a failure here should not read as a
+# failing test. clippy type-checks the macOS and Windows code from Linux but
+# never links, and ci.yml and arm64.yml build in debug and never macOS x64;
+# this is where every target is linked as a release links it.
+#
+# The targets and runners are release.yml's: both Windows builds on the x64
+# runner, macOS x64 cross-built on the ARM runner, Linux on native runners.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE-*']
+  # Or from the Actions tab, on any branch, whenever a build is wanted.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Which target broke, and whether the rest still build, is the useful
+      # information.
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-14
+            target: x86_64-apple-darwin
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The jobs sharing a runner image would otherwise share one cache
+          # entry and keep evicting each other's.
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build
+        run: cargo build --release --locked -p {{app}} --target ${{ matrix.target }}
+
+      # The console front a release ships beside {{app}}.exe, as release.yml
+      # checks it: PowerShell waits for it, so the bare forms come back whole.
+      # x64 only: the runner cannot run ARM64. Run straight, {{app}}.exe gets a
+      # pipe for `$v = & {{app}}.exe --version` and closes it without waiting.
+      # The write is let go there, where println! panicked (os error 232):
+      # here the pipe is closed before {{app}}.exe has started writing.
+      - name: Check {{app}}.com
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $dir = "target/${{ matrix.target }}/release"
+          Copy-Item "$dir/{{app}}-com.exe" "$dir/{{app}}.com"
+          $lines = & "$dir/{{app}}.com" env
+          if ($lines.Count -lt 10) { throw "`$v = & {{app}}.com env gave $($lines.Count) line(s)" }
+          $ver = & "$dir/{{app}}.com" --version
+          if (-not ($ver -match '^{{app}} \d')) { throw "& {{app}}.com --version gave: '$ver'" }
+          $p = [System.Diagnostics.Process]::new()
+          $p.StartInfo.FileName = (Resolve-Path "$dir/{{app}}.exe").Path
+          $p.StartInfo.Arguments = '--version'
+          $p.StartInfo.UseShellExecute = $false
+          $p.StartInfo.RedirectStandardOutput = $true
+          [void]$p.Start()
+          $p.StandardOutput.Close()
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) { throw "{{app}}.exe --version into a closed pipe exited $($p.ExitCode)" }
+          "{{app}}.com: $($lines.Count) lines, $ver"
+
+      # The files a release packs: the binary (and on Windows {{app}}.com
+      # beside it) and the two licences.
+      - name: Gather the files
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/{{app}}${{ runner.os == 'Windows' && '.exe' || '' }} dist/
+          if [ "${{ runner.os }}" = Windows ]; then cp target/${{ matrix.target }}/release/{{app}}-com.exe dist/{{app}}.com; fi
+          cp LICENSE-MIT LICENSE-APACHE dist/
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          # The commit is in the name, so two downloads are never confused.
+          name: {{app}}-${{ matrix.name }}-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
