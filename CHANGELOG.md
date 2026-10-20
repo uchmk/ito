@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.93.1] - 2026-10-20
+
+### 変更
+
+- `docs/common-spec.md`: 秘密の鍵のファイル（`app_dir` の中。拡張子なし・TOML でなくてよい。`bundle` に入れない）を、設定・状態の形式の規則の例外として書いた。コードの変更は無し。
+
 ## [0.93.0] - 2026-10-20
 
 ### 変更
