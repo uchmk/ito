@@ -14,6 +14,15 @@
   理由があって外すときだけ `scripts/ito-first.allow` に `<crate> <理由>` を書く（理由のない行は効かない）。
 - 全部の ito のクレートは 1 つの `rev` にそろえる。上げたら `scripts/lanes.sh sync`。
 
+## 状態のファイルは TOML
+
+アプリが機械的に書いて読み戻すもの（窓の場所・履歴・最近開いたもの・セッション）は `ito_common::state_dir("{{app}}")` に **TOML** で置く
+（`window.toml`、`state.toml`、`recent.toml` …）。`.txt`・`.json`・拡張子なしのバイナリで持たない。
+
+- 一覧は表の中の配列（`recent = ["…"]`、`[[entries]]`）。読むのは `ito_common::kept::read`、書くのは `kept::Writer`（別スレッド・最新が勝つ・`--keys` では書かない）。UI スレッドで書かない。
+- ログは `.log`。キャッシュ・画像・WebView のデータなど、読み戻さないものは対象外。秘密の鍵は `app_dir` の中で、TOML でなくてよい。
+- 詳しくは ito の `docs/common-spec.md` の「設定の形式は TOML」。
+
 ## 作業ルール
 
 - 返答は日本語。コード・コメント・コミットメッセージは英語。

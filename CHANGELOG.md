@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.93.2] - 2026-10-20
+
+### 変更
+
+- `templates/app/CLAUDE.md`: 新しいアプリの既定に「状態のファイルは TOML」（`kept::read` / `kept::Writer`、ログは `.log`、例外）を足した。雛形のコードの変更は無し（窓の場所は元から `window.toml`）。
+
 ## [0.93.1] - 2026-10-20
 
 ### 変更
