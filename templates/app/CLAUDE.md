@@ -30,6 +30,7 @@
 - 改行は LF。
 - コミットと push は、`scripts/verify.sh` が `ALL OK` のときに、頼まれなくてもしてよい（`main` へ直接。force push・履歴の書き換えはしない）。自分の変更だけを `git add` する。
 - 整形は `cargo fmt`（ito と同じ `rustfmt.toml`）。clippy は `-D warnings`。
+  全体を整形しただけのコミットは `.git-blame-ignore-revs` に書く（`git config blame.ignoreRevsFile .git-blame-ignore-revs`）。
 - ビルドは R:（RAM ディスク）。新しいクローンでは `pwsh -NoProfile -File %LOCALAPPDATA%\uchmk-build\cargo-ramdisk.ps1` を先に回す。
 - やることは [TODO.md](TODO.md)。版の繰り上げと CHANGELOG.md（日本語、日付は JST）はセットでコミットする。
 - 共通の仕様（common.toml・設定の画面・テーマ・時計）は ito の `docs/common-spec.md`。

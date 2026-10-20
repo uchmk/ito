@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.95.2] - 2026-10-20
+
+### 追加
+
+- `templates/app/.git-blame-ignore-revs`（空の雛形。全体を `cargo fmt` しただけのコミットを `git blame` から外す。kura・tsumugi・minato が持っていた）と、雛形の `CLAUDE.md` の一行。
+
 ## [0.95.1] - 2026-10-20
 
 ### 変更

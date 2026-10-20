@@ -1,0 +1,2 @@
+# Commits that only reformatted or renamed, one hash per line (with a comment above).
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs` makes `git blame` skip them.
