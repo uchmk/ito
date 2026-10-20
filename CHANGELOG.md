@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.93.0] - 2026-10-20
+
+### 変更
+
+- `docs/common-spec.md`: **状態のファイルも TOML** にする規則を足した（これまで状態の形式は「問わない」だった）。
+  - `.txt`・`.json`・拡張子なしのバイナリで持たず、一覧は表の中の配列（`recent = [...]`、`[[entries]]`）にする。読み書きは `kept::read` / `kept::Writer`。
+  - 古い形は起動時に 1 度だけ TOML に直す（`kept::copy_old` か `move_old`。古いファイルは消さない）。
+  - ログは `.log` のまま。キャッシュ・WebView のデータ・画像・実行ファイルの写しなど、状態でないものは対象外。
+- コードの変更は無い。使う側がやること: 状態に `.txt`・`.json`・バイナリを持つアプリは、TOML に移す（新しい API は要らない）。
+
 ## [0.92.0] - 2026-10-20
 
 ### 追加
