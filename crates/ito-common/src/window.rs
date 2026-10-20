@@ -387,6 +387,20 @@ impl Saved {
         Saved { dir, place }
     }
 
+    /// [`load`](Self::load) for an app whose `window.toml` used to be in
+    /// `old` (its settings folder) and is now in `dir` (its state folder):
+    /// the file there is moved to `dir` first, when `dir` has none, so the
+    /// window opens where it was left. A file that cannot be moved is read
+    /// where it is, once.
+    pub fn load_moved(dir: Option<PathBuf>, old: Option<&Path>) -> Saved {
+        if let (Some(dir), Some(old)) = (dir.as_deref(), old) {
+            if dir != old {
+                let _ = crate::move_old(&path(old), &path(dir));
+            }
+        }
+        Self::load(dir)
+    }
+
     /// The place the window is made at, if there is one.
     pub fn place(&self) -> Option<Window> {
         self.place
@@ -567,6 +581,21 @@ mod tests {
 
     fn win(x: f32, y: f32, w: f32, h: f32) -> Window {
         Window { x, y, w, h, maximized: false, scale: 0.0, zoom: 1.0 }
+    }
+
+    #[test]
+    fn a_place_moves_from_the_settings_folder_to_the_state_folder() {
+        let base = std::env::temp_dir().join(format!("ito-window-moved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (old, new) = (base.join("config"), base.join("state"));
+        write(&old, &win(10.0, 20.0, 900.0, 600.0)).unwrap();
+        let s = Saved::load_moved(Some(new.clone()), Some(&old));
+        assert_eq!(s.place.map(|p| (p.x, p.w)), Some((10.0, 900.0)));
+        assert!(path(&new).exists() && !path(&old).exists());
+        // The state folder wins once it has one.
+        write(&old, &win(1.0, 2.0, 300.0, 300.0)).unwrap();
+        let s = Saved::load_moved(Some(new), Some(&old));
+        assert_eq!(s.place.map(|p| p.x), Some(10.0));
     }
 
     #[test]

@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.92.0] - 2026-10-20
+
+### 追加
+
+- `ito-common::kept`: アプリが状態のフォルダー（`state_dir`）に残すファイルの読み書き。tsumugi・yagura・minato・michi が手で書いていた `state.toml` の型を 1 か所に。
+  - `read::<T>(path)`: TOML を読む。無い・壊れていれば `None`。
+  - `Writer::new(path, on)`: 1 ファイルの書き手。`save(text)` / `save_toml(&v)` は別スレッドで原子的に書き（`create_dir_all` 込み）、速く続けて呼んでも最後の呼び出しが残る（遅れて着いた古い書き込みは捨てる）。`save_now` はスレッドなしで、終了時用。`on == false`（`--keys` の台本など）なら何も書かない。
+  - `copy_old(old, new)`: 旧い置き場から 1 回だけ写す（`new` が無く `old` がファイルのとき。`old` は残す。動かすなら `move_old`）。
+- `ito-common::window::Saved::load_moved(dir, old)`: `window.toml` を設定のフォルダー（`old`）から状態のフォルダー（`dir`）へ動かしてから読む。`dir` に既にあればそちらが勝つ。
+
+### 使う側がやること
+
+- 任意。窓の場所を状態のフォルダーに移すアプリは `Saved::load(Some(app_dir))` を `Saved::load_moved(Some(state_dir), Some(&app_dir))` に替える。`Tracker` は渡した `dir` に書くので、変更は要らない。
+- 手書きの「別スレッドで書く＋番号で最新だけ残す」は `kept::Writer` に置き換えられる。
+
 ## [0.91.0] - 2026-10-20
 
 ### 追加

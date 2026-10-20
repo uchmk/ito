@@ -19,6 +19,7 @@ pub mod bundle;
 #[cfg(feature = "dirwatch")]
 pub mod dirwatch;
 pub mod fonts;
+pub mod kept;
 mod os_theme;
 pub mod report;
 pub mod runinfo;
