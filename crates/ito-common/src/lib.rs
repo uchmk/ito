@@ -69,7 +69,14 @@ fn xdg(var: &str) -> Option<PathBuf> {
 /// The folder of `app`'s own settings (`config.toml`, `keymap.toml` …):
 /// `<APP>_CONFIG_HOME` when set, else `<uchmk>/<app>`.
 pub fn app_dir(app: &str) -> Option<PathBuf> {
-    env_dir(&format!("{}_CONFIG_HOME", app.to_ascii_uppercase())).or_else(|| Some(base_dir()?.join(app)))
+    Some(app_dir_in(&base_dir()?, app))
+}
+
+/// [`app_dir`] under a given `base` (the uchmk folder an app was started
+/// with, or a temporary one in a test) instead of [`base_dir`]:
+/// `<APP>_CONFIG_HOME` when set, else `<base>/<app>`.
+pub fn app_dir_in(base: &Path, app: &str) -> PathBuf {
+    env_dir(&format!("{}_CONFIG_HOME", app.to_ascii_uppercase())).unwrap_or_else(|| base.join(app))
 }
 
 /// The folder of what `app` keeps between runs (sessions, history, the
@@ -926,6 +933,7 @@ zzz = 1
     fn the_app_folders_follow_their_variables() {
         std::env::set_var("ITOTESTAPP_STATE_HOME", "/s/t");
         std::env::set_var("ITOTESTAPP_CONFIG_HOME", "");
+        assert_eq!(app_dir_in(Path::new("/b"), "itotestapp"), Path::new("/b").join("itotestapp"));
         assert_eq!(state_dir("itotestapp"), Some(PathBuf::from("/s/t")));
         // Empty is the same as unset: the folder under uchmk's.
         if let Some(d) = app_dir("itotestapp") {

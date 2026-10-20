@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.96.0] - 2026-10-20
+
+### 追加
+
+- `ito_common::app_dir_in(base, app)`: `app_dir` の base を渡せる形（`<APP>_CONFIG_HOME` があればそれ、なければ `<base>/<app>`）。テストで一時フォルダを base にしたいアプリ向け。`app_dir(app)` はこれを呼ぶだけになった（動きは同じ）。uchmk/ito#32。
+
 ## [0.95.2] - 2026-10-20
 
 ### 追加
