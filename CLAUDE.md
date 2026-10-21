@@ -20,6 +20,8 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON）） | yagura（tsumugi も載せ替える） |
 | `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
+| `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は ``・`
+` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
 | `ito-select` | 描画で並べた文字（ガラスのレイアウト）をマウスの範囲選択でコピーする（プレビュー・詳細欄のように、部品でなく painter で描く窓向け） | kura、minato |
 | `ito-browser` | ペインの横のウェブのページ（Windows・macOS は OS の WebView を窓の子に、Linux はシステムのブラウザへ）、egui のアドレスの欄、打った行の読み方 | tsumugi・minato |

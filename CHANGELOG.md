@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.98.0] - 2026-10-21
+
+### 追加
+
+- 新しいクレート `ito-proc`（uchmk/ito#31、michi の `net::run` の汎用の部分）。止められる子プロセス。
+  - `run(cmd, &stop, &mut |line| keep) -> io::Result<Outcome>`: stdout/stderr をスレッドで読み、stderr は `` でも `
+` でも 1 行に切って `on_line` に渡す（git の進み具合は `` で上書きされる）。`on_line` が `true` を返した行だけ `Done::lines` に残る。stdout は `Done::stdout` に全部。
+  - `stop` が立つと、子と、子が起こしたもの全部（ssh・認証ヘルパー）を殺して `Outcome::Stopped`（失敗とは別）を返す。Unix は子を自分のプロセスグループに入れて `kill -KILL -<pgid>`、Windows は `taskkill /T /F`（窓なし）。C のライブラリも新しい依存も無い。
+  - 子が終わったあとにヘルパーがパイプを握っていても、読むスレッドは 1 秒で打ち切る（呼ぶ側を待たせない）。
+  - `own_group`・`kill_tree` も公開（自分で spawn するアプリ向け）。呼ぶと UI スレッドを塞ぐので、ワーカーから呼ぶ。
+- `ito-confirm` のテスト: 1〜6 個のボタンがどの幅でもボタンとして描かれる。
+
+### 使う側がやること
+
+- michi: `net.rs` の `kill_tree`・`own_group`・`run` を `ito_proc::run` に載せ替える（`Progress::parse` が `Some` の行は `false`、そうでなければ `true` を返す）。
+- minato: `gh` の呼び出しに止める手が要るなら使える。
+
 ## [0.97.0] - 2026-10-21
 
 ### 追加

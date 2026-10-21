@@ -1,0 +1,8 @@
+[package]
+name = "ito-proc"
+description = "Run a child process that can be stopped: its output read on threads, stderr split into lines as they come, the whole process tree killed on stop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true

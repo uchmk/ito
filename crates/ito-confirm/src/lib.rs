@@ -206,4 +206,30 @@ mod tests {
         assert_eq!(width(300.0), 260.0);
         assert_eq!(width(50.0), 160.0);
     }
+    /// The number of button-sized rounded rects in the frame (the fill fades in, so it is not compared).
+    fn filled(q: &Question, w: f32) -> usize {
+        let ctx = Context::default();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(w, 600.0))), ..Default::default() };
+        let st = style();
+        let mut n = 0;
+        for _ in 0..2 {
+            let mut o = ctx.run_ui(input.clone(), |ui| {
+                show(ui.ctx(), q, &st);
+            });
+            o.textures_delta.clear();
+            n = o.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill != Color32::TRANSPARENT && r.rect.height() < 70.0 && r.corner_radius.nw == 6)).count();
+        }
+        n
+    }
+
+    #[test]
+    fn every_button_is_drawn_as_one_however_many() {
+        for count in 1..=6 {
+            let buttons: Vec<String> = (0..count).map(|i| format!("A fairly long choice {i}  {i}")).collect();
+            let q = Question { buttons: &buttons, ..Default::default() };
+            for w in [800.0, 400.0] {
+                assert_eq!(filled(&q, w), count, "{count} buttons in {w}");
+            }
+        }
+    }
 }
