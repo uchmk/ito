@@ -3,13 +3,37 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.99.0] - 2026-10-21
+
+### 追加
+
+- `ito-confirm`: 3 つ以上の選択肢を、横のボタンではなくカードで縦に並べる。
+  - `Card`（`title` 動詞の見出し・`en` 小さく添える別名・`description` 1 行の説明・`result` 数字で言う結果・`undo`・`key` キーの札・`danger`）と、`Question::cards`。
+  - `Undo::{Unsaid, Yes(方法), No(失うもの)}`: 戻せるかどうかの札。`No` のカードは赤い。
+  - `Question::recommended`（おすすめのカードを緑に）と `recommended_label`（見出しの横の「おすすめ」）。赤と緑は同じカードに載らない（戻せないものは「おすすめ」にならない）。
+  - `Question::danger`: 主ボタンを赤にする（取り返しのつかない 2 択）。
+  - `Question::keys`: ボタンの右のキーの札（`Ctrl+Enter`・`Esc`）。
+  - 選択肢の番号は、カードが先、ボタンがその後ろ。`focus`・`primary`・`recommended` と、押されて返る番号は同じ数え方。
+  - カードがあるときのボタンは、塗りなしで枠線だけ（やめるなど静かなもの）。カードが無いときの見た目は今までどおり。
+  - 色の定数 `DANGER_BG`・`DANGER_TEXT`・`OK_TEXT`。
+- テスト: カードがどの幅でも全部描かれる。カードを押すと、その番号が返る。
+
+### 修正
+
+- 0.98.0 の CHANGELOG と `CLAUDE.md` の `ito-proc` の行で、`\r` と `\n` が本物の改行に化けていたのを直した。
+
+### 使う側がやること
+
+- `Question { … }` を欄を全部書いて組み立てているところは、`..Default::default()` を足す（欄が増えた: `cards`・`keys`・`danger`・`recommended`・`recommended_label`）。
+- カードにするには、`cards` に `Card` を並べ、`buttons` にはやめるだけを入れる。`Card` の文言（`result` の数字・`undo` の方法）は呼ぶ側が作る。
+- `recommended` を使うなら `recommended_label` に「おすすめ」を渡す（文言は ito に持たない）。
+
 ## [0.98.0] - 2026-10-21
 
 ### 追加
 
 - 新しいクレート `ito-proc`（uchmk/ito#31、michi の `net::run` の汎用の部分）。止められる子プロセス。
-  - `run(cmd, &stop, &mut |line| keep) -> io::Result<Outcome>`: stdout/stderr をスレッドで読み、stderr は `` でも `
-` でも 1 行に切って `on_line` に渡す（git の進み具合は `` で上書きされる）。`on_line` が `true` を返した行だけ `Done::lines` に残る。stdout は `Done::stdout` に全部。
+  - `run(cmd, &stop, &mut |line| keep) -> io::Result<Outcome>`: stdout/stderr をスレッドで読み、stderr は `\r` でも `\n` でも 1 行に切って `on_line` に渡す（git の進み具合は `\r` で上書きされる）。`on_line` が `true` を返した行だけ `Done::lines` に残る。stdout は `Done::stdout` に全部。
   - `stop` が立つと、子と、子が起こしたもの全部（ssh・認証ヘルパー）を殺して `Outcome::Stopped`（失敗とは別）を返す。Unix は子を自分のプロセスグループに入れて `kill -KILL -<pgid>`、Windows は `taskkill /T /F`（窓なし）。C のライブラリも新しい依存も無い。
   - 子が終わったあとにヘルパーがパイプを握っていても、読むスレッドは 1 秒で打ち切る（呼ぶ側を待たせない）。
   - `own_group`・`kill_tree` も公開（自分で spawn するアプリ向け）。呼ぶと UI スレッドを塞ぐので、ワーカーから呼ぶ。

@@ -20,8 +20,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON）） | yagura（tsumugi も載せ替える） |
 | `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
-| `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は ``・`
-` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
+| `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は `\r`・`\n` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
 | `ito-select` | 描画で並べた文字（ガラスのレイアウト）をマウスの範囲選択でコピーする（プレビュー・詳細欄のように、部品でなく painter で描く窓向け） | kura、minato |
 | `ito-browser` | ペインの横のウェブのページ（Windows・macOS は OS の WebView を窓の子に、Linux はシステムのブラウザへ）、egui のアドレスの欄、打った行の読み方 | tsumugi・minato |
@@ -29,7 +28,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-winres` | `.exe` のアイコンと版の情報の `.res`（rc.exe なしで書く）と、`build.rs` から呼ぶ `emit(name, sides, rgba)`。MSVC のターゲットだけ、クロスビルドでも付く |
 | `ito-graph` | コミットの樹形図を行ごとに並べる（レーン・辺・ブランチの色・曲線）と、egui の描画（機能 `egui`）。Git は知らない | michi |
 | `ito-bugreport` | 不具合の報告（アプリの issue form に、版・OS・アプリが知っていることを埋めた URL。F12 から開く。全アプリで同じ行・同じ順） | kura（yagura・tsumugi は載せる予定） |
-| `ito-confirm` | やる前の確認の重ね表示（行・本文・注・ボタン。押されたボタンを返す） | yagura、kura |
+| `ito-confirm` | やる前の確認の重ね表示（行・本文・注・ボタン。押された番号を返す。3 つ以上はカード: 動詞の見出し・結果の数字・戻せるか・キーの札、おすすめは緑・戻せないものは赤） | yagura、kura |
 | `ito-help` | キーのヘルプ（`ito-keymap` の一覧を見出しとキーと説明の行にして、渡された矩形に描く） | yagura、kura |
 | `ito-console` | Windows の窓のアプリの前に置くコンソールの前段（`<app>.exe` の横の `<app>.com`、`front`。文字で答えるコマンドは待って渡し、ほかは窓が開いたら戻る）と、答えを書く `out`・`err`（誰も読まないパイプでも panic せずに捨てる） | kura、yagura、tsumugi、minato、michi |
 | `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
