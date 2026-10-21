@@ -27,6 +27,8 @@ use ito_keys::{self as keys, Code, Key};
 /// The pause after each step, so the frame that follows a key has drawn
 /// before the next key goes in.
 const GAP: Duration = Duration::from_millis(60);
+/// After a resize, before the next step.
+const SETTLE: Duration = Duration::from_millis(400);
 /// Between the frames of a click or a drag.
 const FRAME: Duration = Duration::from_millis(20);
 
@@ -116,6 +118,18 @@ pub enum Step {
         key: egui::Key,
         mods: u8,
     },
+    /// `<Size:480x600>`: the window's inner size in points, for the narrow-window
+    /// rows that no pointer step can reach (the harness had no way to resize).
+    Size {
+        w: u16,
+        h: u16,
+    },
+    /// `<Theme:name>`: switch to that theme. How is the app's to say (it may write
+    /// `common.toml` and let its watcher reload, or set its own state), so the
+    /// run hands the name back ([`Do::Theme`], [`Press::Theme`]).
+    Theme(String),
+    /// `<Lang:ja>`: likewise for the language (`en`, `ja`, ...).
+    Lang(String),
 }
 
 /// `Step::Wheel`'s modifiers: these bits.
@@ -159,6 +173,12 @@ pub enum Press {
         from: At,
         to: At,
     },
+    Size {
+        w: u16,
+        h: u16,
+    },
+    Theme(String),
+    Lang(String),
 }
 
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
@@ -178,6 +198,9 @@ pub fn press(step: &Step) -> Option<Press> {
             let press = |pressed| egui::Event::Key { key: *key, physical_key: None, pressed, repeat: false, modifiers };
             Some(Press::Events(vec![press(true), press(false)]))
         }
+        Step::Size { w, h } => Some(Press::Size { w: *w, h: *h }),
+        Step::Theme(name) => Some(Press::Theme(name.clone())),
+        Step::Lang(code) => Some(Press::Lang(code.clone())),
         Step::Wait(d) => Some(Press::Wait(*d)),
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
@@ -205,6 +228,9 @@ pub fn label(step: &Step) -> String {
         }
         Step::Drag { from, to } => format!("<Drag:{}-{}>", at_text(*from), at_text(*to)),
         Step::Raw { key, mods } => format!("<Key:{}{}>", held_text(*mods), key.name()),
+        Step::Size { w, h } => format!("<Size:{w}x{h}>"),
+        Step::Theme(name) => format!("<Theme:{name}>"),
+        Step::Lang(code) => format!("<Lang:{code}>"),
     }
 }
 
@@ -460,6 +486,33 @@ fn paste_text_escape(t: &str) -> String {
         .collect()
 }
 
+/// `<Size:480x600>`, `<Theme:name>` and `<Lang:ja>`: the window and settings steps. `None` for a token that is not one.
+fn setting(token: &str) -> Option<Result<Step, String>> {
+    let inner = token.strip_prefix('<')?.strip_suffix('>')?;
+    let (name, arg) = inner.split_once(':')?;
+    // A theme or language is a word the app looks up; keep it a plain one.
+    let word = |what: &str| {
+        let ok = !arg.is_empty() && arg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if ok {
+            Ok(arg.to_owned())
+        } else {
+            Err(format!("`{token}` is not a {what}; write it as letters, digits, - _ and ., as `<{name}:x>`"))
+        }
+    };
+    Some(match name {
+        "Size" => arg
+            .split_once('x')
+            .and_then(|(w, h)| {
+                let side = |v: &str| v.parse::<u16>().ok().filter(|v| (100..=10_000).contains(v));
+                Some(Step::Size { w: side(w)?, h: side(h)? })
+            })
+            .ok_or_else(|| format!("`{token}` is not a size; write the inner size in points from 100 to 10000, as `<Size:480x600>`")),
+        "Theme" => word("theme").map(Step::Theme),
+        "Lang" => word("language").map(Step::Lang),
+        _ => return None,
+    })
+}
+
 /// The name in `<Shot:name>` or `<Shot:name@suffix>`; the suffix stays on
 /// the name, which the app splits off where the picture is saved.
 fn shot_name(token: &str, suffixes: &[&str]) -> Result<String, String> {
@@ -533,6 +586,7 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 Step::Read { tag: tag.to_owned(), name: named(token, tag, noun)? }
             }
             None if pointer(token).is_some() => pointer(token).unwrap_or_else(|| unreachable!())?,
+            None if setting(token).is_some() => setting(token).unwrap_or_else(|| unreachable!())?,
             None if raw(token).is_some() => raw(token).unwrap_or_else(|| unreachable!())?,
             None => Step::Key(Key::parse(token).ok_or_else(|| format!("`{token}` is not a key"))?),
         };
@@ -645,6 +699,10 @@ pub enum Do {
         name: String,
     },
     Quit,
+    /// `<Theme:name>`: switch to it (the app decides how).
+    Theme(String),
+    /// `<Lang:code>`: switch to it (the app decides how).
+    Lang(String),
     /// The last step has gone in.
     Done,
 }
@@ -854,6 +912,13 @@ impl Runner {
                 self.finished = true;
                 return Some(Do::Quit);
             }
+            Press::Size { w, h } => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
+                // The window lays out again at the new size before the next step.
+                self.next = now + SETTLE;
+            }
+            Press::Theme(name) => return Some(Do::Theme(name)),
+            Press::Lang(code) => return Some(Do::Lang(code)),
             Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
             Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
             p @ (Press::Click { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
@@ -983,6 +1048,20 @@ mod tests {
         for bad in ["d<Now>", "<Now><Wait:100>x", "<Now><Now>x"] {
             let err = parse(bad).unwrap_err();
             assert!(err.contains("<Now>"), "{bad}: {err}");
+        }
+    }
+
+    /// `<Size:WxH>`, `<Theme:x>` and `<Lang:x>` parse, print back as written, and refuse nonsense.
+    #[test]
+    fn size_theme_and_lang_are_steps() {
+        let got = parse("<Size:480x600><Theme:light><Lang:ja>").unwrap();
+        assert_eq!(got, [Step::Size { w: 480, h: 600 }, Step::Theme("light".into()), Step::Lang("ja".into())]);
+        let labels: Vec<String> = got.iter().map(label).collect();
+        assert_eq!(labels, ["<Size:480x600>", "<Theme:light>", "<Lang:ja>"]);
+        assert_eq!(press(&got[0]), Some(Press::Size { w: 480, h: 600 }));
+        assert_eq!(press(&got[1]), Some(Press::Theme("light".into())));
+        for bad in ["<Size:480>", "<Size:50x600>", "<Size:480x99999>", "<Size:axb>", "<Theme:>", "<Theme:a b>", "<Lang:ja/en>"] {
+            assert!(parse(bad).is_err(), "{bad}");
         }
     }
 

@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.100.0] - 2026-10-22
+
+### 追加
+
+- `ito-keyscript`: 台本に 3 つの語を足した。窓の大きさと設定を、台本の中で変えられる。
+  - `<Size:480x600>`: 窓の内側の大きさ（点、100〜10000）。狭い窓の確認に使う。`Runner` は `InnerSize` を送り、作り直しを待ってから次へ進む。
+  - `<Theme:名前>`・`<Lang:ja>`: テーマと言語を切り替える。やり方はアプリのもの（`common.toml` を書いて見張りに任せる、自分の状態を変える、など）なので、`Runner` は名前を返すだけ（`Do::Theme`・`Do::Lang`）。
+  - `Step::{Size, Theme, Lang}`、`Press::{Size, Theme, Lang}`、`Do::{Theme, Lang}`。名前は英数字と `- _ .` だけ。
+- テスト: 3 つの語の解析・表記・不正な書き方の拒否。
+
+### 使う側がやること
+
+- `Step`・`Press`・`Do` を `match` で全部並べているところは、新しい枠（`Size`・`Theme`・`Lang`）を足す。
+- `Runner` を使うアプリ: `Do::Theme(name)`・`Do::Lang(code)` を受けて、切り替えを行う（`ito_common` で `common.toml` を書くのが一番手軽）。`Size` は `Runner` が自分で行う。
+- 自前のフレームのループを持つアプリ: `Press::Size` には `ViewportCommand::InnerSize` を送って少し待つ。`Press::Theme`・`Press::Lang` は上と同じ。
+
 ## [0.99.0] - 2026-10-21
 
 ### 追加
