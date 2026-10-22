@@ -2,9 +2,10 @@
 //! environment variables. The values are the app's own (a terminal's, a file
 //! manager's), so the card returns [`ShellChange`]s and the app writes them.
 
+use egui::RichText;
 use std::collections::BTreeMap;
 
-use crate::{button, field, keyed_row, section, sep, z, Drafts, Look};
+use crate::{button, field, focus_ring, keyed_row, section, sep, take_keys, z, Drafts, Look};
 
 /// The card's words, in one language.
 pub struct ShellWords {
@@ -174,21 +175,41 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
             if let Some(k) = gone {
                 vars.remove(k);
             }
+            let bad = vars.iter().any(|(n, _)| bad_name(n.trim()));
             ui.horizontal(|ui| {
-                if ui.small_button(w.add).clicked() {
+                if button(ui, l, w.add) {
                     vars.push((String::new(), String::new()));
                 }
-                let bad = vars.iter().any(|(n, _)| bad_name(n.trim()));
                 if bad {
                     ui.label(egui::RichText::new(w.bad_name).size(z(ui, 12.0)).color(l.c.err));
                 }
-                if ui.add_enabled(!bad, egui::Button::new(w.save)).clicked() {
-                    out.extend(env_changes(now.env, vars));
-                    done = true;
-                }
-                if ui.button(w.cancel).clicked() {
-                    done = true;
-                }
+                // Cancel then Save at the right, in the order they read and Tab goes.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let key = ui.unique_id().with("env-foot");
+                    let width = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(ui.available_width());
+                    let height = ui.available_height();
+                    let shown =
+                        ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            if button(ui, l, w.cancel) {
+                                done = true;
+                            }
+                            let b = egui::Button::new(RichText::new(w.save).size(z(ui, 12.5)))
+                                .corner_radius(7.0)
+                                .min_size(egui::vec2(0.0, z(ui, 30.0)));
+                            let r = ui.add_enabled(!bad, b);
+                            take_keys(ui, &r);
+                            focus_ring(ui, &r);
+                            if r.clicked() {
+                                out.extend(env_changes(now.env, vars));
+                                done = true;
+                            }
+                        });
+                    let used = shown.response.rect.width();
+                    if (used - width).abs() > 0.5 {
+                        ui.data_mut(|d| d.insert_temp(key, used));
+                        ui.ctx().request_repaint();
+                    }
+                });
             });
             ui.add_space(8.0);
         }
