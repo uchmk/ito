@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.101.2] - 2026-10-23
+
+### 追加
+
+- ワークフローの雛形 `release.yml`: アプリに `scripts/release-notes.md` があれば、その中身をリリースノートの末尾（CHANGELOG へのリンクの前）に足す。アプリ固有の注意書きを雛形の外に置くため。
+  - 使う側がやること: `scripts/lanes.sh sync` で `release.yml` が変わる。注意書きを残したいアプリ（yagura の「一部の値は通常のユーザーの権限では読めない」の一文など）は `scripts/release-notes.md` に書く。無いアプリは今までどおり。
+
 ## [0.101.1] - 2026-10-23
 
 ### 修正
