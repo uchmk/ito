@@ -797,6 +797,8 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(steps: Vec<Step>, done: Option<PathBuf>) -> Self {
+        // A script may switch the theme or language, which writes `common.toml`.
+        ito_common::scripted_run();
         let dir = done
             .as_ref()
             .and_then(|d| d.parent().map(PathBuf::from))

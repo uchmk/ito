@@ -63,7 +63,7 @@ tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uc
 
 | 変数 | 意味 |
 | --- | --- |
-| `UCHMK_CONFIG_DIR` | `<config>/uchmk` の代わりのフォルダ（common.toml・themes・各アプリのフォルダ） |
+| `UCHMK_CONFIG_DIR` | `<config>/uchmk` の代わりのフォルダ（common.toml・themes・各アプリのフォルダ）。`--keys` の台本が動いている間は、これが無いと本物のフォルダーへの書き込みを断る（`ito_common::scripted_run`、`ito_keyscript::Runner::new` が呼ぶ） |
 | `<APP>_CONFIG_HOME` | そのアプリの設定のフォルダ（`app_dir` が読む）。例 `KURA_CONFIG_HOME`・`TSUMUGI_CONFIG_HOME`・`YAGURA_CONFIG_HOME` |
 | `<APP>_STATE_HOME` | そのアプリの状態のフォルダ（`state_dir` が読む） |
 | `<APP>_KEYS_DONE` | `--keys` の終わりに状態を書くファイル（下の「コマンドライン」） |

@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.101.0] - 2026-10-22
+
+### 追加
+
+- `ito-keyscript`: `Runner::new` が `ito_common::scripted_run()` を呼ぶ（`ito-common` に依存する）。
+- `ito-common`: `scripted_run()`。`--keys` の台本で起動したアプリが 1 回呼ぶと、`write_atomic`（設定の書き込みの唯一の口）が、`UCHMK_CONFIG_DIR` が無いまま本物の `uchmk` フォルダーへ書くのを断る（`Err`）。`<Theme:…>`・`<Lang:…>` が `common.toml` を書くので、付け忘れた試験が持ち主の設定を書き換えたため（michi 0.106.9 の試験）。
+  - `UCHMK_CONFIG_DIR` が付いていれば何も変わらない。台本でないときも変わらない。`<APP>_CONFIG_HOME` で外へ出したアプリのフォルダーは対象外。
+- テスト: 守る条件（台本・`UCHMK_CONFIG_DIR`・フォルダーの内外）。
+
+### 使う側がやること
+
+- `ito_keyscript::Runner` を使うアプリは何もしなくてよい（`Runner::new` が `scripted_run()` を呼ぶ）。`Press` で自前のループを回すアプリは、台本を読んだ直後、設定を読み書きする前に `ito_common::scripted_run()` を呼ぶ。
+- 台本の試験は必ず `UCHMK_CONFIG_DIR` を捨てるフォルダーに向けて回す（付け忘れると、書き込みが断られて `<Theme:…>` が効かない）。
+
 ## [0.100.0] - 2026-10-22
 
 ### 追加

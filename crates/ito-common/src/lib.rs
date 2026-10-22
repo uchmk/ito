@@ -851,12 +851,40 @@ pub fn read_or_empty(path: &Path) -> Result<String, String> {
     }
 }
 
+/// Set once a `--keys` script is running (see [`scripted_run`]).
+static SCRIPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Call once when the app starts with a `--keys` script. From then on
+/// [`write_atomic`] refuses to write into the real `uchmk` folder unless
+/// `UCHMK_CONFIG_DIR` points elsewhere, so a test run that forgot it (a
+/// `<Theme:…>` step writes `common.toml`) cannot change the owner's settings.
+pub fn scripted_run() {
+    SCRIPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a write to `path` would change the real settings during a script:
+/// `scripted`, no `UCHMK_CONFIG_DIR` (`custom`), and `path` inside the `uchmk` folder `base`.
+fn touches_real_settings(path: &Path, scripted: bool, custom: bool, base: Option<&Path>) -> bool {
+    scripted && !custom && base.is_some_and(|b| path.starts_with(b))
+}
+
 /// Write `bytes` to `path` all at once: beside it first, to the disk, then
 /// over it. A crash or a full disk leaves the old file whole. The file beside
 /// it is named for this process and write (`<file>.uchmk-<pid>-<n>.new`), so
 /// two apps (or two threads) writing the same file never share one.
 pub fn write_atomic(path: &Path, bytes: impl AsRef<[u8]>) -> Result<(), String> {
     use std::io::Write;
+    if touches_real_settings(
+        path,
+        SCRIPTED.load(std::sync::atomic::Ordering::Relaxed),
+        env_dir("UCHMK_CONFIG_DIR").is_some(),
+        base_dir().as_deref(),
+    ) {
+        return Err(format!(
+            "{}: not written, because a `--keys` run would change the real settings; start it with UCHMK_CONFIG_DIR set to a scratch folder",
+            path.display()
+        ));
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -904,6 +932,17 @@ pub fn watch(paths: Vec<PathBuf>, every: Duration, mut on_change: impl FnMut(&[P
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_script_may_not_write_the_real_settings() {
+        let base = Path::new("/home/u/.config/uchmk");
+        let real = base.join("common.toml");
+        assert!(touches_real_settings(&real, true, false, Some(base)));
+        assert!(!touches_real_settings(&real, false, false, Some(base)), "no script, no guard");
+        assert!(!touches_real_settings(&real, true, true, Some(base)), "UCHMK_CONFIG_DIR is the scratch folder");
+        assert!(!touches_real_settings(Path::new("/tmp/x/common.toml"), true, false, Some(base)), "outside the folder");
+        assert!(!touches_real_settings(&real, true, false, None));
+    }
+
     #[test]
     fn the_window_table_is_read_key_by_key() {
         let (c, w) = Common::parse(

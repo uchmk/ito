@@ -9,5 +9,6 @@ repository.workspace = true
 
 [dependencies]
 egui = "0.36"
+ito-common = { path = "../ito-common" }
 ito-keys = { path = "../ito-keys", features = ["egui"] }
 png = "0.18"
