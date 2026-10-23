@@ -601,6 +601,34 @@ mod pane {
         assert_eq!(text.lines().collect::<Vec<_>>(), ["bcd", "hij", "nop"]);
     }
 
+    /// A drag begun beside a vertical rule (Claude Code's side panel) takes
+    /// that side's text only, in the highlight and in the copy.
+    #[test]
+    fn a_drag_beside_a_rule_stays_on_its_side() {
+        let mut t = term(30, 4);
+        feed(&mut t, "left one     │right one\r\nleft two     │right two\r\nleft three   │right three\r\nleft four    │right four");
+        assert_eq!(crate::grid::divider(&t), Some(13));
+        assert_eq!(crate::grid::side_of(&t, 2), Some((0, 13)));
+        assert_eq!(crate::grid::side_of(&t, 20), Some((14, 30)));
+        assert_eq!(crate::grid::side_of(&t, 13), None);
+        select_at(&mut t, (5, 0), false, true);
+        select_at(&mut t, (4, 2), true, false);
+        let text = crate::grid::selection_in(&t, (0, 13)).unwrap_or_default();
+        assert_eq!(text, "one\nleft two\nleft");
+        let mut rows = cell_rows(&t);
+        crate::grid::limit_selected(&mut rows, (0, 13));
+        assert!(rows[0].iter().enumerate().all(|(x, c)| !c.selected || x < 13));
+        assert!(rows[0][5].selected && !rows[0][20].selected);
+    }
+
+    /// No rule, no change: an ordinary screen has none to keep to.
+    #[test]
+    fn a_screen_without_a_rule_has_no_sides() {
+        let mut t = term(20, 4);
+        feed(&mut t, "abc\r\ndef\r\nghi");
+        assert_eq!(crate::grid::divider(&t), None);
+    }
+
     /// A triple click: the whole line under the cell, not what lies near it.
     #[test]
     fn a_line_selection_takes_the_whole_line() {

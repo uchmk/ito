@@ -347,6 +347,69 @@ pub fn cell_rows<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
     out
 }
 
+/// The column of a vertical rule that splits the screen in two, when a
+/// program draws one (Claude Code's side panel, a `tmux` split): a box-drawing
+/// bar in the same column on most rows. `None` on an ordinary screen.
+pub fn divider<T: EventListener>(term: &Term<T>) -> Option<usize> {
+    let rows = cell_rows(term);
+    let cols = rows.first().map_or(0, Vec::len);
+    let need = (rows.len() * 3 / 5).max(3);
+    let mut best: Option<(usize, usize)> = None;
+    for c in 4..cols.saturating_sub(4) {
+        let n = rows.iter().filter(|r| matches!(r[c].c, '│' | '┃' | '║')).count();
+        if n >= need && best.is_none_or(|(_, m)| n > m) {
+            best = Some((c, n));
+        }
+    }
+    best.map(|(c, _)| c)
+}
+
+/// The columns `lo..hi` of the side of the [`divider`] that `col` is on; none
+/// when there is no divider or `col` is on it.
+pub fn side_of<T: EventListener>(term: &Term<T>, col: usize) -> Option<(usize, usize)> {
+    let d = divider(term)?;
+    match col.cmp(&d) {
+        std::cmp::Ordering::Less => Some((0, d)),
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Greater => Some((d + 1, term.grid().columns())),
+    }
+}
+
+/// Keep only the selected cells in the columns `lo..hi`.
+pub fn limit_selected(rows: &mut [Vec<CellView>], (lo, hi): (usize, usize)) {
+    for row in rows {
+        for (x, cell) in row.iter_mut().enumerate() {
+            cell.selected &= (lo..hi).contains(&x);
+        }
+    }
+}
+
+/// The selection's text with each row cut to the columns `lo..hi`, one row a
+/// line with the blanks at the end taken off.
+pub fn selection_in<T: EventListener>(term: &Term<T>, (lo, hi): (usize, usize)) -> Option<String> {
+    let range = term.selection.as_ref()?.to_range(term)?;
+    let last = term.grid().columns().checked_sub(1)?;
+    let mut lines = Vec::new();
+    for l in range.start.line.0..=range.end.line.0 {
+        let line = Line(l);
+        let (a, b) = if range.is_block {
+            (range.start.column.0.min(range.end.column.0), range.start.column.0.max(range.end.column.0))
+        } else {
+            (
+                if line == range.start.line { range.start.column.0 } else { 0 },
+                if line == range.end.line { range.end.column.0 } else { last },
+            )
+        };
+        let (a, b) = (a.max(lo), b.min(hi.checked_sub(1)?));
+        if a > b {
+            continue;
+        }
+        let text = term.bounds_to_string(Point::new(line, Column(a)), Point::new(line, Column(b)));
+        lines.push(text.trim_end().to_owned());
+    }
+    Some(lines.join("\n"))
+}
+
 /// One cell, copied out from under the lock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

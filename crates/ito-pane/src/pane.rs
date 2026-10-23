@@ -122,7 +122,7 @@ impl Pane for Terminal {
     }
 
     fn screen(&self) -> Screen {
-        self.with_grid(|t| Screen {
+        let mut screen = self.with_grid(|t| Screen {
             rows: crate::cell_rows(t),
             cursor: crate::cursor_cell(t),
             cursor_hidden: crate::cursor_hidden(t),
@@ -131,7 +131,11 @@ impl Pane for Terminal {
             mouse: crate::mouse_report(t),
             focus_report: crate::focus_report(t),
             kitty: crate::kitty_flags(t),
-        })
+        });
+        if let Some(cols) = *self.side.lock().unwrap() {
+            crate::grid::limit_selected(&mut screen.rows, cols);
+        }
+        screen
     }
 
     fn scrolled_back(&self) -> usize {

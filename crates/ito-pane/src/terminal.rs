@@ -334,6 +334,9 @@ pub struct Terminal {
     /// The last match, start and end, so the next search carries on past it
     /// in whichever direction it goes.
     found: Option<(Point, Point)>,
+    /// The columns a drag begun beside a vertical rule is kept to (see
+    /// [`crate::grid::divider`]); none for any other selection.
+    pub(crate) side: Mutex<Option<(usize, usize)>>,
     /// Where the shell says it is, when it says so at all. A shell that does
     /// not send OSC 7 leaves this `None` for ever, which is why it only ever
     /// suppresses work rather than driving any.
@@ -527,6 +530,7 @@ impl Terminal {
             quoting,
             cwd_rx,
             found: None,
+            side: Mutex::new(None),
             shell_cwd: None,
             log,
             cast,
@@ -774,18 +778,25 @@ impl Terminal {
     /// Begin a selection at a cell, or carry one on to it. `start` is the
     /// press; everything after is the drag.
     pub fn select(&self, cell: (usize, usize), right_half: bool, start: bool) {
-        select_at(&mut self.term.lock(), cell, right_half, start);
+        let mut term = self.term.lock();
+        if start {
+            // A drag begun beside a vertical rule stays on its side of it.
+            *self.side.lock().unwrap() = side_of(&term, cell.0);
+        }
+        select_at(&mut term, cell, right_half, start);
     }
 
     /// Begin a selection at a cell, or carry it on to it, with the whole
     /// cell at both ends whichever way it runs (the keys' selection).
     pub fn select_cells(&self, cell: (usize, usize), start: bool) {
+        *self.side.lock().unwrap() = None;
         select_cells(&mut self.term.lock(), cell, start);
     }
 
     /// Begin a block selection at a cell: the rectangle from here to where
     /// the drag goes on ([`Terminal::select`] carries it).
     pub fn select_block(&self, cell: (usize, usize), right_half: bool) {
+        *self.side.lock().unwrap() = None;
         select_kind(&mut self.term.lock(), cell, right_half, Some(SelectionType::Block));
     }
 
@@ -793,6 +804,7 @@ impl Terminal {
     pub fn select_word(&self, cell: (usize, usize)) {
         let point = self.point(cell);
         let mut term = self.term.lock();
+        *self.side.lock().unwrap() = None;
         term.selection = Some(Selection::new(SelectionType::Semantic, point, Side::Left));
     }
 
@@ -800,6 +812,7 @@ impl Terminal {
     pub fn select_line(&self, cell: (usize, usize)) {
         let point = self.point(cell);
         let mut term = self.term.lock();
+        *self.side.lock().unwrap() = None;
         term.selection = Some(Selection::new(SelectionType::Lines, point, Side::Left));
     }
 
@@ -809,12 +822,18 @@ impl Terminal {
     }
 
     pub fn clear_selection(&self) {
+        *self.side.lock().unwrap() = None;
         self.term.lock().selection = None;
     }
 
     /// The selected text, if any of it is.
     pub fn selection(&self) -> Option<String> {
-        self.term.lock().selection_to_string().filter(|s| !s.is_empty())
+        let term = self.term.lock();
+        let text = match *self.side.lock().unwrap() {
+            Some(cols) => selection_in(&term, cols),
+            None => term.selection_to_string(),
+        };
+        text.filter(|s| !s.is_empty())
     }
 
     /// Find `needle` from the top of the view, and put the match on screen.
@@ -822,6 +841,7 @@ impl Terminal {
     /// `Some(true)` when the match was found by running off the end and
     /// starting again; `None` when there is none.
     pub fn search(&mut self, needle: &str, back: bool) -> Option<bool> {
+        *self.side.lock().unwrap() = None;
         let mut term = self.term.lock();
         search_in(&mut term, &mut self.found, needle, back)
     }

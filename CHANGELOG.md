@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.103.1] - 2026-10-23
+
+### 変更
+
+- `ito-pane`: 画面を縦の罫線（`│` `┃` `║`。Claude Code の横のパネルなど）で左右に分けているとき、罫線の片側でドラッグを始めると、選択（色）もコピーもその側だけになる（今までは行全体で、反対側の文字も入った）。
+  罫線が無い画面・Alt+ドラッグ・ダブル／トリプルクリック・キーの選択は今までどおり。`grid::{divider, side_of, limit_selected, selection_in}` を足した。使う側がやることは無い。
+
 ## [0.103.0] - 2026-10-23
 
 ### 追加
