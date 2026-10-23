@@ -134,13 +134,21 @@ pub fn profile(shell: &str, home: &std::path::Path) -> Option<std::path::PathBuf
         "zsh" => Some(std::env::var_os("ZDOTDIR").map(PathBuf::from).unwrap_or_else(|| home.to_path_buf()).join(".zshrc")),
         "pwsh" => {
             let mut cmd = std::process::Command::new(shell);
-            cmd.args(["-NoLogo", "-NoProfile", "-Command", "$PROFILE.CurrentUserCurrentHost"]).stdin(std::process::Stdio::null());
+            cmd.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); $PROFILE.CurrentUserCurrentHost",
+            ])
+            .stdin(std::process::Stdio::null());
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x0800_0000);
             }
-            let asked = cmd.output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|p| !p.is_empty());
+            // UTF-8 both ways: a lossy ANSI read made a mojibake folder of `ドキュメント` (tsumugi #210).
+            let asked =
+                cmd.output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).map(|o| o.trim().to_string()).filter(|p| !p.is_empty());
             asked.map(PathBuf::from).or_else(|| {
                 Some(if cfg!(windows) {
                     home.join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")

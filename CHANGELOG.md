@@ -3,6 +3,29 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.102.0] - 2026-10-23
+
+### 修正
+
+- `ito-titlebar`: 左のスロット（ロゴ・名前・タブ）が中央を越えて伸びても、検索ボックスとベルが最小化・最大化ボタンの上に押し出されない（uchmk/ito#33）。
+  グループの右端は `rect.right() - MARGIN` までに丸める。左のスロットが邪魔で入らないときは、ベルを隠し、虫眼鏡だけを右端に寄せる。
+
+### 追加
+
+- `ito_titlebar::left_limit(rect)`: 左のスロットが止まるべき x（虫眼鏡とベルが右に入る場所を残した位置）。`left` のコールバックが受け取った `rect` を渡し、タブの文字を落とす目安にする。
+- `Out::squeezed`: 左のスロットが長すぎてベルを隠したとき `true`（このとき `bell_rect` は `None`）。
+
+### 使う側がやること
+
+- タブなどを描く左のスロットは、`ito_titlebar::left_limit(rect)` を超えないように文字を落とす（michi の #145）。`Out` を自分で作っていなければ、ほかに変更は要らない（`Out` は `Default`）。
+
+## [0.101.3] - 2026-10-23
+
+### 修正
+
+- `ito-common` の `shellhook::profile`: `pwsh` の `$PROFILE` を UTF-8 で読む（日本語の `ドキュメント` が文字化けしたフォルダーになり、そこにフックが書かれていた。tsumugi #210）
+  - 使う側がやること: `rev` を上げるだけ
+
 ## [0.101.2] - 2026-10-23
 
 ### 追加
