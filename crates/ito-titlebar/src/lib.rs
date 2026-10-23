@@ -33,6 +33,8 @@ const GAP: f32 = 6.0;
 const BELL_SPAN: f32 = 34.0;
 /// Narrower than this the box is the magnifier alone.
 const COMPACT_BELOW: f32 = 160.0;
+/// The magnifier's width.
+const COMPACT_W: f32 = 30.0;
 /// The room kept from the app's slots, and from the window's edge.
 const MARGIN: f32 = 12.0;
 
@@ -95,6 +97,16 @@ pub struct Out {
     pub bell: bool,
     /// Where the bell is: a list under it ends at its right edge.
     pub bell_rect: Option<Rect>,
+    /// The left slot ended too far right for the box and the bell: the bell
+    /// is hidden (`bell_rect` is `None`) and the box is the magnifier at the
+    /// right edge. Stop the slot at [`left_limit`] to avoid it.
+    pub squeezed: bool,
+}
+
+/// Where the left slot should stop (x), given the rect it was handed: the
+/// magnifier and the bell fit to the right of it, inside the caption buttons.
+pub fn left_limit(rect: Rect) -> f32 {
+    rect.right() - MARGIN - COMPACT_W - BELL_SPAN - MARGIN
 }
 
 /// The bar in `ui.max_rect()`. `left` draws in the rect that is the bar
@@ -141,15 +153,25 @@ pub fn show(ui: &mut Ui, spec: &Spec<'_>, left: impl FnOnce(&mut Ui, Rect) -> f3
     let half = (middle - left_end - MARGIN).min(rect.right() - MARGIN - keep - middle);
     let box_w = BOX_MAX_W.min(2.0 * half - BELL_SPAN);
     let compact = box_w < COMPACT_BELOW;
-    let w = if compact { 30.0 } else { box_w };
-    let group_left = (middle - (w + BELL_SPAN) / 2.0).max(left_end + MARGIN);
+    let w = if compact { COMPACT_W } else { box_w };
+    // Never past the caption buttons: when the left slot is in the way, the
+    // bell goes and the magnifier keeps the right edge.
+    let group_right = rect.right() - MARGIN;
+    let mut group_left = (middle - (w + BELL_SPAN) / 2.0).max(left_end + MARGIN).min(group_right - w - BELL_SPAN);
+    out.squeezed = group_left < left_end + MARGIN;
+    if out.squeezed {
+        group_left = group_right - w;
+    }
     let r = Rect::from_min_size(Pos2::new(group_left, rect.center().y - BOX_H / 2.0), Vec2::new(w, BOX_H));
     let bell_rect = Rect::from_min_size(Pos2::new(r.right() + GAP, rect.center().y - BELL_H / 2.0), Vec2::new(BELL_W, BELL_H));
-    let free = Rect::from_min_max(Pos2::new(r.right() + BELL_SPAN + MARGIN, rect.top()), Pos2::new(rect.right() - MARGIN, rect.bottom()));
+    let free_left = if out.squeezed { r.right() } else { r.right() + BELL_SPAN } + MARGIN;
+    let free = Rect::from_min_max(Pos2::new(free_left, rect.top()), Pos2::new((rect.right() - MARGIN).max(free_left), rect.bottom()));
     right(ui, free);
     out.search = search_box(ui, r, compact, &spec.words);
-    out.bell = bell(ui, bell_rect, spec).clicked();
-    out.bell_rect = Some(bell_rect);
+    if !out.squeezed {
+        out.bell = bell(ui, bell_rect, spec).clicked();
+        out.bell_rect = Some(bell_rect);
+    }
     out
 }
 
@@ -403,6 +425,20 @@ mod tests {
         assert!(bell.left() - GAP - 30.0 >= 120.0 + MARGIN - 0.5);
         assert!(slot.right() <= 720.0 - 3.0 * CAPTION_W - MARGIN + 0.5);
         let _ = bell;
+    }
+
+    #[test]
+    fn a_wide_left_slot_never_pushes_the_group_over_the_caption_buttons() {
+        // 720 wide, the left slot ends at 540 (michi's tabs).
+        let (out, left, _) = run(720.0, &spec(0, true), 540.0);
+        let limit = left_limit(left.unwrap());
+        assert!(limit < 540.0, "the slot is told to stop at {limit}");
+        assert!(out.squeezed && out.bell_rect.is_none() && !out.bell);
+        // A slot that stops at the limit is not squeezed, and the bell is inside.
+        let (out, _, _) = run(720.0, &spec(0, true), limit);
+        assert!(!out.squeezed);
+        let bell = out.bell_rect.unwrap();
+        assert!(bell.right() <= 720.0 - 3.0 * CAPTION_W - MARGIN + 0.5, "bell at {}", bell.right());
     }
 
     #[test]
