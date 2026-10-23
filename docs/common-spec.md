@@ -99,6 +99,21 @@ weekday = true
 - **言語だけは**アプリの config.toml に `language` があればそちらが勝つ（`ito_i18n::resolve`）。
 - アプリは common.toml とテーマのフォルダーの時刻を **2 秒ごとに** UI ではないスレッドで見て、変わったら読み直し、すぐ当てる。
 
+## 他のアプリの場所（`[apps]`）
+
+アプリが別のアプリを起こす（kura が michi を開く、など）ときの exe の探し方。`ito_common::apps` と `ito_openin::app`。
+
+- 探す順: `common.toml` の `[apps]` → そのアプリの自己登録 → PATH。
+  ```toml
+  [apps]
+  kura = "D:/tools/kura.exe"
+  ```
+  名前は `[a-z0-9_-]+`。設定の画面の「アプリ」のカードから変える（`ito_prefs::apps_card`）。
+- 自己登録: 各アプリは起動時に `apps::register(名前, 版)` で自分の exe を状態のフォルダー（`<state>/uchmk/apps/<名前>.toml`）に書く。
+  マシンごとで、`common.toml` には書かない（人が書く設定にアプリが書き込まない）。
+  `target`・`cargo-target` の下のビルドと `--keys` の実行中は書かない。登録先のファイルが無ければ飛ばして次を試す。
+- 呼ぶ側は `ito_openin::app::open/launch/available` を使う。シェルは通さない。
+
 ## 倍率
 
 - 画面全体の倍率は common.toml の `scale`（`Common::scale_or_one()`）。egui では `ctx.set_zoom_factor(s)` で当てる。

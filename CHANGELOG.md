@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.103.0] - 2026-10-23
+
+### 追加
+
+- `ito_common::apps`: 他の uchmk のアプリの exe を探す仕組み。探す順は、`common.toml` の `[apps]`（`kura = "D:/tools/kura.exe"`。全アプリ共通の上書き）→ そのアプリが自分で書いた登録（状態のフォルダーの `apps/<名前>.toml`）→ PATH。
+  - `register(app, version)`: 起動時に自分の exe の場所を書く（変わったときだけ書く。`--keys` の実行中と、`target`・`cargo-target` の下のビルドは登録しない）。
+  - `find`・`pinned`・`scan`・`scan_in_background`（設定画面用の行）・`write_edits`（`[apps]` の書き換え。`edit_common` に渡す）。
+  - `Common::apps`（`[apps]` の表）。名前は `[a-z0-9_-]+` だけ。
+- `ito_openin::app`: ほかのアプリを簡単に呼ぶ。`open(app, path)`・`launch(app, args, cwd)`・`available(app)`・`exe(app)`・`not_found(app)`。
+- `ito_openin::spawn` は、最初の語がアプリ名なら（`[open]` のひな形の `kura {path}` など）、固定した場所か登録された場所を使う。
+- `ito_prefs::apps_card`（`AppsWords`・`AppsForm`・`add_edit`）: 設定の画面の「アプリ」のカード。行ごとに、見つかった場所・見つけ方・版と、場所を固定する欄・外すボタン。登録のないアプリは下の欄から足す。
+
+### 使う側がやること
+
+- 起動時に `ito_common::apps::register("<app>", env!("CARGO_PKG_VERSION"))` を呼ぶ（失敗は無視してよい。UI スレッドを止めたくなければワーカーで）。
+- 設定の画面の Open in のページに `apps_card` を置く。行は `apps::scan_in_background(common.apps.clone())` の答え。カードが返す `Edit` は `edit_common(base, |t| apps::write_edits(t, &edits))` で書く。
+- 他のアプリを呼ぶ処理は `ito_openin::app::open/launch/available` を使う。独自に PATH を探さない。
+- `Common { … }` をリテラルで書いているところは `..Default::default()` を足す（`apps` 欄が増えた）。
+
 ## [0.102.0] - 2026-10-23
 
 ### 修正

@@ -14,8 +14,11 @@
 //! - [`config`]: the `[open]`, `[line_args]` and `[diff_tools.<name>]` tables
 //!   of config.toml, with what to warn of, and the edits a settings screen
 //!   makes to them (`ito-prefs` draws the card).
+//! - [`app`]: starting another uchmk app by name (`app::open("kura", path)`), from
+//!   where it registered or was pinned (`ito_common::apps`).
 //! - [`open`], [`open_file`], [`open_diff`], [`open_merge`]: start the program.
 
+pub mod app;
 pub mod config;
 pub mod diff;
 pub mod lines;
@@ -214,10 +217,15 @@ pub fn file_argv(template: &str, path: &Path, line: Option<usize>, custom: &Line
     Ok(Built { argv: out, line_passed: true })
 }
 
-/// Starts `argv` (in `cwd`); does not wait for it, and no window flashes.
+/// Starts `argv` (in `cwd`); does not wait for it, and no window flashes. A
+/// first word that is an uchmk app's name goes to the exe it registered or
+/// was pinned to.
 pub fn spawn(argv: &[String], cwd: Option<&Path>) -> Result<(), String> {
     let Some(program) = argv.first() else { return Err("empty command".to_owned()) };
-    let mut c = Command::new(program);
+    // A bare uchmk app's name (`tsumugi new {path}`) is started from where the
+    // app registered or was pinned, so it need not be on PATH.
+    let pinned = app::pinned_program(program);
+    let mut c = Command::new(pinned.as_deref().unwrap_or(program.as_ref()));
     c.args(&argv[1..]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     if let Some(dir) = cwd {
         c.current_dir(dir);

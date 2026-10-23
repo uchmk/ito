@@ -12,3 +12,5 @@ repository.workspace = true
 # versions as ito-common, both Pure Rust.
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
+# Where the other uchmk apps are (`app`, and a bare app name in a command line).
+ito-common = { path = "../ito-common" }

@@ -5,7 +5,7 @@
 //! a person wrote around it kept.
 //!
 //! ```text
-//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, [clock]
+//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, [clock], [window], [apps]
 //! <config dir>/uchmk/<app>/config.toml  each app's own (`<APP>_CONFIG_HOME` moves the folder)
 //! <config dir>/uchmk/themes/*.toml      themes of one's own
 //! ```
@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 
+pub mod apps;
 pub mod bundle;
 #[cfg(feature = "dirwatch")]
 pub mod dirwatch;
@@ -350,10 +351,12 @@ pub struct Common {
     pub mono_font: Option<MonoFont>,
     pub clock: Option<Clock>,
     pub window: Option<WindowPrefs>,
+    /// `[apps]`: where a person pinned an app's exe (see [`apps`]); empty for none.
+    pub apps: std::collections::BTreeMap<String, String>,
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 8] = ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "clock", "window"];
+const KEYS: [&str; 9] = ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "clock", "window", "apps"];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -457,7 +460,25 @@ impl Common {
             }
             m
         });
-        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, clock, window };
+        let mut apps = std::collections::BTreeMap::new();
+        match t.get("apps") {
+            None => {}
+            Some(toml::Value::Table(a)) => {
+                for (k, v) in a {
+                    match v {
+                        _ if !apps::valid_name(k) => warnings.push(format!(
+                            "common.toml: `apps.{k}` is not an app name (lower case letters, digits, - and _), so it is not used"
+                        )),
+                        toml::Value::String(s) => {
+                            apps.insert(k.clone(), s.clone());
+                        }
+                        _ => warnings.push(format!("common.toml: apps.{k} must be a path in quotes, so it is not used")),
+                    }
+                }
+            }
+            Some(_) => warnings.push("common.toml: `apps` must be a table ([apps]), so it is not used".to_owned()),
+        }
+        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, clock, window, apps };
         Ok((common, warnings))
     }
 
@@ -853,6 +874,11 @@ pub fn read_or_empty(path: &Path) -> Result<String, String> {
 
 /// Set once a `--keys` script is running (see [`scripted_run`]).
 static SCRIPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether [`scripted_run`] was called.
+pub(crate) fn is_scripted() -> bool {
+    SCRIPTED.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Call once when the app starts with a `--keys` script. From then on
 /// [`write_atomic`] refuses to write into the real `uchmk` folder unless

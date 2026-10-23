@@ -17,6 +17,7 @@ use egui::{Color32, FontId, RichText};
 use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
 
+mod apps;
 mod keys;
 mod more;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
@@ -24,6 +25,7 @@ mod notify;
 mod openin;
 mod shell;
 mod updates;
+pub use apps::{add_edit, apps_card, note as apps_note, AppsForm, AppsWords};
 pub use more::{
     about_index, about_page, about_text, advanced_card, advanced_index, backup_card, backup_index, default_order, fonts_card, fonts_index,
     forget_place, keeps_place, mono_font_card, mono_font_index, startup_card, startup_index, window_card, window_index, About, AboutAction,
