@@ -523,7 +523,24 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
         let lit = egui::Shape::rect_filled(shown.response.rect.expand2(egui::vec2(10.0, 0.0)), 6.0, c.wait.gamma_multiply(0.14));
         ui.painter().set(behind, lit);
     }
+    scroll_to_first_hit(ui, hit, l.q, shown.response.rect);
     r.expect("the control ran")
+}
+
+/// The query whose first hit has been scrolled to.
+const SCROLLED: &str = "prefs-scrolled-to";
+
+/// Scrolls the page to the first row a search lights, once per query: a hit
+/// low on a long page would otherwise be off-screen (kura #443). Rows come
+/// top to bottom, so the first lit one in a pass is the first hit.
+fn scroll_to_first_hit(ui: &egui::Ui, hit: bool, q: &str, rect: egui::Rect) {
+    let id = egui::Id::new(SCROLLED);
+    if q.is_empty() {
+        ui.data_mut(|d| d.remove::<String>(id));
+    } else if hit && ui.data(|d| d.get_temp::<String>(id)).as_deref() != Some(q) {
+        ui.data_mut(|d| d.insert_temp(id, q.to_owned()));
+        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    }
 }
 
 /// The design's switch: a pill with a knob, cyan when on.
@@ -1006,6 +1023,32 @@ mod tests {
         assert!(!picked(choice, "Nord", true), "Nord is the dark one");
         assert!(picked(("dark", "Nord", "x"), "tsumugi Dark", false), "dark is the built-in one");
         assert!(picked(("nord", "", ""), "Nord", false), "a name, whatever its case");
+    }
+
+    /// The first hit of a search, low on a long page, is scrolled into view
+    /// once per query (kura #443).
+    #[test]
+    fn a_search_hit_low_on_the_page_is_scrolled_into_view() {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
+        let mut seen = egui::Rect::NOTHING;
+        for frame in 0..40 {
+            // The scroll glides, so time has to move.
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(f64::from(frame) * 0.1), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let l = Look { c: ito_theme::colors(), q: "needle" };
+                        for i in 0..40 {
+                            row(ui, l, &format!("filler {i}"), "", |ui| ui.label("x"));
+                        }
+                        seen = row(ui, l, "needle", "", |ui| ui.label("x")).rect;
+                    });
+                });
+            });
+            out.textures_delta.clear();
+        }
+        assert!(screen.contains_rect(seen), "the hit at {seen:?} is not in {screen:?}");
     }
 
     #[test]
