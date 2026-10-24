@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.106.0] - 2026-10-25
+
+### 追加
+
+- `ito-openin`: 拡張子で「システムの開き方か、エディターか」を選ぶ共通の表（uchmk/ito#36）。`[open] system = ["mp4", "pdf"]`（点なし・大小文字は区別しない。無ければ既定の `SYSTEM_EXTENSIONS`、`[]` は 1 つも無し）と `OpenCfg::opens_with_system(path)`。tsumugi の `[open] system` と同じ既定の 40 個。
+  - 使う側がやること: tsumugi は自前の `system` を外してこれを読む（キーは同じ）。kura の `[open].rules`（名前・mime の glob から opener を選ぶ）は載せ替えず、rules に当たらなかったファイルの既定として `opens_with_system` を使う案（kura のセッションで判断）。`OpenCfg { .. }` を直接書いているところは `..Default::default()` を足す。
+
 ## [0.105.0] - 2026-10-24
 
 ### 追加

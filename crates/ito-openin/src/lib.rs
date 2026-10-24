@@ -26,7 +26,7 @@ pub mod lines;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-pub use config::{Config, Edit, OpenCfg, UserTool};
+pub use config::{Config, Edit, OpenCfg, UserTool, SYSTEM_EXTENSIONS};
 pub use lines::LineArgs;
 
 /// Which program something is opened in.

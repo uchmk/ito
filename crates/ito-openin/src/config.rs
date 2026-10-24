@@ -9,6 +9,8 @@
 //! diff      = ""            # a full command line, or leave it to diff_tool
 //! merge     = ""
 //! diff_tool = "meld"        # a name from `diff::KNOWN`, from [diff_tools], or "auto"
+//! system    = ["mp4", "pdf"] # opened the system's own way, not in the editor
+//!                           # (`OpenCfg::opens_with_system`; not there: SYSTEM_EXTENSIONS, []: none)
 //!
 //! [line_args]               # how an editor is told a line (wins over the built-in table)
 //! myed = "--goto={line} {path}"
@@ -40,6 +42,30 @@ pub struct OpenCfg {
     pub diff: String,
     pub merge: String,
     pub diff_tool: String,
+    /// Extensions (no dot, any case) opened the system's own way instead of in
+    /// the editor. Not there: [`SYSTEM_EXTENSIONS`]; `[]`: none.
+    pub system: Option<Vec<String>>,
+}
+
+/// What `[open] system` holds when config.toml does not say: videos, music,
+/// pictures, documents, archives and installers.
+pub const SYSTEM_EXTENSIONS: [&str; 40] = [
+    "mp4", "mkv", "mov", "avi", "webm", "wmv", "flv", "m4v", "mpg", "mpeg", "mp3", "wav", "flac", "m4a", "ogg", "aac", "opus", "png",
+    "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "ico", "heic", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "7z", "rar",
+    "iso", "exe", "msi", "psd",
+];
+
+impl OpenCfg {
+    /// Whether `path` is of a kind `[open] system` names, by its extension
+    /// (any case, a leading dot in the list is ignored).
+    pub fn opens_with_system(&self, path: &Path) -> bool {
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return false };
+        let is = |s: &str| s.trim_start_matches('.').eq_ignore_ascii_case(ext);
+        match &self.system {
+            Some(list) => list.iter().any(|s| is(s)),
+            None => SYSTEM_EXTENSIONS.iter().any(|s| is(s)),
+        }
+    }
 }
 
 /// `[diff_tools.<name>]`: a diff / merge tool the user added.
@@ -320,6 +346,27 @@ mod tests {
 
     fn found(name: &str) -> Found {
         Found { tool: diff::known(name).unwrap(), program: name.to_owned() }
+    }
+
+    #[test]
+    fn system_extensions_default_and_override() {
+        let (c, _) = Config::read(None);
+        assert!(c.open.opens_with_system(Path::new("/v/Clip.MP4")), "any case");
+        assert!(!c.open.opens_with_system(Path::new("/src/main.rs")));
+        assert!(!c.open.opens_with_system(Path::new("/src/Makefile")));
+        let (c, w) = Config::read(Some(
+            "[open]
+system = [\".rs\"]
+",
+        ));
+        assert!(w.is_empty());
+        assert!(c.open.opens_with_system(Path::new("a.rs")) && !c.open.opens_with_system(Path::new("a.mp4")));
+        let (c, _) = Config::read(Some(
+            "[open]
+system = []
+",
+        ));
+        assert!(!c.open.opens_with_system(Path::new("a.mp4")));
     }
 
     #[test]
