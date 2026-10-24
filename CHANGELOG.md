@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.105.0] - 2026-10-24
+
+### 追加
+
+- `ito-syntax`: 宣言を返す（uchmk/ito#35）。`Stream::line_decls(text) -> (Ink, Vec<Decl>)` は `line` と同じ 1 回の解析で、その行が宣言する名前（`Decl { range, kind }`。`kind` は文法の `entity.name.<kind>` の `<kind>`: function・class・struct・enum・trait・interface・impl・namespace・macro・type、TOML の表は `table`）も返す。HTML のタグ名（`entity.name.tag`）は宣言に数えない。`decl_kind(scope)` も公開。
+  - 使う側がやること: 無し（`line` は今までどおり）。アウトラインは kind を選び、字下げで入れ子にする。TOML の表の kind は issue の `section` ではなく、文法そのままの `table`。kura は syntect・two-face を外せる（kura#469）。
+
 ## [0.104.2] - 2026-10-24
 
 ### 修正

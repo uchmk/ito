@@ -30,6 +30,18 @@ pub enum Tok {
 /// The spans of a line: byte ranges of its text, in order and apart.
 pub type Ink = Vec<(Range<usize>, Tok)>;
 
+/// A name a line declares: `fn main` gives `main` with kind `function`. The
+/// kind is the word after `entity.name.` in the grammar (`function`, `class`,
+/// `struct`, `enum`, `trait`, `interface`, `impl`, `namespace`, `macro`, `type`,
+/// and `table` for a TOML table); the app picks the kinds it lists and
+/// nests them by indent. HTML tag names (`entity.name.tag`) are not
+/// declarations and are left out.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decl {
+    pub range: Range<usize>,
+    pub kind: String,
+}
+
 /// A line longer than this (minified code) is left plain and not parsed.
 pub const MAX_LINE: usize = 1500;
 
@@ -78,20 +90,33 @@ impl Stream {
     /// parser. A line over [`MAX_LINE`] bytes gives no tokens and is not
     /// parsed.
     pub fn line(&mut self, text: &str) -> Ink {
+        self.line_decls(text).0
+    }
+
+    /// The same one parse as [`line`](Stream::line), also giving the
+    /// declarations of the line (byte ranges, in order and apart).
+    pub fn line_decls(&mut self, text: &str) -> (Ink, Vec<Decl>) {
         if text.len() > MAX_LINE {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
         let set = syntaxes();
         let mut src = String::with_capacity(text.len() + 1);
         src.push_str(text);
         src.push('\n');
-        let Ok(ops) = self.state.parse_line(&src, set) else { return Vec::new() };
+        let Ok(ops) = self.state.parse_line(&src, set) else { return (Vec::new(), Vec::new()) };
         let mut out: Ink = Vec::new();
+        let mut decls: Vec<Decl> = Vec::new();
         let end = text.len();
         let mut put = |stack: &ScopeStack, from: usize, to: usize| {
             let (from, to) = (from.min(end), to.min(end));
             if from >= to {
                 return;
+            }
+            if let Some(kind) = stack.as_slice().iter().rev().find_map(|s| decl_kind(&s.build_string())) {
+                match decls.last_mut() {
+                    Some(d) if d.range.end == from && d.kind == kind => d.range.end = to,
+                    _ => decls.push(Decl { range: from..to, kind }),
+                }
             }
             let Some(tok) = stack.as_slice().iter().rev().find_map(|s| classify(&s.build_string())) else { return };
             match out.last_mut() {
@@ -105,11 +130,11 @@ impl Stream {
             at = pos;
             // A malformed op only loses the colour.
             if self.stack.apply(&op).is_err() {
-                return Vec::new();
+                return (Vec::new(), Vec::new());
             }
         }
         put(&self.stack, at, end);
-        out
+        (out, decls)
     }
 }
 
@@ -120,6 +145,12 @@ pub fn highlight<'a>(path: &str, lines: impl IntoIterator<Item = &'a str>) -> Ve
         Some(mut s) => lines.into_iter().map(|l| s.line(l)).collect(),
         None => lines.into_iter().map(|_| Vec::new()).collect(),
     }
+}
+
+/// The kind of a declaration scope: `entity.name.function.rust` is `function`.
+pub fn decl_kind(scope: &str) -> Option<String> {
+    let kind = scope.strip_prefix("entity.name.")?.split('.').next()?;
+    (!kind.is_empty() && kind != "tag").then(|| kind.to_owned())
 }
 
 /// What a scope (`keyword.control.rust`) is.
@@ -210,6 +241,30 @@ mod tests {
         s.line("/* open");
         s.reset();
         assert_eq!(word("let a", &s.line("let a"), Tok::Keyword), ["let"]);
+    }
+
+    #[test]
+    fn declarations_come_from_the_same_parse() {
+        let mut s = Stream::new("a.rs").unwrap();
+        let text = "pub fn main() {";
+        let (ink, decls) = s.line_decls(text);
+        assert!(!ink.is_empty());
+        assert_eq!(decls.iter().map(|d| (&text[d.range.clone()], d.kind.as_str())).collect::<Vec<_>>(), [("main", "function")]);
+        let (_, d) = s.line_decls("struct Point {");
+        assert_eq!((d.len(), d[0].kind.as_str()), (1, "struct"));
+        let (_, d) = s.line_decls("    let x = 1;");
+        assert!(d.is_empty());
+        assert_eq!(decl_kind("entity.name.function.rust").as_deref(), Some("function"));
+        assert_eq!(decl_kind("entity.name.tag.html"), None);
+        assert_eq!(decl_kind("keyword.control"), None);
+    }
+
+    #[test]
+    fn a_toml_table_is_a_table() {
+        let mut s = Stream::new("Cargo.toml").unwrap();
+        let text = "[package]";
+        let (_, d) = s.line_decls(text);
+        assert!(d.iter().any(|d| d.kind == "table"), "{d:?}");
     }
 
     #[test]
