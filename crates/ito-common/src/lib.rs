@@ -5,7 +5,7 @@
 //! a person wrote around it kept.
 //!
 //! ```text
-//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, [clock], [window], [apps]
+//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, easy, high_contrast, [clock], [window], [apps]
 //! <config dir>/uchmk/<app>/config.toml  each app's own (`<APP>_CONFIG_HOME` moves the folder)
 //! <config dir>/uchmk/themes/*.toml      themes of one's own
 //! ```
@@ -353,10 +353,15 @@ pub struct Common {
     pub window: Option<WindowPrefs>,
     /// `[apps]`: where a person pinned an app's exe (see [`apps`]); empty for none.
     pub apps: std::collections::BTreeMap<String, String>,
+    /// `easy = true`: the plain wording for the technical words (see `ito-glossary`).
+    pub easy: Option<bool>,
+    /// `high_contrast = true`: the high-contrast variant of the theme (see `ito_theme::high_contrast`).
+    pub high_contrast: Option<bool>,
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 9] = ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "clock", "window", "apps"];
+const KEYS: [&str; 11] =
+    ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "easy", "high_contrast", "clock", "window", "apps"];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -478,7 +483,17 @@ impl Common {
             }
             Some(_) => warnings.push("common.toml: `apps` must be a table ([apps]), so it is not used".to_owned()),
         }
-        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, clock, window, apps };
+        let mut flag = |key: &str| match t.get(key) {
+            None => None,
+            Some(toml::Value::Boolean(b)) => Some(*b),
+            Some(_) => {
+                warnings.push(format!("common.toml: `{key}` must be true or false, so it is not used"));
+                None
+            }
+        };
+        let easy = flag("easy");
+        let high_contrast = flag("high_contrast");
+        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, easy, high_contrast, clock, window, apps };
         Ok((common, warnings))
     }
 
@@ -499,6 +514,16 @@ impl Common {
         let (theme, dark, light) = fallback.unwrap_or(("dark", "tsumugi Dark", "tsumugi Light"));
         let pick = |own: &Option<String>, old: &str| own.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| old.to_owned());
         (pick(&self.theme, theme), pick(&self.dark_theme, dark), pick(&self.light_theme, light))
+    }
+
+    /// Whether the plain wording is on: common.toml's `easy`, else off.
+    pub fn easy_or_off(&self) -> bool {
+        self.easy.unwrap_or(false)
+    }
+
+    /// Whether the high-contrast variant is on: common.toml's `high_contrast`, else off.
+    pub fn high_contrast_or_off(&self) -> bool {
+        self.high_contrast.unwrap_or(false)
     }
 
     /// The monospace face: common.toml's, else the bundled one.
@@ -1032,6 +1057,16 @@ zzz = 1
         let (c, warnings) = Common::parse("clock = 1\n").unwrap();
         assert_eq!((c.clock, warnings.len()), (None, 1));
         assert_eq!(Common::read(&dir("none")), Ok((Common::default(), Vec::new())), "no file: nothing set");
+    }
+
+    #[test]
+    fn easy_and_high_contrast_are_switches_that_default_to_off() {
+        let none = Common::default();
+        assert!(!none.easy_or_off() && !none.high_contrast_or_off());
+        let (c, w) = Common::parse("easy = true\nhigh_contrast = true\n").unwrap();
+        assert!(c.easy_or_off() && c.high_contrast_or_off() && w.is_empty(), "{w:?}");
+        let (c, w) = Common::parse("easy = \"yes\"\n").unwrap();
+        assert_eq!((c.easy, w.len()), (None, 1));
     }
 
     #[test]

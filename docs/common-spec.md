@@ -81,6 +81,8 @@ dark_theme = "tsumugi Dark"   # system で OS が暗いとき
 light_theme = "tsumugi Light" # system で OS が明るいとき
 scale = 1.0                # 画面の倍率。0.2 から 5.0、0.1 刻み
 mono_font = "bundled"      # 等幅の字体。bundled（内蔵の JetBrains Mono）/ system（システムのもの）
+easy = false               # やさしい表示。専門語を言い換え、ホバーで説明（ito-glossary）
+high_contrast = false      # 高コントラスト。色を `Colors::high_contrast()` に通し、状態に印（ito-a11y）を付ける
 
 [clock]
 show = true

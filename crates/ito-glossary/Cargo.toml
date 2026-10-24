@@ -1,0 +1,17 @@
+[package]
+name = "ito-glossary"
+description = "A table of technical words with a plain wording and a one-or-two-line explanation (English and Japanese): the easy display's label, the hover text, a dotted-underline hover for egui, and a check for the app's own table"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# The dotted underline and the hover (`hover`), coloured by `ito-theme`.
+egui = ["dep:egui", "dep:ito-theme"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }

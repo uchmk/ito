@@ -3,6 +3,27 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.104.0] - 2026-10-24
+
+### 追加
+
+- `ito-watch`（uchmk/ito#21）: フォルダーの変更をその場で受ける。`Watcher::start(on)` が名前付きスレッドを 1 本立て、`watch(roots)` で見る場所を替える（最新の希望だけが効く）。`Event::{Paths, Lost, Watching(bool)}`。ネットワーク共有は見ない（`on_share`）。
+- `ito-guard`（#23）: コミット前の見張り。守る名前のブランチ（`*` 付き）、ステージされたファイルの大きさ・鍵・`.env`・中のトークン。Git は知らず、`Entry` の一覧と読む関数を渡す（`scan`）。
+- `ito-glossary`（#24）: 専門語の表（`Term`・`Glossary`）。やさしい言い方・ホバーの説明（日英）、`label`、表の検査 `check`、点線のホバー `hover`（機能 `egui`）。`ito_common::Common::easy`（`easy = true`）で全アプリ共通に切り替える。
+- `ito-syntax`（#19）: コードの色分けの種類。`highlight(path, lines)`、行をまたぐ状態を持つ `Stream`、`classify`、`knows`。syntect（純 Rust）+ two-face、文法は 1 プロセスで 1 回だけ読む。
+- `ito-guide`（#22）: 初回・困りごとのガイド。`Problem`・`Step`・OS ごとの `Fix`・開閉の `Guide`（Esc は `escape`、パレットからは `reopen`）、キーを取らず外のクリックで閉じる egui のパネル `show`（機能 `egui`）、表示の深さ `Level`（basic / full）。
+- `ito-a11y`（#27）: 色だけに頼らない状態の印 `State`（記号と読み上げの名前、日英）、スクリーンリーダー向けの `say`・`announce`（機能 `egui`）。
+- `ito_theme::Colors::high_contrast()`（#27）: 高コントラストの色（本文 12:1 以上、淡い文字と状態の色は 7:1 以上、罫線 3:1 以上）。`ito_common::Common::high_contrast`（`high_contrast = true`）で全アプリ共通に切り替える。
+- `ito_common::Common` に `easy`・`high_contrast`（`easy_or_off()`・`high_contrast_or_off()`）。
+- `scripts/lanes/ito-first.txt`: `syntect`・`two-face` は `ito-syntax`、`notify` は `ito-watch` を使う。
+
+### 使う側がやること
+
+- `Common { … }` をリテラルで書いているところは `..Default::default()` を足す（`easy`・`high_contrast` が増えた）。
+- michi: 手元の `guard.rs`・`syntax.rs`・`notify` の見張り・ガイドのパネルを `ito-guard`・`ito-syntax`・`ito-watch`・`ito-guide` に替え、`scripts/ito-first.allow` の `notify` の行を外す。専門語の表は `ito-glossary` の `Term` で書く。
+- kura: プレビューの色分けを `ito-syntax` に替え、`syntect`・`two-face` の依存を外す。
+- `high_contrast_or_off()` が真なら、`ito_theme::set(colors.high_contrast())` を通し、選択・フォーカス・競合などに `ito_a11y::State::mark()` を付ける。
+
 ## [0.103.1] - 2026-10-23
 
 ### 変更

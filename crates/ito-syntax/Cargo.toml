@@ -1,0 +1,14 @@
+[package]
+name = "ito-syntax"
+description = "Syntax kinds for code: a path and lines of text in, token kinds as byte ranges out (syntect's pure-Rust engine with bat's grammar collection, loaded once per process)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# bat's grammar collection on syntect's pure-Rust regex engine, so nothing
+# needs a C compiler (the same pair kura and michi used).
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }

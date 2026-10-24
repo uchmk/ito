@@ -26,6 +26,12 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-browser` | ペインの横のウェブのページ（Windows・macOS は OS の WebView を窓の子に、Linux はシステムのブラウザへ）、egui のアドレスの欄、打った行の読み方 | tsumugi・minato |
 | `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。依存は serde と toml だけ | kura（dev-dependencies） |
 | `ito-winres` | `.exe` のアイコンと版の情報の `.res`（rc.exe なしで書く）と、`build.rs` から呼ぶ `emit(name, sides, rgba)`。MSVC のターゲットだけ、クロスビルドでも付く |
+| `ito-watch` | フォルダーの変更をその場で受ける（`notify` を別スレッドで。ネットワークの共有は見ない・見られないときは `Watching(false)` で呼ぶ側が定期に見に行く・最新の願いだけ通す） | michi |
+| `ito-guard` | コミットの前の見張り（守る名前のブランチ `*`、ステージされたファイルの大きさ・鍵・`.env`・中のトークン）。Git は知らない（`Entry` の一覧と読む関数を渡す） | michi |
+| `ito-glossary` | 専門語の表（やさしい言い方・ホバーの説明・日英）、`easy` の表示、表の検査 `check`、点線のホバー（機能 `egui`）。語はアプリの表 | michi、tsumugi |
+| `ito-syntax` | コードの色分けの種類（path と行 → トークンの種類のバイト範囲。syntect の純 Rust + two-face、文法は 1 プロセスで 1 回。`Stream` が行をまたぐ状態を持つ） | michi、kura |
+| `ito-guide` | 初回・困りごとのガイド（Problem / Step、OS ごとの `Fix`、開閉の `Guide`、キーを取らない egui のパネル `show`（機能 `egui`）、`Level`） | michi |
+| `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前）と、スクリーンリーダー向けの `say`・`announce`（機能 `egui`）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
 | `ito-graph` | コミットの樹形図を行ごとに並べる（レーン・辺・ブランチの色・曲線）と、egui の描画（機能 `egui`）。Git は知らない | michi |
 | `ito-bugreport` | 不具合の報告（アプリの issue form に、版・OS・アプリが知っていることを埋めた URL。F12 から開く。全アプリで同じ行・同じ順） | kura（yagura・tsumugi は載せる予定） |
 | `ito-confirm` | やる前の確認の重ね表示（行・本文・注・ボタン。押された番号を返す。3 つ以上はカード: 動詞の見出し・結果の数字・戻せるか・キーの札、おすすめは緑・戻せないものは赤） | yagura、kura |

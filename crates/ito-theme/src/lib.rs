@@ -334,6 +334,41 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
+impl Colors {
+    /// The high-contrast variant of these colours (`high_contrast = true` in
+    /// common.toml, read by `ito_common::Common::high_contrast_or_off`): same
+    /// hue and light/dark, but text at 15:1 or more, dim text and the status
+    /// colours at 7:1 against both the background and the panel, and borders
+    /// that show. The terminal's own sixteen are kept.
+    pub fn high_contrast(&self) -> Colors {
+        let (ink, ground) = if self.light { (Color32::BLACK, Color32::WHITE) } else { (Color32::WHITE, Color32::BLACK) };
+        let mut c = *self;
+        // The grounds go to the extreme, one step apart so that a panel still
+        // stands off its background.
+        c.bg = mix(self.bg, ground, 0.85);
+        c.side = mix(self.side, ground, 0.75);
+        c.panel = mix(self.panel, ground, 0.7);
+        c.fg = mix(self.fg, ink, 0.9);
+        // Raise a colour toward the ink until it reads at `want` on every ground.
+        let lift = |x: Color32, want: f32| {
+            let mut t = 0.0;
+            loop {
+                let y = mix(x, ink, t);
+                if [c.bg, c.side, c.panel].iter().all(|g| contrast(y, *g) >= want) || t >= 1.0 {
+                    return y;
+                }
+                t += 0.05;
+            }
+        };
+        c.dim = lift(self.dim, 7.0);
+        for slot in [&mut c.wait, &mut c.run, &mut c.err, &mut c.done, &mut c.blue, &mut c.magenta] {
+            *slot = lift(*slot, 7.0);
+        }
+        c.border = lift(mix(self.border, ink, 0.3), 3.0);
+        c
+    }
+}
+
 /// The built-in themes, `tsumugi Dark` first.
 pub fn builtin() -> Vec<Theme> {
     BUILTIN
@@ -492,6 +527,33 @@ mod tests {
             for (what, s) in [("wait", c.wait), ("run", c.run), ("err", c.err), ("done", c.done)] {
                 assert!(contrast(s, c.panel) >= 3.0, "{name}: {what} {:.1}", contrast(s, c.panel));
             }
+        }
+    }
+
+    /// The high-contrast variant of every built-in theme: text, dim text and
+    /// the status colours 7:1 on every ground, borders 3:1, light stays light.
+    #[test]
+    fn every_theme_has_a_high_contrast_variant_that_reads() {
+        for t in builtin() {
+            let h = t.colors.high_contrast();
+            let name = &t.name;
+            assert_eq!(h.light, t.colors.light, "{name}");
+            for (what, g) in [("bg", h.bg), ("side", h.side), ("panel", h.panel)] {
+                assert!(contrast(h.fg, g) >= 12.0, "{name}: text on {what} {:.1}", contrast(h.fg, g));
+                for (slot, s) in [
+                    ("dim", h.dim),
+                    ("wait", h.wait),
+                    ("run", h.run),
+                    ("err", h.err),
+                    ("done", h.done),
+                    ("blue", h.blue),
+                    ("magenta", h.magenta),
+                ] {
+                    assert!(contrast(s, g) >= 7.0, "{name}: {slot} on {what} {:.1}", contrast(s, g));
+                }
+            }
+            assert!(contrast(h.border, h.panel) >= 3.0, "{name}: border {:.1}", contrast(h.border, h.panel));
+            assert_eq!(h.ansi16, t.colors.ansi16, "{name}");
         }
     }
 

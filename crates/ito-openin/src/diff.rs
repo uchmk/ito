@@ -24,8 +24,8 @@ pub struct Known {
     pub merge: &'static str,
 }
 
-// Command lines follow each tool's documentation. WinMerge's three-way line is
-// not checked on a real install yet (the middle pane is the base).
+// Command lines follow each tool's documentation. WinMerge's three-way line was
+// run on a real install (WinMerge 2.16, 2026-10-24): it opens left | base | right.
 pub const KNOWN: &[Known] = &[
     Known {
         name: "winmerge",

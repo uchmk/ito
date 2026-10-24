@@ -1,0 +1,17 @@
+[package]
+name = "ito-guide"
+description = "The first-run / setup-problems guide: a list of problems, each with copyable fix commands per OS, shown as a non-blocking egui panel that takes no keys and closes on Esc or a click outside"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# The panel (`show`), coloured by `ito-theme`.
+egui = ["dep:egui", "dep:ito-theme"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }

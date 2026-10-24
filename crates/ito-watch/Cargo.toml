@@ -1,0 +1,11 @@
+[package]
+name = "ito-watch"
+description = "Event-driven recursive folder watcher: the watcher lives on its own thread (starting one can hang on a network drive), shares are skipped, only the newest wish counts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+notify = "8"

@@ -1,0 +1,16 @@
+[package]
+name = "ito-a11y"
+description = "Accessibility for the apps: marks for selected / focused / conflict states that do not rely on colour alone, their spoken names (English and Japanese), and a screen-reader label for what egui paints"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# `say` / `announce`: the screen-reader label of a painted thing (egui's accesskit).
+egui = ["dep:egui"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }

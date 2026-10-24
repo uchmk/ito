@@ -1,0 +1,10 @@
+[package]
+name = "ito-guard"
+description = "A look before a commit: protected branch names (with `*`), and staged files that look wrong to commit (too big, a key or .env, a token inside). Git-free and table-driven"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
