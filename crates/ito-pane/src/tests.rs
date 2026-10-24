@@ -104,6 +104,17 @@ mod pane {
         assert_eq!(all_text(&t), "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\na line longer than ten\n");
     }
 
+    /// A reply to a query and the focus report are not typing: they leave a
+    /// scrolled view (and the selection drag on it) where it is.
+    #[test]
+    fn only_a_person_typing_brings_the_view_back_to_the_bottom() {
+        assert!(crate::terminal::is_typing("in key", b"a"));
+        assert!(crate::terminal::is_typing("in paste", b"a"));
+        assert!(!crate::terminal::is_typing("in reply", b"[?6c"));
+        assert!(!crate::terminal::is_typing("in key", &crate::focus_bytes(true)));
+        assert!(!crate::terminal::is_typing("in key", &crate::focus_bytes(false)));
+    }
+
     /// A search across sessions reads the whole buffer: the newest line
     /// first, the scrollback too, case aside; and showing one puts it on
     /// screen with its match selected.

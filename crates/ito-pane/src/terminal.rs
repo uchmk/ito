@@ -407,6 +407,13 @@ pub(crate) fn new_pty(options: &tty::Options, window: WindowSize) -> io::Result<
     tty::new(options, window, 0).inspect_err(|_| crate::sys::end_new_consoles(&consoles))
 }
 
+/// Whether bytes sent to the program are a person answering what is on screen
+/// (keys, a paste, the wheel as the mouse) rather than the pane's own reply to
+/// a query or its gaining or losing the keys.
+pub(crate) fn is_typing(origin: &str, bytes: &[u8]) -> bool {
+    origin != "in reply" && bytes != crate::focus_bytes(true) && bytes != crate::focus_bytes(false)
+}
+
 impl Terminal {
     /// Start a shell in `cwd`. The cell size is what the PTY is told, so a
     /// program asking for pixels (an image protocol, say) gets the truth.
@@ -743,13 +750,17 @@ impl Terminal {
         log_pty(&self.log, origin, &bytes);
         // Neither a reply nor the pane gaining or losing the keys is a person
         // answering: a "waiting" noticed before it still stands.
-        if origin != "in reply" && bytes != crate::focus_bytes(true) && bytes != crate::focus_bytes(false) {
+        let person = is_typing(origin, &bytes);
+        if person {
             *self.last_input.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+            // Typing is an answer to what is on screen, so the view comes back to
+            // the bottom — every terminal does this, and a key that seemed to do
+            // nothing because the view was in the scrollback is a bad surprise.
+            // A reply to a query, or the pane gaining the keys by the click that
+            // begins a selection, is not typing: it left the view where it was
+            // scrolled to, so a drag could not stay on the lines it was reading.
+            self.term.lock().scroll_display(Scroll::Bottom);
         }
-        // Typing is an answer to what is on screen, so the view comes back to
-        // the bottom — every terminal does this, and a key that seemed to do
-        // nothing because the view was in the scrollback is a bad surprise.
-        self.term.lock().scroll_display(Scroll::Bottom);
         let _ = self.sender.send(Msg::Input(bytes.into()));
     }
 
