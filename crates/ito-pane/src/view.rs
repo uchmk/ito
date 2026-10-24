@@ -828,7 +828,12 @@ pub fn show_faces<P: Pane + ?Sized>(
             // the selection with it, as in every terminal: without it a drag
             // could not reach what is scrolled off the screen. The view moves
             // first so the cell below is read against where it ends up.
-            let speed = edge_speed(p.y, inner.top(), inner.bottom(), row_h);
+            // The pointer leaving the window is no position at all (egui keeps
+            // the last one it saw): a pane that runs to the window's edge gets
+            // its last position a little inside it, so that is read as past
+            // the edge it was heading for.
+            let y = if hover.is_none() { gone_edge_y(p.y, inner.top(), inner.bottom(), row_h) } else { p.y };
+            let speed = edge_speed(y, inner.top(), inner.bottom(), row_h);
             if speed != 0.0 {
                 let dt = ui.ctx().input(|i| i.stable_dt).min(0.1);
                 let acc_id = id.with("edge-scroll");
@@ -909,6 +914,18 @@ fn edge_speed(y: f32, top: f32, bottom: f32, row_h: f32) -> f32 {
         _ => return 0.0,
     };
     sign * (EDGE_BASE + past * EDGE_PER_ROW).min(EDGE_MAX)
+}
+
+/// Where a drag whose pointer left the window counts as being: its last known
+/// `y`, unless that was within two rows of `top` or `bottom`, when it is a row
+/// beyond that edge. The events of a fast move out of the window stop short of
+/// the edge, and without this the view would not run at all.
+fn gone_edge_y(y: f32, top: f32, bottom: f32, row_h: f32) -> f32 {
+    match y {
+        y if y < top + 2.0 * row_h => top - row_h,
+        y if y > bottom - 2.0 * row_h => bottom + row_h,
+        y => y,
+    }
 }
 
 /// Turn wheel movement, measured in rows, into whole rows — keeping the part
@@ -1293,6 +1310,17 @@ mod tests {
         assert!(edge_speed(510.0, top, bottom, row_h) < 0.0, "below runs towards the newest");
         assert_eq!(edge_speed(-5000.0, top, bottom, row_h), EDGE_MAX);
         assert_eq!(edge_speed(9000.0, top, bottom, row_h), -EDGE_MAX);
+    }
+
+    /// A drag that left the window near an edge of the pane keeps running that
+    /// way; one that left from the middle does not.
+    #[test]
+    fn a_drag_that_left_the_window_by_an_edge_still_runs() {
+        let (top, bottom, row_h) = (100.0, 500.0, 20.0);
+        let run = |y| edge_speed(gone_edge_y(y, top, bottom, row_h), top, bottom, row_h);
+        assert!(run(105.0) > 0.0, "left by the top");
+        assert!(run(495.0) < 0.0, "left by the bottom");
+        assert_eq!(run(300.0), 0.0, "left from the middle");
     }
 
     #[test]
