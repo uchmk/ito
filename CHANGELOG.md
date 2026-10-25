@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.107.0] - 2026-10-26
+
+### 追加
+- `scripts/lanes/release-check.sh`: リリースの終わりの確認（`bash scripts/release-check.sh vX.Y.Z`、`FILES` に追加）。
+  `release.yml` が成功したあとに 1 回回す。確認は 3 つ: 成果物が 6 つ（zip 2 + tar.gz 4）、SHA-256 の表（`release-sums.yml` が書く `<!-- checksums -->` 以降）に 6 つ全部の行がある、
+  ノートが長すぎない（40 行超は `WARN`。落とさない）。足りなければ `NG` の行に次の手（`gh workflow run release-sums.yml -f tag=…` など）が出て、終了コードが 1 になる。
+  `REPO=owner/name` で別のリポジトリも見られる。
+
+### 使う側がやること
+- `rev` を上げ、`scripts/lanes.sh sync` を流す（`scripts/release-check.sh` が入る）。
+- リリースの手順の文書（kura は `docs/claude/release.md`）に、「`release.yml` の成功で終わりにしない。`bash scripts/release-check.sh vX.Y.Z` が `RELEASE OK` になるまでが終わり。
+  SHA-256 の表を見ていないまま『完了』と報告しない（見られないときは『未確認』と理由を書く）」と書く。
+
 ## [0.106.0] - 2026-10-25
 
 ### 追加

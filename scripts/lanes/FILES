@@ -20,3 +20,4 @@ todo-open.sh
 xrun.sh
 lane-trust.ps1
 release-sums.sh
+release-check.sh
