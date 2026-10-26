@@ -12,7 +12,7 @@
 use std::ops::Range;
 use std::sync::OnceLock;
 
-use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
+use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
 #[cfg(feature = "themes")]
 pub mod themed;
@@ -34,15 +34,15 @@ pub enum Tok {
 pub type Ink = Vec<(Range<usize>, Tok)>;
 
 /// A name a line declares: `fn main` gives `main` with kind `function`. The
-/// kind is the word after `entity.name.` in the grammar (`function`, `class`,
-/// `struct`, `enum`, `trait`, `interface`, `impl`, `namespace`, `macro`, `type`,
-/// and `table` for a TOML table); the app picks the kinds it lists and
-/// nests them by indent. HTML tag names (`entity.name.tag`) are not
-/// declarations and are left out.
+/// kind is one of `function`, `class`, `struct`, `enum`, `union`, `trait`,
+/// `interface`, `impl`, `namespace`, `mod`, `macro`, `type`, and `table` (a
+/// TOML table); the app picks the kinds it lists and nests them by indent. It is
+/// read from the whole scope stack (see [`decl_kind`]), so a name that only
+/// refers to something (a call, a type annotation) is not a declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decl {
     pub range: Range<usize>,
-    pub kind: String,
+    pub kind: &'static str,
 }
 
 /// A line longer than this (minified code) is left plain and not parsed.
@@ -165,7 +165,7 @@ impl Stream {
             if from >= to {
                 return;
             }
-            if let Some(kind) = stack.as_slice().iter().rev().find_map(|s| decl_kind(&s.build_string())) {
+            if let Some(kind) = decl_kind(stack.as_slice()) {
                 match decls.last_mut() {
                     Some(d) if d.range.end == from && d.kind == kind => d.range.end = to,
                     _ => decls.push(Decl { range: from..to, kind }),
@@ -200,10 +200,42 @@ pub fn highlight<'a>(path: &str, lines: impl IntoIterator<Item = &'a str>) -> Ve
     }
 }
 
-/// The kind of a declaration scope: `entity.name.function.rust` is `function`.
-pub fn decl_kind(scope: &str) -> Option<String> {
-    let kind = scope.strip_prefix("entity.name.")?.split('.').next()?;
-    (!kind.is_empty() && kind != "tag").then(|| kind.to_owned())
+const DECL_TAGS: [&str; 10] = ["class", "struct", "enum", "union", "trait", "interface", "impl", "namespace", "macro", "type"];
+
+/// What the innermost `entity.name` on `stack` declares, if anything. Only the
+/// stack tells a definition from a mention: TypeScript's and PHP's grammars name
+/// a call `entity.name.function` inside `meta.function-call`, and TypeScript names
+/// the types it refers to `entity.name.type` inside `meta.type.annotation`,
+/// `meta.return.type` or `meta.type.parameters` (and a bare `entity.name.type`
+/// in `source.ts` / `source.tsx`); none of those declare anything.
+/// `entity.name.module` is `mod`, `type.alias` is `type`, `type.module` is
+/// `namespace`, and `type.<class|struct|…>` is the word after `type`.
+pub fn decl_kind(stack: &[Scope]) -> Option<&'static str> {
+    let scope = |n: &str| Scope::new(n).ok();
+    let entity = scope("entity.name")?;
+    let name = stack.iter().rev().find(|sc| entity.is_prefix_of(**sc))?;
+    let within = |names: &[&str]| names.iter().filter_map(|n| scope(n)).any(|p| stack.iter().any(|sc| p.is_prefix_of(*sc)));
+    let full = name.build_string();
+    let mut atoms = full.split('.').skip(2);
+    let tag = |t: &str| DECL_TAGS.iter().copied().find(|&k| k == t);
+    match atoms.next()? {
+        "function" => (!within(&["meta.function-call"])).then_some("function"),
+        "table" => Some("table"),
+        "module" => Some("mod"),
+        "type" => {
+            if within(&["meta.type.annotation", "meta.return.type", "meta.type.parameters"]) {
+                return None;
+            }
+            match atoms.next() {
+                Some("alias") => Some("type"),
+                Some("module") => Some("namespace"),
+                Some(sub) if tag(sub).is_some() => tag(sub),
+                _ if within(&["source.ts", "source.tsx"]) => None,
+                _ => Some("type"),
+            }
+        }
+        kind => tag(kind),
+    }
 }
 
 /// What a scope (`keyword.control.rust`) is.
@@ -302,14 +334,63 @@ mod tests {
         let text = "pub fn main() {";
         let (ink, decls) = s.line_decls(text);
         assert!(!ink.is_empty());
-        assert_eq!(decls.iter().map(|d| (&text[d.range.clone()], d.kind.as_str())).collect::<Vec<_>>(), [("main", "function")]);
+        assert_eq!(decls.iter().map(|d| (&text[d.range.clone()], d.kind)).collect::<Vec<_>>(), [("main", "function")]);
         let (_, d) = s.line_decls("struct Point {");
-        assert_eq!((d.len(), d[0].kind.as_str()), (1, "struct"));
+        assert_eq!((d.len(), d[0].kind), (1, "struct"));
         let (_, d) = s.line_decls("    let x = 1;");
         assert!(d.is_empty());
-        assert_eq!(decl_kind("entity.name.function.rust").as_deref(), Some("function"));
-        assert_eq!(decl_kind("entity.name.tag.html"), None);
-        assert_eq!(decl_kind("keyword.control"), None);
+        assert_eq!(s.line_decls("}").1, []);
+    }
+
+    fn kinds(path: &str, src: &str) -> Vec<(String, &'static str)> {
+        let mut s = Stream::new(path).unwrap();
+        src.lines().flat_map(|l| s.line_decls(l).1.into_iter().map(move |d| (l[d.range].to_owned(), d.kind))).collect()
+    }
+
+    #[test]
+    fn typescript_mentions_are_not_declarations() {
+        let src = "const x = new Foo<Bar>();
+let y: Map<string, Foo> = z as Baz;
+function f(a: Foo): Bar { g(); return x.y(); }
+export class C extends D implements I {
+  method(x: number) {}
+}
+interface I { m(): void }
+type T = A | B;
+enum E { A }
+namespace N {}
+const arrow = (x) => x;
+";
+        let names: Vec<_> = kinds("a.ts", src).into_iter().filter(|(_, k)| *k != "function").map(|(n, k)| format!("{k} {n}")).collect();
+        assert_eq!(names, ["class C", "interface I", "type T", "enum E", "namespace N"]);
+        let fns: Vec<_> = kinds("a.ts", src).into_iter().filter(|(_, k)| *k == "function").map(|d| d.0).collect();
+        assert_eq!(fns, ["f", "method", "m", "arrow"]);
+        assert!(kinds("a.tsx", "export function App(): JSX.Element { return <Foo /> }").iter().all(|(n, _)| n == "App"));
+    }
+
+    #[test]
+    fn rust_and_go_kinds() {
+        let rs = kinds(
+            "a.rs",
+            "pub struct App {
+}
+enum E { A }
+trait T { fn t(&self); }
+impl App {
+  fn new() {}
+}
+mod tests {}
+",
+        );
+        let rs: Vec<_> = rs.iter().map(|(n, k)| format!("{k} {n}")).collect();
+        assert_eq!(rs, ["struct App", "enum E", "trait T", "function t", "impl App", "function new", "mod tests"]);
+        let go = kinds(
+            "a.go",
+            "func main() { f() }
+type S struct {}
+",
+        );
+        assert_eq!(go, [("main".to_owned(), "function"), ("S".to_owned(), "type")]);
     }
 
     #[test]

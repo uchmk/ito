@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.110.0] - 2026-10-26
+
+### 追加
+- `ito_syntax::decl_kind(stack: &[Scope])`: スコープの積み全体から宣言の種類を決める（kura の `symbols.rs` の `classify` と同じ規則）。`Stream::line_decls` はこれを使う。
+  - 種類は `function` / `class` / `struct` / `enum` / `union` / `trait` / `interface` / `impl` / `namespace` / `mod` / `macro` / `type` / `table`。
+  - 呼び出し（`meta.function-call` の中の `entity.name.function`）、型の注釈・戻り値・型引数の中の型名、TypeScript の素の `entity.name.type`（`JSX.Element` など）は宣言にしない。
+- 機能 `themes`: `Themed::line_decls(text) -> (Spans, Vec<Decl>)`（色と宣言を 1 回の解析から。`line` はこの前半）。
+
+### 変更
+- `Decl.kind` は `String` から `&'static str` に（比較は `d.kind == "function"` のまま使える）。
+- `Decl.range` は隣り合う同じ種類をまとめたもので、前後の空白を含むことがある。
+
+### 使う側がやること
+- `Decl.kind` を `String` として持つ側は `.to_owned()` する。空白は `trim()` する（kura の `piece.trim()` と同じ）。`table` の見出しは行全体から作る。
+
 ## [0.109.0] - 2026-10-26
 
 ### 追加

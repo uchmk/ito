@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use syntect::highlighting::{FontStyle, HighlightIterator, HighlightState, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference};
 
-use crate::{fence_lang, find, find_token, syntaxes, MAX_LINE};
+use crate::{decl_kind, fence_lang, find, find_token, syntaxes, Decl, MAX_LINE};
 
 /// How a stretch of text is painted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +72,7 @@ pub struct Themed {
     theme: &'static Theme,
     parse: ParseState,
     state: HighlightState,
+    stack: ScopeStack,
 }
 
 impl Themed {
@@ -95,27 +96,55 @@ impl Themed {
     fn with(syntax: &'static SyntaxReference, theme_name: &str) -> Option<Themed> {
         let theme = theme(theme_name)?;
         let state = HighlightState::new(&Highlighter::new(theme), ScopeStack::new());
-        Some(Themed { syntax, theme, parse: ParseState::new(syntax), state })
+        Some(Themed { syntax, theme, parse: ParseState::new(syntax), state, stack: ScopeStack::new() })
     }
 
     /// Forget what the earlier lines opened.
     pub fn reset(&mut self) {
         self.parse = ParseState::new(self.syntax);
         self.state = HighlightState::new(&Highlighter::new(self.theme), ScopeStack::new());
+        self.stack = ScopeStack::new();
     }
 
     /// The spans of the next line (without its newline). A line over
     /// [`MAX_LINE`](crate::MAX_LINE) bytes gives none and is not parsed.
     pub fn line(&mut self, text: &str) -> Spans {
+        self.line_decls(text).0
+    }
+
+    /// The spans of the next line and the names it declares ([`Decl`]), from
+    /// one parse.
+    pub fn line_decls(&mut self, text: &str) -> (Spans, Vec<Decl>) {
         if text.len() > MAX_LINE {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
         let mut src = String::with_capacity(text.len() + 1);
         src.push_str(text);
         src.push('\n');
-        let Ok(ops) = self.parse.parse_line(&src, syntaxes()) else { return Vec::new() };
+        let Ok(ops) = self.parse.parse_line(&src, syntaxes()) else { return (Vec::new(), Vec::new()) };
         let hl = Highlighter::new(self.theme);
         let end = text.len();
+        let mut decls: Vec<Decl> = Vec::new();
+        let mut put = |stack: &ScopeStack, from: usize, to: usize| {
+            let (from, to) = (from.min(end), to.min(end));
+            if let (true, Some(kind)) = (from < to, decl_kind(stack.as_slice())) {
+                match decls.last_mut() {
+                    Some(d) if d.range.end == from && d.kind == kind => d.range.end = to,
+                    _ => decls.push(Decl { range: from..to, kind }),
+                }
+            }
+        };
+        let mut was = 0;
+        for (pos, op) in &ops {
+            put(&self.stack, was, *pos);
+            was = *pos;
+            // A malformed op only loses the declarations.
+            if self.stack.apply(op).is_err() {
+                self.stack = ScopeStack::new();
+                break;
+            }
+        }
+        put(&self.stack, was, end);
         let mut out: Spans = Vec::new();
         let mut at = 0;
         for (style, piece) in HighlightIterator::new(&mut self.state, &ops, &src, &hl) {
@@ -135,13 +164,21 @@ impl Themed {
                 _ => out.push((from..to, s)),
             }
         }
-        out
+        (out, decls)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declarations_come_with_the_spans() {
+        let mut t = Themed::new("a.rs", "base16-ocean.dark").unwrap();
+        let (spans, decls) = t.line_decls("fn main() {}");
+        assert_eq!(spans, t.line("fn main() {}").into_iter().collect::<Vec<_>>());
+        assert_eq!(decls.iter().map(|d| (&"fn main() {}"[d.range.clone()], d.kind)).collect::<Vec<_>>(), [("main", "function")]);
+    }
 
     #[test]
     fn a_line_is_covered_in_the_themes_colours() {
