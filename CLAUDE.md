@@ -17,7 +17,9 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-theme` | 組み込みの 20 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |
 | `ito-openin` | 別のプログラムで開く（コマンドラインのひな形 `{path} {line} {left} {right} {base} {merged}`、窓を出さない起動、他のアプリを呼ぶ `app::open/launch`、エディターの行の渡し方の表と `[line_args]`、diff / merge ツールの表と見つけ方、`[open]`・`[line_args]`・`[diff_tools.<名>]` の読み書きと設定画面の `Edit`）。設定画面のカードは `ito-prefs` の `open_card` | kura、michi |
-| `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON）） | yagura（tsumugi も載せ替える） |
+| `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON））。アプリ自前の短い音を頼まれた瞬間に鳴らす `player`（Windows・macOS のみ、Linux は `Err`） | yagura、fude（tsumugi も載せ替える） |
+| `ito-export` | SVG の文字列のページを PNG・複数ページの PDF（文字は文字のまま）・印刷にする（resvg・svg2pdf、純 Rust。止まるのでワーカースレッドから） | fude（kura・michi も） |
+| `ito-ime` | 自前で描く入力行の入力メソッド（候補窓の位置・縦書きは列の右隣・変換中の文字を覚えて下線で描く・確定・変換中のキーを奪わない）。`ito-keyscript` の `<Preedit:>`・`<Commit:>` と組む | fude、ito-pane |
 | `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`・`<Size:WxH>`・`<Theme:名前>`・`<Lang:ja>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は `\r`・`\n` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
