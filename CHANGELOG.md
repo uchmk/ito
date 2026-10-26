@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.109.0] - 2026-10-26
+
+### 追加
+- `ito-syntax`: フェンスや HTML の `language-…` の言語名から引く入口（kura の `find_token` / `fence_syntax` の別名表を共通に）。`fence_lang(info)`、`knows_token(token)`、`Stream::for_token` / `for_fence`、機能 `themes` の `Themed::for_token(token, theme)` / `for_fence(info, theme)`。`text` / `plain` などは言語なし。
+- Markdown / HTML の色（見出し・リンク・引用・薄い字）は `themed::scope_color` と `foreground` で足りる（`Theme` 型は出さない）。
+
 ## [0.108.0] - 2026-10-26
 
 ### 追加

@@ -63,6 +63,56 @@ pub(crate) fn find(path: &str) -> Option<&'static SyntaxReference> {
     found.filter(|s| s.name != "Plain Text")
 }
 
+/// The grammar for a language name or extension as written in a Markdown fence
+/// or an HTML `class="language-…"` (`rust`, `py3`, `shell`, `yml`, `c++`). Common
+/// aliases are mapped first; `text`, `plain` and the like are no language.
+pub(crate) fn find_token(token: &str) -> Option<&'static SyntaxReference> {
+    let set = syntaxes();
+    let lower = token.to_ascii_lowercase();
+    let alias = match lower.as_str() {
+        "text" | "txt" | "plain" | "plaintext" | "none" | "output" => return None,
+        "shell" | "console" | "shellsession" | "sh-session" | "zsh" | "ksh" | "fish" => "bash",
+        "jsonc" | "json5" | "jsonl" | "ndjson" => "json",
+        "yml" => "yaml",
+        "jsx" | "mjs" | "cjs" | "node" => "js",
+        "docker" | "containerfile" => "dockerfile",
+        "c++" => "cpp",
+        "golang" => "go",
+        "rs" => "rust",
+        "py3" | "python3" => "python",
+        "hcl" | "tf" => "terraform",
+        "cmd" | "batch" => "bat",
+        "patch" => "diff",
+        "html5" | "xhtml" | "vue-html" => "html",
+        "cfg" | "conf" | "dosini" => "ini",
+        other => other,
+    };
+    set.find_syntax_by_token(alias).or_else(|| set.find_syntax_by_token(token)).filter(|s| s.name != "Plain Text")
+}
+
+/// The language word of a fence's info string (`rust`, `rust,ignore`, `{.python}`).
+pub fn fence_lang(info: &str) -> Option<&str> {
+    info.split(|c: char| c.is_whitespace() || c == ',' || c == '{' || c == '}').find(|s| !s.is_empty()).map(|l| l.trim_start_matches('.'))
+}
+
+/// Whether a language name (a fence's, an HTML class's) is known.
+pub fn knows_token(token: &str) -> bool {
+    find_token(token).is_some()
+}
+
+impl Stream {
+    /// A stream for a language name or extension (`rust`, `py3`, `shell`).
+    pub fn for_token(token: &str) -> Option<Stream> {
+        let syntax = find_token(token)?;
+        Some(Stream { syntax, state: ParseState::new(syntax), stack: ScopeStack::new() })
+    }
+
+    /// A stream for a fence's info string (`rust,ignore`, `{.python}`).
+    pub fn for_fence(info: &str) -> Option<Stream> {
+        Stream::for_token(fence_lang(info)?)
+    }
+}
+
 /// Whether a language is known for `path` (by file name, then extension).
 pub fn knows(path: &str) -> bool {
     find(path).is_some()
@@ -268,6 +318,17 @@ mod tests {
         let text = "[package]";
         let (_, d) = s.line_decls(text);
         assert!(d.iter().any(|d| d.kind == "table"), "{d:?}");
+    }
+
+    #[test]
+    fn fence_words_find_languages() {
+        assert_eq!(fence_lang("rust,ignore"), Some("rust"));
+        assert_eq!(fence_lang("{.python}"), Some("python"));
+        assert_eq!(fence_lang("  "), None);
+        assert!(knows_token("rust") && knows_token("py3") && knows_token("shell") && knows_token("yml") && knows_token("RS"));
+        assert!(!knows_token("text") && !knows_token("zzzunknown"));
+        let ink = Stream::for_fence("rust,ignore").unwrap().line("let a = 1;");
+        assert_eq!(word("let a = 1;", &ink, Tok::Keyword), ["let"]);
     }
 
     #[test]

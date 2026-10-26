@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use syntect::highlighting::{FontStyle, HighlightIterator, HighlightState, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference};
 
-use crate::{find, syntaxes, MAX_LINE};
+use crate::{fence_lang, find, find_token, syntaxes, MAX_LINE};
 
 /// How a stretch of text is painted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,7 +78,21 @@ impl Themed {
     /// For the language of `path`; `None` for one it does not know (the caller
     /// leaves the text plain).
     pub fn new(path: &str, theme_name: &str) -> Option<Themed> {
-        let syntax = find(path)?;
+        Themed::with(find(path)?, theme_name)
+    }
+
+    /// For a language name or extension as a fence or an HTML class writes it
+    /// (`rust`, `py3`, `shell`); `None` for `text` and the unknown.
+    pub fn for_token(token: &str, theme_name: &str) -> Option<Themed> {
+        Themed::with(find_token(token)?, theme_name)
+    }
+
+    /// For a fence's info string (`rust,ignore`, `{.python}`).
+    pub fn for_fence(info: &str, theme_name: &str) -> Option<Themed> {
+        Themed::for_token(fence_lang(info)?, theme_name)
+    }
+
+    fn with(syntax: &'static SyntaxReference, theme_name: &str) -> Option<Themed> {
         let theme = theme(theme_name)?;
         let state = HighlightState::new(&Highlighter::new(theme), ScopeStack::new());
         Some(Themed { syntax, theme, parse: ParseState::new(syntax), state })
@@ -155,6 +169,13 @@ mod tests {
         assert_eq!(second[0].1.rgb, comment);
         assert!(Themed::new("a.zzzunknown", "base16-ocean.dark").is_none());
         assert!(t.line(&"x ".repeat(2000)).is_empty());
+    }
+
+    #[test]
+    fn a_fence_word_is_a_language() {
+        let mut t = Themed::for_fence("rust,ignore", "base16-ocean.dark").unwrap();
+        assert!(t.line("let a = 1;").len() > 1);
+        assert!(Themed::for_token("text", "base16-ocean.dark").is_none());
     }
 
     #[test]
