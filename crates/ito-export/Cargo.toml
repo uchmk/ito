@@ -1,0 +1,20 @@
+[package]
+name = "ito-export"
+description = "Pages as SVG strings to PNG, one multi-page PDF with the fonts embedded, and the OS print dialog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# SVG to pixels; the same version and features as kura's preview.
+resvg = { version = "0.48", default-features = false, features = ["text", "system-fonts"] }
+# SVG to PDF (text stays text, the fonts are subset and embedded), and the
+# page tree around it (the same pdf-writer as svg2pdf's). Pure Rust, like resvg.
+svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
+pdf-writer = "0.12"
+
+[target."cfg(windows)".dependencies]
+# The shell's "print" verb.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

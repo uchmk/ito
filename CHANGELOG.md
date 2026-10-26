@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.113.0] - 2026-10-26
+
+### 追加
+- 新しいクレート `ito-export`: SVG の文字列で渡されたページを、PNG・複数ページの PDF・印刷にする（uchmk/ito#42）。どれも止まるので、ワーカースレッドから呼ぶ。
+  - `Fonts`（`system()`・`empty()`・`with_file(path)`）: SVG が名指す字体。システムの字体は最初に要ったときに 1 回だけ読む。
+  - `png_bytes(svg, scale, &fonts)` / `png(.., out)`: resvg で描く。`scale` 2.0 で 192 dpi。
+  - `pdf_bytes(&pages, &fonts)` / `pdf(.., out)`: svg2pdf で、ページごとに 1 枚。文字は文字のまま、字体は必要な字だけ埋め込む。SVG の 96 px = 1 inch を pt（1/72）に直す（794 × 1123 px が A4）。
+  - `print(&pdf)`: Windows は `ShellExecuteW` の `print`、macOS は `lpr`、Linux は `lp`。紙が出るのではなく、渡し終えたら戻る。
+  - 純 Rust（Windows の印刷だけ `windows`）。svg2pdf 0.13 は usvg 0.45 を使い resvg 0.48 とは別なので、字体の表は形式ごとに持つ。
+
+### 使う側がやること
+- fude・kura・michi: `ito-export = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、ページを SVG にして `ito_export::pdf` などへ渡す。他の ito のクレートと同じ `rev` にそろえる。
+
 ## [0.112.0] - 2026-10-26
 
 ### 追加
