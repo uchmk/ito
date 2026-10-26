@@ -88,6 +88,11 @@ impl Themed {
         Themed::with(find_token(token)?, theme_name)
     }
 
+    /// For the language a `#!` first line names.
+    pub fn for_shebang(first: &str, theme_name: &str) -> Option<Themed> {
+        Themed::for_token(crate::shebang_token(first)?, theme_name)
+    }
+
     /// For a fence's info string (`rust,ignore`, `{.python}`).
     pub fn for_fence(info: &str, theme_name: &str) -> Option<Themed> {
         Themed::for_token(fence_lang(info)?, theme_name)

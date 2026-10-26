@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.111.0] - 2026-10-26
+
+### 追加
+- `ito-syntax`: `#!` の行から言語を決める入口（kura の `shebang_token` を共通に）。`shebang_token(first)`、`Stream::for_shebang(first)`、機能 `themes` の `Themed::for_shebang(first, theme)`。拡張子で言語が決まらないファイル（`knows(path)` が偽）の 1 行目に使う。
+
+### 変更
+- `MAX_LINE` を 1500 から 2000 バイトに（kura の 2000 に合わせる。これより長い行は色を付けず、解析もしない）。
+
+### 使う側がやること
+- kura は自前の `shebang_token` を外して `Stream::for_shebang` / `Themed::for_shebang` を使う。
+
 ## [0.110.0] - 2026-10-26
 
 ### 追加

@@ -46,7 +46,7 @@ pub struct Decl {
 }
 
 /// A line longer than this (minified code) is left plain and not parsed.
-pub const MAX_LINE: usize = 1500;
+pub const MAX_LINE: usize = 2000;
 
 /// bat's collection, loaded once per process: loading it is slow enough to be
 /// felt if every test or every file did it.
@@ -100,7 +100,19 @@ pub fn knows_token(token: &str) -> bool {
     find_token(token).is_some()
 }
 
+/// The language word of a `#!` first line (`#!/usr/bin/env python3` gives
+/// `python3`, `#!/bin/bash -e` gives `bash`); `None` for any other line. For a
+/// file whose name says no language (see [`knows`]).
+pub fn shebang_token(first: &str) -> Option<&str> {
+    first.strip_prefix("#!")?.split_whitespace().rfind(|w| !w.starts_with('-') && *w != "env")?.rsplit('/').next()
+}
+
 impl Stream {
+    /// A stream for the language a `#!` first line names.
+    pub fn for_shebang(first: &str) -> Option<Stream> {
+        Stream::for_token(shebang_token(first)?)
+    }
+
     /// A stream for a language name or extension (`rust`, `py3`, `shell`).
     pub fn for_token(token: &str) -> Option<Stream> {
         let syntax = find_token(token)?;
@@ -366,6 +378,15 @@ const arrow = (x) => x;
         let fns: Vec<_> = kinds("a.ts", src).into_iter().filter(|(_, k)| *k == "function").map(|d| d.0).collect();
         assert_eq!(fns, ["f", "method", "m", "arrow"]);
         assert!(kinds("a.tsx", "export function App(): JSX.Element { return <Foo /> }").iter().all(|(n, _)| n == "App"));
+    }
+
+    #[test]
+    fn a_shebang_names_the_language() {
+        assert_eq!(shebang_token("#!/usr/bin/env python3"), Some("python3"));
+        assert_eq!(shebang_token("#!/bin/bash -e"), Some("bash"));
+        assert_eq!(shebang_token("fn main() {}"), None);
+        assert!(Stream::for_shebang("#!/usr/bin/env python3").is_some());
+        assert!(Stream::for_shebang("#!/usr/bin/env nosuchlang").is_none());
     }
 
     #[test]
