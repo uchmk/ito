@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.114.0] - 2026-10-26
+
+### 追加
+- `ito_notify::player`: アプリ自前の短い音を、頼まれた瞬間に鳴らす `Player`（uchmk/ito#41）。打鍵ごとの「カチッ」のような、20〜80 ms の音向け。出力を 1 つ開いたままにし、`play` は声（voice）をミキサーに足して即戻る。重ねて鳴らせる（同時に 32 まで、超えたら古い声から）。
+  - `Player::new() -> Result<Player, String>`: 既定の出力を開く。Windows は `waveOut`（10 ms × 3 本）、macOS は AudioQueue。**Linux には音の実装を入れない**（ALSA の C ライブラリを引くため）。`Err` が返るので、呼ぶ側は音なしで続ける。出力の無い機械でも `Err`。
+  - `load_pcm(&[f32], rate) -> Sample`（モノ、-1.0..=1.0、線形で 44.1 kHz に直す）、`load_wav(&bytes) -> Result<Sample, String>`（PCM 8/16 bit・float32、何チャンネルでもモノに混ぜる）、`play(&Sample, volume)`。
+  - 開いている間は無音をミキサーに流し続ける。音を出す設定のときだけ `Player` を作り、切ったら捨てる。`Drop` で出力を閉じる。
+  - 通知の音（`sound::play`、システムの音を 1 回）はそのまま。
+- Windows の `windows` の機能に `Win32_Media`・`Win32_Media_Audio`・`Win32_System_Threading`（`ito-notify`）。
+
+### 使う側がやること
+- fude: `ito_notify::player::Player::new()` を設定が「音あり」のときに作り（`Err` なら音なし）、コードで作ったサンプルを `load_pcm` で 1 回読んで、打鍵ごとに `play(&tick, 0.4)`。
+
 ## [0.113.0] - 2026-10-26
 
 ### 追加

@@ -1,5 +1,5 @@
 //! Telling a person from an app, three ways: the system's notification
-//! ([`toast`]), a sound ([`sound`]) and a message sent elsewhere
+//! ([`toast`]), a sound ([`sound`], or the app's own short ones, [`player`]) and a message sent elsewhere
 //! ([`webhook`]: an ntfy topic, a Slack or Discord incoming webhook, or any
 //! address that takes JSON, to as many places as the settings list). Each runs
 //! on a thread of its own and a failure only goes to stderr, so a caller never
@@ -11,6 +11,7 @@
 //! this: see [`SOUNDS`] and [`FORMATS`].
 
 pub mod notifier;
+pub mod player;
 pub mod sound;
 pub mod toast;
 pub mod webhook;
