@@ -242,6 +242,14 @@ pub fn run_with(cfg: &Config, root: &Path, args: &[String], mut automated: BTree
     // The fixed lines, in the gloss's language or in English.
     let t = |ja: String, en: String| if plain { en } else { ja };
 
+    if check && all.is_empty() {
+        // A checklist that parsed to nothing is a wrong shape (an old `id | check`
+        // table, say), not a finished one: every test's claim would go unseen.
+        writeln!(r.stderr, "{src}: no checks found; each section is `## N. Title` over a `| # | Do | Expect |` table").unwrap();
+        r.code = 1;
+        return r;
+    }
+
     let mut out = (lane.preamble)(&Counts { all: all.len(), manual: manual.len(), untranslated });
     // The progress, for `--stats`. Not written into the file: every pull
     // request that ticked a box also rewrote the total and its section's
@@ -832,6 +840,24 @@ mod tests {
         assert!(text.contains("Covered by tests, not listed below: 1.3"), "{text}");
         let again = run_with(&cfg, &d, &args(&["--check"]), auto());
         assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    }
+
+    #[test]
+    fn check_fails_when_the_checklist_parses_to_nothing() {
+        let d = dir("empty");
+        std::fs::write(
+            d.join("TESTING.md"),
+            "## Start
+
+| id | check |
+|---|---|
+| start-1 | opens |
+",
+        )
+        .unwrap();
+        let r = run_with(&config(), &d, &args(&["--check"]), BTreeSet::new());
+        assert_eq!(r.code, 1);
+        assert!(r.stderr.contains("no checks found"), "{}", r.stderr);
     }
 
     #[test]

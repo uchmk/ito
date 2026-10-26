@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.116.0] - 2026-10-27
+
+### 変更
+- 雛形 `templates/app/TESTING.md` を `ito-testcheck` が読む形にした（uchmk/ito#45）。見出しは `## 1. Start`、表は `| # | Do | Expect |`、行の番号は `1.1`〜`1.3`。冒頭の説明も「行を外すのは `#[test]` の `///` に `1.1: …` と書いたとき」に直した。
+- 雛形の `examples/make-testcheck.rs` の `src_dirs` を `&["src"]` から `&["crates"]` にした（アプリの `src` は `crates/<app>/src` にあるので、前の値ではテストの印が 1 つも見つからなかった）。
+
+### 追加
+- `ito-testcheck`: `--check` で、チェック表が 1 行も読めなかった（古い `id | check` の形など）ときは失敗にする。
+
+### 使う側がやること
+- 雛形から作ったアプリ（fude など）: `TESTING.md` を上の形に直し、`make-testcheck.rs` の `src_dirs` を `&["crates"]` にする。
+
 ## [0.115.0] - 2026-10-26
 
 ### 追加

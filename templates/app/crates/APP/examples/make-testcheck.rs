@@ -13,7 +13,7 @@ fn main() {
     run(&Config {
         source: "TESTING.md",
         notes: "scripts/testcheck-ja.toml",
-        src_dirs: &["src"],
+        src_dirs: &["crates"],
         dep_crates: &[],
         release_list: None,
         command: "cargo run --example make-testcheck",

@@ -1,12 +1,13 @@
 # Testing
 
-The checks a person (or an agent with a screen) makes. Each section is a table of `id | check`; a test that names an id
-in its code takes the row off the list, and `cargo run --example make-testcheck` writes what is left to `TESTING-CHECKS.md`.
+The checks a person (or an agent with a screen) makes. Each section is `## N. Title` over a table of `# | Do | Expect`.
+A test takes a row off the list by naming its number in a doc comment on the `#[test]` (`/// 1.1: …`), and
+`cargo run --example make-testcheck` writes what is left to `TESTING-CHECKS.md`.
 
-## Start
+## 1. Start
 
-| id | check |
-|---|---|
-| start-1 | `{{app}}` opens a window of 1280x800 with the text "{{app}}" |
-| start-2 | After moving and resizing it, closing and starting again, the window comes back at the same place and size |
-| start-3 | `F12` opens the browser at the repository's new issue form with the version and OS filled in |
+| # | Do | Expect |
+|---|---|---|
+| 1.1 | Run `{{app}}` | A window of 1280x800 opens with the title "{{app}}" |
+| 1.2 | Move and resize the window, close it and start it again | The window comes back at the same place and size |
+| 1.3 | Press `F12` | The browser opens the repository's new issue form with the version and OS filled in |
