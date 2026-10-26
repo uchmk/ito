@@ -151,7 +151,7 @@ pub fn profile(shell: &str, home: &std::path::Path) -> Option<std::path::PathBuf
                 cmd.output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).map(|o| o.trim().to_string()).filter(|p| !p.is_empty());
             asked.map(PathBuf::from).or_else(|| {
                 Some(if cfg!(windows) {
-                    home.join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
+                    crate::documents_dir().unwrap_or_else(|| home.join("Documents")).join("PowerShell/Microsoft.PowerShell_profile.ps1")
                 } else {
                     home.join(".config/powershell/Microsoft.PowerShell_profile.ps1")
                 })

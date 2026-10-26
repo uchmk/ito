@@ -77,6 +77,34 @@ pub const JAPANESE_BOLD: &[&str] = &[
     "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc",
 ];
 
+/// The system faces that set Japanese prose like print (Mincho, serif), in
+/// order; read like [`JAPANESE`]. For an app that shows a clean copy of what
+/// was written, where [`JAPANESE`] (Gothic) is the screen's face. They carry
+/// the vertical presentation forms (U+FE10–FE19, U+FE30–FE44).
+#[cfg(windows)]
+pub const MINCHO: &[&str] = &[r"C:\Windows\Fonts\yumin.ttf", r"C:\Windows\Fonts\msmincho.ttc"];
+#[cfg(target_os = "macos")]
+pub const MINCHO: &[&str] = &["/System/Library/Fonts/ヒラギノ明朝 ProN.ttc", "/System/Library/Fonts/Hiragino Mincho ProN.ttc"];
+#[cfg(not(any(windows, target_os = "macos")))]
+pub const MINCHO: &[&str] = &[
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/ipafont-mincho/ipam.ttf",
+];
+
+/// Their bold, where the system has one.
+#[cfg(windows)]
+pub const MINCHO_BOLD: &[&str] = &[r"C:\Windows\Fonts\yumindb.ttf"];
+#[cfg(target_os = "macos")]
+pub const MINCHO_BOLD: &[&str] = &["/System/Library/Fonts/ヒラギノ明朝 ProN.ttc"];
+#[cfg(not(any(windows, target_os = "macos")))]
+pub const MINCHO_BOLD: &[&str] = &[
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSerifCJK-Bold.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSerifCJK-Bold.ttc",
+];
+
 /// Where a user's own fonts are, then the system's: a Nerd Font is usually
 /// installed for the user alone.
 pub fn font_dirs() -> Vec<PathBuf> {

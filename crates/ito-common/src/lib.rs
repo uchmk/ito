@@ -62,6 +62,56 @@ pub fn home_dir() -> Option<PathBuf> {
     env_dir(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
 }
 
+/// The user's Documents folder, where it really is: `UCHMK_DOCUMENTS_DIR`
+/// when set (a test or a `--keys` run keeps off the real one); else, on
+/// Windows, what the shell says (moved, on OneDrive or under a localised name
+/// are right); `~/Documents` on macOS; `XDG_DOCUMENTS_DIR` of
+/// `~/.config/user-dirs.dirs`, else `~/Documents`, elsewhere.
+pub fn documents_dir() -> Option<PathBuf> {
+    if let Some(d) = env_dir("UCHMK_DOCUMENTS_DIR") {
+        return Some(d);
+    }
+    #[cfg(windows)]
+    if let Some(d) = known_documents() {
+        return Some(d);
+    }
+    let home = home_dir()?;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let conf = xdg("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
+        if let Some(d) = std::fs::read_to_string(conf.join("user-dirs.dirs")).ok().and_then(|t| user_dir(&t, "DOCUMENTS", &home)) {
+            return Some(d);
+        }
+    }
+    Some(home.join("Documents"))
+}
+
+#[cfg(windows)]
+fn known_documents() -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+    // SAFETY: the returned wide string is copied before it is freed, as the API requires.
+    unsafe {
+        let p = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None).ok()?;
+        let path = p.to_string().ok().filter(|s| !s.is_empty());
+        CoTaskMemFree(Some(p.0 as *const _));
+        path.map(PathBuf::from)
+    }
+}
+
+/// `XDG_<name>_DIR` of a `user-dirs.dirs` text (`XDG_DOCUMENTS_DIR="$HOME/Doc"`),
+/// with `$HOME` filled in; an absolute path only.
+#[cfg(any(test, not(any(windows, target_os = "macos"))))]
+fn user_dir(text: &str, name: &str, home: &Path) -> Option<PathBuf> {
+    let key = format!("XDG_{name}_DIR=");
+    let value = text.lines().map(str::trim).find_map(|l| l.strip_prefix(key.as_str()))?.trim().trim_matches('"');
+    let path = match value.strip_prefix("$HOME") {
+        Some(rest) => home.join(rest.trim_start_matches('/')),
+        None => PathBuf::from(value),
+    };
+    (path.is_absolute() && !value.is_empty()).then_some(path)
+}
+
 /// An XDG folder variable; a relative one is ignored, as the XDG spec says.
 fn xdg(var: &str) -> Option<PathBuf> {
     env_dir(var).filter(|d| d.is_absolute())
@@ -983,6 +1033,26 @@ pub fn watch(paths: Vec<PathBuf>, every: Duration, mut on_change: impl FnMut(&[P
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn user_dirs_fill_in_home_and_refuse_the_relative() {
+        let home = std::env::temp_dir();
+        let data = home.join("data");
+        let text = "# c\nXDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_DOCUMENTS_DIR=\"$HOME/書類\"\n";
+        assert_eq!(user_dir(text, "DOCUMENTS", &home), Some(home.join("書類")));
+        let abs = format!("XDG_DOCUMENTS_DIR=\"{}\"\n", data.display());
+        assert_eq!(user_dir(&abs, "DOCUMENTS", &home), Some(data));
+        assert_eq!(user_dir("XDG_DOCUMENTS_DIR=\"docs\"\n", "DOCUMENTS", &home), None);
+        assert_eq!(user_dir(text, "MUSIC", &home), None);
+    }
+
+    #[test]
+    fn documents_dir_is_somewhere() {
+        // The override is set per process, so only the unset case is read here.
+        if std::env::var_os("UCHMK_DOCUMENTS_DIR").is_none() {
+            assert!(documents_dir().is_some_and(|d| d.is_absolute()));
+        }
+    }
+
     #[test]
     fn a_script_may_not_write_the_real_settings() {
         let base = Path::new("/home/u/.config/uchmk");

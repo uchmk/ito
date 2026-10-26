@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.112.0] - 2026-10-26
+
+### 追加
+- `ito_common::fonts::MINCHO` / `MINCHO_BOLD`: 印刷の組みのような日本語の明朝（セリフ）の字体のパス。`JAPANESE` / `JAPANESE_BOLD`（ゴシック）と同じ形で、`read_first` で読む。縦書きの字形（U+FE10–FE19、U+FE30–FE44）を持つ。Windows は游明朝・MS 明朝、macOS はヒラギノ明朝、Linux は Noto Serif CJK・IPA 明朝（uchmk/ito#38）。
+- `ito_common::documents_dir()`: ユーザーの「ドキュメント」フォルダー。Windows は `SHGetKnownFolderPath`（移動・OneDrive・日本語名でも正しい）、macOS は `~/Documents`、Linux は `user-dirs.dirs` の `XDG_DOCUMENTS_DIR`（無ければ `~/Documents`）。環境変数 `UCHMK_DOCUMENTS_DIR` で上書きでき、テストや `--keys` の実行が本物のフォルダーに書かない（uchmk/ito#39）。
+
+### 変更
+- `shellhook` の PowerShell のプロファイルの代わりの場所に `documents_dir()` を使う（PowerShell に聞けなかったとき）。
+- Windows の `windows` クレートの機能に `Win32_System_Com`・`Win32_UI_Shell` を足した。
+
+### 使う側がやること
+- fude: 明朝の清書は `fonts::MINCHO`、ノートの置き場の既定は `documents_dir()` の `fude`。`--keys` の実行では `UCHMK_DOCUMENTS_DIR` を一時のフォルダーに向ける。
+
 ## [0.111.0] - 2026-10-26
 
 ### 追加
