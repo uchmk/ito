@@ -14,6 +14,9 @@ use std::sync::OnceLock;
 
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
+#[cfg(feature = "themes")]
+pub mod themed;
+
 /// The kind of a token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tok {
@@ -47,12 +50,12 @@ pub const MAX_LINE: usize = 1500;
 
 /// bat's collection, loaded once per process: loading it is slow enough to be
 /// felt if every test or every file did it.
-fn syntaxes() -> &'static SyntaxSet {
+pub(crate) fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-fn find(path: &str) -> Option<&'static SyntaxReference> {
+pub(crate) fn find(path: &str) -> Option<&'static SyntaxReference> {
     let set = syntaxes();
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     // By the whole name first (`Dockerfile`, `Makefile`), then the extension.

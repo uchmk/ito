@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.108.0] - 2026-10-26
+
+### 追加
+- `ito-syntax` の機能 `themes`（既定オフ）: 名前付きの syntect テーマの色で塗るモジュール `ito_syntax::themed`（uchmk/ito#37。kura の `syntect_theme` のため）。
+  - `Themed::new(path, theme_name)` と `line(text) -> Vec<(Range<usize>, Style)>`（`Style { rgb, bold, italic, underline }`。行を隙間なく覆う。`reset`。`MAX_LINE` 超は空）。
+  - `theme_names()`、`foreground(theme)`、`scope_color(theme, &["comment", …])`（そのテーマが既定の文字色と違う色にする最初のスコープの色。見出し・リンク・薄い字を取る用）。
+  - 知らない名前は `base16-ocean.dark`、それも無ければ最初のテーマ。
+
+### 使う側がやること
+- 使うアプリは `ito-syntax = { …, features = ["themes"] }` にし、`syntect` / `two-face` の直接の依存を外す。`Highlighter` の代わりに `Themed`、Markdown / HTML の `Palette` の `pick` は `scope_color` に置き換える。
+
 ## [0.107.0] - 2026-10-26
 
 ### 追加
