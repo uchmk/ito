@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.115.0] - 2026-10-26
+
+### 追加
+- 新しいクレート `ito-ime`: 自前で描く入力行の入力メソッド（日本語・中国語・韓国語）（uchmk/ito#40）。`ito-pane` の `view.rs` にあった処理を取り出した。
+  - `Ime::new(id)`（`.purpose(..)`・`.orientation(Orientation::Horizontal | Vertical)`）と `ime.frame(ui, at, key) -> Frame`: 入力点 `at`（キャレット大の矩形）を窓に伝え（候補窓の位置）、このフレームの `Preedit`・`Commit` を読む。変換中の文字は次の変更の通知までフレームをまたいで覚える。`Frame { commits, preedit, composing }`。
+  - 確定した直後の文字は、アプリが自分で描き終えるまで（`key` が変わるか `HOLD` = 0.25 秒）`preedit` に残る。消えて左から戻る見え方を避ける。`key` には入力点の位置を表す数（セルの番号、文字のオフセット）を渡す。
+  - `Orientation::Vertical`: 縦書きの列の右隣に候補窓が開くよう、矩形をずらして渡す（`place`）。実機の候補窓の位置は未確認（OS によって開く向きが違うことがある）。
+  - `ime.swallow_keys(ctx)`: 変換中は Enter・Backspace・矢印・Tab・Esc などを、そのフレームの入力から外す。キーを読む前に呼ぶ。`ime.composing(ctx)`。
+  - `paint(painter, origin, text, font, fg, bg)`: 変換中の文字を下線つきで描く（横書き用。縦書きはアプリが自分で）。
+- `ito-keyscript`: 台本の語 `<Preedit:にほん>`（変換中の文字。`<Preedit:>` で終わり）と `<Commit:日本>`（確定）。`Step::Preedit`・`Step::Commit`、`preedit_event`・`commit_event`。文字の逃げ方は `<Paste:>` と同じ（`\n`・`\e`・`\\`・`\xNN`）。`--keys` で日本語の入力を試せる。
+- `ito-pane`: IME の候補窓の位置・変換中の文字の描画・確定直後の保持を `ito-ime` に載せ替えた（動きは変えない）。機能 `egui` が `ito-ime` を引く。
+
+### 使う側がやること
+- fude: `ito-ime = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、書く帯のフレームで `ime.swallow_keys(ctx)` の後に `ime.frame(ui, 入力点の矩形, 位置の数)` を呼ぶ。`commits` を挿入し、`preedit` を入力点に描く。台本は `<Preedit:にほん><Commit:日本>`。
+- kura・tsumugi・minato: `ito-pane` の `rev` を上げるだけ（`ito-ime` が増える）。
+
 ## [0.114.0] - 2026-10-26
 
 ### 追加

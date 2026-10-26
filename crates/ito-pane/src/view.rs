@@ -216,9 +216,6 @@ impl CursorStyle {
 
 /// How long the cursor stays on, then off, while it blinks.
 const BLINK: f64 = 0.53;
-/// How long text an input method committed stays drawn at the cursor while
-/// waiting for the program to echo it.
-const IME_HOLD: f64 = 0.25;
 
 /// The rows as text, a line each, without the blanks at their ends or the
 /// blank lines under the last one written: what a screen reader reads.
@@ -646,54 +643,15 @@ pub fn show_faces<P: Pane + ?Sized>(
             }
             .unwrap_or((cx, cy));
             let ime_at = Rect::from_min_size(inner.min + Vec2::new(ix as f32 * cell_w, iy as f32 * row_h), Vec2::new(cell_w, row_h));
-            ui.output_mut(|o| {
-                o.ime = Some(egui::output::IMEOutput {
-                    purpose: egui::IMEPurpose::Terminal,
-                    // egui-winit puts the candidate window by `rect`, so it is the
-                    // cursor's cell, not the pane.
-                    rect: ime_at,
-                    cursor_rect: ime_at,
-                    should_interrupt_composition: false,
-                });
-            });
-            // The composition so far stays in the pane's memory between
-            // frames (an event comes only when it changes), drawn at the
-            // cursor, underlined, over what is there.
-            let preedit_id = id.with("ime-preedit");
-            // A commit is kept drawn at the same place until the program has
-            // echoed it (the cursor moves) or a moment has passed: without
-            // that the text vanishes at the commit and comes back from the
-            // left once the echo arrives, which looks like typing it again.
-            let now = ui.input(|i| i.time);
-            let said = ui.ctx().input(|i| {
-                i.events.iter().rev().find_map(|e| match e {
-                    egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => Some((text.clone(), None)),
-                    egui::Event::Ime(egui::ImeEvent::Commit(text)) => Some((text.clone(), Some(((ix, iy), now)))),
-                    _ => None,
-                })
-            });
-            if let Some(said) = said {
-                ui.ctx().data_mut(|d| d.insert_temp(preedit_id, said));
-            }
-            let (preedit, committed) =
-                ui.ctx().data(|d| d.get_temp::<(String, Option<((usize, usize), f64)>)>(preedit_id)).unwrap_or_default();
-            let preedit = match committed {
-                Some((was, since)) if was == (ix, iy) && now - since < IME_HOLD => {
-                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(IME_HOLD - (now - since)));
-                    preedit
-                }
-                Some(_) => String::new(),
-                None => preedit,
-            };
-            if !preedit.is_empty() {
-                let g = painter.layout_no_wrap(preedit, f.clone(), pal.fg);
-                let place = Rect::from_min_size(ime_at.left_top(), g.size());
-                painter.rect_filled(place, CornerRadius::ZERO, pal.bg);
-                painter.galley(place.min, g, pal.fg);
-                painter.line_segment(
-                    [place.left_bottom() - Vec2::new(0.0, 1.0), place.right_bottom() - Vec2::new(0.0, 1.0)],
-                    Stroke::new(1.0, pal.fg),
-                );
+            // The composition is drawn at the cursor, underlined, over what is
+            // there; a commit stays drawn there until the program has echoed it
+            // (the cursor moves) or a moment has passed: without that the text
+            // vanishes at the commit and comes back from the left once the echo
+            // arrives, which looks like typing it again. The commit itself goes
+            // to the program from `input`.
+            let said = ito_ime::Ime::new(id).purpose(egui::IMEPurpose::Terminal).frame(ui, ime_at, (iy * size.cols + ix) as u64);
+            if !said.preedit.is_empty() {
+                ito_ime::paint(&painter, ime_at.left_top(), &said.preedit, f.clone(), pal.fg, pal.bg);
             }
         }
     }

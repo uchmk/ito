@@ -79,6 +79,11 @@ pub enum Step {
     /// for what a control byte or the closing `>` (`\x3e`) cannot be written as. For a program that reads a bracketed
     /// paste off the pane (49.6), where the clipboard would need setting from outside first.
     PasteText(String),
+    /// `<Preedit:にほん>`: an input method's composition so far, as the platform's preedit event (`Event::Ime(Preedit)`),
+    /// with the escapes of `Step::PasteText`. `<Preedit:>` ends it. For `--keys` to drive a Japanese input line.
+    Preedit(String),
+    /// `<Commit:日本>`: what the input method settled on, as the commit event, with the same escapes.
+    Commit(String),
     /// `<Click:0.5,0.4>` and `<RClick:…>`: the left or right button at that
     /// place in the window, as fractions of its width and height. The right-click
     /// and wheel rows were each driven by a hundred lines of `SendInput`
@@ -188,6 +193,8 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Key(k) => clipboard_chord(k).or_else(|| events(k)).map(Press::Events),
         Step::Paste => Some(Press::Paste),
         Step::PasteText(t) => Some(Press::PasteText(t.clone())),
+        Step::Preedit(t) => Some(Press::Events(vec![preedit_event(t)])),
+        Step::Commit(t) => Some(Press::Events(vec![commit_event(t)])),
         Step::Read { tag, name } => Some(Press::Read { tag: tag.clone(), name: name.clone() }),
         Step::Click { right, mods, at } => Some(Press::Click { right: *right, mods: *mods, at: *at }),
         Step::Hover { at } => Some(Press::Hover { at: *at }),
@@ -220,6 +227,8 @@ pub fn label(step: &Step) -> String {
         Step::Quit => "<Quit>".into(),
         Step::Paste => "<Paste>".into(),
         Step::PasteText(t) => format!("<Paste:{}>", paste_text_escape(t)),
+        Step::Preedit(t) => format!("<Preedit:{}>", paste_text_escape(t)),
+        Step::Commit(t) => format!("<Commit:{}>", paste_text_escape(t)),
         Step::Read { tag, name } => format!("<{tag}:{name}>"),
         Step::Click { right, mods, at } => format!("<{}Click:{}{}>", if *right { "R" } else { "" }, held_text(*mods), at_text(*at)),
         Step::Hover { at } => format!("<Hover:{}>", at_text(*at)),
@@ -353,6 +362,16 @@ pub fn paste_text_event(text: &str) -> egui::Event {
     egui::Event::Paste(text.to_owned())
 }
 
+/// `<Preedit:text>`: the composition so far, with no part of it marked active.
+pub fn preedit_event(text: &str) -> egui::Event {
+    egui::Event::Ime(egui::ImeEvent::Preedit { text: text.to_owned(), active_range_chars: None })
+}
+
+/// `<Commit:text>`: the text the input method settled on.
+pub fn commit_event(text: &str) -> egui::Event {
+    egui::Event::Ime(egui::ImeEvent::Commit(text.to_owned()))
+}
+
 /// How long nothing may be pressed, past any `<Wait:N>` due, before a script
 /// counts as stuck. A key waits at most five seconds for things to settle, so
 /// this is only reached when the frame loop itself has stopped running.
@@ -444,10 +463,11 @@ fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
     Ok(name.to_owned())
 }
 
-/// The text in `<Paste:text>`; see [`Step::PasteText`] for the escapes.
-fn paste_text(token: &str) -> Result<String, String> {
-    let bad = |why: &str| format!("`{token}` is not a paste: {why}");
-    let inner = token.strip_prefix("<Paste:").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+/// The text in `<Paste:text>`, `<Preedit:text>` or `<Commit:text>` (`what`); see [`Step::PasteText`] for the escapes.
+fn paste_text(token: &str, what: &str) -> Result<String, String> {
+    let noun = if what == "Paste" { "a paste" } else { "an input method step" };
+    let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
+    let inner = token.strip_prefix(&format!("<{what}:")).and_then(|t| t.strip_suffix('>')).unwrap_or("");
     let mut out = String::new();
     let mut it = inner.chars();
     while let Some(c) = it.next() {
@@ -580,7 +600,9 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             None if token.starts_with("<Shot:") => Step::Shot(shot_name(token, dialect.shot_suffixes)?),
             None if token.starts_with("<State:") => Step::State(named(token, "State", "state")?),
             None if token == "<Paste>" => Step::Paste,
-            None if token.starts_with("<Paste:") => Step::PasteText(paste_text(token)?),
+            None if token.starts_with("<Paste:") => Step::PasteText(paste_text(token, "Paste")?),
+            None if token.starts_with("<Preedit:") => Step::Preedit(paste_text(token, "Preedit")?),
+            None if token.starts_with("<Commit:") => Step::Commit(paste_text(token, "Commit")?),
             None if read.is_some() => {
                 let (tag, noun) = read.copied().unwrap_or_else(|| unreachable!());
                 Step::Read { tag: tag.to_owned(), name: named(token, tag, noun)? }
@@ -1141,6 +1163,17 @@ mod tests {
         for bad in ["<Paste:\\q>", "<Paste:\\x1>", "<Paste:\\>"] {
             assert!(parse(bad).unwrap_err().contains("not a paste"), "{bad}");
         }
+    }
+
+    /// `<Preedit:>` and `<Commit:>` are the input method's events, with the paste escapes.
+    #[test]
+    fn preedit_and_commit_are_the_input_methods_events() {
+        let got = parse("<Preedit:にほん><Preedit:><Commit:日本\\n>").unwrap();
+        assert_eq!(got, [Step::Preedit("にほん".into()), Step::Preedit(String::new()), Step::Commit("日本\n".into())]);
+        assert_eq!(press(&got[0]), Some(Press::Events(vec![preedit_event("にほん")])));
+        assert_eq!(press(&got[2]), Some(Press::Events(vec![commit_event("日本\n")])));
+        assert_eq!(label(&got[2]), "<Commit:日本\\n>");
+        assert!(parse("<Commit:\\q>").unwrap_err().contains("not an input method step"));
     }
 
     /// A click holds `C-` / `A-` / `S-` like a wheel does, and `<Hover:>` only moves the pointer.

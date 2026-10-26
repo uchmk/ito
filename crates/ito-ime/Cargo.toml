@@ -1,0 +1,11 @@
+[package]
+name = "ito-ime"
+description = "An input method (Japanese, Chinese, Korean) for a line the app paints itself: the candidate window beside the input point, the composition kept and drawn underlined, the commit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"

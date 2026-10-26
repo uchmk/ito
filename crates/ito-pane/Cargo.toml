@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = []
 # The pane drawn with egui: `show`, `Palette`, `wheel_whole`.
-egui = ["dep:egui", "dep:harfrust", "dep:skrifa", "dep:vello_cpu", "dep:unicode-bidi"]
+egui = ["dep:egui", "dep:ito-ime", "dep:harfrust", "dep:skrifa", "dep:vello_cpu", "dep:unicode-bidi"]
 # Choosing wgpu's backends (`gpu`), through the wgpu that egui draws with.
 wgpu = ["dep:ito-gpu"]
 # `Screen` and its cells as serde types, for the tsumugi server to send.
@@ -23,6 +23,7 @@ crossbeam-channel = "0.5"
 polling = "3"
 egui = { version = "0.36", optional = true }
 ito-gpu = { path = "../ito-gpu", optional = true }
+ito-ime = { path = "../ito-ime", optional = true }
 # Ligatures (tsumugi's QUESTIONS.md Q8 and Q10): harfrust shapes a run of
 # cells, skrifa reads the outlines of the glyphs it substitutes and vello_cpu
 # fills them. The three egui 0.36 draws its own text with, at its versions,
