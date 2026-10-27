@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.120.1] - 2026-10-27
+
+### 修正
+- `ito-notify` の `player`（Windows）: 10 ms × 3 本（約 30 ms）の先読みだと、約 40 ms ごとに約 9 ms の無音が入り、音の約 4 分の 1 が欠けていた（fude の実測）。先読みを 5 本（約 50 ms）にした。聞こえるまでの遅れ（約 31 ms）は Windows 側で決まるので変わらない。使う側がやることは無い。
+
 ## [0.120.0] - 2026-10-27
 
 ### 追加

@@ -182,9 +182,9 @@ mod os {
     };
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
-    /// Frames in one buffer (10 ms), and buffers queued ahead: about 30 ms.
+    /// Frames in one buffer (10 ms), and buffers queued ahead: about 50 ms (3 buffers underran on Windows: ~9 ms holes every 40 ms).
     const FRAMES: usize = (RATE / 100) as usize;
-    const BUFFERS: usize = 3;
+    const BUFFERS: usize = 5;
 
     pub fn start(mixer: Arc<Mutex<Mixer>>, stop: Arc<AtomicBool>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
