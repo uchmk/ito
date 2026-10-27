@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.117.0] - 2026-10-27
+
+### 追加
+- `ito_prefs::seg(ui, look, id, now, options) -> Option<T>`: 区切りのボタン（セグメント化されたコントロール、uchmk/ito#43）。外枠が 1 つで、選ばれた部分が塗られる。高さ 26 pt でツールバーの 30 pt の行に収まる。Tab で 1 つの止まり場、フォーカス中は ←→（Home・End）で選びが動き、押すとその部分を選ぶ。フォーカスの輪は他の部品と同じ。`select` と同じ `options: &[(T, &str)]` の形で、変わったときだけ `Some` を返す。
+
 ## [0.116.1] - 2026-10-27
 
 ### 修正

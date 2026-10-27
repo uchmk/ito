@@ -656,6 +656,92 @@ pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options:
     (pick != now).then_some(pick)
 }
 
+/// A segmented control: one outlined group of parts, the chosen one filled.
+/// For a 2 to 4 way toggle in a toolbar, where a [`select`] is too much. It is
+/// 26 points high, so it fits a 30 point row.
+///
+/// The group is one stop for Tab; Left and Right (Home and End) move the pick
+/// while it has the keys, and a click picks the part under it. The value
+/// picked, when it changed.
+pub fn seg<T: PartialEq + Copy>(ui: &mut egui::Ui, l: Look, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
+    let c = l.c;
+    let font = FontId::proportional(z(ui, 12.5));
+    let pad = z(ui, 12.0);
+    let galleys: Vec<_> = options.iter().map(|(_, t)| ui.painter().layout_no_wrap((*t).to_owned(), font.clone(), c.fg)).collect();
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + pad * 2.0).collect();
+    let size = egui::vec2(widths.iter().sum::<f32>(), z(ui, 26.0));
+    let button = ui.make_persistent_id(egui::IdSalt::new(("prefs-seg", id)));
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let resp = ui.interact(rect, button, egui::Sense::click());
+    let at = options.iter().position(|(v, _)| *v == now);
+    let mut to = at;
+    if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.clicked()) {
+        let mut x = rect.left();
+        for (k, w) in widths.iter().enumerate() {
+            if pos.x < x + w {
+                to = Some(k);
+                break;
+            }
+            x += w;
+        }
+        ui.memory_mut(|m| m.request_focus(button));
+    }
+    if resp.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                button,
+                egui::EventFilter { tab: false, horizontal_arrows: true, vertical_arrows: false, escape: false },
+            )
+        });
+        let (left, right, home, end) = ui.input_mut(|i| {
+            let none = egui::Modifiers::NONE;
+            (
+                i.consume_key(none, egui::Key::ArrowLeft),
+                i.consume_key(none, egui::Key::ArrowRight),
+                i.consume_key(none, egui::Key::Home),
+                i.consume_key(none, egui::Key::End),
+            )
+        });
+        to = seg_step(to, options.len(), left, right, home, end);
+    }
+    let p = ui.painter();
+    p.rect_stroke(rect, 6.0, egui::Stroke::new(1.0, c.border_strong()), egui::StrokeKind::Inside);
+    let mut x = rect.left();
+    for (k, (w, g)) in widths.iter().zip(galleys).enumerate() {
+        let part = egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(*w, rect.height()));
+        let chosen = to == Some(k);
+        if chosen {
+            p.rect_filled(part.shrink(1.0), 5.0, c.run);
+        } else if k > 0 && to != Some(k - 1) {
+            p.line_segment(
+                [part.left_top() + egui::vec2(0.0, 6.0), part.left_bottom() - egui::vec2(0.0, 6.0)],
+                egui::Stroke::new(1.0, c.border),
+            );
+        }
+        let color = if chosen { c.on_accent() } else { c.fg };
+        p.galley(part.center() - g.size() / 2.0, g, color);
+        x += w;
+    }
+    focus_ring(ui, &resp);
+    to.filter(|k| Some(*k) != at).map(|k| options[k].0)
+}
+
+/// Where the pick goes for this frame's keys. Left and Right stop at the ends.
+fn seg_step(at: Option<usize>, len: usize, left: bool, right: bool, home: bool, end: bool) -> Option<usize> {
+    let last = len.checked_sub(1)?;
+    if home {
+        Some(0)
+    } else if end {
+        Some(last)
+    } else if left {
+        Some(at.map_or(0, |k| k.saturating_sub(1)))
+    } else if right {
+        Some(at.map_or(0, |k| (k + 1).min(last)))
+    } else {
+        at
+    }
+}
+
 /// The design's plain button: an outline, words in the text colour.
 pub fn button(ui: &mut egui::Ui, l: Look, words: &str) -> bool {
     let b = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(l.c.fg))
@@ -1014,6 +1100,49 @@ pub fn theme_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seg_keys_move_the_pick_and_stop_at_the_ends() {
+        assert_eq!(seg_step(Some(1), 4, true, false, false, false), Some(0));
+        assert_eq!(seg_step(Some(0), 4, true, false, false, false), Some(0));
+        assert_eq!(seg_step(Some(3), 4, false, true, false, false), Some(3));
+        assert_eq!(seg_step(Some(1), 4, false, false, false, true), Some(3));
+        assert_eq!(seg_step(Some(2), 4, false, false, false, false), Some(2));
+        assert_eq!(seg_step(None, 0, true, false, false, false), None);
+    }
+
+    /// Through a frame: a click on the second part picks it.
+    #[test]
+    fn a_click_on_a_part_of_seg_picks_it() {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0));
+        let look = Look { c: ito_theme::colors(), q: "" };
+        let options = [(0u8, "A"), (1, "B"), (2, "C")];
+        let mut rect = egui::Rect::NOTHING;
+        let mut got = None;
+        for frame in 0..4 {
+            let mut events = Vec::new();
+            if frame >= 2 {
+                let pos = egui::pos2(rect.right() - 20.0, rect.center().y);
+                events.push(egui::Event::PointerMoved(pos));
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: frame == 2,
+                    modifiers: Default::default(),
+                });
+            }
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(f64::from(frame) * 0.1), events, ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                let before = ui.cursor().min;
+                let r = seg(ui, look, "x", 0u8, &options);
+                rect = egui::Rect::from_min_size(before, egui::vec2(0.0, 26.0)).union(ui.min_rect());
+                got = got.or(r);
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(got, Some(2));
+    }
 
     #[test]
     fn the_theme_named_is_the_one_picked() {
