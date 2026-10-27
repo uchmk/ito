@@ -240,6 +240,10 @@ pub struct State {
     /// leaves it (egui lets go of it before this frame is drawn), and only
     /// the next Esc leaves the screen.
     pub held: bool,
+    /// The search field was that control. egui lets go of the focus on Esc
+    /// before the frame is drawn, so only this tells the search's Esc from
+    /// another control's.
+    pub search_held: bool,
 }
 
 impl State {
@@ -364,15 +368,17 @@ pub fn show_with(
     mut body: impl FnMut(&mut egui::Ui, usize, Look),
 ) -> Out {
     let mut out = Out { close: keys.close, open_file: false };
-    // Esc in the focused search clears what it holds first, and the keys stay
-    // in the field (egui would let go of them on this Esc).
+    // Esc in the search clears what it holds first, and the keys stay in the
+    // field. egui let go of the focus on this Esc already, so the search is
+    // known by `search_held` (what had the keys at the end of the last frame).
     let search_id = egui::Id::new("prefs-search");
     if extras.results.is_some()
         && !state.query.is_empty()
-        && ui.memory(|m| m.has_focus(search_id))
+        && (state.search_held || ui.memory(|m| m.has_focus(search_id)))
         && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         state.query.clear();
+        ui.memory_mut(|m| m.request_focus(search_id));
         out.close = false;
     }
     let n = nav.pages.len().max(1);
@@ -576,6 +582,7 @@ pub fn show_with(
         });
     }
     state.held = ui.memory(|m| m.focused().is_some());
+    state.search_held = ui.memory(|m| m.has_focus(search_id));
     out
 }
 
@@ -1498,6 +1505,10 @@ mod tests {
 
     /// One frame of two pages of cards, with the extras, and the text drawn.
     fn cards(ctx: &egui::Context, state: &mut State, keys: Keys) -> (Out, Vec<String>) {
+        cards_with(ctx, state, keys, Vec::new())
+    }
+
+    fn cards_with(ctx: &egui::Context, state: &mut State, keys: Keys, events: Vec<egui::Event>) -> (Out, Vec<String>) {
         let nav = Nav {
             pages: &[("General", "One"), ("Theme", "Two"), ("Keys", "Three")],
             index: &[(0, "Language"), (0, "Show clock"), (1, "Dark")],
@@ -1513,6 +1524,7 @@ mod tests {
         };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0))),
+            events,
             ..Default::default()
         };
         let mut out = Out::default();
@@ -1575,6 +1587,26 @@ mod tests {
         assert!((out.close, state.query.as_str()) == (false, ""), "the first Esc clears the search");
         let (out, _) = cards(&ctx, &mut state, Keys { close: true, ..Keys::default() });
         assert!(out.close, "the next one closes the screen");
+    }
+
+    /// A real Esc in the focused search: egui drops the focus before the
+    /// frame, and the search still keeps its keys and loses its words (fude #58).
+    #[test]
+    fn a_real_esc_in_the_search_clears_it_and_keeps_the_focus() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let _ = cards(&ctx, &mut state, Keys::default());
+        let search = egui::Id::new("prefs-search");
+        ctx.memory_mut(|m| m.request_focus(search));
+        state.query = "clock".into();
+        let _ = cards(&ctx, &mut state, Keys::default());
+        assert!(state.search_held, "the search has the keys");
+        // The app's keys: `held` makes Esc not close the screen.
+        let (out, _) = cards_with(&ctx, &mut state, Keys::default(), tap(egui::Key::Escape));
+        assert!((out.close, state.query.as_str()) == (false, ""), "the words are gone");
+        assert!(ctx.memory(|m| m.has_focus(search)), "the keys stay in the search");
+        let _ = cards(&ctx, &mut state, Keys::default());
+        assert!(ctx.memory(|m| m.has_focus(search)));
     }
 
     #[test]

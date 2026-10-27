@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.2] - 2026-10-28
+
+### 修正
+- `ito-prefs`: 検索欄の Esc が実アプリで効いていなかったのを直した（uchmk/ito#58、fude の報告）。egui は Esc でフォーカスを外してから描くので、`has_focus` では見分けられなかった。`State::search_held`（前のフレームの終わりに検索欄がキーを持っていたか）で見分け、Esc で問いを消し、フォーカスを検索欄に戻す。
+  使う側がやること: `State` を `State { page, query, held }` と書いていれば `search_held: false` を足す（`State::default()` なら何もしない）。
+
 ## [0.124.1] - 2026-10-28
 
 fude の続きの 4 つ（uchmk/ito#56〜#59）。
