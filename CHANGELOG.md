@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.119.2] - 2026-10-27
+
+### 修正
+- `ito_prefs::NotifyCfg`: `[notify]` に `[[notify.webhooks]]` が無いと `missing field webhooks` で読めなかった。`webhooks` に `#[serde(default)]` を付けた（欄が 1 つだけの `[notify]` のテストも足した）。使う側がやることは無い（`rev` を上げるだけ）。
+
 ## [0.119.1] - 2026-10-27
 
 ### 修正

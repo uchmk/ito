@@ -71,6 +71,7 @@ pub struct NotifyCfg {
     /// One of `ito_notify::FORMATS`.
     pub webhook_format: Option<String>,
     /// `[[notify.webhooks]]`, as written.
+    #[serde(default)]
     pub webhooks: Vec<HookCfg>,
     /// The sound keys (`sound_done`, …): the app's own, so not fields.
     #[serde(flatten)]
@@ -331,6 +332,24 @@ mod tests {
         assert_eq!(urls, ["http://a/", "http://b/"]);
         assert_eq!(n.places[0].states, ["failed"]);
         assert_eq!(n.places[1].states, ["done", "failed"], "not written: every event");
+    }
+
+    /// A `[notify]` with one key (or none) reads: the rest is not required.
+    #[test]
+    fn a_table_with_one_key_reads() {
+        let (n, w) = read(
+            "[notify]
+system = [\"done\"]
+",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(n.system.as_deref(), Some(&["done".to_owned()][..]));
+        assert!(n.places.is_empty());
+        let (n, _) = read(
+            "[notify]
+",
+        );
+        assert_eq!(n, NotifyCfg::new(&DONE_FAILED));
     }
 
     /// An app with one event: no second column, the sound by its own key.
