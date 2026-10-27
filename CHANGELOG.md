@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.123.0] - 2026-10-28
+
+### 追加
+- `scripts/lanes/workflows/release.yml`: 端末版（TUI）の配布物。`scripts/lanes.conf` に `tui_crate=<クレート>` と `tui_bin=<実行ファイル>` を書くと、新しいジョブ `tui` が Linux x64・ARM64 でビルドし、`<tui_bin>-<tag>-linux-{x64,arm64}.tar.gz` を同じリリースに付ける（Windows・macOS は付けない）。書かないアプリではジョブごと飛ばされ、何も変わらない。`lanes.sh` の雛形に `{{tui_crate}}`・`{{tui_bin}}` を足した。`sums` は `tui` のあとに走る。
+- `scripts/lanes/release-check.sh`: `tui_bin` があるアプリは配布物を 8 つ（zip 2 + tar.gz 6）と数える。
+  使う側がやること: yagura は `lanes.conf` に `tui_crate=yagura-tui`・`tui_bin=yagura-tui` を足し、`rev` を上げて `scripts/lanes.sh sync`。ほかのアプリは何もしない。
+
 ## [0.122.2] - 2026-10-27
 
 ### 修正

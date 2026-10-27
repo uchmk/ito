@@ -78,12 +78,12 @@ import glob, re, sys
 for f in glob.glob("scripts/lanes/workflows/*.yml"):
     t = open(f, encoding="utf-8").read()
     for tok in set(re.findall(r"\{\{(\w+)\}\}", t)):
-        if tok not in ("app", "crate", "bin"):
+        if tok not in ("app", "crate", "bin", "tui_crate", "tui_bin"):
             sys.exit("%s: unknown token {{%s}}" % (f, tok))
     try:
         import yaml
     except ImportError:
         continue
-    yaml.safe_load(re.sub(r"\{\{(app|crate|bin)\}\}", "x", t))
+    yaml.safe_load(re.sub(r"\{\{(app|crate|bin|tui_crate|tui_bin)\}\}", "x", t))
 '
 echo "ALL OK: $tests"
