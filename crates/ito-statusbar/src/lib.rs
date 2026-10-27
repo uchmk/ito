@@ -45,8 +45,7 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
     ui.painter().hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, fade(c.border)));
     ui.set_opacity(spec.opacity.clamp(0.0, 1.0));
     let inner = Rect::from_min_max(rect.min + Vec2::new(12.0, 1.0), rect.max - Vec2::new(12.0, 0.0));
-    let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
-    left(&mut bar);
+    // The right end first, so the left knows how much is left to it.
     let mut end = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::right_to_left(Align::Center)));
     if spec.clock.show {
         let now = chrono::Local::now().naive_local();
@@ -60,11 +59,18 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
     }
     end.add_space(16.0);
     right(&mut end);
+    // The left stops short of it, and what does not fit is cut off (the last
+    // item that is wider than the room ends in `…`).
+    let stop = (end.min_rect().left() - 12.0).max(inner.left());
+    let room = Rect::from_min_max(inner.min, egui::pos2(stop, inner.max.y));
+    let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(room).layout(Layout::left_to_right(Align::Center)));
+    bar.set_clip_rect(room.intersect(ui.clip_rect()));
+    left(&mut bar);
 }
 
 /// Plain words in the bar.
 pub fn item(ui: &mut Ui, text: &str, color: Color32) {
-    ui.label(RichText::new(text).size(12.0).color(color));
+    ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate());
     ui.add_space(10.0);
 }
 
@@ -131,6 +137,34 @@ mod tests {
         run(&ctx, 10.0, |ui| scale_changed(ui.ctx(), 1.2));
         run(&ctx, 11.0, |ui| assert_eq!(scale_words(ui.ctx(), "en").as_deref(), Some("Scale 120%")));
         run(&ctx, 12.5, |ui| assert_eq!(scale_words(ui.ctx(), "en"), None));
+    }
+
+    #[test]
+    fn the_left_stops_short_of_the_right() {
+        let ctx = Context::default();
+        let clock = Clock::default();
+        let spec = Spec { clock: &clock, lang: "en", opacity: 1.0 };
+        let (mut right_at, mut left_to) = (f32::MAX, 0.0f32);
+        run(&ctx, 0.0, |ui| {
+            // 300 pt wide: far less than the items need.
+            let mut narrow =
+                ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(300.0, 26.0))));
+            show(
+                &mut narrow,
+                &spec,
+                |ui| {
+                    for _ in 0..8 {
+                        item(ui, "a long hint of keys", Color32::WHITE);
+                    }
+                    left_to = ui.clip_rect().right();
+                },
+                |ui| {
+                    link(ui, "settings");
+                    right_at = ui.min_rect().left();
+                },
+            );
+        });
+        assert!(left_to <= right_at, "left is cut at {left_to}, right starts at {right_at}");
     }
 
     #[test]
