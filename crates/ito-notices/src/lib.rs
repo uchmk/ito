@@ -227,7 +227,10 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
         });
     });
     keep_tab_inside(ctx, resp.response.layer_id, first);
-    if resp.response.clicked_elsewhere() && action.is_none() {
+    // A click on the bell is the app's to answer (it opens or closes the list):
+    // the click that opened this list is also "elsewhere" to it on its first frame.
+    let on_bell = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| anchor.contains(p));
+    if resp.response.clicked_elsewhere() && !on_bell && action.is_none() {
         action = Some(Action::Close);
     }
     action
