@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.119.1] - 2026-10-27
+
+### 修正
+- `ito_prefs::seg`: 選ばれた部分の文字が `on_accent` でなく `fg` で描かれていた（暗いテーマで塗りの上の文字が読みにくい）。文字を `Color32::PLACEHOLDER` で組むようにし、選び・非選びの色が効く。使う側がやることは無い（`rev` を上げるだけ）。
+
 ## [0.119.0] - 2026-10-27
 
 ### 追加

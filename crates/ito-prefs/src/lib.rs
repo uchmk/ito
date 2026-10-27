@@ -669,7 +669,8 @@ pub fn seg<T: PartialEq + Copy>(ui: &mut egui::Ui, l: Look, id: &str, now: T, op
     let c = l.c;
     let font = FontId::proportional(z(ui, 12.5));
     let pad = z(ui, 12.0);
-    let galleys: Vec<_> = options.iter().map(|(_, t)| ui.painter().layout_no_wrap((*t).to_owned(), font.clone(), c.fg)).collect();
+    let galleys: Vec<_> =
+        options.iter().map(|(_, t)| ui.painter().layout_no_wrap((*t).to_owned(), font.clone(), egui::Color32::PLACEHOLDER)).collect();
     let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + pad * 2.0).collect();
     let size = egui::vec2(widths.iter().sum::<f32>(), z(ui, 26.0));
     let button = ui.make_persistent_id(egui::IdSalt::new(("prefs-seg", id)));
