@@ -128,11 +128,22 @@ pub fn pdf(pages: &[String], fonts: &Fonts, out: &Path) -> Result<(), String> {
     std::fs::write(out, bytes).map_err(|e| format!("{}: {e}", out.display()))
 }
 
+/// What [`print`] did with the PDF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Printed {
+    /// Handed to the printer (Windows: the `print` verb; macOS and Linux: `lpr`, `lp`).
+    Sent,
+    /// The program that opens PDFs has no `print` verb (Edge and Chrome have only `open`), so the PDF
+    /// was opened there; the person prints from the viewer.
+    Opened,
+}
+
 /// Hand the PDF to the OS to print, and return once it is handed over (not
 /// when the paper is out). Windows asks the shell for the `print` verb of the
-/// program that opens PDFs; macOS and Linux send it to the default printer
+/// program that opens PDFs, and opens the PDF there when it has none
+/// ([`Printed::Opened`]); macOS and Linux send it to the default printer
 /// with `lpr` and `lp`.
-pub fn print(pdf: &Path) -> Result<(), String> {
+pub fn print(pdf: &Path) -> Result<Printed, String> {
     if !pdf.is_file() {
         return Err(format!("{}: no such file", pdf.display()));
     }
@@ -140,22 +151,31 @@ pub fn print(pdf: &Path) -> Result<(), String> {
     {
         use windows::core::{w, HSTRING};
         use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+        use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNORMAL};
+        // ShellExecuteW returns a value at most 32 for an error code, not a handle.
         // SAFETY: both strings outlive the call, and no other pointer is passed.
         let r = unsafe { ShellExecuteW(None, w!("print"), &HSTRING::from(pdf.as_os_str()), None, None, SW_HIDE) };
-        // At most 32 is an error code, not a handle.
-        if r.0 as usize > 32 {
-            Ok(())
-        } else {
-            Err(format!("the shell would not print {} (code {})", pdf.display(), r.0 as usize))
+        let code = r.0 as usize;
+        if code > 32 {
+            return Ok(Printed::Sent);
         }
+        // 27 (SE_ERR_ASSOCINCOMPLETE) and 31 (SE_ERR_NOASSOC): the viewer has no `print` verb.
+        if code == 27 || code == 31 {
+            // SAFETY: as above.
+            let r = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(pdf.as_os_str()), None, None, SW_SHOWNORMAL) };
+            if r.0 as usize > 32 {
+                return Ok(Printed::Opened);
+            }
+            return Err(format!("no program opens {} (code {})", pdf.display(), r.0 as usize));
+        }
+        Err(format!("the shell would not print {} (code {code})", pdf.display()))
     }
     #[cfg(not(windows))]
     {
         let tool = if cfg!(target_os = "macos") { "lpr" } else { "lp" };
         let out = std::process::Command::new(tool).arg(pdf).output().map_err(|e| format!("{tool}: {e}"))?;
         if out.status.success() {
-            Ok(())
+            Ok(Printed::Sent)
         } else {
             Err(format!("{tool}: {}", String::from_utf8_lossy(&out.stderr).trim()))
         }

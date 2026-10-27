@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.121.0] - 2026-10-27
+
+### 変更
+- `ito_export::print` が `Result<Printed, String>` を返す（以前は `Result<(), String>`）。Windows で PDF を開くプログラムに `print` の verb が無いとき（Edge・Chrome が既定の素の Windows 11 では、コード 31 `SE_ERR_NOASSOC` で必ず失敗していた）、`open` で開き、`Printed::Opened` を返す（印刷はビューアーから）。刷りに出せたときは `Printed::Sent`。使う側がやること: `print(&p)?;` と捨てているだけなら変更は要らない。`Opened` のときに「印刷はビューアーから」と言い分けたいなら、返りを見る。
+
 ## [0.120.1] - 2026-10-27
 
 ### 修正
