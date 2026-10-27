@@ -28,9 +28,10 @@ mod shell;
 mod updates;
 pub use apps::{add_edit, apps_card, note as apps_note, AppsForm, AppsWords};
 pub use more::{
-    about_index, about_page, about_text, advanced_card, advanced_index, backup_card, backup_index, default_order, fonts_card, fonts_index,
-    forget_place, keeps_place, mono_font_card, mono_font_index, startup_card, startup_index, window_card, window_index, About, AboutAction,
-    Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN, MORE_JA, WINDOW_KEYS,
+    about_index, about_page, about_text, advanced_card, advanced_index, backup_card, backup_index, default_order, default_order_grouped,
+    fonts_card, fonts_index, forget_place, keeps_place, mono_font_card, mono_font_index, startup_card, startup_index, window_card,
+    window_index, About, AboutAction, Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN,
+    MORE_JA, WINDOW_KEYS,
 };
 pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
 pub use notify_cfg::{notify_window, take_clicks, test as test_notify, Event, HookCfg, NotifyCfg, DONE_FAILED};
@@ -363,6 +364,17 @@ pub fn show_with(
     mut body: impl FnMut(&mut egui::Ui, usize, Look),
 ) -> Out {
     let mut out = Out { close: keys.close, open_file: false };
+    // Esc in the focused search clears what it holds first, and the keys stay
+    // in the field (egui would let go of them on this Esc).
+    let search_id = egui::Id::new("prefs-search");
+    if extras.results.is_some()
+        && !state.query.is_empty()
+        && ui.memory(|m| m.has_focus(search_id))
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        state.query.clear();
+        out.close = false;
+    }
     let n = nav.pages.len().max(1);
     state.page = state.page.min(n - 1);
     if keys.next || keys.back {
@@ -380,7 +392,7 @@ pub fn show_with(
     ui.painter().line_segment([side.right_top(), side.right_bottom()], egui::Stroke::new(1.0, c.border));
     let mut nav_ui = ui.new_child(egui::UiBuilder::new().max_rect(side.shrink2(egui::vec2(10.0, 16.0))));
     let search = egui::TextEdit::singleline(&mut state.query)
-        .id(egui::Id::new("prefs-search"))
+        .id(search_id)
         .hint_text(nav.words.search)
         .desired_width(f32::INFINITY)
         .margin(egui::vec2(10.0, 8.0))
@@ -565,6 +577,12 @@ pub fn show_with(
     }
     state.held = ui.memory(|m| m.focused().is_some());
     out
+}
+
+/// The search is reading every page ([`Extras::results`]): a page then draws
+/// only its cards, not what stands outside them (buttons at its top).
+pub fn in_results(ui: &egui::Ui) -> bool {
+    ui.data(|d| d.get_temp::<String>(egui::Id::new(RESULTS))).is_some()
 }
 
 /// While the search reads every page: the title of the page being drawn.
@@ -968,6 +986,12 @@ pub type Drafts = HashMap<String, Draft>;
 /// leaves it as it was): the new words, when they differ. The words are all
 /// picked when it takes the keys, so what is typed replaces them.
 pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: &str, width: f32) -> Option<String> {
+    // The results' unseen pass only measures: the field's id is absolute, so
+    // a second field with it would clash with the one drawn after.
+    if !ui.is_visible() {
+        ui.allocate_space(egui::vec2(width, z(ui, 32.0)));
+        return None;
+    }
     let eid = field_id(id);
     let focused = ui.memory(|m| m.has_focus(eid));
     if !focused {

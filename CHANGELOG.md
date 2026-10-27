@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.1] - 2026-10-28
+
+fude の続きの 4 つ（uchmk/ito#56〜#59）。
+
+### 追加
+- `ito-prefs`: `default_order_grouped(has)`。アプリのページを先に、共通のページを後ろにそろえる（ナビを `Extras::groups` で分けるアプリ向け。見出しが 2 回出ない）。`docs/common-spec.md` に書いた（uchmk/ito#59）。
+- `ito-prefs`: `in_results(ui)`。検索が全ページを読んでいる間の `body` で、ページの外のもの（ボタンなど）を出さない判断に使う。
+
+### 修正
+- `ito-prefs`: 検索結果で `field` が同じ id を 2 回描いて衝突していたのを直した（見えない 1 回目は大きさだけ取る）（uchmk/ito#56）。
+- `ito-prefs`: 検索結果では通知のページの「試しに送る」「既定に戻す」を出さない（uchmk/ito#57）。
+- `ito-prefs`: 検索欄にフォーカスがあるときの Esc は、まず問いを消す（フォーカスは残る。`Extras::results` を使うとき）（uchmk/ito#58）。
+
 ## [0.124.0] - 2026-10-28
 
 fude の 4 つの crate-request（uchmk/ito#52〜#55）。

@@ -172,15 +172,18 @@ pub fn notify_page(
     drafts: &mut Drafts,
 ) -> Option<Test> {
     let mut test = None;
-    ui.horizontal(|ui| {
-        if button(ui, l, w.notify_test) {
-            test = Some(Test::All);
-        }
-        if button(ui, l, w.notify_reset) {
-            n.reset(defaults);
-        }
-    });
-    ui.add_space(8.0);
+    // The results keep the cards that hit; these two belong to the page.
+    if !crate::in_results(ui) {
+        ui.horizontal(|ui| {
+            if button(ui, l, w.notify_test) {
+                test = Some(Test::All);
+            }
+            if button(ui, l, w.notify_reset) {
+                n.reset(defaults);
+            }
+        });
+        ui.add_space(8.0);
+    }
     section(ui, l, w.notify_when, |ui| {
         let Notify { system, sound, hooks, .. } = n;
         let names: Vec<(String, String)> = hooks

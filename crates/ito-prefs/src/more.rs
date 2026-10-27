@@ -61,6 +61,16 @@ pub fn default_order(has: &[Page]) -> Vec<Page> {
     Page::ALL.into_iter().filter(|p| matches!(p, Page::General | Page::About) || has.contains(p)).collect()
 }
 
+/// [`default_order`] with the app's pages first and every shared page after
+/// them, so a nav that groups them (`Extras::groups`: the app, then
+/// "Common (ito)") shows each heading once. General is then the first shared
+/// page, not the first page.
+pub fn default_order_grouped(has: &[Page]) -> Vec<Page> {
+    let mut order = default_order(has);
+    order.sort_by_key(|p| *p != Page::App);
+    order
+}
+
 /// The words of these pages and cards, in one language.
 pub struct MoreWords {
     pub p_general: &'static str,
@@ -640,6 +650,12 @@ pub fn forget_place(dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_grouped_order_puts_the_app_before_every_shared_page() {
+        let few = default_order_grouped(&[Page::Keys, Page::App]);
+        assert_eq!(few, [Page::App, Page::General, Page::Keys, Page::About]);
+    }
 
     #[test]
     fn the_default_order_starts_with_general_and_ends_with_about() {
