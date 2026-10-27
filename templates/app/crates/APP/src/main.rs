@@ -8,6 +8,7 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod envreport;
 mod i18n;
 mod icon;
 
@@ -21,7 +22,9 @@ const REPO: &str = "https://github.com/uchmk/{{app}}";
 const USAGE: &str = "\
 {{app}} — {{description}}
 
-usage: {{app}} [--version | --help]
+usage: {{app}} [--version | --help | env]
+
+  env   print what a bug report needs (version, files, last run); no window
 ";
 
 struct App {
@@ -53,6 +56,16 @@ enum Command {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, saved: &Saved) -> Self {
         saved.put(cc);
+        // What this run drew with, for the bug report and `{{app}} env`.
+        let mut used = ito_common::runinfo::RunInfo::new(env!("CARGO_PKG_VERSION"));
+        if let Some(rs) = cc.wgpu_render_state.as_ref() {
+            let info = rs.adapter.get_info();
+            used.adapter = info.name;
+            used.backend = format!("{:?}", info.backend);
+            used.device = format!("{:?}", info.device_type);
+        }
+        used.ppp = cc.egui_ctx.pixels_per_point();
+        ito_common::runinfo::save("{{app}}", &used);
         let base = ito_common::base_dir();
         let (common, mut warnings) = match base.as_deref().map(ito_common::Common::read) {
             Some(Ok(read)) => read,
@@ -298,6 +311,7 @@ fn main() -> eframe::Result {
         match a.as_str() {
             "--version" | "-V" => say(&ito_bugreport::version_line("{{app}}", env!("CARGO_PKG_VERSION")), false),
             "--help" | "-h" => say(USAGE, false),
+            "env" | "--env" => say(envreport::text().trim_end_matches('\n'), false),
             other => {
                 say(&format!("{{app}}: unknown argument `{other}`\n\n{USAGE}"), true);
                 std::process::exit(2);

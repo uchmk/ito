@@ -91,6 +91,8 @@ try {
     cargo fmt --all
     python3 scripts/ito-first.py
     if ($LASTEXITCODE) { throw 'ito-first failed' }
+    # Windows' core.filemode is false, so git would record the scripts as 100644 and CI could not run them.
+    foreach ($sh in Get-ChildItem scripts -Filter *.sh) { git update-index --add --chmod=+x "scripts/$($sh.Name)" }
 }
 finally { Pop-Location }
 Write-Host "`nDone. Nothing is committed. Next: read $Dest\TODO.md, run scripts/verify.sh, create uchmk/$Name."

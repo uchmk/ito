@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.122.2] - 2026-10-27
+
+### 修正
+- `templates/app`: 雛形のアプリに `<app> env`（版・ファイル・最後の起動・環境変数。窓なし、10 行以上）を足した（uchmk/ito#50）。`release.yml` の「Check .com」が `<app>.com env` を要るのに雛形に無く、fude の v0.10.1 のリリースが落ちていた。窓を開くとき `runinfo` を保存し、`.com` の前段のテストにも `env` を足した。
+- `templates/app` の `ci.yml`: `scripts/lanes.sh check` を `bash scripts/lanes.sh check` にした（uchmk/ito#51）。Windows（`core.filemode=false`）で作ると `lanes.sh` が 100644 でコミットされ、ubuntu で Permission denied（exit 126）になっていた。`new-app.ps1` も `scripts/*.sh` を index で `+x` にする。
+  使う側がやること: 前に作ったアプリは `git ls-files -s scripts/lanes.sh` が 100644 なら `git update-index --chmod=+x scripts/lanes.sh` をコミットする。`<app> env` が無いアプリは、minato の `envreport.rs` かこの雛形の `envreport.rs` を写して `env` を足す。
+
 ## [0.122.1] - 2026-10-27
 
 ### 修正

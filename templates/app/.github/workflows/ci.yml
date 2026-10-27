@@ -72,6 +72,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/ito-first.py
-      - run: scripts/lanes.sh check
+      - run: bash scripts/lanes.sh check
       - run: cargo run -q -p {{app}} --example make-testcheck -- --check
       - run: cargo run -q -p {{app}} --example make-bugform -- --check

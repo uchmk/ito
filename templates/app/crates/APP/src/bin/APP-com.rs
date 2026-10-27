@@ -29,7 +29,7 @@ mod tests {
 
     #[test]
     fn it_waits_for_all_but_the_window() {
-        for waits in [&["--version"][..], &["-V"], &["--help"], &["--bogus"]] {
+        for waits in [&["--version"][..], &["-V"], &["--help"], &["env"], &["--env"], &["--bogus"]] {
             assert!(answers_in_text(&line(waits)), "{waits:?}");
         }
         assert!(!answers_in_text(&line(&[])));
