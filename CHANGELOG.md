@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.120.0] - 2026-10-27
+
+### 追加
+- `ito_prefs::NotifyCfg::tell_open(events, app, icon, event, title, body, tag, open)`・`notify_window(&Context)`・`take_clicks() -> Vec<String>`: 押すと窓が前に来るシステムの通知（uchmk/ito#47）。通知（Windows では `open` のボタンも）を押すと、`notify_window` で覚えた窓へ `ViewportCommand::Focus` を送り、`tag` が `take_clicks` から返る（アプリは通知の行き先へ移れる）。同じ `tag` の新しい通知は前のを置き換える。音と webhook は `tell` と同じ。macOS は押されたかを知れないので表示だけ。通知の送り手は最初の呼び出しの `app`・`icon` で決まる（1 プロセスに 1 つ）。`tell` は変わらない。
+
+### 使う側がやること
+- 窓を出す最初のフレームで `ito_prefs::notify_window(ctx)` を呼び、`tell` を `tell_open` に替え、毎フレーム `take_clicks()` を見る。
+- michi: `notify.rs` の `Notifier`・`WINDOW`・`CLICKED`・`set_window`・`take_clicks`・`notifier()` を消し、`tell_open` に置き換える（`tag` は notice の id の文字列、`take_clicks` は `Vec<String>` なので `parse::<u64>()` する）。
+
 ## [0.119.3] - 2026-10-27
 
 ### 修正

@@ -14,6 +14,7 @@ use ito_notify::toast::{App, Icon};
 use ito_notify::webhook::{self, Level, Place};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{Hook, Notify, Test};
 
@@ -176,10 +177,33 @@ impl NotifyCfg {
     /// Tell of `event` (one of the app's `events`) in every way this turns on
     /// for it: the system's notification with the app's icon, the sound, and
     /// the webhooks.
-    pub fn tell(&self, events: &[Event], app: App, icon: Icon, event: &str, title: &str, body: &str) {
+    pub fn tell(&self, events: &[Event], app: App<'static>, icon: Icon, event: &str, title: &str, body: &str) {
+        self.tell_as(events, app, icon, event, title, body, None);
+    }
+
+    /// Like [`NotifyCfg::tell`], but the system's notification opens: a click
+    /// on it (or on its `open` button, Windows) brings the window forward
+    /// (see [`notify_window`]) and `tag` comes back from [`take_clicks`], for
+    /// the app to go to the notice's place. A newer notice with the same `tag`
+    /// replaces the last. macOS cannot say a notification was clicked, so
+    /// there it only shows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tell_open(&self, events: &[Event], app: App<'static>, icon: Icon, event: &str, title: &str, body: &str, tag: &str, open: &str) {
+        self.tell_as(events, app, icon, event, title, body, Some((tag, open)));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tell_as(&self, events: &[Event], app: App<'static>, icon: Icon, event: &str, title: &str, body: &str, open: Option<(&str, &str)>) {
         let Some(k) = events.iter().position(|e| e.name == event) else { return };
         let sound = self.on(&self.sound, event).then(|| self.sounds.get(k).map_or(events[k].sound, String::as_str));
-        send(self.focus_mode(), self.on(&self.system, event).then_some(app), icon, sound, title, body);
+        let system = self.on(&self.system, event);
+        match open {
+            Some((tag, label)) if system => {
+                notifier(app, icon).show(ito_notify::notifier::Toast::open(tag, title, body, label));
+                send(self.focus_mode(), None, icon, sound, title, body);
+            }
+            _ => send(self.focus_mode(), system.then_some(app), icon, sound, title, body),
+        }
         webhook::send_all(&self.places, event, events[k].level, title, body, "");
     }
 
@@ -226,6 +250,47 @@ impl NotifyCfg {
     }
 }
 
+/// The window, to bring forward when a notification is clicked.
+static WINDOW: OnceLock<egui::Context> = OnceLock::new();
+/// The tags of the notifications clicked, until the frame takes them.
+static CLICKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static NOTIFIER: OnceLock<ito_notify::notifier::Notifier> = OnceLock::new();
+/// Who the notifications are from and their icon, for the notifier's logo.
+static WHO: OnceLock<(App<'static>, Icon)> = OnceLock::new();
+
+/// Remember the window (call it from the first frame), so that a click on a
+/// notification [`NotifyCfg::tell_open`] showed can reach it.
+pub fn notify_window(ctx: &egui::Context) {
+    let _ = WINDOW.set(ctx.clone());
+}
+
+/// The tags clicked since the last call (the frame takes them).
+pub fn take_clicks() -> Vec<String> {
+    std::mem::take(&mut *CLICKED.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+fn logo() -> Option<std::path::PathBuf> {
+    let (app, icon) = WHO.get()?;
+    ito_notify::toast::icon_file(app.id, *icon)
+}
+
+fn notifier(app: App<'static>, icon: Icon) -> &'static ito_notify::notifier::Notifier {
+    NOTIFIER.get_or_init(|| {
+        let _ = WHO.set((app, icon));
+        let click: ito_notify::notifier::Click = Arc::new(|tag, arg| {
+            if arg != ito_notify::notifier::OPEN {
+                return;
+            }
+            CLICKED.lock().unwrap_or_else(|e| e.into_inner()).push(tag.to_owned());
+            if let Some(ctx) = WINDOW.get() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                ctx.request_repaint();
+            }
+        });
+        ito_notify::notifier::Notifier::new(app, Some(logo), click)
+    })
+}
+
 fn send(focus_mode: bool, app: Option<App>, icon: Icon, sound: Option<&str>, title: &str, body: &str) {
     if let Some(app) = app {
         ito_notify::toast::show_with_icon(app, icon, title, body);
@@ -241,7 +306,7 @@ fn send(focus_mode: bool, app: Option<App>, icon: Icon, sound: Option<&str>, tit
 /// first event's notice, through the system's notification, the sound and
 /// every webhook), or only the webhook `Test::Hook` names, whatever it is
 /// told of.
-pub fn test(events: &[Event], p: &Notify, what: Test, app: App, icon: Icon, title: &str, body: &str) {
+pub fn test(events: &[Event], p: &Notify, what: Test, app: App<'static>, icon: Icon, title: &str, body: &str) {
     let places: Vec<Place> = p.hooks.iter().map(|h| h.place(&names(events))).collect();
     let (name, level) = events.first().map_or(("done", Level::Done), |e| (e.name, e.level));
     match what {
@@ -332,6 +397,14 @@ mod tests {
         assert_eq!(urls, ["http://a/", "http://b/"]);
         assert_eq!(n.places[0].states, ["failed"]);
         assert_eq!(n.places[1].states, ["done", "failed"], "not written: every event");
+    }
+
+    /// The tags clicked are handed over once.
+    #[test]
+    fn clicks_are_taken_once() {
+        CLICKED.lock().unwrap().push("7".to_owned());
+        assert_eq!(take_clicks(), ["7"]);
+        assert!(take_clicks().is_empty());
     }
 
     /// A `[notify]` with one key (or none) reads: the rest is not required.
