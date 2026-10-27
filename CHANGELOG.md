@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.122.0] - 2026-10-27
+
+### 追加
+- 新しいクレート `ito-statusbar`: 全アプリのステータスバー（uchmk/ito#48）。`show(ui, &Spec{clock, lang, opacity}, left, right)` が下のパネルを埋め、側の色と上の線・左にアプリの項目・右端に時計（等幅・一番強い文字の色・ホバーで `Clock::full`・`Clock::next_minute` で再描画）を描く。`right` は時計（と倍率の文字）の左から左向きに並べる。倍率を変えたら `scale_changed(ctx, scale)`（2 秒間 `scale_text` を出す）。項目は `item`・`link`・`divider`・`dot`。`opacity` は入力中に UI を薄くするアプリ（fude）向け。設定の画面を開いている間に隠すのはアプリ。
+  使う側がやること: michi・minato・tsumugi は自前の枠と時計を `show` に置き換える（`key_bar` は絶対位置で描いているので、`left` の中で `item`/`link` に直す）。fude は新しく足す。
+
 ## [0.121.0] - 2026-10-27
 
 ### 変更

@@ -1,0 +1,14 @@
+[package]
+name = "ito-statusbar"
+description = "The window's bottom status bar, the same in every app: the app's own items from the left, the clock at the right end (monospace, the strongest text colour, the whole date on hover, drawn again at the minute), and the scale's words for a moment after a scale change"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-common = { path = "../ito-common", features = ["clock"] }
+ito-theme = { path = "../ito-theme" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
