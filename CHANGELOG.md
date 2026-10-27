@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.119.0] - 2026-10-27
+
+### 追加
+- `ito_prefs::NotifyCfg`・`Event`・`HookCfg`・`DONE_FAILED`・`test_notify`: `[notify]` の読み書きを全アプリで 1 つにした（uchmk/ito#46）。kura・michi が持っていた写し（`NotifyCfg`・`check`・`page`・`edits`・`webhooks_of`・`tell`・`test`）の置き換え先。イベントはアプリのもので、`Event { name, sound_key, sound, level }` の並びで渡す（kura・michi の `done`/`failed` は `DONE_FAILED`）。
+  - `NotifyCfg` はアプリの設定の構造体に `#[serde(default)] notify: NotifyCfg` で入れ、読んだあとに `check(&events, path, &mut warnings)` を 1 回呼ぶ（書かれていない欄を埋め、知らないイベント・音・形式・http(s) でない宛先を警告して戻し、`sounds` と `places` を作る）。書かれていない `[notify]` は `NotifyCfg::new(&events)`。
+  - `tell(&events, app, icon, event, title, body)` はシステムの通知・音・webhook へ。`page(&events)` は設定の画面の `Notify`、`edits(&events, &page)` と `webhooks_of(&events, &page)` は画面の変更の書き戻し。「テストを送る」は `test_notify(&events, &page, what, app, icon, title, body)`。
+- `ito-prefs` が `serde` と `toml` に依る（どちらも `ito-common` が既に使っている純 Rust）。
+
+### 使う側がやること
+- kura・michi: 自前の `NotifyCfg`・`HookCfg`・`check`・`page`・`webhooks_of`・`edits`・`tell`・`test` を消し、`ito_prefs::NotifyCfg` と `DONE_FAILED` に置き換える。`n.system` などの欄は `Option` になった（`check` のあとは `Some`）。`sound_done` / `sound_failed` は `n.sounds[0]` / `[1]`、`focus_mode` は `n.focus_mode()`。アプリの設定の構造体が `Eq` を導出しているなら外す（`NotifyCfg` は `PartialEq` のみ）。
+- 新しいアプリ: 自前で書かず、これを使う。
+
 ## [0.118.0] - 2026-10-27
 
 ### 追加

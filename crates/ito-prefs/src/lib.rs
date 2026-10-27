@@ -22,6 +22,7 @@ mod keys;
 mod more;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
+mod notify_cfg;
 mod openin;
 mod shell;
 mod updates;
@@ -32,6 +33,7 @@ pub use more::{
     Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN, MORE_JA, WINDOW_KEYS,
 };
 pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
+pub use notify_cfg::{test as test_notify, Event, HookCfg, NotifyCfg, DONE_FAILED};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
 pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
 pub use updates::{status as update_status, update_card, UpdateWords};

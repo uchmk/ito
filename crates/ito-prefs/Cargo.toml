@@ -16,6 +16,8 @@ ito-keys = { path = "../ito-keys", features = ["egui"] }
 ito-notify = { path = "../ito-notify" }
 ito-openin = { path = "../ito-openin" }
 ito-theme = { path = "../ito-theme" }
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
 
 [dev-dependencies]
 egui = { version = "0.36", default-features = false, features = ["default_fonts"] }
