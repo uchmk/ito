@@ -48,6 +48,10 @@ pub enum Tone {
 /// that does the same (empty for none), and what the app does with it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry<T> {
+    /// A small label before the title ("Settings", "Theme"; empty for none).
+    /// Drawn dim in a column as wide as the longest group on show, so the
+    /// titles line up, and matched together with the title ([`search`]).
+    pub group: String,
     pub title: String,
     pub detail: String,
     pub key: String,
@@ -60,7 +64,21 @@ pub struct Entry<T> {
 
 impl<T> Entry<T> {
     pub fn new(title: impl Into<String>, key: impl Into<String>, pick: T) -> Self {
-        Self { title: title.into(), detail: String::new(), key: key.into(), pick, hits: Vec::new(), tone: Tone::Normal }
+        Self {
+            group: String::new(),
+            title: title.into(),
+            detail: String::new(),
+            key: key.into(),
+            pick,
+            hits: Vec::new(),
+            tone: Tone::Normal,
+        }
+    }
+
+    /// The same entry under a group label.
+    pub fn in_group(mut self, group: impl Into<String>) -> Self {
+        self.group = group.into();
+        self
     }
 }
 
@@ -136,10 +154,14 @@ pub fn score(query: &str, text: &str) -> Option<i32> {
 }
 
 /// The entries that match, best first (by place in `entries`); ties keep
-/// their order. Each is matched on its title and detail together.
+/// their order. Each is matched on its group, title and detail together, so
+/// typing a group's name lists the whole group.
 pub fn search<T>(query: &str, entries: &[Entry<T>]) -> Vec<usize> {
-    let mut found: Vec<(i32, usize)> =
-        entries.iter().enumerate().filter_map(|(k, e)| score(query, &format!("{} {}", e.title, e.detail)).map(|s| (s, k))).collect();
+    let mut found: Vec<(i32, usize)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(k, e)| score(query, &format!("{} {} {}", e.group, e.title, e.detail)).map(|s| (s, k)))
+        .collect();
     found.sort_by_key(|(s, k)| (std::cmp::Reverse(*s), *k));
     found.into_iter().map(|(_, k)| k).collect()
 }
@@ -247,6 +269,16 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                     }
                     // A window of ROWS lines that follows the selection.
                     let first = view.selected.saturating_sub(ROWS - 1).min(hits.len().saturating_sub(ROWS));
+                    // One column for the groups on show, so the titles line up.
+                    let group_font = egui::TextStyle::Body.resolve(ui.style());
+                    let group_w = hits
+                        .iter()
+                        .skip(first)
+                        .take(ROWS)
+                        .filter(|&&k| !entries[k].group.is_empty())
+                        .map(|&k| ui.painter().layout_no_wrap(entries[k].group.clone(), group_font.clone(), style.dim).size().x)
+                        .fold(0.0_f32, f32::max);
+                    let group_w = if group_w > 0.0 { group_w + 10.0 } else { 0.0 };
                     for (row, &k) in hits.iter().enumerate().skip(first).take(ROWS) {
                         let e = &entries[k];
                         let on = row == view.selected;
@@ -269,12 +301,17 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         let detail = (!e.detail.is_empty()).then(|| p.layout_no_wrap(e.detail.clone(), font.clone(), style.dim));
                         let key_w = key.as_ref().map_or(0.0, |g| g.size().x + 12.0);
                         let detail_w = detail.as_ref().map_or(0.0, |g| g.size().x + 8.0);
-                        let room = (rect.width() - 12.0 - key_w - detail_w).max(rect.width() / 2.0);
+                        let room = (rect.width() - 12.0 - group_w - key_w - detail_w).max(rect.width() / 2.0);
                         let mut job = title_job(&e.title, &e.hits, font.clone(), ink, style.hit);
                         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
                         let title = p.layout_job(job);
-                        let right = rect.left() + 6.0 + title.size().x;
-                        p.galley(egui::pos2(rect.left() + 6.0, mid - title.size().y / 2.0), title, ink);
+                        let left = rect.left() + 6.0 + group_w;
+                        let right = left + title.size().x;
+                        if !e.group.is_empty() {
+                            let g = p.layout_no_wrap(e.group.clone(), font.clone(), style.dim);
+                            p.galley(egui::pos2(rect.left() + 6.0, mid - g.size().y / 2.0), g, style.dim);
+                        }
+                        p.galley(egui::pos2(left, mid - title.size().y / 2.0), title, ink);
                         if let Some(g) = detail {
                             p.galley(egui::pos2(right + 8.0, mid - g.size().y / 2.0), g, style.dim);
                         }
@@ -309,7 +346,15 @@ mod tests {
     use super::*;
 
     fn entry(title: &str, detail: &str) -> Entry<u8> {
-        Entry { title: title.into(), detail: detail.into(), key: String::new(), pick: 0, hits: Vec::new(), tone: Tone::Normal }
+        Entry {
+            group: String::new(),
+            title: title.into(),
+            detail: detail.into(),
+            key: String::new(),
+            pick: 0,
+            hits: Vec::new(),
+            tone: Tone::Normal,
+        }
     }
 
     #[test]
@@ -319,6 +364,13 @@ mod tests {
         assert_eq!(score("rs", "split"), None, "out of order");
         assert_eq!(score("", "anything"), Some(0));
         assert_eq!(score("abc", "ab"), None, "ran out of text");
+    }
+
+    #[test]
+    fn a_group_is_matched_with_the_title() {
+        let list = [entry("Flip the page", "").in_group("Clean copy"), entry("Open", "").in_group("Screen"), entry("Clean up", "")];
+        assert_eq!(search("clean", &list), vec![0, 2], "the whole group, and a title that has the word");
+        assert_eq!(search("screen", &list), vec![1]);
     }
 
     #[test]

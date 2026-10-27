@@ -332,6 +332,7 @@ fn table(ui: &mut egui::Ui, l: Look, ends: &[End], ways: Vec<(&str, &str, &mut V
         let cols = columns(row);
         let hit = !l.q.is_empty() && (label.to_lowercase().contains(l.q) || note.to_lowercase().contains(l.q));
         if hit {
+            crate::mark_hit(ui);
             ui.painter().rect_filled(row.expand2(egui::vec2(10.0, 0.0)), 6.0, c.wait.gamma_multiply(0.14));
         }
         let words = egui::Rect::from_center_size(cols[0].center(), egui::vec2(cols[0].width(), 40.0));

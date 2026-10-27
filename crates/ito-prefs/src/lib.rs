@@ -286,6 +286,40 @@ pub struct Nav<'a> {
     pub file: &'a str,
 }
 
+/// What [`show_with`] adds to [`show`]: nav headings, a tag on the pages ito
+/// shares, a back button, and a search that reads every page at once.
+/// Everything is off by default.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Extras<'a> {
+    /// Nav headings: each one's words and the index of its first page, in
+    /// order ("Notebook" at 0, "Common (ito)" at 5).
+    pub groups: &'a [(&'a str, usize)],
+    /// The pages the apps share (indexes into [`Nav::pages`]); each gets
+    /// `shared_tag` beside its title.
+    pub shared: &'a [usize],
+    /// The tag on a shared page's title ("ito's common page").
+    pub shared_tag: &'a str,
+    /// The back button in the page's head: an arrow and these words ("Back to
+    /// the notebook"), then the key (Esc). A click does what Esc does
+    /// ([`Out::close`]). Empty for none.
+    pub back: &'a str,
+    /// With the words, a search shows the cards that hit on every page at
+    /// once, and the pages that have none are dimmed in the nav; Esc then
+    /// clears the search before it closes the screen.
+    pub results: Option<Results<'a>>,
+}
+
+/// The words of the search's results page ([`Extras::results`]).
+#[derive(Clone, Copy, Debug)]
+pub struct Results<'a> {
+    /// The heading, `{q}` standing for the search (`Settings with "{q}"`).
+    pub head: &'a str,
+    /// The line under it ("Searching all pages.").
+    pub lead: &'a str,
+    /// When nothing hits ("Not found.").
+    pub none: &'a str,
+}
+
 /// What the frame was asked for, besides what the page hands back.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Out {
@@ -309,7 +343,25 @@ pub(crate) fn z(ui: &egui::Ui, size: f32) -> f32 {
 
 /// The screen across all of `ui`: the nav and the page, which `body` draws
 /// (it gets the page's index and the [`Look`]).
-pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Keys, body: impl FnOnce(&mut egui::Ui, usize, Look)) -> Out {
+pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Keys, body: impl FnMut(&mut egui::Ui, usize, Look)) -> Out {
+    show_with(ui, c, state, nav, keys, Extras::default(), body)
+}
+
+/// [`show`] with the [`Extras`].
+///
+/// With [`Extras::results`] a search calls `body` for every page that has a
+/// hit, and [`section`] then draws only the cards that hit, each under
+/// "Page > Card". Draw a page's content inside [`section`]s so the results
+/// carry it; anything outside one is drawn whole.
+pub fn show_with(
+    ui: &mut egui::Ui,
+    c: Colors,
+    state: &mut State,
+    nav: &Nav,
+    keys: Keys,
+    extras: Extras,
+    mut body: impl FnMut(&mut egui::Ui, usize, Look),
+) -> Out {
     let mut out = Out { close: keys.close, open_file: false };
     let n = nav.pages.len().max(1);
     state.page = state.page.min(n - 1);
@@ -339,7 +391,14 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         searched.request_focus();
     }
     nav_ui.add_space(10.0);
-    let q = state.query.trim().to_lowercase();
+    let mut q = state.query.trim().to_lowercase();
+    // Esc clears the search first, when the screen reads every page.
+    if extras.results.is_some() && !q.is_empty() && keys.close {
+        state.query.clear();
+        q.clear();
+        out.close = false;
+    }
+    let cross = extras.results.is_some() && !q.is_empty();
     let hits = |p: usize| -> usize {
         if q.is_empty() {
             return 1;
@@ -347,15 +406,17 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         nav.index.iter().filter(|(at, words)| *at == p && words.to_lowercase().contains(&q)).count()
             + usize::from(nav.pages[p].0.to_lowercase().contains(&q))
     };
-    let shown: Vec<usize> = (0..nav.pages.len()).filter(|p| hits(*p) > 0).collect();
+    let with_hits: Vec<usize> = (0..nav.pages.len()).filter(|p| hits(*p) > 0).collect();
+    // Reading every page, the nav keeps them all, the ones without a hit dim.
+    let shown: Vec<usize> = if cross { (0..nav.pages.len()).collect() } else { with_hits.clone() };
     // The search moves to the first page that has it.
-    if !q.is_empty() && !shown.contains(&state.page) {
+    if !q.is_empty() && !cross && !shown.contains(&state.page) {
         if let Some(first) = shown.first() {
             state.page = *first;
         }
     }
     if searched.lost_focus() && nav_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-        if let Some(first) = shown.first() {
+        if let Some(first) = with_hits.first() {
             state.page = *first;
             // The keys go on to the first row the search lights.
             if !q.is_empty() {
@@ -366,8 +427,18 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     if shown.is_empty() {
         nav_ui.label(RichText::new(nav.words.nothing).size(z(ui, 12.5)).color(c.dim));
     }
+    let mut group = None;
     for p in shown {
-        let on = state.page == p;
+        let at = extras.groups.iter().rposition(|(_, start)| *start <= p);
+        if at != group {
+            group = at;
+            if let Some((head, _)) = at.map(|g| extras.groups[g]) {
+                nav_ui.add_space(if p == 0 { 2.0 } else { 10.0 });
+                nav_ui.label(RichText::new(head).size(z(ui, 11.0)).strong().color(c.faint()));
+                nav_ui.add_space(2.0);
+            }
+        }
+        let on = !cross && state.page == p;
         // Mouse only: the keys go page to page with Ctrl+Tab, and Tab goes
         // from the search straight into the page.
         let (r, resp) = nav_ui.allocate_exact_size(egui::vec2(nav_ui.available_width(), z(&nav_ui, 32.0)), egui::Sense::CLICK);
@@ -376,7 +447,13 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         } else if resp.hovered() {
             nav_ui.painter().rect_filled(r, 6.0, c.hover());
         }
-        let color = if on { c.strong() } else { c.dim };
+        let color = if on {
+            c.strong()
+        } else if cross && hits(p) == 0 {
+            c.faint()
+        } else {
+            c.dim
+        };
         nav_ui.painter().text(
             egui::pos2(r.left() + 10.0, r.center().y),
             egui::Align2::LEFT_CENTER,
@@ -395,6 +472,10 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
         }
         if resp.clicked() {
             state.page = p;
+            // A page picked from the results leaves them.
+            if cross {
+                state.query.clear();
+            }
         }
     }
 
@@ -404,14 +485,57 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(area));
     let page = state.page;
     let (title, lead) = nav.pages.get(page).copied().unwrap_or(("", ""));
+    let results = extras.results.filter(|_| cross);
+    let heading = match results {
+        Some(r) => r.head.replace("{q}", state.query.trim()),
+        None => title.to_owned(),
+    };
+    let lead = results.map_or(lead, |r| r.lead);
     egui::ScrollArea::vertical().id_salt(("prefs-page", title)).auto_shrink([false, false]).show(&mut body_ui, |ui| {
         egui::Frame::NONE.inner_margin(egui::Margin { left: 48, right: 48, top: 28, bottom: 40 }).show(ui, |ui| {
             ui.set_max_width(ui.available_width().min(820.0));
-            ui.label(RichText::new(title).size(z(ui, 24.0)).strong().color(c.strong()));
+            if !extras.back.is_empty() && results.is_none() {
+                ui.horizontal(|ui| {
+                    let back = egui::Button::new(RichText::new(format!("\u{2190} {}", extras.back)).size(z(ui, 12.5)).color(c.dim))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::new(1.0, c.border_strong()))
+                        .corner_radius(6.0);
+                    let back = ui.add(back);
+                    focus_ring(ui, &back);
+                    ui.label(RichText::new("Esc").size(z(ui, 11.0)).color(c.faint()));
+                    out.close |= back.clicked();
+                });
+                ui.add_space(10.0);
+            }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(heading).size(z(ui, 24.0)).strong().color(c.strong()));
+                if results.is_none() && !extras.shared_tag.is_empty() && extras.shared.contains(&page) {
+                    egui::Frame::NONE
+                        .stroke(egui::Stroke::new(1.0, c.border_strong()))
+                        .corner_radius(6.0)
+                        .inner_margin(egui::Margin::symmetric(8, 2))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(extras.shared_tag).size(z(ui, 11.0)).color(c.dim));
+                        });
+                }
+            });
             ui.add_space(2.0);
             ui.label(RichText::new(lead).size(z(ui, 13.5)).color(c.dim));
             ui.add_space(16.0);
-            body(ui, page, l);
+            match results {
+                None => body(ui, page, l),
+                Some(r) => {
+                    if with_hits.is_empty() {
+                        ui.label(RichText::new(r.none).size(z(ui, 13.0)).color(c.dim));
+                    }
+                    for p in &with_hits {
+                        let at = egui::Id::new(RESULTS);
+                        ui.data_mut(|d| d.insert_temp(at, nav.pages[*p].0.to_owned()));
+                        body(ui, *p, l);
+                        ui.data_mut(|d| d.remove::<String>(at));
+                    }
+                }
+            }
         });
     });
     // No row lit took the keys: they stay where the search left them.
@@ -443,6 +567,17 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     out
 }
 
+/// While the search reads every page: the title of the page being drawn.
+const RESULTS: &str = "prefs-results";
+/// Set by a row the search lights, so [`section`] can tell a card has a hit.
+const HIT_SEEN: &str = "prefs-hit-seen";
+
+/// A row the search lights says so (for the results, which keep only the
+/// cards that have one). Custom rows call this when they light.
+pub(crate) fn mark_hit(ui: &egui::Ui) {
+    ui.data_mut(|d| d.insert_temp(egui::Id::new(HIT_SEEN), true));
+}
+
 /// Enter in the search: the first row it lights takes the keys.
 const JUMP: &str = "prefs-jump";
 /// The row taking the keys: its control takes them.
@@ -456,10 +591,28 @@ fn take_keys(ui: &egui::Ui, r: &egui::Response) {
 }
 
 /// A card of rows under a small heading.
-pub fn section(ui: &mut egui::Ui, l: Look, head: &str, rows: impl FnOnce(&mut egui::Ui)) {
+///
+/// While the search reads every page ([`Extras::results`]) a card with no hit
+/// is left out, and the heading reads "Page > Card". `rows` is then run once
+/// unseen to find the hit, so keep it free of side effects.
+pub fn section(ui: &mut egui::Ui, l: Look, head: &str, mut rows: impl FnMut(&mut egui::Ui)) {
     let c = l.c;
     let hit = !l.q.is_empty() && head.to_lowercase().contains(l.q);
-    ui.label(RichText::new(head).size(z(ui, 11.0)).strong().color(if hit { c.wait } else { c.dim }));
+    let page = ui.data(|d| d.get_temp::<String>(egui::Id::new(RESULTS)));
+    let label = match &page {
+        Some(page) => format!("{page} \u{203a} {head}"),
+        None => head.to_owned(),
+    };
+    if page.is_some() && !hit {
+        let seen = egui::Id::new(HIT_SEEN);
+        ui.data_mut(|d| d.remove::<bool>(seen));
+        let mut dry = ui.new_child(egui::UiBuilder::new().id_salt("prefs-dry").max_rect(ui.available_rect_before_wrap()).invisible());
+        rows(&mut dry);
+        if ui.data_mut(|d| d.remove_temp::<bool>(seen)).is_none() {
+            return;
+        }
+    }
+    ui.label(RichText::new(label).size(z(ui, 11.0)).strong().color(if hit { c.wait } else { c.dim }));
     ui.add_space(6.0);
     egui::Frame::NONE
         .fill(c.panel)
@@ -492,6 +645,9 @@ pub fn row<R>(ui: &mut egui::Ui, l: Look, label: &str, note: &str, control: impl
 pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &str, control: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let c = l.c;
     let hit = !l.q.is_empty() && [key, label, note].iter().any(|w| w.to_lowercase().contains(l.q));
+    if hit {
+        mark_hit(ui);
+    }
     let behind = ui.painter().add(egui::Shape::Noop);
     let mut r = None;
     let shown = ui.horizontal(|ui| {
@@ -499,7 +655,7 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
         // The control first, on the right; the words wrap in what is left,
         // never under it.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let jump = hit && ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(JUMP))).is_some();
+            let jump = hit && ui.is_visible() && ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(JUMP))).is_some();
             if jump {
                 ui.data_mut(|d| d.insert_temp(egui::Id::new(JUMP_HERE), true));
             }
@@ -538,6 +694,10 @@ const SCROLLED: &str = "prefs-scrolled-to";
 /// low on a long page would otherwise be off-screen (kura #443). Rows come
 /// top to bottom, so the first lit one in a pass is the first hit.
 fn scroll_to_first_hit(ui: &egui::Ui, hit: bool, q: &str, rect: egui::Rect) {
+    // Not in the results (the cards come top to bottom) nor in a dry run.
+    if !ui.is_visible() || ui.data(|d| d.get_temp::<String>(egui::Id::new(RESULTS))).is_some() {
+        return;
+    }
     let id = egui::Id::new(SCROLLED);
     if q.is_empty() {
         ui.data_mut(|d| d.remove::<String>(id));
@@ -982,6 +1142,17 @@ fn in_force<'a>(themes: &'a [Theme], choice: (&'a str, &'a str, &'a str), light:
     themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)).map_or(name, |t| t.name.as_str())
 }
 
+/// Flip the mode shown now, for the title bar's tag and the palette's
+/// "Switch the theme": a light screen goes to the dark theme picked for dark
+/// (`choice`'s second, as on the theme page), a dark one to the light theme.
+/// Follow OS becomes an explicit mode, since what the OS shows is what the
+/// tag read. Write the result like the theme page's.
+/// `choice` is common.toml's `theme`, `dark_theme` and `light_theme`.
+pub fn flip_theme(choice: (&str, &str, &str), light_now: bool) -> Vec<CommonChange> {
+    let (_, dark, light) = choice;
+    vec![common(None, "theme", quote(if light_now { dark } else { light }))]
+}
+
 /// The theme page: the mode (Follow OS, Light, Dark) under the heading, the
 /// themes of that mode on the left, and on the right the preview the app
 /// draws in the theme in force (`l.c`). `choice` is common.toml's `theme`,
@@ -1134,6 +1305,15 @@ pub fn theme_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tag's flip writes the other mode's remembered theme.
+    #[test]
+    fn flip_goes_to_the_other_modes_theme() {
+        let to_dark = flip_theme(("system", "nord", "paper"), true);
+        let to_light = flip_theme(("system", "nord", "paper"), false);
+        assert_eq!((to_dark.len(), to_dark[0].key, to_dark[0].value.as_str()), (1, "theme", "\"nord\""));
+        assert_eq!(to_light[0].value, "\"paper\"");
+    }
 
     /// Esc closes the screen, but not while a popup is open: that Esc is the popup's.
     #[test]
@@ -1290,6 +1470,87 @@ mod tests {
             walk(&c.shape, &mut texts);
         }
         (changes, texts)
+    }
+
+    /// One frame of two pages of cards, with the extras, and the text drawn.
+    fn cards(ctx: &egui::Context, state: &mut State, keys: Keys) -> (Out, Vec<String>) {
+        let nav = Nav {
+            pages: &[("General", "One"), ("Theme", "Two"), ("Keys", "Three")],
+            index: &[(0, "Language"), (0, "Show clock"), (1, "Dark")],
+            words: &EN,
+            file: "config.toml",
+        };
+        let extras = Extras {
+            groups: &[("Notebook", 0), ("Common", 2)],
+            shared: &[2],
+            shared_tag: "Common page",
+            back: "Back",
+            results: Some(Results { head: "Settings with \"{q}\"", lead: "All pages.", none: "None." }),
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0))),
+            ..Default::default()
+        };
+        let mut out = Out::default();
+        let mut run = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                out = show_with(ui, ito_theme::colors(), state, &nav, keys, extras, |ui, page, l| match page {
+                    0 => {
+                        section(ui, l, "Words", |ui| {
+                            row(ui, l, "Language", "", |_| {});
+                        });
+                        section(ui, l, "Clock", |ui| {
+                            row(ui, l, "Show clock", "", |_| {});
+                        });
+                    }
+                    1 => section(ui, l, "Mode", |ui| {
+                        row(ui, l, "Dark", "", |_| {});
+                    }),
+                    _ => {}
+                });
+            });
+        });
+        run.textures_delta.clear();
+        fn walk(s: &egui::Shape, v: &mut Vec<String>) {
+            match s {
+                egui::Shape::Text(t) => v.push(t.galley.text().to_owned()),
+                egui::Shape::Vec(list) => list.iter().for_each(|s| walk(s, v)),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for c in &run.shapes {
+            walk(&c.shape, &mut texts);
+        }
+        (out, texts)
+    }
+
+    #[test]
+    fn a_search_reads_every_page_and_esc_clears_it_first() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let (_, plain) = cards(&ctx, &mut state, Keys::default());
+        assert!(plain.iter().any(|t| t == "Notebook") && plain.iter().any(|t| t == "Common"), "the nav headings: {plain:?}");
+        assert!(plain.iter().any(|t| t == "Common page") || state.page != 2, "the tag is only on the shared page");
+        assert!(plain.iter().any(|t| t.ends_with("Back")), "the back button: {plain:?}");
+
+        state.query = "dark".into();
+        let _ = cards(&ctx, &mut state, Keys::default());
+        let (_, found) = cards(&ctx, &mut state, Keys::default());
+        assert!(found.iter().any(|t| t == "Settings with \"dark\""), "{found:?}");
+        assert!(found.iter().any(|t| t == "Theme \u{203a} Mode"), "{found:?}");
+        assert!(!found.iter().any(|t| t.contains("General \u{203a}")), "a page with no hit leaves no card: {found:?}");
+        assert!(found.iter().any(|t| t == "Keys"), "the pages without a hit stay in the nav");
+
+        state.query = "clock".into();
+        let (_, found) = cards(&ctx, &mut state, Keys::default());
+        assert!(found.iter().any(|t| t == "General \u{203a} Clock"), "{found:?}");
+        assert!(!found.iter().any(|t| t == "General \u{203a} Words"), "a card with no hit is left out: {found:?}");
+
+        let (out, _) = cards(&ctx, &mut state, Keys { close: true, ..Keys::default() });
+        assert!((out.close, state.query.as_str()) == (false, ""), "the first Esc clears the search");
+        let (out, _) = cards(&ctx, &mut state, Keys { close: true, ..Keys::default() });
+        assert!(out.close, "the next one closes the screen");
     }
 
     #[test]

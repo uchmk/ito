@@ -539,6 +539,9 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             for (row, desc, layer, hay) in &shown {
                 crate::sep(ui, l);
                 let lit = !l.q.is_empty() && hay.contains(l.q);
+                if lit {
+                    crate::mark_hit(ui);
+                }
                 let behind = ui.painter().add(egui::Shape::Noop);
                 let drawn = ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;

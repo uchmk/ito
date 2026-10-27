@@ -221,6 +221,52 @@ fn search_box(ui: &mut Ui, r: Rect, compact: bool, words: &Words<'_>) -> bool {
     resp.clicked()
 }
 
+/// The words on the theme tag ([`theme_tag`]), in the app's language.
+#[derive(Clone, Copy, Debug)]
+pub struct ThemeWords<'a> {
+    /// On the tag while the dark theme is shown ("Dark").
+    pub dark: &'a str,
+    /// On the tag while the light theme is shown ("Light").
+    pub light: &'a str,
+    /// The hover ("Switch the theme").
+    pub hover: &'a str,
+}
+
+/// What [`theme_tag`] did.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ThemeTag {
+    /// The tag was clicked (or Enter / Space on it): flip the theme
+    /// (`ito_prefs::flip_theme`).
+    pub clicked: bool,
+    /// Where it ended (x), for whatever the slot draws after it.
+    pub end: f32,
+}
+
+/// A small outlined tag at the left of `rect` (the right slot's rect) that
+/// names the mode shown now, "Dark" or "Light"; a click asks to flip it.
+/// It has the focus ring a keyboard user needs.
+pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>) -> ThemeTag {
+    let c = ito_theme::colors();
+    let text = if dark_now { words.dark } else { words.light };
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(12.0), c.dim);
+    let size = Vec2::new(galley.size().x + 18.0, 22.0);
+    let r = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - size.y / 2.0), size);
+    if r.right() > rect.right() {
+        return ThemeTag { clicked: false, end: rect.left() };
+    }
+    let resp = ui.interact(r, ui.id().with("titlebar-theme"), Sense::CLICK).on_hover_text(words.hover);
+    let p = ui.painter().clone();
+    if resp.hovered() {
+        p.rect_filled(r, 6.0, c.hover());
+    }
+    p.rect_stroke(r, 6.0, Stroke::new(1.0, c.border), egui::StrokeKind::Inside);
+    if resp.has_focus() {
+        p.rect_stroke(r.expand(1.0), 7.0, Stroke::new(2.0, c.fg), egui::StrokeKind::Outside);
+    }
+    p.galley(Pos2::new(r.left() + 9.0, r.center().y - galley.size().y / 2.0), galley, c.dim);
+    ThemeTag { clicked: resp.clicked(), end: r.right() }
+}
+
 /// The bell in `rect`, with the unread count on it.
 fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> egui::Response {
     let c = ito_theme::colors();

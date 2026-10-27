@@ -3,6 +3,26 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.0] - 2026-10-28
+
+fude の 4 つの crate-request（uchmk/ito#52〜#55）。
+
+### 追加
+- `ito-titlebar`: `theme_tag(ui, rect, dark_now, &ThemeWords{dark, light, hover}) -> ThemeTag{clicked, end}`。今の見た目（ダーク/ライト）を出す小さな枠のタグで、押すと切り替えを頼む。フォーカスの輪あり。`right` の矩形の左端に置く（uchmk/ito#52）。
+- `ito-prefs`: `flip_theme((theme, dark_theme, light_theme), light_now) -> Vec<CommonChange>`。今がライトなら dark_theme、ダークなら light_theme を `theme` に書く（OS に合わせる設定は明示の設定になる）。タイトルバーのタグとパレットの「テーマを切り替える」が同じ関数を使う（uchmk/ito#52）。
+- `ito-palette`: `Entry::group` と `Entry::in_group("…")`。行の左に薄く出るグループ名で、検索はグループ名もタイトルといっしょに見る（グループ名を打つとそのグループが全部出る）（uchmk/ito#53）。
+- `ito-prefs`: `show_with(…, Extras, body)`。`show` は `Extras::default()` で呼ぶだけなので動きは同じ。
+  - `Extras::groups`・`shared`・`shared_tag`: ナビの見出し（アプリのページ名と「共通（ito）」）と、共通のページの題の横の札（uchmk/ito#55）。
+  - `Extras::back`: ページの頭の「← 〜へ戻る  Esc」。押すと Esc と同じ（`Out::close`）（uchmk/ito#55）。
+  - `Extras::results`（`Results{head, lead, none}`）: 検索がすべてのページの当たりを 1 枚に出す。ヒットの無いページはナビで薄くなり、ページごとの件数は今までどおり。カードの見出しは「ページ › カード」。Esc は先に検索を消す（uchmk/ito#54）。
+
+### 変更
+- `ito-prefs`: `show` の `body` と `section` の `rows` が `FnOnce` から `FnMut` になった。検索の結果は、当たりの無いカードを見えない描画で 1 回試してから省くため。副作用を持たせないこと。
+  使う側がやること: `body` や `rows` の中で捨てる（move out する）値があれば、clone するか外に出す。ほとんどのアプリは何もしない。
+- `ito-palette`: `Entry` に欄 `group` を足した。
+  使う側がやること: `Entry { … }` と欄を並べて作っているところは `group: String::new()` を足す（`Entry::new` は変わらない）。
+- 自前の行を描くアプリで、検索の当たりを光らせているところは、光らせるときに `ito_prefs` の行と同じく当たりを知らせる必要がある（`row`・`keyed_row` を使っていれば何もしない）。
+
 ## [0.123.0] - 2026-10-28
 
 ### 追加
