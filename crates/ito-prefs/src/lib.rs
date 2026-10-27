@@ -262,8 +262,10 @@ impl Keys {
     /// The keys as tsumugi has them, taken from egui's input: Esc closes
     /// unless `busy`; Ctrl+Tab and Ctrl+PageDown go to the next page, with
     /// Shift or PageUp to the one before, as tabs do elsewhere; Ctrl+F (Cmd+F
-    /// on macOS) goes to the search.
+    /// on macOS) goes to the search. An open popup (a dropdown) keeps Esc for
+    /// itself: the first Esc closes it, the next one the screen.
     pub fn standard(ui: &egui::Ui, busy: bool) -> Self {
+        let busy = busy || egui::Popup::is_any_open(ui.ctx());
         let close = !busy && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         ui.input_mut(|i| {
             let ctrl = egui::Modifiers::CTRL;
@@ -1132,6 +1134,28 @@ pub fn theme_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Esc closes the screen, but not while a popup is open: that Esc is the popup's.
+    #[test]
+    fn esc_is_the_popups_while_one_is_open() {
+        let ctx = egui::Context::default();
+        let esc = || egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let frame = |events: Vec<egui::Event>| {
+            let mut close = false;
+            let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| close = Keys::standard(ui, false).close);
+            out.textures_delta.clear();
+            close
+        };
+        assert!(frame(vec![esc()]), "no popup: Esc closes the screen");
+        egui::Popup::open_id(&ctx, egui::Id::new("dropdown"));
+        assert!(!frame(vec![esc()]), "a popup is open: Esc is left to it");
+    }
 
     #[test]
     fn filled_buttons_take_the_themes_accent_and_error_colours() {
