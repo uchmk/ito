@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.118.0] - 2026-10-27
+
+### 追加
+- `ito_prefs::button_with(ui, look, words, Tone) -> Response` と `Tone { Plain, Primary, Danger }`: 塗ったボタン（uchmk/ito#44）。`Primary` はテーマの強調色（`run`）、`Danger` はエラー色（`err`）で塗り、文字は `on_accent`。大きさとフォーカスの輪は `button` と同じ。`button` は `Plain` のまま変わらない。
+
 ## [0.117.0] - 2026-10-27
 
 ### 追加

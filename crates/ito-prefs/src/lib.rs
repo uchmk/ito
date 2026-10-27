@@ -742,17 +742,46 @@ fn seg_step(at: Option<usize>, len: usize, left: bool, right: bool, home: bool, 
     }
 }
 
+/// How a [`button_with`] is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tone {
+    /// An outline, words in the text colour.
+    #[default]
+    Plain,
+    /// Filled with the theme's accent: the one main action on a screen.
+    Primary,
+    /// Filled with the theme's error colour: the action that throws something away.
+    Danger,
+}
+
 /// The design's plain button: an outline, words in the text colour.
 pub fn button(ui: &mut egui::Ui, l: Look, words: &str) -> bool {
-    let b = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(l.c.fg))
-        .fill(Color32::TRANSPARENT)
-        .stroke(egui::Stroke::new(1.0, l.c.border_strong()))
+    button_with(ui, l, words, Tone::Plain).clicked()
+}
+
+/// A button of the given [`Tone`]: the same size and focus ring as [`button`].
+/// A filled one takes the theme's accent or error colour with the text colour
+/// for words on an accent ([`ito_theme::Colors::on_accent`]), so it follows the theme.
+pub fn button_with(ui: &mut egui::Ui, l: Look, words: &str, tone: Tone) -> egui::Response {
+    let (fill, stroke, text) = tone_colors(&l.c, tone);
+    let b = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(text))
+        .fill(fill)
+        .stroke(stroke)
         .corner_radius(7.0)
         .min_size(egui::vec2(0.0, z(ui, 30.0)));
     let r = ui.add(b);
     take_keys(ui, &r);
     focus_ring(ui, &r);
-    r.clicked()
+    r
+}
+
+/// The fill, outline and words of a button.
+fn tone_colors(c: &Colors, tone: Tone) -> (Color32, egui::Stroke, Color32) {
+    match tone {
+        Tone::Plain => (Color32::TRANSPARENT, egui::Stroke::new(1.0, c.border_strong()), c.fg),
+        Tone::Primary => (c.run, egui::Stroke::NONE, c.on_accent()),
+        Tone::Danger => (c.err, egui::Stroke::NONE, c.on_accent()),
+    }
 }
 
 pub fn status(ui: &mut egui::Ui, words: &str, color: Color32) {
@@ -1100,6 +1129,15 @@ pub fn theme_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filled_buttons_take_the_themes_accent_and_error_colours() {
+        let c = ito_theme::colors();
+        assert_eq!(tone_colors(&c, Tone::Primary).0, c.run);
+        assert_eq!(tone_colors(&c, Tone::Danger).0, c.err);
+        assert_eq!(tone_colors(&c, Tone::Danger).2, c.on_accent());
+        assert_eq!(tone_colors(&c, Tone::Plain).0, Color32::TRANSPARENT);
+    }
 
     #[test]
     fn seg_keys_move_the_pick_and_stop_at_the_ends() {
