@@ -279,6 +279,21 @@ pub fn own_group(cmd: &mut Command) {
     sys::own_group(cmd);
 }
 
+/// Start `cmd` as a background process that outlives the caller and holds
+/// none of its pipes: stdio null, no console window, its own process group
+/// (Windows: detached; Unix: a new session's group). On Windows a child is
+/// otherwise handed every inheritable handle of the caller even with
+/// `Stdio::null()`, so whoever waits for the caller's stdout/stderr pipe (a
+/// test, `$(app list)`) would never see EOF while the daemon lives. The
+/// caller's own standard handles are made non-inheritable for the spawn and
+/// put back after. The child is not waited for.
+pub fn spawn_detached(mut cmd: Command) -> io::Result<()> {
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    sys::detach(&mut cmd);
+    let _guard = sys::HoldHandles::new();
+    cmd.spawn().map(drop)
+}
+
 /// Kill the child and every process it started, then reap it.
 pub fn kill_tree(child: &mut Child) {
     sys::kill_tree(child);
@@ -295,6 +310,51 @@ mod sys {
 
     pub fn own_group(cmd: &mut Command) {
         cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    pub fn detach(cmd: &mut Command) {
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
+        fn GetHandleInformation(h: *mut std::ffi::c_void, flags: *mut u32) -> i32;
+        fn SetHandleInformation(h: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+    }
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+
+    /// The caller's standard handles, not inheritable until dropped.
+    pub struct HoldHandles(Vec<(*mut std::ffi::c_void, u32)>);
+
+    impl HoldHandles {
+        pub fn new() -> Self {
+            let mut held = Vec::new();
+            // STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE: -10, -11, -12.
+            for which in [-10i32, -11, -12] {
+                // SAFETY: this process's own standard handles; only their inherit flag changes.
+                unsafe {
+                    let h = GetStdHandle(which as u32);
+                    let mut flags = 0u32;
+                    if !h.is_null() && h as isize != -1 && GetHandleInformation(h, &mut flags) != 0 && flags & HANDLE_FLAG_INHERIT != 0 {
+                        SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+                        held.push((h, flags & HANDLE_FLAG_INHERIT));
+                    }
+                }
+            }
+            HoldHandles(held)
+        }
+    }
+
+    impl Drop for HoldHandles {
+        fn drop(&mut self) {
+            for &(h, flag) in &self.0 {
+                // SAFETY: the same handles, still open; their inherit flag is put back.
+                unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, flag) };
+            }
+        }
     }
 
     pub fn kill_tree(child: &mut Child) {
@@ -317,6 +377,18 @@ mod sys {
         cmd.process_group(0);
     }
 
+    pub fn detach(cmd: &mut Command) {
+        cmd.process_group(0);
+    }
+
+    pub struct HoldHandles;
+
+    impl HoldHandles {
+        pub fn new() -> Self {
+            HoldHandles
+        }
+    }
+
     pub fn kill_tree(child: &mut Child) {
         // A negative pid is the whole group, which the child leads.
         let _ = Command::new("kill")
@@ -333,6 +405,13 @@ mod sys {
     use std::process::{Child, Command};
 
     pub fn own_group(_: &mut Command) {}
+    pub fn detach(_: &mut Command) {}
+    pub struct HoldHandles;
+    impl HoldHandles {
+        pub fn new() -> Self {
+            HoldHandles
+        }
+    }
     pub fn kill_tree(_: &mut Child) {}
 }
 
@@ -354,6 +433,12 @@ mod tests {
             c.args(["-c", &format!("echo {out}; echo {err} >&2; exit {code}")]);
             c
         }
+    }
+
+    #[test]
+    fn a_detached_process_starts_and_a_missing_one_is_an_error() {
+        spawn_detached(say("x", "y", 0)).unwrap();
+        assert!(spawn_detached(Command::new("ito-proc-no-such-program")).is_err());
     }
 
     fn sleeper() -> Command {

@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.129.0] - 2026-10-29
+
+### 追加
+- `ito-proc`: `spawn_detached(cmd)`（uchmk/ito#69、koyomi の依頼）。常駐させる子（エンジン・デーモン）の起こし方。stdio は null、窓なし、自分のプロセスグループ
+  （Windows は detached）で、待たない。Windows の `Command` は `Stdio::null()` でも呼び側の継承できるハンドルを全部子に渡し、呼び側の stdout/stderr のパイプを
+  子が握り続けて待つ側（テスト・`$(app list)`・`.com`）が EOF を見られなくなる。そこで起こす間だけ呼び側の標準ハンドルを継承しない印にして、あとで戻す。
+  使う側がやること: koyomi は `client.rs` の `keep_own_handles` と起こし方の `creation_flags` を外して `ito_proc::spawn_detached` に替える。
+
 ## [0.128.0] - 2026-10-29
 
 ### 追加
