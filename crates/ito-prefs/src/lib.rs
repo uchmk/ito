@@ -84,6 +84,9 @@ pub struct Words {
     pub webhook: &'static str,
     pub webhook_url: &'static str,
     pub webhook_url_note: &'static str,
+    /// The switch that keeps the addresses in the OS credential store, not in the file.
+    pub webhook_hide: &'static str,
+    pub webhook_hide_note: &'static str,
     pub webhook_bad: &'static str,
     pub webhook_format: &'static str,
     pub webhook_format_note: &'static str,
@@ -146,6 +149,8 @@ pub const EN: Words = Words {
     webhook_url: "Address",
     webhook_url_note:
         "An ntfy topic for the phone, a Slack or Discord webhook, or any address that takes JSON; nothing is sent while it is empty",
+    webhook_hide: "Keep the addresses in the system's credential store",
+    webhook_hide_note: "A Slack or Discord address carries its token. The file then holds only a reference (secret:webhook-1), so sharing or committing it leaks nothing",
     webhook_bad: "Start the address with http:// or https://; nothing is sent until then",
     webhook_format: "Format",
     webhook_format_note: "What the address takes",
@@ -203,6 +208,8 @@ pub const JA: Words = Words {
     webhook: "Webhook",
     webhook_url: "アドレス",
     webhook_url_note: "ntfy のトピック・Slack や Discord の webhook・JSON を受けるアドレス。空なら送りません",
+    webhook_hide: "アドレスを OS の資格情報ストアに置く",
+    webhook_hide_note: "Slack や Discord のアドレスは token を含みます。ファイルには参照（secret:webhook-1）だけが残り、ファイルを共有・コミットしても漏れません",
     webhook_bad: "http:// か https:// で始めてください。それまでは送りません",
     webhook_format: "形式",
     webhook_format_note: "アドレスが受ける形",

@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.128.0] - 2026-10-29
+
+### 追加
+- `ito-prefs`: 通知の画面の Webhook に「アドレスを OS の資格情報ストアに置く」スイッチ（uchmk/ito#67）。設定は `[notify] hide_webhooks`（既定は false）。
+  `NotifyCfg::webhooks_to_write(app, events, page)` が、書くべき Webhook を返す（スイッチが入っていれば `conceal` 済みで、切ったときはストアの `webhook-N` を消して
+  アドレスをそのままに戻す）。変えていなければ `None`。ストアを触るのでワーカースレッドから呼ぶ。
+  使う側がやること（破壊的）: `Notify { … }` を直に組んでいれば欄 `hide: bool` を足す。自前の `Words` を組んでいれば `webhook_hide`・`webhook_hide_note` を足す
+  （`..EN` / `..JA` なら不要）。`ito-prefs` は `ito-secret` に依る。
+
 ## [0.127.0] - 2026-10-29
 
 ### 追加

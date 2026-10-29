@@ -31,13 +31,16 @@ pub struct Notify {
     pub focus: bool,
     /// The places a notice is sent, in the settings' order.
     pub hooks: Vec<Hook>,
+    /// The addresses are kept in the OS credential store, the file holding
+    /// `secret:` references (see `ito_notify::webhook::conceal`).
+    pub hide: bool,
 }
 
 impl Notify {
     /// Back to `defaults`, but for the webhooks: they are not a choice but
     /// places.
     pub fn reset(&mut self, defaults: &Notify) {
-        *self = Notify { hooks: std::mem::take(&mut self.hooks), ..defaults.clone() };
+        *self = Notify { hooks: std::mem::take(&mut self.hooks), hide: self.hide, ..defaults.clone() };
     }
 }
 
@@ -150,6 +153,8 @@ pub fn notify_index(w: &Words) -> Vec<&'static str> {
         w.focus_note,
         w.webhook_url,
         w.webhook_url_note,
+        w.webhook_hide,
+        w.webhook_hide_note,
         w.webhook_format,
         w.webhook_add,
         w.webhook_test,
@@ -234,6 +239,10 @@ pub fn notify_page(
         }
     });
     section(ui, l, w.webhook, |ui| {
+        if row(ui, l, w.webhook_hide, w.webhook_hide_note, |ui| switch(ui, l, n.hide)) {
+            n.hide = !n.hide;
+        }
+        sep(ui, l);
         if let Some(k) = webhook_rows(ui, l, w, &mut n.hooks, ends.len(), drafts) {
             test = Some(Test::Hook(k));
         }
@@ -371,6 +380,7 @@ mod tests {
             sound: vec![false; ends],
             sounds: vec!["chime".to_owned(); ends],
             focus: true,
+            hide: false,
             hooks: (0..hooks).map(hook).collect(),
         }
     }

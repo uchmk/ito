@@ -71,6 +71,9 @@ pub struct NotifyCfg {
     pub webhook: Option<String>,
     /// One of `ito_notify::FORMATS`.
     pub webhook_format: Option<String>,
+    /// The addresses are kept in the OS credential store and the file holds
+    /// `secret:` references (not written: no).
+    pub hide_webhooks: Option<bool>,
     /// `[[notify.webhooks]]`, as written.
     #[serde(default)]
     pub webhooks: Vec<HookCfg>,
@@ -179,6 +182,11 @@ impl NotifyCfg {
         which.as_ref().is_some_and(|l| l.iter().any(|e| e == event))
     }
 
+    /// Whether the addresses are kept in the credential store.
+    pub fn hide_webhooks(&self) -> bool {
+        self.hide_webhooks.unwrap_or(false)
+    }
+
     /// Whether sounds keep quiet in focus mode.
     pub fn focus_mode(&self) -> bool {
         self.focus_mode.unwrap_or(true)
@@ -227,6 +235,7 @@ impl NotifyCfg {
             sound: col(&self.sound),
             sounds,
             focus: self.focus_mode(),
+            hide: self.hide_webhooks(),
             hooks: self.places.iter().map(|p| Hook::of(p, &names(events), true)).collect(),
         }
     }
@@ -236,6 +245,25 @@ impl NotifyCfg {
     pub fn webhooks_of(&self, events: &[Event], p: &Notify) -> Option<Vec<Place>> {
         let now: Vec<Place> = p.hooks.iter().map(|h| h.place(&names(events))).collect();
         (now != self.places).then_some(now)
+    }
+
+    /// The webhooks to write to the file when the page's `p` changed them or
+    /// the switch: None when nothing is to be written. With `p.hide` the
+    /// addresses go to the credential store of `app` and the places come back
+    /// as `secret:` references; without it they come back as they are and
+    /// what the store held is forgotten. Blocks: call it from a worker thread.
+    pub fn webhooks_to_write(&self, app: &str, events: &[Event], p: &Notify) -> std::io::Result<Option<Vec<Place>>> {
+        let switched = p.hide != self.hide_webhooks();
+        let Some(now) = self.webhooks_of(events, p).or_else(|| switched.then(|| self.places.clone())) else { return Ok(None) };
+        if p.hide {
+            return webhook::conceal(app, &now).map(Some);
+        }
+        if switched {
+            for i in 1..=now.len() {
+                ito_secret::delete(app, &format!("webhook-{i}"))?;
+            }
+        }
+        Ok(Some(now))
     }
 
     /// The `[notify]` keys to write, as TOML, so that the file reads as the
@@ -255,6 +283,9 @@ impl NotifyCfg {
         }
         if p.focus != was.focus {
             out.push(("focus_mode", p.focus.to_string()));
+        }
+        if p.hide != was.hide {
+            out.push(("hide_webhooks", p.hide.to_string()));
         }
         out
     }
