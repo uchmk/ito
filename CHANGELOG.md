@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.5] - 2026-10-29
+
+### 修正
+- `ito-prefs`: 設定の画面が `ui.max_rect()` ではなく `ui.available_rect_before_wrap()` を使うようにした（uchmk/ito#63、yagura の報告）。上のパネル（タイトルバー）の下にあるルートの ui で呼ぶと、画面がバーの上に描かれて、閉じるボタンなどが消えていた。
+- `ito-notices`: 「すべて既読」のボタンと各行の上でポインターを指の形にした（uchmk/ito#62、minato の報告）。
+  使う側がやること: 無し。rev を上げるだけ。
+
 ## [0.124.4] - 2026-10-29
 
 ### 修正

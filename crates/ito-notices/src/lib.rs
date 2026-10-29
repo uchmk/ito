@@ -161,6 +161,9 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
                     if unread > 0 {
                         first = Some(mark.id);
                     }
+                    if mark.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
                     if mark.clicked() {
                         action = Some(Action::ReadAll);
                     }
@@ -183,6 +186,9 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
                         let text_color = if n.read { c.dim } else { c.fg };
                         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
                         first = first.or(Some(resp.id));
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
                         let p = ui.painter_at(rect);
                         let keyed = sel == Some(row);
                         if keyed && moved {
@@ -285,6 +291,42 @@ mod tests {
             full.textures_delta.clear();
         }
         out
+    }
+
+    #[test]
+    fn the_hand_shows_over_the_rows_and_the_button() {
+        let list = [notice(1, Kind::Ok, false, Some("x"))];
+        let hand_at = |pos: egui::Pos2| {
+            let ctx = egui::Context::default();
+            let mut icon = egui::CursorIcon::Default;
+            for events in [vec![], vec![egui::Event::PointerMoved(pos)], vec![egui::Event::PointerMoved(pos)]] {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                    events,
+                    ..Default::default()
+                };
+                let mut full = ctx.run_ui(input, |ui| {
+                    let anchor = Rect::from_min_size(egui::pos2(700.0, 8.0), vec2(28.0, 24.0));
+                    show(ui.ctx(), anchor, &list, &words());
+                });
+                full.textures_delta.clear();
+                icon = full.platform_output.cursor_icon;
+            }
+            icon
+        };
+        let mut hands = 0;
+        let mut y = 0.0;
+        while y < 200.0 {
+            let mut x = 300.0;
+            while x < 800.0 {
+                if hand_at(egui::pos2(x, y)) == egui::CursorIcon::PointingHand {
+                    hands += 1;
+                }
+                x += 20.0;
+            }
+            y += 10.0;
+        }
+        assert!(hands > 0, "no hand cursor over the panel");
     }
 
     #[test]

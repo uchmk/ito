@@ -390,7 +390,8 @@ pub fn show_with(
         // The keys to the page's first control with the next Tab.
         ui.memory_mut(|m| m.surrender_focus(m.focused().unwrap_or(egui::Id::NULL)));
     }
-    let rect = ui.max_rect();
+    // What is left of the ui, not its `max_rect`: under a top panel (a title bar) the root ui keeps the whole window.
+    let rect = ui.available_rect_before_wrap();
     ui.painter().rect_filled(rect, 0.0, c.bg);
     // The nav down the left: the search, the pages, and the file.
     let side = egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + 240.0, rect.bottom()));
@@ -1565,6 +1566,34 @@ mod tests {
             walk(&c.shape, &mut texts);
         }
         (out, texts)
+    }
+
+    /// On the root ui under a top panel (a title bar), the screen leaves the bar alone (uchmk/ito#63).
+    #[test]
+    fn the_screen_stays_below_a_top_panel() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let nav = Nav { pages: &[("General", "One")], index: &[(0, "Language")], words: &EN, file: "config.toml" };
+        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "Back", results: None };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let mut run = ctx.run_ui(input, |ui| {
+            egui::Panel::top("bar").exact_size(40.0).show(ui, |_| {});
+            show_with(ui, ito_theme::colors(), &mut state, &nav, Keys::default(), extras, |_, _, _| {});
+        });
+        run.textures_delta.clear();
+        let bg = ito_theme::colors().bg;
+        let top = run
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if r.fill == bg => Some(r.rect.top()),
+                _ => None,
+            })
+            .fold(f32::MAX, f32::min);
+        assert!(top >= 40.0, "the screen painted from y = {top}, over the bar");
     }
 
     #[test]
