@@ -939,6 +939,16 @@ impl Terminal {
         self.term.lock().set_options(config);
     }
 
+    /// Where the match a search is on starts and ends (buffer points, line
+    /// zero the top of the live screen), while the selection is still it;
+    /// `None` after a drag, a click or [`end_search`](Self::end_search).
+    pub fn found(&self) -> Option<(Point, Point)> {
+        let (a, b) = self.found?;
+        let term = self.term.lock();
+        let r = term.selection.as_ref()?.to_range(&term)?;
+        (r.start == a && r.end == b).then_some((a, b))
+    }
+
     /// Forget where a search got to, so the next one starts from the view.
     pub fn end_search(&mut self) {
         self.found = None;

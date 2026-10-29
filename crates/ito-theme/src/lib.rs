@@ -276,6 +276,7 @@ impl Colors {
             fg: self.fg,
             fg_dim: mix(self.dim, self.panel, 0.2),
             selection: self.selection(),
+            found: self.wait,
             cursor: self.run,
             on_cursor: self.bg,
             ansi: Some(self.ansi()),

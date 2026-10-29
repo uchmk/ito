@@ -104,7 +104,7 @@ mod tests {
     fn cell(c: char) -> CellView {
         use alacritty_terminal::vte::ansi::{Color, NamedColor};
         let (fg, bg) = (Color::Named(NamedColor::Foreground), Color::Named(NamedColor::Background));
-        CellView { c, fg, bg, flags: alacritty_terminal::term::cell::Flags::empty(), ul: None, selected: false }
+        CellView { c, fg, bg, flags: alacritty_terminal::term::cell::Flags::empty(), ul: None, selected: false, found: false }
     }
 
     fn row(text: &str) -> Vec<CellView> {

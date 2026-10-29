@@ -55,6 +55,26 @@ mod pane {
     use super::testing::{feed, term};
     use super::*;
 
+    /// The match a search is on is marked `found` (and not `selected`), only
+    /// the match, so a pane can draw it apart from a drag.
+    #[test]
+    fn the_match_is_marked_found() {
+        let mut t = term(20, 3);
+        feed(
+            &mut t,
+            "ab hit cd
+",
+        );
+        let mut found = None;
+        assert_eq!(search_in(&mut t, &mut found, "hit", true), Some(false));
+        let mut rows = cell_rows(&t);
+        mark_found(&t, found.unwrap(), &mut rows);
+        let marked: String = rows[0].iter().filter(|c| c.found).map(|c| c.c).collect();
+        assert_eq!(marked, "hit");
+        assert!(rows.iter().flatten().all(|c| !(c.found && c.selected)));
+        assert!(rows.iter().flatten().all(|c| !c.selected));
+    }
+
     /// Turning round mid-search moves at once: one `<C-S-b>` undoes one
     /// `<C-S-n>` (#93, 1.9g). Before, the first press after a change of
     /// direction found the match it was already on.

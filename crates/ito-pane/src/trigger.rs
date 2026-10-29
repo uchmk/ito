@@ -335,6 +335,7 @@ mod tests {
             flags,
             ul: None,
             selected: false,
+            found: false,
         };
         let mut out = Vec::new();
         for c in s.chars() {

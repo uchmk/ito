@@ -340,11 +340,28 @@ pub fn cell_rows<T: EventListener>(term: &Term<T>) -> Vec<Vec<CellView>> {
                 flags: cell.flags,
                 ul: cell.underline_color(),
                 selected: sel.is_some_and(|r| r.contains(at)),
+                found: false,
             });
         }
         out.push(row);
     }
     out
+}
+
+/// Mark the cells of the match `(start, end)` as `found` and no longer
+/// `selected`, in `rows` as [`cell_rows`] made them.
+pub fn mark_found<T: EventListener>(term: &Term<T>, (start, end): (Point, Point), rows: &mut [Vec<CellView>]) {
+    let offset = term.grid().display_offset() as i32;
+    for (l, row) in rows.iter_mut().enumerate() {
+        let line = Line(l as i32 - offset);
+        for (c, cell) in row.iter_mut().enumerate() {
+            let at = Point::new(line, Column(c));
+            if at >= start && at <= end {
+                cell.found = true;
+                cell.selected = false;
+            }
+        }
+    }
 }
 
 /// The column of a vertical rule that splits the screen in two, when a
@@ -426,6 +443,10 @@ pub struct CellView {
     /// was drawn at all -- a drag copied text with no sign of what it took,
     /// and a search that worked was indistinguishable from one that did not.
     pub selected: bool,
+    /// Inside the match a search is on now (`selected` is cleared there, so
+    /// the two are drawn apart: a drag in the selection colour, the match in
+    /// [`Palette::found`](crate::Palette)).
+    pub found: bool,
 }
 
 /// Plain text as a pattern for [`Terminal::search`](crate::Terminal::search):

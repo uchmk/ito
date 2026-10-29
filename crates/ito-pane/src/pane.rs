@@ -135,6 +135,9 @@ impl Pane for Terminal {
         if let Some(cols) = *self.side.lock().unwrap() {
             crate::grid::limit_selected(&mut screen.rows, cols);
         }
+        if let Some(range) = self.found() {
+            self.with_grid(|t| crate::grid::mark_found(t, range, &mut screen.rows));
+        }
         screen
     }
 

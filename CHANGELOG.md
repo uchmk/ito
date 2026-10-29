@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.130.0] - 2026-10-29
+
+### 追加
+- `ito-pane`: 検索の一致を選択と別の色で描く（uchmk/ito#70、tsumugi の依頼）。`CellView::found`（今の一致の中。そこでは `selected` を外す）、
+  `Palette::found`（一致の背景。文字は黒か白のうち読める方、太字。kura の find_keyword と同じ流れ）、`ito-theme` の `Colors::palette` は `wait` を渡す。
+  `Terminal::found() -> Option<(Point, Point)>` は今の一致の始まりと終わり（選択がまだその一致のときだけ。ドラッグ・クリック・`end_search` のあとは `None`）で、
+  「3 / 12」のように何番目かを数えるアプリが、自分の持つ一致の一覧と突き合わせるのに使う。数え上げは `ito-pane` に入れない。
+  使う側がやること（破壊的）: `CellView { … }` を直に組んでいれば `found: false`、`Palette { … }` を直に組んでいれば `found` を足す（`..Palette::default()` なら不要）。
+
 ## [0.129.0] - 2026-10-29
 
 ### 追加

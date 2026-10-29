@@ -32,6 +32,9 @@ pub struct Palette {
     /// ito-select's colour (`ito_theme::Colors::selection` is it), the one
     /// their painted text is selected in too.
     pub selection: Color32,
+    /// Behind the match a search is on (the text on it is black or white,
+    /// whichever reads better). ito-theme gives `wait`.
+    pub found: Color32,
     /// The focused cursor, and the "lines back" note.
     pub cursor: Color32,
     /// Text drawn on top of `cursor`.
@@ -49,6 +52,7 @@ impl Default for Palette {
             fg: Color32::from_rgb(0xc8, 0xcd, 0xd8),
             fg_dim: Color32::from_rgb(0x79, 0x80, 0x90),
             selection: Color32::from_rgb(0x2f, 0x4a, 0x6b),
+            found: Color32::from_rgb(0xe0, 0xaf, 0x4a),
             cursor: Color32::from_rgb(0x6f, 0xd0, 0xd0),
             on_cursor: Color32::from_rgb(0x16, 0x18, 0x1d),
             ansi: None,
@@ -462,10 +466,11 @@ pub fn show_faces<P: Pane + ?Sized>(
             // A selected cell takes the palette's selection (ito-theme gives
             // ito-select's colour, the one painted text takes too) in place of
             // its own background; its letters keep their colour on it.
-            let bg = match (cell.selected, painted(x).and_then(|p| p.1)) {
-                (true, _) => pal.selection,
-                (false, Some([r, g, b])) => Color32::from_rgb(r, g, b),
-                (false, None) => color(cell.bg, pal, true),
+            let bg = match (cell.found, cell.selected, painted(x).and_then(|p| p.1)) {
+                (true, _, _) => pal.found,
+                (_, true, _) => pal.selection,
+                (_, false, Some([r, g, b])) => Color32::from_rgb(r, g, b),
+                (_, false, None) => color(cell.bg, pal, true),
             };
             match run {
                 Some((_, c)) if c == bg => {}
@@ -522,6 +527,7 @@ pub fn show_faces<P: Pane + ?Sized>(
                 continue;
             }
             let fg = match painted(x).and_then(|p| p.0) {
+                _ if cell.found => text_on(pal.found),
                 Some([r, g, b]) => Color32::from_rgb(r, g, b),
                 None => ink(cell, pal),
             };
@@ -545,7 +551,7 @@ pub fn show_faces<P: Pane + ?Sized>(
                 egui::pos2(inner.left() + x as f32 * cell_w, top + lift),
                 Align2::LEFT_TOP,
                 cell.c,
-                faces.pick(cell.flags).clone(),
+                faces.pick(if cell.found { cell.flags | Flags::BOLD } else { cell.flags }).clone(),
                 fg,
             );
         }
@@ -921,6 +927,16 @@ fn fill(painter: &egui::Painter, inner: Rect, from: usize, to: usize, top: f32, 
     );
 }
 
+/// Black or white, whichever reads better on `bg`.
+fn text_on(bg: Color32) -> Color32 {
+    let l = 0.299 * f32::from(bg.r()) + 0.587 * f32::from(bg.g()) + 0.114 * f32::from(bg.b());
+    if l > 140.0 {
+        Color32::from_rgb(0x16, 0x18, 0x1d)
+    } else {
+        Color32::WHITE
+    }
+}
+
 /// The colour a cell's text is drawn in: its own, dimmed (SGR 2), or its
 /// background's when reversed (SGR 7).
 fn ink(cell: &crate::CellView, pal: &Palette) -> Color32 {
@@ -1243,6 +1259,7 @@ mod tests {
             flags,
             ul: None,
             selected: false,
+            found: false,
         };
         let row = |s: &str| s.chars().map(|c| cell(c, Flags::empty())).collect::<Vec<_>>();
         let mut wide = row("$ ");
