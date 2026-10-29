@@ -147,7 +147,7 @@ impl NotifyCfg {
         }
         self.webhook_format = Some(format);
         let url = self.webhook.clone().unwrap_or_default();
-        if !url.is_empty() && !ito_notify::is_http(&url) {
+        if !url.is_empty() && !ito_notify::is_http(&url) && ito_notify::webhook::reference(&url).is_none() {
             warnings.push(format!("{path}: [notify] `webhook` `{url}` is not an http(s) address"));
         }
         let mut hooks = Vec::new();
@@ -163,6 +163,16 @@ impl NotifyCfg {
         }
         let old = Place { url: url.trim().to_owned(), format: self.webhook_format.clone().unwrap_or_else(ntfy), states };
         self.places = webhook::places(old, hooks);
+    }
+
+    /// Read the `secret:` addresses back from the OS credential store of
+    /// `app` (see `ito_notify::webhook::conceal`), after [`NotifyCfg::check`];
+    /// the lines are for the settings' warnings. Blocks: call it from a
+    /// worker thread, then hand the result to the thread that sends.
+    pub fn reveal(&mut self, app: &str) -> Vec<String> {
+        let (places, warnings) = webhook::reveal(app, &self.places);
+        self.places = places;
+        warnings
     }
 
     fn on(&self, which: &Option<Vec<String>>, event: &str) -> bool {

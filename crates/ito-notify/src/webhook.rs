@@ -29,7 +29,7 @@ impl Place {
     /// address is no problem: nothing is sent to it, as before.
     pub fn problems(&self, states: &[&str]) -> Vec<String> {
         let mut out = Vec::new();
-        if !self.url.trim().is_empty() && !is_http(&self.url) {
+        if !self.url.trim().is_empty() && !is_http(&self.url) && reference(&self.url).is_none() {
             out.push(format!("`url` `{}` is not an http(s) address", self.url));
         }
         if !FORMATS.contains(&self.format.as_str()) {
@@ -40,6 +40,61 @@ impl Place {
         }
         out
     }
+}
+
+/// How a `url` points at an address kept in the OS credential store (see
+/// `ito_secret`) instead of written in the file: `secret:webhook-1`.
+pub const SECRET: &str = "secret:";
+
+/// The name in the store when `url` is a `secret:` reference.
+pub fn reference(url: &str) -> Option<&str> {
+    url.trim().strip_prefix(SECRET).map(str::trim).filter(|n| !n.is_empty())
+}
+
+/// `places` with each `secret:` address read back from the store of `app`.
+/// What cannot be read (gone, locked, no store) gets an empty address, so
+/// nothing is sent there, and comes back as a line for the settings'
+/// warnings. Blocks: call it from a worker thread.
+pub fn reveal(app: &str, places: &[Place]) -> (Vec<Place>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let out = places
+        .iter()
+        .map(|p| {
+            let Some(name) = reference(&p.url) else { return p.clone() };
+            let url = match ito_secret::get(app, name) {
+                Ok(Some(u)) => u,
+                Ok(None) => {
+                    warnings.push(format!("`url` `{}` is not in the credential store", p.url));
+                    String::new()
+                }
+                Err(e) => {
+                    warnings.push(format!("`url` `{}` cannot be read from the credential store: {e}", p.url));
+                    String::new()
+                }
+            };
+            Place { url, ..p.clone() }
+        })
+        .collect();
+    (out, warnings)
+}
+
+/// `places` with each http(s) address moved into the store of `app`
+/// (`webhook-1`, `webhook-2`, …, by position) and replaced by its `secret:`
+/// reference, for writing to the file. An address already a reference or
+/// empty stays. The first failure stops it, so nothing is written to a file
+/// that was meant to hold no address. Blocks: call it from a worker thread.
+pub fn conceal(app: &str, places: &[Place]) -> std::io::Result<Vec<Place>> {
+    let mut out = Vec::with_capacity(places.len());
+    for (i, p) in places.iter().enumerate() {
+        if !is_http(&p.url) {
+            out.push(p.clone());
+            continue;
+        }
+        let name = format!("webhook-{}", i + 1);
+        ito_secret::set(app, &name, p.url.trim())?;
+        out.push(Place { url: format!("{SECRET}{name}"), ..p.clone() });
+    }
+    Ok(out)
 }
 
 /// The places the settings send to: `old`, the one address of before
@@ -227,6 +282,34 @@ fn post(url: &str, format: &str, level: Level, title: &str, message: &str, folde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reference_is_no_problem_and_sends_nothing_until_revealed() {
+        assert_eq!(reference(" secret:webhook-2 "), Some("webhook-2"));
+        assert_eq!(reference("secret:"), None);
+        assert_eq!(reference("https://x/y"), None);
+        let p = Place { url: "secret:webhook-1".into(), format: "ntfy".into(), states: vec!["done".into()] };
+        assert!(p.problems(&["done"]).is_empty());
+        assert!(!p.takes("done"), "the reference itself is no address");
+        let (_, warnings) = reveal("ito-notify-test-none", std::slice::from_ref(&Place { url: "secret:nope".into(), ..p.clone() }));
+        assert_eq!(warnings.len(), 1, "an entry that is not there is told, not sent to");
+    }
+
+    #[test]
+    fn conceal_then_reveal_gives_the_address_back() {
+        let app = format!("ito-notify-test-{}", std::process::id());
+        let p = Place { url: "https://hooks.example/T0/secret-token".into(), format: "slack".into(), states: vec!["done".into()] };
+        let kept = match conceal(&app, std::slice::from_ref(&p)) {
+            Err(e) if cfg!(not(windows)) => return eprintln!("skipped: {e}"),
+            r => r.unwrap(),
+        };
+        assert_eq!(kept[0].url, "secret:webhook-1");
+        assert!(!format!("{kept:?}").contains("secret-token"), "the file's side holds no token");
+        let (back, warnings) = reveal(&app, &kept);
+        assert!(warnings.is_empty());
+        assert_eq!(back, vec![p]);
+        ito_secret::delete(&app, "webhook-1").unwrap();
+    }
 
     #[test]
     fn each_format_says_it_its_way() {

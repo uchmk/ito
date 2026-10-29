@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.127.0] - 2026-10-29
+
+### 追加
+- `ito-proc`: `run_lines(cmd, stop, on_line)`（uchmk/ito#65、koyomi の依頼）。`run` と同じ止め方（`stop` で子の木ごと殺す）で、stdout と stderr を
+  1 行ずつ `on_line(Stream, &str) -> bool` に渡す（stderr は CR・LF で区切る）。`true` を返した行だけ `Lines { status, kept }` に残る。
+  ログに書く・画面に流すだけなら何も残さずに済み、時間切れで殺された子の言ったことも `kept` に残る。`run`・`Outcome`・`Done` は変えない。
+- `ito-secret`（新しいクレート。uchmk/ito#67、koyomi の依頼）。秘密（Webhook のアドレスは token を含む、ジョブのパスワードなど）をファイルでなく OS の
+  資格情報ストアに置く。`get`・`set`・`delete(app, name)`（ストア上の名前は `uchmk/<app>/<name>`）。Windows は資格情報マネージャー、macOS はキーチェーン、
+  Linux は `secret-tool`（値は stdin で渡し、コマンドラインに載せない）。ストアが無い所は `ErrorKind::Unsupported` の `Err` で、ファイルには退避しない。
+  `mask(text, secrets)` は秘密を `***` に置き換える（長い順）。ストアは待つことがあるのでワーカースレッドから呼ぶ。
+- `ito-notify::webhook`: `secret:<名前>` の参照。`conceal(app, places)` がアドレスをストアに移して `secret:webhook-N` に置き換え（ファイルに書く側）、
+  `reveal(app, places)` が読み戻す（読めないものは空のアドレス＝送らず、警告の行を返す）。`reference(url)`。`Place::problems` は参照を警告しない。
+- `ito-prefs`: `NotifyCfg::reveal(app)`（`check` のあとに呼ぶ）。`[notify] webhook` と `[[notify.webhooks]]` の `url` に参照を書いても警告しない。
+  使う側がやること: 無し（足しただけ）。参照を使うなら、起動時に `check` のあとワーカースレッドで `reveal` を呼び、書くときは `conceal` の結果を `write_webhooks` に渡す。
+  設定の画面の「Webhook を隠す」スイッチは文言の欄を増やすので別の版で入れる。
+
 ## [0.126.0] - 2026-10-29
 
 ### 追加

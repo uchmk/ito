@@ -5,6 +5,9 @@
 //! started* (an ssh, a credential helper), which a plain `Child::kill` does
 //! not.
 //!
+//! [`run_lines`] is the same for a child that talks a lot: stdout comes line by
+//! line too and nothing is collected unless the callback keeps it.
+//!
 //! It blocks the calling thread, so call it from a worker, never the UI thread.
 //! What the lines mean stays with the caller.
 
@@ -145,6 +148,126 @@ pub fn run(mut cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(&str) ->
                 }
             }
             return Ok(Outcome::Done(Done { status, stdout, lines }));
+        }
+    }
+}
+
+/// Which pipe a line came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stream {
+    Out,
+    Err,
+}
+
+/// How a [`run_lines`] ended, with the lines the callback asked to keep.
+#[derive(Debug)]
+pub struct Lines {
+    /// How it exited; `None` when the stop flag killed it.
+    pub status: Option<ExitStatus>,
+    /// The kept lines, in the order they came.
+    pub kept: Vec<(Stream, String)>,
+}
+
+impl Lines {
+    /// Whether the child exited by itself with status 0.
+    pub fn ok(&self) -> bool {
+        self.status.is_some_and(|s| s.success())
+    }
+
+    /// Whether the stop flag ended it.
+    pub fn stopped(&self) -> bool {
+        self.status.is_none()
+    }
+}
+
+enum Seen {
+    Line(Stream, String),
+    End(Stream),
+}
+
+/// Read `r` to its end, sending each line (ended by CR or LF, empty ones dropped).
+fn split_lines(mut r: impl Read, which: Stream, tx: mpsc::Sender<Seen>) {
+    let (mut buf, mut line) = ([0u8; 4096], Vec::new());
+    let send = |line: &mut Vec<u8>| {
+        if !line.is_empty() {
+            let _ = tx.send(Seen::Line(which, String::from_utf8_lossy(line).into_owned()));
+            line.clear();
+        }
+    };
+    while let Ok(n @ 1..) = r.read(&mut buf) {
+        for &b in &buf[..n] {
+            if b == b'\r' || b == b'\n' {
+                send(&mut line);
+            } else {
+                line.push(b);
+            }
+        }
+    }
+    send(&mut line);
+    let _ = tx.send(Seen::End(which));
+}
+
+/// Like [`run`], but stdout comes line by line too, split at CR and LF like
+/// stderr, and nothing is collected whole: a chatty child costs no memory but
+/// the lines `on_line` keeps. `on_line` runs on the calling thread with the
+/// pipe and the line, and returns whether to keep it in [`Lines::kept`]; a caller
+/// that writes the lines away or shows them live keeps none.
+///
+/// The kept lines come back whether the child exited or was stopped, so a job
+/// killed by its timeout still shows what it said before.
+pub fn run_lines(mut cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(Stream, &str) -> bool) -> io::Result<Lines> {
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    own_group(&mut cmd);
+    let mut child = cmd.spawn()?;
+    let (tx, rx) = mpsc::channel();
+    let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
+    let (out_tx, err_tx) = (tx.clone(), tx.clone());
+    let out = std::thread::Builder::new().name("ito-proc-stdout".into()).spawn(move || split_lines(stdout, Stream::Out, out_tx));
+    let err = std::thread::Builder::new().name("ito-proc-stderr".into()).spawn(move || split_lines(stderr, Stream::Err, err_tx));
+    if let Err(e) = out.and(err) {
+        kill_tree(&mut child);
+        return Err(e);
+    }
+    let mut kept = Vec::new();
+    let (mut out_end, mut err_end) = (false, false);
+    let mut exited: Option<(ExitStatus, Instant)> = None;
+    let mut take = |kept: &mut Vec<(Stream, String)>, p: Seen, out_end: &mut bool, err_end: &mut bool| match p {
+        Seen::Line(w, l) => {
+            if on_line(w, &l) {
+                kept.push((w, l));
+            }
+        }
+        Seen::End(Stream::Out) => *out_end = true,
+        Seen::End(Stream::Err) => *err_end = true,
+    };
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            kill_tree(&mut child);
+            // What the readers already got is still the caller's.
+            while let Ok(p) = rx.try_recv() {
+                take(&mut kept, p, &mut out_end, &mut err_end);
+            }
+            return Ok(Lines { status: None, kept });
+        }
+        if let Ok(p) = rx.recv_timeout(POLL) {
+            take(&mut kept, p, &mut out_end, &mut err_end);
+        }
+        if exited.is_none() {
+            match child.try_wait() {
+                Ok(Some(status)) => exited = Some((status, Instant::now())),
+                Ok(None) => {}
+                Err(e) => {
+                    kill_tree(&mut child);
+                    return Err(e);
+                }
+            }
+        }
+        let Some((status, at)) = exited else { continue };
+        if (out_end && err_end) || at.elapsed() > GRACE {
+            while let Ok(p) = rx.try_recv() {
+                take(&mut kept, p, &mut out_end, &mut err_end);
+            }
+            return Ok(Lines { status: Some(status), kept });
         }
     }
 }
@@ -295,6 +418,50 @@ mod tests {
         c.args(["-c", r"printf 'a 1%%\ra 2%%\ra 3%%\nend\n' >&2"]);
         let Outcome::Done(d) = run(c, &stop, &mut |_| true).unwrap() else { panic!() };
         assert_eq!(d.lines, ["a 1%", "a 2%", "a 3%", "end"]);
+    }
+
+    #[test]
+    fn run_lines_gives_both_pipes_line_by_line() {
+        let stop = AtomicBool::new(false);
+        let mut seen = Vec::new();
+        let r = run_lines(say("hello", "oops", 3), &stop, &mut |w, l| {
+            seen.push((w, l.trim().to_owned()));
+            w == Stream::Err
+        })
+        .unwrap();
+        assert!(!r.ok() && !r.stopped());
+        assert_eq!(r.status.and_then(|s| s.code()), Some(3));
+        assert!(seen.contains(&(Stream::Out, "hello".into())) && seen.contains(&(Stream::Err, "oops".into())), "{seen:?}");
+        // Only what the callback kept comes back.
+        assert_eq!(r.kept.len(), 1);
+        assert_eq!(r.kept[0].0, Stream::Err);
+    }
+
+    #[test]
+    fn run_lines_keeps_what_was_said_before_a_stop() {
+        #[cfg(windows)]
+        let job = {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "echo before & ping -n 60 127.0.0.1"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let job = {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo before; sleep 60"]);
+            c
+        };
+        let stop = AtomicBool::new(false);
+        let r = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(1500));
+                stop.store(true, Ordering::Relaxed);
+            });
+            run_lines(job, &stop, &mut |_, _| true)
+        })
+        .unwrap();
+        assert!(r.stopped() && !r.ok());
+        assert!(r.kept.iter().any(|(w, l)| *w == Stream::Out && l.trim() == "before"), "{:?}", r.kept);
     }
 
     #[test]

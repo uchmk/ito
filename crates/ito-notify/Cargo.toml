@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 png = "0.18"
+ito-secret = { path = "../ito-secret" }
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = [
