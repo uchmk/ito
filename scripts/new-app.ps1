@@ -96,3 +96,9 @@ try {
 }
 finally { Pop-Location }
 Write-Host "`nDone. Nothing is committed. Next: read $Dest\TODO.md, run scripts/verify.sh, create uchmk/$Name."
+# The policy file sends people to the Security tab, so these four must be on once the repository exists.
+Write-Host "`nAfter creating uchmk/$Name on GitHub, turn on its security settings (as in the other apps):"
+Write-Host "  gh api -X PUT repos/uchmk/$Name/vulnerability-alerts"
+Write-Host "  gh api -X PUT repos/uchmk/$Name/automated-security-fixes"
+Write-Host "  gh api -X PUT repos/uchmk/$Name/private-vulnerability-reporting"
+Write-Host "  gh api -X PATCH repos/uchmk/$Name/code-scanning/default-setup -f state=configured -f 'languages[]=actions'"

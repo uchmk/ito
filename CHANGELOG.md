@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.6] - 2026-10-29
+
+### 修正
+- `templates/app/SECURITY.md`: tsumugi 専用の方針（tsumugi の advisory のリンク、サーバー・OSC の範囲）をやめ、ito・yagura・michi・minato と同じ、アプリ名の入らない `SECURITY.md` にした（uchmk/ito#64、fude の報告）。kura・tsumugi のような範囲の節が要るアプリは自分で書く。
+- `scripts/new-app.ps1`: 終わりに、GitHub のリポジトリを作ったあとに回す 4 つの `gh api`（Dependabot alerts・security updates・private vulnerability reporting・CodeQL の default setup `languages: [actions]`）を表示する。
+  使う側がやること: 無し。新しいアプリを作るときに表示を見る。
+
 ## [0.124.5] - 2026-10-29
 
 ### 修正
