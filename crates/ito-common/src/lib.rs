@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 
+pub mod access;
 pub mod apps;
 pub mod bundle;
 #[cfg(feature = "dirwatch")]

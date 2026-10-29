@@ -12,7 +12,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし）。窓との扉は `ito-ipc::door` | tsumugi、kura、michi |
-| `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、状態のフォルダーのファイルの読み書き（`kept`: `read`・最新を残す別スレッドの `Writer`・`copy_old`）、他のアプリの exe の探し方（`apps`: `[apps]`・自己登録・PATH）、窓の場所の保存と戻し方（`window`、古い形も読む `load`、追跡の `Tracker`、アプリの手順を束ねる `Saved`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
+| `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、状態のフォルダーのファイルの読み書き（`kept`: `read`・最新を残す別スレッドの `Writer`・`copy_old`）、他のアプリの exe の探し方（`apps`: `[apps]`・自己登録・PATH）、他のアカウントが書けるか（`access`: `others_can_write`）、窓の場所の保存と戻し方（`window`、古い形も読む `load`、追跡の `Tracker`、アプリの手順を束ねる `Saved`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
 | `ito-fonts` | 同梱の等幅フォント（JetBrains Mono、SIL OFL）と egui への登録（機能 `egui`）。`common.toml` の `mono_font`（`bundled` が既定、`system`）で選ぶ | kura、tsumugi、michi |
 | `ito-theme` | 組み込みの 20 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
 | `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ | tsumugi、yagura |

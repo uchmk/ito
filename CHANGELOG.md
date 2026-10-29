@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.125.0] - 2026-10-29
+
+### 追加
+- `ito-common`: `access`（uchmk/ito#66、koyomi の依頼）。`others_can_write(path) -> io::Result<Vec<String>>` が、そのパスと上のフォルダ（ホームの下ならホームまで）を、
+  今のユーザーとシステムのアカウントのほかに誰が書き換えられるかを返す。空なら本人だけ。`findings(path)` はどのパスで見つけたかも返す。
+  設定のファイルのコマンドを走らせるアプリが、他人が書けるファイルを実行しないために使う。
+  - Windows: DACL の許可の項目（書き込み・追記・削除・`WRITE_DAC`・`WRITE_OWNER`。上のフォルダでは子の削除・削除・その 2 つ）を、本人・Administrators・SYSTEM・TrustedInstaller 以外について数える。所有者もその 4 つのどれでもなければ数える。拒否の項目は見ない。名前は `DOMAIN
+ame`。
+  - Unix: グループ・その他が書ける（スティッキーのフォルダは除く）、または所有者が本人でも root でもない。Linux では自分の主グループによる書き込みは除く（umask 002 の既定）。
+  - テスト用に `open_to_everyone(path)`（Windows は Everyone に変更を許す、Unix は `o+w`）。
+  使う側がやること: 無し（足しただけ）。Windows の `windows` クレートの機能 `Win32_Security*`・`Win32_System_Threading` と、Unix の `libc` が `ito-common` の依存に増える。
+
 ## [0.124.6] - 2026-10-29
 
 ### 修正
