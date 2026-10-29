@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.131.0] - 2026-10-29
+
+### 変更
+- 新しいアプリの雛形（`templates/app`）に `ito-statusbar` を入れた。`Cargo.toml` の依存、下のパネル（`status_bar`: 左にアプリの項目、右端に時計）、
+  倍率を変えたときの `scale_changed`。`new-app` で作ったのにステータスバーが無い、が毎回起きていたため。
+- `scripts/lanes/ito-required.txt` に `ito-statusbar` を足した。`ito-first.py` が、ステータスバーの無いアプリを落とす。
+  使う側がやること: rev を上げて `scripts/lanes.sh sync` を流すと落ちる。バーを付ける（`ito_statusbar::show`）か、
+  要らないアプリは `scripts/ito-first.allow` に `ito-statusbar <理由>` を書く。
+
 ## [0.130.0] - 2026-10-29
 
 ### 追加

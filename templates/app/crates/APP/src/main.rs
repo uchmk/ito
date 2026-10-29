@@ -126,6 +126,7 @@ impl App {
         }
         self.common.scale = Some(next);
         ctx.set_zoom_factor(next);
+        ito_statusbar::scale_changed(ctx, next);
         self.scale_note = Some(ito_common::scale_text(next, &self.lang));
         if let Some(base) = ito_common::base_dir() {
             std::thread::spawn(move || {
@@ -135,6 +136,15 @@ impl App {
                 }
             });
         }
+    }
+
+    /// The bottom bar: the app's items on the left (add yours here), the clock
+    /// from common.toml at the right end, the scale's words after a change.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let clock = self.common.clock_or(None);
+        let spec = ito_statusbar::Spec { clock: &clock, lang: &self.lang, opacity: 1.0 };
+        let version = env!("CARGO_PKG_VERSION");
+        ito_statusbar::show(ui, &spec, |ui| ito_statusbar::item(ui, version, ito_theme::colors().dim), |_| {});
     }
 
     /// The window's own bar: the name, the palette box, the bell and the
@@ -276,6 +286,10 @@ impl eframe::App for App {
             .exact_size(ito_titlebar::HEIGHT)
             .frame(egui::Frame::NONE.fill(ito_theme::colors().bg))
             .show(ui, |ui| self.title_bar(ui));
+        egui::Panel::bottom("statusbar")
+            .exact_size(ito_statusbar::HEIGHT)
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| self.status_bar(ui));
         self.notice_list(&ctx);
         self.command_palette(&ctx);
         ui.heading(self.table.tr("app.hello"));

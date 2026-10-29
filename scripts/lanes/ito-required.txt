@@ -19,5 +19,6 @@ ito-bugreport   F12: an issue form filled with the version, OS and what the app 
 ito-testcheck   TESTING.md -> the lanes' check tables (examples/make-testcheck)
 ito-console     APP.com in front of APP.exe
 ito-titlebar    the window's own title bar: drag, caption buttons, the palette box, the bell
+ito-statusbar   the window's bottom status bar: the app's items, the clock at the right end
 ito-notices     the list the bell opens
 ito-winres      the .exe's icon and version
