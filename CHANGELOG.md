@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.3] - 2026-10-29
+
+### 修正
+- `ito-prefs`: 窓が低いと、ページの一覧の最後（About）が下の「config.toml を開く」ボタンに重なっていたのを直した（tsumugi#323）。一覧は縦にスクロールし、ボタンの上で止まる。窓が狭いときは、ページの左右の余白を 48 から 16 まで縮めて、行の幅を保つ。
+
 ## [0.124.2] - 2026-10-28
 
 ### 修正

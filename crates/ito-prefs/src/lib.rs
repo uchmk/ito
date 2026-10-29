@@ -445,57 +445,61 @@ pub fn show_with(
     if shown.is_empty() {
         nav_ui.label(RichText::new(nav.words.nothing).size(z(ui, 12.5)).color(c.dim));
     }
-    let mut group = None;
-    for p in shown {
-        let at = extras.groups.iter().rposition(|(_, start)| *start <= p);
-        if at != group {
-            group = at;
-            if let Some((head, _)) = at.map(|g| extras.groups[g]) {
-                nav_ui.add_space(if p == 0 { 2.0 } else { 10.0 });
-                nav_ui.label(RichText::new(head).size(z(ui, 11.0)).strong().color(c.faint()));
-                nav_ui.add_space(2.0);
+    // The pages scroll when the window is too short for them, above the file's button.
+    let list_room = (side.bottom() - 56.0 - nav_ui.cursor().top()).max(60.0);
+    egui::ScrollArea::vertical().id_salt("prefs-nav").max_height(list_room).auto_shrink([false, true]).show(&mut nav_ui, |nav_ui| {
+        let mut group = None;
+        for p in shown {
+            let at = extras.groups.iter().rposition(|(_, start)| *start <= p);
+            if at != group {
+                group = at;
+                if let Some((head, _)) = at.map(|g| extras.groups[g]) {
+                    nav_ui.add_space(if p == 0 { 2.0 } else { 10.0 });
+                    nav_ui.label(RichText::new(head).size(z(ui, 11.0)).strong().color(c.faint()));
+                    nav_ui.add_space(2.0);
+                }
             }
-        }
-        let on = !cross && state.page == p;
-        // Mouse only: the keys go page to page with Ctrl+Tab, and Tab goes
-        // from the search straight into the page.
-        let (r, resp) = nav_ui.allocate_exact_size(egui::vec2(nav_ui.available_width(), z(&nav_ui, 32.0)), egui::Sense::CLICK);
-        if on {
-            nav_ui.painter().rect_filled(r, 6.0, c.chosen());
-        } else if resp.hovered() {
-            nav_ui.painter().rect_filled(r, 6.0, c.hover());
-        }
-        let color = if on {
-            c.strong()
-        } else if cross && hits(p) == 0 {
-            c.faint()
-        } else {
-            c.dim
-        };
-        nav_ui.painter().text(
-            egui::pos2(r.left() + 10.0, r.center().y),
-            egui::Align2::LEFT_CENTER,
-            nav.pages[p].0,
-            FontId::proportional(z(ui, 13.0)),
-            color,
-        );
-        if !q.is_empty() {
+            let on = !cross && state.page == p;
+            // Mouse only: the keys go page to page with Ctrl+Tab, and Tab goes
+            // from the search straight into the page.
+            let (r, resp) = nav_ui.allocate_exact_size(egui::vec2(nav_ui.available_width(), z(nav_ui, 32.0)), egui::Sense::CLICK);
+            if on {
+                nav_ui.painter().rect_filled(r, 6.0, c.chosen());
+            } else if resp.hovered() {
+                nav_ui.painter().rect_filled(r, 6.0, c.hover());
+            }
+            let color = if on {
+                c.strong()
+            } else if cross && hits(p) == 0 {
+                c.faint()
+            } else {
+                c.dim
+            };
             nav_ui.painter().text(
-                egui::pos2(r.right() - 10.0, r.center().y),
-                egui::Align2::RIGHT_CENTER,
-                hits(p).to_string(),
-                FontId::proportional(z(ui, 11.0)),
-                c.faint(),
+                egui::pos2(r.left() + 10.0, r.center().y),
+                egui::Align2::LEFT_CENTER,
+                nav.pages[p].0,
+                FontId::proportional(z(ui, 13.0)),
+                color,
             );
-        }
-        if resp.clicked() {
-            state.page = p;
-            // A page picked from the results leaves them.
-            if cross {
-                state.query.clear();
+            if !q.is_empty() {
+                nav_ui.painter().text(
+                    egui::pos2(r.right() - 10.0, r.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    hits(p).to_string(),
+                    FontId::proportional(z(ui, 11.0)),
+                    c.faint(),
+                );
+            }
+            if resp.clicked() {
+                state.page = p;
+                // A page picked from the results leaves them.
+                if cross {
+                    state.query.clear();
+                }
             }
         }
-    }
+    });
 
     // The page.
     let l = Look { c, q: &q };
@@ -509,8 +513,10 @@ pub fn show_with(
         None => title.to_owned(),
     };
     let lead = results.map_or(lead, |r| r.lead);
+    // A narrow window keeps the rows a readable width: the margins give way.
+    let side_margin = (area.width() * 0.1).clamp(16.0, 48.0) as i8;
     egui::ScrollArea::vertical().id_salt(("prefs-page", title)).auto_shrink([false, false]).show(&mut body_ui, |ui| {
-        egui::Frame::NONE.inner_margin(egui::Margin { left: 48, right: 48, top: 28, bottom: 40 }).show(ui, |ui| {
+        egui::Frame::NONE.inner_margin(egui::Margin { left: side_margin, right: side_margin, top: 28, bottom: 40 }).show(ui, |ui| {
             ui.set_max_width(ui.available_width().min(820.0));
             if !extras.back.is_empty() && results.is_none() {
                 ui.horizontal(|ui| {
