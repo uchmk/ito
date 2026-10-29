@@ -25,6 +25,10 @@ updates:
       # Security updates still come through: this only stops the monthly bump.
       - dependency-name: "egui*"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # eframe is egui's own release train: a lone eframe bump pulls a second
+      # egui beside ito's and does not build.
+      - dependency-name: eframe
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   # The actions in `.github/workflows` pin major versions, so this is what moves
   # `@v7` to `@v8` rather than letting it sit until an action is deprecated and

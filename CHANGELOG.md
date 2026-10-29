@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.124.4] - 2026-10-29
+
+### 修正
+- `templates/app`: `dependabot.yml` が eframe の minor・major の更新も無視するようにした（uchmk/ito#60）。egui だけ無視して eframe を無視していなかったため、eframe の単独の更新が ito の egui と別の egui を引き込んで、ビルドが通らなかった（fude#1）。
+  使う側がやること: 既に作ったアプリ（kura・michi・minato・yagura など）の `.github/dependabot.yml` の `egui*` の隣に同じ規則を足す。rev の更新は要らない。
+
 ## [0.124.3] - 2026-10-29
 
 ### 修正
