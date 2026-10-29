@@ -74,6 +74,9 @@ pub struct Question<'a> {
     pub rows: &'a [(String, String)],
     /// Lines of text under the rows, wrapped to the box.
     pub body: &'a [String],
+    /// A line diff under the body (from `ito_diff::diff`): `+`/`-` marks and
+    /// colour, the line numbers in a gutter, and a scroll when it is long.
+    pub diff: &'a [ito_diff::Item],
     /// Lines in the warning colour under the body.
     pub notes: &'a [String],
     /// The cards, in order, above the buttons. The choices are numbered cards
@@ -158,6 +161,10 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                 for line in q.body {
                     ui.add(egui::Label::new(RichText::new(line).color(style.text)).wrap());
                 }
+            }
+            if !q.diff.is_empty() {
+                ui.add_space(6.0);
+                diff_view(ui, q.diff, style);
             }
             if !q.notes.is_empty() {
                 ui.add_space(6.0);
@@ -353,6 +360,40 @@ fn card(ui: &mut Ui, c: &Card, focused: bool, recommended: bool, badge: &str, st
     resp.clicked()
 }
 
+/// The tallest the diff gets before it scrolls, in points.
+const DIFF_MAX_HEIGHT: f32 = 240.0;
+
+/// The diff as monospace rows: a gutter of old and new line numbers, a `+`/`-`
+/// mark (so the kind is not told by colour alone), then the text.
+fn diff_view(ui: &mut Ui, items: &[ito_diff::Item], style: &Style) {
+    use ito_diff::{Item, Kind};
+    let digits =
+        items.iter().filter_map(|i| if let Item::Line(l) = i { l.old_no.max(l.new_no) } else { None }).max().unwrap_or(0).to_string().len();
+    let font = FontId::monospace(12.0);
+    let fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
+    egui::ScrollArea::vertical().max_height(DIFF_MAX_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for item in items {
+            let mut job = LayoutJob::default();
+            job.wrap.max_width = ui.available_width();
+            match item {
+                Item::Folded(n) => job.append(&format!("{:w$}  … {n} lines", "", w = digits * 2 + 1), 0.0, fmt(style.dim)),
+                Item::Line(l) => {
+                    let no = |n: Option<usize>| n.map_or_else(|| " ".repeat(digits), |n| format!("{n:>digits$}"));
+                    job.append(&format!("{} {} ", no(l.old_no), no(l.new_no)), 0.0, fmt(style.dim));
+                    let color = match l.kind {
+                        Kind::Same => style.text,
+                        Kind::Added => OK_TEXT,
+                        Kind::Removed => DANGER_TEXT,
+                    };
+                    job.append(&format!("{} {}", l.kind.mark(), l.text), 0.0, fmt(color));
+                }
+            }
+            ui.add(egui::Label::new(job).wrap());
+        }
+    });
+}
+
 fn text_width(ui: &egui::Ui, s: &str) -> f32 {
     let font = egui::TextStyle::Body.resolve(ui.style());
     ui.painter().layout_no_wrap(s.to_owned(), font, Color32::WHITE).size().x
@@ -407,6 +448,29 @@ mod tests {
         // So does a primary one, in range or not, narrow or wide.
         assert_eq!(run(&Question { primary: Some(1), focus: Some(1), ..q }, 120.0), None);
         assert_eq!(run(&Question { primary: Some(9), ..q }, 800.0), None);
+    }
+
+    #[test]
+    fn a_long_diff_draws_in_a_narrow_box_too() {
+        let old: String = (1..=300)
+            .map(|i| {
+                format!(
+                    "line {i}
+"
+                )
+            })
+            .collect();
+        let new = old.replace(
+            "line 150
+",
+            "a changed line that is long enough to wrap in a narrow box
+",
+        );
+        let items = ito_diff::diff(&old, &new, 3);
+        let buttons = vec!["Run".to_owned()];
+        let q = Question { title: "Changed", diff: &items, buttons: &buttons, ..Default::default() };
+        assert_eq!(run(&q, 800.0), None);
+        assert_eq!(run(&q, 120.0), None);
     }
 
     #[test]

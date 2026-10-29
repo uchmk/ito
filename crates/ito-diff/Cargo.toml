@@ -1,0 +1,12 @@
+[package]
+name = "ito-diff"
+description = "A line diff of two texts (added, removed and unchanged lines with their numbers), folded down to a few lines of context"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Pure Rust; the diff michi already uses.
+similar = "3.2"

@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.126.0] - 2026-10-29
+
+### 追加
+- `ito-diff`（新しいクレート。uchmk/ito#68、koyomi の依頼）。2 つの文字列の行の差分。純 Rust（`similar`）。Git は知らない。
+  `diff_lines(old, new) -> Vec<Line>`（`Line { kind: Same | Added | Removed, old_no, new_no, text }`。行末は含まない）、
+  `fold(&lines, context) -> Vec<Item>`（変更の前後 `context` 行だけ残し、続く変わらない行は `Item::Folded(n)` にする。1 行だけの塊は畳まない）、
+  `diff(old, new, context)`（上の 2 つを続けたもの）、`counts(&lines) -> (追加, 削除)`、`Kind::mark()`（`+`・`-`・空白。色だけに頼らない印）。
+- `ito-confirm`: `Question::diff: &[ito_diff::Item]`。本文の下に差分を等幅で描く（行番号の溝・`+`/`-` の印・緑/赤・畳んだ所は「… N lines」・高さ 240 を超えたらスクロール）。
+  使う側がやること: `Question { … }` を全部の欄を書いて作っているところは `..Default::default()` を足す（欄が 1 つ増えた）。`ito-confirm` が `ito-diff` に依る。
+
 ## [0.125.0] - 2026-10-29
 
 ### 追加

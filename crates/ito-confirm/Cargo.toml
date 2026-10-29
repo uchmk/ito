@@ -9,3 +9,4 @@ repository.workspace = true
 
 [dependencies]
 egui = "0.36"
+ito-diff = { path = "../ito-diff" }

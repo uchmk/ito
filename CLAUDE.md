@@ -36,7 +36,8 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前）と、スクリーンリーダー向けの `say`・`announce`（機能 `egui`）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
 | `ito-graph` | コミットの樹形図を行ごとに並べる（レーン・辺・ブランチの色・曲線）と、egui の描画（機能 `egui`）。Git は知らない | michi |
 | `ito-bugreport` | 不具合の報告（アプリの issue form に、版・OS・アプリが知っていることを埋めた URL。F12 から開く。全アプリで同じ行・同じ順） | kura（yagura・tsumugi は載せる予定） |
-| `ito-confirm` | やる前の確認の重ね表示（行・本文・注・ボタン。押された番号を返す。3 つ以上はカード: 動詞の見出し・結果の数字・戻せるか・キーの札、おすすめは緑・戻せないものは赤） | yagura、kura |
+| `ito-diff` | 2 つの文字列の行の差分（`diff_lines`・畳む `fold`・`counts`。純 Rust の `similar`。Git は知らない）。`ito-confirm` の `Question::diff` が描く | yagura、kura、koyomi |
+| `ito-confirm` | やる前の確認の重ね表示（行・本文・差分・注・ボタン。押された番号を返す。3 つ以上はカード: 動詞の見出し・結果の数字・戻せるか・キーの札、おすすめは緑・戻せないものは赤） | yagura、kura |
 | `ito-help` | キーのヘルプ（`ito-keymap` の一覧を見出しとキーと説明の行にして、渡された矩形に描く） | yagura、kura |
 | `ito-console` | Windows の窓のアプリの前に置くコンソールの前段（`<app>.exe` の横の `<app>.com`、`front`。文字で答えるコマンドは待って渡し、ほかは窓が開いたら戻る）と、答えを書く `out`・`err`（誰も読まないパイプでも panic せずに捨てる） | kura、yagura、tsumugi、minato、michi |
 | `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
