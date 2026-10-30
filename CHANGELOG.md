@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.142.0] - 2026-10-31
+
+### 追加
+
+- `ito-prefs`: タグの色の 16 色の固定パレットと割り当て、色選び（uchmk/ito#91、tsumugi の依頼）。
+  - `TAG_PALETTE`（`"#rrggbb"` が 16。先頭 8 は tsumugi の今の 8 色なので、保存済みの `[tags.colors]` はそのまま有効）、`tag_slot(hex)`（パレットの何番目か）、`parse_hex`。
+  - `settle_tag_colors(tags, own) -> Vec<(tag, hex)>`: `own`（タグ → hex）にまだ色のないタグだけに色を割り当てる。名前の FNV-1a（32 ビット）の番号の色が他で使われていなければそれ、使われていれば最初の空き、空きがなければ最も共有の少ない色。`{` を含む名前は飛ばす。結果をアプリが 1 回だけ設定（`[tags.colors]`）に書けば、再起動しても色が変わらない。
+  - `tag_picker(ui, look, current) -> Option<&'static str>`: 設定画面向けの色見本の列（今の色に輪）。押された色を返す。
+  - 色は `tag_colors` でテーマに合わせて直すので、16 色とも 20 テーマの明暗で文字のコントラスト 4.5 以上。
+  - 使う側（tsumugi）がやること: 自前の `TAG_PALETTE`・`tag_slot`・`settle_tag_colors` と色選びを消して、これに置き換える。色の表示は `Tag { color: parse_hex(..), .. }` を `tag` / `paint_tag` に渡す。
+
 ## [0.141.0] - 2026-10-31
 
 ### 追加

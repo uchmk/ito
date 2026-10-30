@@ -126,6 +126,81 @@ pub fn tag(ui: &mut egui::Ui, l: Look, t: Tag) -> egui::Response {
     r
 }
 
+/// The fixed palette of tag colours, `"#rrggbb"`. The first 8 are tsumugi's original ones (saved colours stay valid).
+pub const TAG_PALETTE: [&str; 16] = [
+    "#4a4f5c", "#5e4a86", "#2f6b66", "#7a5a22", "#2f4f7f", "#7a343a", "#3d6b3a", "#7a3a5e", "#2a6a8a", "#8a4a22", "#5d6b24", "#8a2f6a",
+    "#4a5aa0", "#a04a3a", "#2f7a4f", "#6b6b78",
+];
+
+/// The palette slot of `hex` (case does not matter), if it is one of [`TAG_PALETTE`].
+pub fn tag_slot(hex: &str) -> Option<usize> {
+    TAG_PALETTE.iter().position(|p| p.eq_ignore_ascii_case(hex))
+}
+
+/// `"#rrggbb"` as a colour.
+pub fn parse_hex(hex: &str) -> Option<Color32> {
+    let h = hex.strip_prefix('#')?;
+    if h.len() != 6 || !h.is_ascii() {
+        return None;
+    }
+    let v = u32::from_str_radix(h, 16).ok()?;
+    Some(Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
+}
+
+/// The colours for the `tags` that have none in `own` yet (`tag -> hex`), each different from the others in
+/// use where the palette allows. A tag's own slot is where its name hashes to (32-bit FNV-1a, the same on
+/// every machine); if another tag in use has that, the first free slot; if none is free, the least shared.
+/// Names with a `{` are skipped. Write the result into the app's settings once, so a tag keeps its colour.
+pub fn settle_tag_colors(tags: &[&str], own: &std::collections::HashMap<String, String>) -> Vec<(String, String)> {
+    let n = TAG_PALETTE.len();
+    let mut uses = [0usize; 16];
+    for t in tags {
+        if let Some(k) = own.get(*t).and_then(|h| tag_slot(h)) {
+            uses[k] += 1;
+        }
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for t in tags {
+        if t.contains('{') || own.contains_key(*t) || out.iter().any(|(o, _)| o == t) {
+            continue;
+        }
+        let h = t.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+        let home = h as usize % n;
+        let k = if uses[home] == 0 {
+            home
+        } else if let Some(free) = (0..n).find(|k| uses[*k] == 0) {
+            free
+        } else {
+            (0..n).min_by_key(|k| uses[*k]).unwrap_or(home)
+        };
+        uses[k] += 1;
+        out.push(((*t).to_owned(), TAG_PALETTE[k].to_owned()));
+    }
+    out
+}
+
+/// A row of swatches for the settings screen: the palette, with `current` (a `#rrggbb`) ringed. The colour
+/// pressed, if any.
+pub fn tag_picker(ui: &mut egui::Ui, l: Look, current: &str) -> Option<&'static str> {
+    let mut picked = None;
+    let size = z(ui, 20.0);
+    ui.horizontal_wrapped(|ui| {
+        for (k, hex) in TAG_PALETTE.iter().enumerate() {
+            let (rect, r) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+            let fill = parse_hex(hex).unwrap_or(l.c.dim);
+            ui.painter().circle_filled(rect.center(), size / 2.0 - 3.0, fill);
+            if tag_slot(current) == Some(k) {
+                ui.painter().circle_stroke(rect.center(), size / 2.0 - 0.5, egui::Stroke::new(2.0, l.c.fg));
+            }
+            focus_ring(ui, &r);
+            if r.clicked() {
+                picked = Some(*hex);
+            }
+        }
+    });
+    picked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +261,61 @@ mod tests {
             let wide = tag_width(ui, Tag::new("A very long label indeed"));
             let rect = paint_tag(ui.painter(), ui.ctx(), &l.c, Pos2::ZERO, Tag::new("A very long label indeed"), 60.0);
             assert!(rect.width() <= 60.5 && wide > 60.0, "{} {wide}", rect.width());
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_palette_is_valid_and_reads_in_every_theme() {
+        assert!(TAG_PALETTE.iter().all(|h| parse_hex(h).is_some()));
+        assert_eq!(TAG_PALETTE.iter().collect::<std::collections::HashSet<_>>().len(), 16);
+        for theme in ito_theme::builtin() {
+            for h in TAG_PALETTE {
+                for on in [false, true] {
+                    let (fill, _, ink) = tag_colors(&theme.colors, parse_hex(h), "x", on);
+                    assert!(contrast(ink, fill) >= MIN_CONTRAST, "{} {h}", theme.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sixteen_tags_get_sixteen_colours_and_a_kept_one_stays() {
+        let names: Vec<String> = (0..16).map(|i| format!("tag{i}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut own = std::collections::HashMap::new();
+        own.insert("tag0".to_owned(), TAG_PALETTE[3].to_owned());
+        let got = settle_tag_colors(&refs, &own);
+        assert_eq!(got.len(), 15);
+        assert!(got.iter().all(|(t, _)| t != "tag0"));
+        let mut slots: Vec<usize> = got.iter().map(|(_, h)| tag_slot(h).unwrap()).collect();
+        slots.push(3);
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), 16);
+        assert_eq!(settle_tag_colors(&refs, &own), got, "stable");
+    }
+
+    #[test]
+    fn more_tags_than_colours_share_the_least_and_braces_are_skipped() {
+        let names: Vec<String> = (0..20).map(|i| format!("t{i}")).collect();
+        let mut refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        refs.push("{x}");
+        let got = settle_tag_colors(&refs, &Default::default());
+        assert_eq!(got.len(), 20);
+        let mut count = [0; 16];
+        for (_, h) in &got {
+            count[tag_slot(h).unwrap()] += 1;
+        }
+        assert!(count.iter().all(|c| (1..=2).contains(c)), "{count:?}");
+    }
+
+    #[test]
+    fn the_picker_draws() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let l = Look { c: ito_theme::colors(), q: "" };
+            assert_eq!(tag_picker(ui, l, TAG_PALETTE[2]), None);
         });
         out.textures_delta.clear();
     }
