@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.133.0] - 2026-10-30
+
+### 追加
+- 新しいクレート `ito-power`（uchmk/ito#72、koyomi の依頼）: 電源と眠り。
+  `Awake::hold(reason)`（ガード。落とすと PC がまた眠れる。`is_active` で効いたか見る）、
+  `wake_at(when) -> Result<WakeHandle, WhyNot>`（落とすと取り消し。`WhyNot` は `TimersDisabled`・`OnBattery`・`Unsupported`・`InThePast`・`Failed(os エラー)` で、文にもなる）、
+  `sleep_after() -> Option<Duration>`（今の電源の「スリープまで」。眠らない設定や不明は `None`）。
+  Windows は電源要求（`powercfg /requests` に理由が出る）・再開つきの待機タイマー・有効な電源プラン（「スリープ」「起動タイマーの許可」）。
+  macOS は `caffeinate -i`、Linux は `systemd-inhibit` の子プロセスで眠りを止める（落とすと殺す）。この 2 つで起こすのは未対応（`Unsupported`、`sleep_after` は `None`）。
+
 ## [0.132.0] - 2026-10-30
 
 ### 追加
