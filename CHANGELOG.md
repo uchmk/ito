@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.150.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-http`: アプリが自分の PC で開く小さな HTTP の待ち受け（受け取る webhook、スクリプトから叩く手元の REST）（uchmk/ito#100）。標準ライブラリだけの HTTP/1.1（依存は serde_json と ito-secret）。
+  - `Server::start(Config::new(port, token), handler, log)`。`stop()` と drop で止まる。`port()` は 0 を渡したときの実際のポート。
+  - 待ち受けは 127.0.0.1 だけ（`ipv6` で `::1` も）。LAN には出せない設定しか無い。
+  - 全部のリクエストに `Authorization: Bearer <token>` を要る。定時間で比べ、無い・違うは本文を読む前に 401、ハンドラーは呼ばれない。トークンはログにも `Debug` にも出ない。`token_from_secret(app, name)` で `ito-secret` から読む。
+  - 上限: 本文 `max_body`（既定 64 KiB、超えると本文を読まずに 413）、同時の接続 `max_connections`（既定 8、超えると 503）、読みの待ち `timeout`（既定 10 秒、408）。chunked は 501。ハンドラーの panic は 500 で、待ち受けは続く。
+  - `handler(Request { method, path（%デコード済み）, query, headers（小文字）, body }) -> Response { status, json }`。`Request::json::<T>()`、`Response::ok/error`。
+  - ログは 1 リクエストにつき `LogLine { method, path, status, millis }`（クエリは秘密が入りうるので出さない）。1 接続 1 リクエスト（`Connection: close`）、TLS なし。
+
+### 使う側がやること
+
+- koyomi: `ito-http = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、`POST /runs`・`GET /runs/<id>` を `Request` に直して ito-ipc の扉へ渡す。ハンドラーは接続のスレッドで呼ばれるので、長い仕事は受け付けて 202 を返す。
+
 ## [0.149.0] - 2026-10-31
 
 ### 追加

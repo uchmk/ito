@@ -1,0 +1,13 @@
+[package]
+name = "ito-http"
+description = "A small local HTTP listener for an app: loopback only, a bearer token compared in constant time, JSON in and out, body and connection limits, a log callback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-secret = { path = "../ito-secret" }
+serde = "1"
+serde_json = "1"
