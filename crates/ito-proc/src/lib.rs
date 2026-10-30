@@ -17,6 +17,8 @@
 //! What the lines mean stays with the caller.
 
 #[cfg(windows)]
+mod elevate;
+#[cfg(windows)]
 mod logon;
 
 use std::io::{self, Read};
@@ -336,7 +338,7 @@ impl std::fmt::Debug for Logon<'_> {
 /// [`run_lines_with`], with the child running as another account's user.
 ///
 /// Windows only (`CreateProcessWithLogonW`, with that account's profile loaded); elsewhere
-/// this is `Err(Unsupported)`. There is no elevation: an administrator account gets its
+/// this is `Err(Unsupported)`. There is no elevation here (see [`run_elevated`]): an administrator account gets its
 /// filtered token, as from a normal process. The pipes, the stop flag and the kill of the
 /// whole tree (the child is put in a job of its own before it first runs) work as for
 /// [`run_lines_with`]. A wrong password, an account that may not log on here and the like come
@@ -362,6 +364,37 @@ pub fn run_lines_as(
     {
         let _ = (cmd, logon, stop, enc, on_line);
         Err(io::Error::new(io::ErrorKind::Unsupported, "running as another account is only supported on Windows"))
+    }
+}
+
+/// Run `exe` with `args` elevated and wait for it; its exit code comes back.
+///
+/// Windows only: the UAC prompt (`ShellExecuteExW`, verb `runas`), the program gets a console window of
+/// its own (so it can read a password there). Saying no to the prompt is `ErrorKind::PermissionDenied`.
+/// Elsewhere this is `Err(Unsupported)`. It blocks until the program ends, so call it from a worker.
+/// The arguments are quoted the way `CommandLineToArgvW` reads them back.
+pub fn run_elevated(exe: &std::path::Path, args: &[std::ffi::OsString]) -> io::Result<i32> {
+    #[cfg(windows)]
+    {
+        elevate::run_elevated(exe, args)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, args);
+        Err(io::Error::new(io::ErrorKind::Unsupported, "elevation is only supported on Windows"))
+    }
+}
+
+/// Whether this process already runs elevated (Windows `TokenElevation`). Elsewhere: whether it is root
+/// is not asked, so this is `false`.
+pub fn is_elevated() -> bool {
+    #[cfg(windows)]
+    {
+        elevate::is_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 

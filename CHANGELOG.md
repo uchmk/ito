@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.157.0] - 2026-10-31
+
+### 追加
+
+- `ito-proc::run_elevated(exe, args) -> io::Result<i32>`: UAC の確認（`ShellExecuteExW`、`runas`）を出して昇格した exe を起こし、終わるまで待って終了コードを返す（uchmk/ito#103）。
+  相手には自前のコンソールの窓が付くので、パスワードをそこで読める。確認を断ると `ErrorKind::PermissionDenied`。Windows 以外は `Unsupported`。止まるので worker から。
+- `ito-proc::is_elevated() -> bool`: 今のプロセスが昇格済みか（Windows の `TokenElevation`。ほかは `false`）。
+
+### 使う側がやること
+
+- koyomi: `ito_service` が `NeedsAdmin` を返したら、`!is_elevated()` を確かめて `run_elevated(current_exe, args)` で同じコマンドを昇格して回し、その終了コードをそのまま返す。
+
 ## [0.156.0] - 2026-10-31
 
 ### 追加
