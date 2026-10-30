@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.144.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-store`: アプリが大量に持つデータ（スレッドや項目のキャッシュ）を置く手元の SQLite（uchmk/ito#93、fumi の依頼。SQLite の `bundled` を許す方針）。
+  - `Store::open(app, name, migrations)`（`state_dir(app)` の `<name>.sqlite3`）/ `open_at(path, migrations)`: WAL・busy timeout・`foreign_keys`。`migrations[i]` は版 i → i+1 の SQL で、`PRAGMA user_version` で未適用のものだけを順に（各 1 トランザクション）流す。出荷した移行は変えず足す。自分の版より新しいデータベースは開かない。
+  - `write(|tx| ..) -> Pending<T>`: **書き込みのスレッドは 1 本**。トランザクションで包み、`Ok` なら commit、失敗なら全部 rollback。UI は `Pending::try_get` で後から見る（`wait` はワーカー向け）。`read(|conn| ..)` は別の読み取り接続（WAL なので書き込みを待たない）。
+  - `meta_get` / `meta_set`: 同じデータベースの key-value。同期の位置（Gmail の `historyId` など）を、行と同じ `write` の中で書けば一緒に commit される。
+  - `fts_sql(content, rowid, columns)`: 外部コンテンツの FTS5 表 `<content>_fts`（`tokenize='trigram'`、日本語が引ける）と、挿入・更新・削除に追従するトリガー、既存の行の索引づけの SQL（移行に入れる）。
+  - `parse_query(input) -> Query` / `search_ids`: 打った文字の各語を引用して FTS5 の演算子（`AND`・`NEAR`・`*`・`-`・`:`・`"`）を文字として扱う。trigram は 3 文字未満の語に当たらないので、それは `Query::short` に分けて返す（アプリが `LIKE` で絞る）。
+  - `describe()`: 場所・大きさ・スキーマの版の 1 行。`<app> env` と不具合の報告のファイルの欄に。
+  - C のコンパイラーが要る（SQLite を同梱でビルドする）。verify.sh の 3 ターゲットで確かめた。
+  使う側（fumi）がやること: 自前の rusqlite と接続の管理を `ito-store` に置き換える。
+
 ## [0.143.0] - 2026-10-31
 
 ### 追加

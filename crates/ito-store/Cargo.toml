@@ -1,0 +1,12 @@
+[package]
+name = "ito-store"
+description = "A local SQLite store for an app: WAL, one write thread, versioned migrations, and full-text search that reads Japanese (FTS5 trigram)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-common = { path = "../ito-common" }
+rusqlite = { version = "0.41", features = ["bundled"] }

@@ -47,6 +47,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
 | `ito-statusbar` | 窓の下のステータスバー（`show`: 側の色と上の線・左にアプリの項目・右端に時計（等幅・一番強い文字の色・ホバーで `Clock::full`・分が変わるときだけ再描画）・倍率を変えた直後の `scale_text`（`scale_changed`）。項目の `item`・`link`・`divider`・`dot`。`opacity` で入力中に薄くできる）。色は `ito_theme::colors()`。設定の画面を開いている間はアプリが隠す | fude、michi、minato、tsumugi |
 | `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストの押しは `ito-notify` の `Toast::open` | michi、tsumugi |
+| `ito-store` | 手元の SQLite（`bundled`）。WAL・書き込みスレッド 1 本（`write` は `Pending` を返す）・`user_version` の移行・`meta`（同期の位置を行と一緒に commit）・FTS5 trigram の全文検索（`fts_sql`・`parse_query`。3 文字未満は `short`）・`describe` | fumi |
 
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 

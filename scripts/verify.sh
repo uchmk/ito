@@ -6,9 +6,10 @@
 # Clippy covers every OS the crates ship for -- Linux, Windows and macOS --
 # whatever the host: the host first, then the others. Those are type checks
 # only -- they never run that code, so read Windows path strings by eye.
-# objc2 compiles a little Objective-C for macOS, so off a Mac that clippy
-# goes through cargo-zigbuild, whose zig is a C compiler for it (installed
-# from PyPI below when it is missing). Before 2026-10-15 the second clippy
+# objc2 compiles a little Objective-C for macOS and ito-store compiles SQLite
+# (bundled), so any target that is not the host's own goes through
+# cargo-zigbuild, whose zig is a C compiler for it (installed from PyPI below
+# when it is missing). Before 2026-10-15 the second clippy
 # was always Windows, so a run on the Windows PC never compiled Linux and
 # still said ALL OK (yagura's v0.62.0 went red on Linux that way); before
 # 2026-10-16 macOS was left to CI, which has no Mac here.
@@ -59,7 +60,7 @@ tests=$(echo "$last" | grep 'test result' | awk '{p+=$4; f+=$6} END {print p " p
 run cargo +stable clippy -q --workspace --all-targets --all-features -- -D warnings
 for t in $others; do
     case "$t:$host" in
-        *-apple-darwin:*-apple-darwin | *-linux-gnu:* | *-windows-msvc:*)
+        *-apple-darwin:*-apple-darwin | *-linux-gnu:*-linux-gnu | *-windows-msvc:*-windows-msvc)
             run cargo +stable clippy -q --workspace --all-targets --all-features --target "$t" -- -D warnings ;;
         *) zigbuild clippy -q --workspace --all-targets --all-features --target "$t" -- -D warnings ;;
     esac
