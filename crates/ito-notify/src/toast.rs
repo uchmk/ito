@@ -115,9 +115,10 @@ pub(crate) fn applescript_string(s: &str) -> String {
 #[cfg(windows)]
 pub(crate) mod os {
     use super::xml_escape;
+    use std::sync::Once;
     use windows::core::{w, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::CoIncrementMTAUsage;
     use windows::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
     };
@@ -156,8 +157,14 @@ pub(crate) mod os {
     }
 
     pub fn show(id: &str, name: &str, logo: Option<&std::path::Path>, title: &str, body: &str) {
-        // SAFETY: a thread of its own; already initialized is fine.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        // Each toast has a thread of its own. If that thread were the last user of the MTA, COM would tear it
+        // down on exit, and windows-rs's cached activation factories would point into the dead apartment (the
+        // second toast then crashes). One process-wide usage keeps the MTA alive.
+        static MTA: Once = Once::new();
+        // SAFETY: no preconditions; the cookie is deliberately never released.
+        MTA.call_once(|| {
+            let _ = unsafe { CoIncrementMTAUsage() };
+        });
         register(id, name, logo);
         if let Err(e) = toast(id, logo, title, body) {
             eprintln!("the notification failed: {e}");

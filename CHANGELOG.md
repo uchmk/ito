@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.134.1] - 2026-10-30
+
+### 修正
+- `ito-notify` の `toast::show` が、Windows で 2 回目の呼び出しでプロセスごと落ちるのを直した（uchmk/ito#78、koyomi が見つけた）。
+  トーストごとのスレッドが MTA の最後の使い手として抜けると COM が MTA を壊し、windows-rs が持ち回る activation factory が消えたアパートメントを指していた。
+  プロセスで 1 回 `CoIncrementMTAUsage()` を呼んで MTA を生かしておく。使う側がやることはない。
+
 ## [0.134.0] - 2026-10-30
 
 ### 追加
