@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.132.0] - 2026-10-30
+
+### 追加
+- `ito-proc`: 子の出力の文字コードを選べる（uchmk/ito#74、koyomi の依頼）。日本語の Windows の `.bat` や古い exe は CP932 で書くので、UTF-8 だけだと文字化けする。
+  `Encoding`（`Utf8` が既定、`ShiftJis`、`Console`（Windows は `GetOEMCP` のコードページ。ほかは UTF-8）、`Auto`（1 行ごとに、UTF-8 として正しければそのまま、でなければ `Console`））。
+  `run_with` / `run_lines_with` は `Encoding` を受ける。`Done::stdout_as(enc)`。生のバイトは今までどおり `Done::stdout`。
+  `run` / `run_lines` / `Done::stdout_text` は変わらない（UTF-8、壊れたバイトは置き換え）。使う側は必要な所で `*_with` に替えるだけ。
+- `ito-proc` が `encoding_rs`（純 Rust）に依る。
+
 ## [0.131.1] - 2026-10-30
 
 ### 修正

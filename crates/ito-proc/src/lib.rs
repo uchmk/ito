@@ -8,6 +8,11 @@
 //! [`run_lines`] is the same for a child that talks a lot: stdout comes line by
 //! line too and nothing is collected unless the callback keeps it.
 //!
+//! A child that is not UTF-8 (a `.bat` or an old exe on Japanese Windows writes
+//! CP932) is read with [`run_with`] / [`run_lines_with`] and an [`Encoding`];
+//! [`run`] and [`run_lines`] read UTF-8 and replace bad bytes. The raw bytes of
+//! stdout are always in [`Done::stdout`].
+//!
 //! It blocks the calling thread, so call it from a worker, never the UI thread.
 //! What the lines mean stays with the caller.
 
@@ -16,6 +21,68 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
+
+/// How the bytes a child writes become text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Encoding {
+    /// UTF-8, bad bytes replaced. What [`run`] and [`run_lines`] use.
+    #[default]
+    Utf8,
+    /// Shift_JIS (Windows-31J, CP932), on any system.
+    ShiftJis,
+    /// The system's console code page (`GetOEMCP` on Windows: CP932 on Japanese
+    /// Windows, CP437 and the like elsewhere there); UTF-8 on other systems.
+    Console,
+    /// UTF-8 for a line that is valid UTF-8, the console code page for one
+    /// that is not. A line is decided on its own, so a child that mixes both
+    /// still reads right.
+    Auto,
+}
+
+impl Encoding {
+    /// `bytes` (one line, or all of a pipe) as text.
+    pub fn decode(self, bytes: &[u8]) -> String {
+        match self {
+            Encoding::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
+            Encoding::ShiftJis => encoding_rs::SHIFT_JIS.decode_without_bom_handling(bytes).0.into_owned(),
+            Encoding::Console => console().decode_without_bom_handling(bytes).0.into_owned(),
+            Encoding::Auto => match std::str::from_utf8(bytes) {
+                Ok(t) => t.to_owned(),
+                Err(_) => console().decode_without_bom_handling(bytes).0.into_owned(),
+            },
+        }
+    }
+}
+
+/// The encoding of the system's console code page.
+fn console() -> &'static encoding_rs::Encoding {
+    #[cfg(windows)]
+    {
+        extern "system" {
+            fn GetOEMCP() -> u32;
+        }
+        // SAFETY: a plain call without arguments.
+        from_code_page(unsafe { GetOEMCP() })
+    }
+    #[cfg(not(windows))]
+    encoding_rs::UTF_8
+}
+
+/// The encoding for a Windows code page number; Western ones that
+/// `encoding_rs` has no table for (437, 850 …) read as windows-1252.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn from_code_page(cp: u32) -> &'static encoding_rs::Encoding {
+    match cp {
+        932 => encoding_rs::SHIFT_JIS,
+        936 | 54936 => encoding_rs::GB18030,
+        949 => encoding_rs::EUC_KR,
+        950 => encoding_rs::BIG5,
+        65001 => encoding_rs::UTF_8,
+        874 => encoding_rs::WINDOWS_874,
+        1250..=1258 => encoding_rs::Encoding::for_label(format!("windows-{cp}").as_bytes()).unwrap_or(encoding_rs::WINDOWS_1252),
+        _ => encoding_rs::WINDOWS_1252,
+    }
+}
 
 /// How a [`run`] ended.
 #[derive(Debug)]
@@ -44,7 +111,12 @@ impl Done {
 
     /// stdout as text, bad bytes replaced.
     pub fn stdout_text(&self) -> String {
-        String::from_utf8_lossy(&self.stdout).into_owned()
+        self.stdout_as(Encoding::Utf8)
+    }
+
+    /// stdout as text in `enc`.
+    pub fn stdout_as(&self, enc: Encoding) -> String {
+        enc.decode(&self.stdout)
     }
 }
 
@@ -68,7 +140,13 @@ enum Piece {
 /// calling thread; it returns whether to keep the line in [`Done::lines`]
 /// (a progress line that was shown is not kept, the error text is).
 /// The child gets its own process group (Unix) and no console window (Windows).
-pub fn run(mut cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(&str) -> bool) -> io::Result<Outcome> {
+pub fn run(cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(&str) -> bool) -> io::Result<Outcome> {
+    run_with(cmd, stop, Encoding::Utf8, on_line)
+}
+
+/// [`run`], reading stderr's lines in `enc`. stdout stays bytes
+/// ([`Done::stdout_as`]).
+pub fn run_with(mut cmd: Command, stop: &AtomicBool, enc: Encoding, on_line: &mut dyn FnMut(&str) -> bool) -> io::Result<Outcome> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_group(&mut cmd);
     let mut child = cmd.spawn()?;
@@ -79,7 +157,7 @@ pub fn run(mut cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(&str) ->
         let (mut buf, mut line) = ([0u8; 4096], Vec::new());
         let send = |line: &mut Vec<u8>| {
             if !line.is_empty() {
-                let _ = err_tx.send(Piece::Line(String::from_utf8_lossy(line).into_owned()));
+                let _ = err_tx.send(Piece::Line(enc.decode(line)));
                 line.clear();
             }
         };
@@ -186,11 +264,11 @@ enum Seen {
 }
 
 /// Read `r` to its end, sending each line (ended by CR or LF, empty ones dropped).
-fn split_lines(mut r: impl Read, which: Stream, tx: mpsc::Sender<Seen>) {
+fn split_lines(mut r: impl Read, which: Stream, enc: Encoding, tx: mpsc::Sender<Seen>) {
     let (mut buf, mut line) = ([0u8; 4096], Vec::new());
     let send = |line: &mut Vec<u8>| {
         if !line.is_empty() {
-            let _ = tx.send(Seen::Line(which, String::from_utf8_lossy(line).into_owned()));
+            let _ = tx.send(Seen::Line(which, enc.decode(line)));
             line.clear();
         }
     };
@@ -215,15 +293,25 @@ fn split_lines(mut r: impl Read, which: Stream, tx: mpsc::Sender<Seen>) {
 ///
 /// The kept lines come back whether the child exited or was stopped, so a job
 /// killed by its timeout still shows what it said before.
-pub fn run_lines(mut cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(Stream, &str) -> bool) -> io::Result<Lines> {
+pub fn run_lines(cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(Stream, &str) -> bool) -> io::Result<Lines> {
+    run_lines_with(cmd, stop, Encoding::Utf8, on_line)
+}
+
+/// [`run_lines`], reading both pipes' lines in `enc`.
+pub fn run_lines_with(
+    mut cmd: Command,
+    stop: &AtomicBool,
+    enc: Encoding,
+    on_line: &mut dyn FnMut(Stream, &str) -> bool,
+) -> io::Result<Lines> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_group(&mut cmd);
     let mut child = cmd.spawn()?;
     let (tx, rx) = mpsc::channel();
     let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     let (out_tx, err_tx) = (tx.clone(), tx.clone());
-    let out = std::thread::Builder::new().name("ito-proc-stdout".into()).spawn(move || split_lines(stdout, Stream::Out, out_tx));
-    let err = std::thread::Builder::new().name("ito-proc-stderr".into()).spawn(move || split_lines(stderr, Stream::Err, err_tx));
+    let out = std::thread::Builder::new().name("ito-proc-stdout".into()).spawn(move || split_lines(stdout, Stream::Out, enc, out_tx));
+    let err = std::thread::Builder::new().name("ito-proc-stderr".into()).spawn(move || split_lines(stderr, Stream::Err, enc, err_tx));
     if let Err(e) = out.and(err) {
         kill_tree(&mut child);
         return Err(e);
@@ -433,6 +521,37 @@ mod tests {
             c.args(["-c", &format!("echo {out}; echo {err} >&2; exit {code}")]);
             c
         }
+    }
+
+    #[test]
+    fn bytes_are_read_in_the_encoding_asked_for() {
+        // 日本語 in CP932.
+        let sjis = [0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA];
+        assert_eq!(Encoding::ShiftJis.decode(&sjis), "日本語");
+        assert!(Encoding::Utf8.decode(&sjis).contains('\u{FFFD}'));
+        // Auto: valid UTF-8 stays, anything else is the console's.
+        assert_eq!(Encoding::Auto.decode("日本語 ok".as_bytes()), "日本語 ok");
+        assert_eq!(Encoding::Auto.decode(b"plain"), "plain");
+        #[cfg(not(windows))]
+        assert!(Encoding::Auto.decode(&sjis).contains('\u{FFFD}'));
+        assert_eq!(from_code_page(932).name(), "Shift_JIS");
+        assert_eq!(from_code_page(437).name(), "windows-1252");
+        assert_eq!(from_code_page(1251).name(), "windows-1251");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_lines_with_decodes_a_child_that_writes_shift_jis() {
+        let stop = AtomicBool::new(false);
+        let mut c = Command::new("sh");
+        c.args(["-c", r"printf '\223\372\226\173\214\352\nok\n'"]);
+        let mut got = Vec::new();
+        run_lines_with(c, &stop, Encoding::ShiftJis, &mut |_, l| {
+            got.push(l.to_owned());
+            false
+        })
+        .unwrap();
+        assert_eq!(got, ["日本語", "ok"]);
     }
 
     #[test]
