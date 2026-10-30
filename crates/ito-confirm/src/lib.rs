@@ -146,46 +146,55 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
             ui.set_width(w - 28.0);
             ui.label(RichText::new(q.title).strong().color(style.title));
             ui.add_space(6.0);
-            let key_w = q.rows.iter().map(|(k, _)| text_width(ui, k)).fold(0.0, f32::max);
-            for (k, v) in q.rows {
-                ui.horizontal_top(|ui| {
-                    ui.allocate_ui(vec2(key_w + 12.0, 0.0), |ui| {
-                        ui.set_min_width(key_w + 12.0);
-                        ui.label(RichText::new(k).color(style.dim));
+            // Everything between the title and the buttons scrolls when the
+            // box would not fit the window; the title, buttons and hint stay.
+            let reserve = 26.0 + if q.buttons.is_empty() { 0.0 } else { 52.0 } + if q.hint.is_empty() { 0.0 } else { 40.0 };
+            let room = (screen.height() - 40.0 - 28.0 - reserve).max(60.0);
+            egui::ScrollArea::vertical().max_height(room).auto_shrink([false, true]).show(ui, |ui| {
+                let key_w = q.rows.iter().map(|(k, _)| text_width(ui, k)).fold(0.0, f32::max);
+                for (k, v) in q.rows {
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui(vec2(key_w + 12.0, 0.0), |ui| {
+                            ui.set_min_width(key_w + 12.0);
+                            ui.label(RichText::new(k).color(style.dim));
+                        });
+                        ui.add(egui::Label::new(RichText::new(v).color(style.text)).wrap());
                     });
-                    ui.add(egui::Label::new(RichText::new(v).color(style.text)).wrap());
-                });
-            }
-            if !q.body.is_empty() {
-                ui.add_space(6.0);
-                for line in q.body {
-                    ui.add(egui::Label::new(RichText::new(line).color(style.text)).wrap());
                 }
-            }
-            if !q.diff.is_empty() {
-                ui.add_space(6.0);
-                diff_view(ui, q.diff, style);
-            }
-            if !q.notes.is_empty() {
-                ui.add_space(6.0);
-                for line in q.notes {
-                    ui.add(egui::Label::new(RichText::new(line).color(style.warn)).wrap());
-                }
-            }
-            if !q.cards.is_empty() {
-                ui.add_space(8.0);
-                for (i, c) in q.cards.iter().enumerate() {
-                    if card(ui, c, q.focus == Some(i), q.recommended == Some(i), q.recommended_label, style) {
-                        clicked = Some(i);
-                    }
+                if !q.body.is_empty() {
                     ui.add_space(6.0);
+                    for line in q.body {
+                        ui.add(egui::Label::new(RichText::new(line).color(style.text)).wrap());
+                    }
                 }
-            }
+                if !q.diff.is_empty() {
+                    ui.add_space(6.0);
+                    diff_view(ui, q.diff, style);
+                }
+                if !q.notes.is_empty() {
+                    ui.add_space(6.0);
+                    for line in q.notes {
+                        ui.add(egui::Label::new(RichText::new(line).color(style.warn)).wrap());
+                    }
+                }
+                if !q.cards.is_empty() {
+                    ui.add_space(8.0);
+                    for (i, c) in q.cards.iter().enumerate() {
+                        if card(ui, c, q.focus == Some(i), q.recommended == Some(i), q.recommended_label, style) {
+                            clicked = Some(i);
+                        }
+                        ui.add_space(6.0);
+                    }
+                }
+            });
             if !q.buttons.is_empty() {
                 ui.add_space(if q.cards.is_empty() { 10.0 } else { 2.0 });
                 // At the box's right edge, the last button rightmost; a row too
                 // long for the box wraps to the next line, not past the edge.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true), |ui| {
+                // Sized to its own height: a bare `with_layout` would take all the
+                // room the area had last frame and grow the box every frame.
+                let layout = egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true);
+                ui.allocate_ui_with_layout(vec2(ui.available_width(), 0.0), layout, |ui| {
                     let n = q.cards.len();
                     for (j, label) in q.buttons.iter().enumerate().rev() {
                         let i = n + j;
@@ -419,6 +428,50 @@ mod tests {
             o.textures_delta.clear();
         }
         out
+    }
+
+    /// The box's rect after `frames` frames in a window `h` tall.
+    fn box_rect(q: &Question, h: f32, frames: usize) -> (Rect, Rect) {
+        let ctx = Context::default();
+        let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, h));
+        let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        for _ in 0..frames {
+            let mut o = ctx.run_ui(input.clone(), |ui| {
+                show(ui.ctx(), q, &style());
+            });
+            o.textures_delta.clear();
+        }
+        (ctx.memory(|m| m.area_rect(Id::new("ito-confirm"))).expect("the box was drawn"), screen)
+    }
+
+    #[test]
+    fn a_tall_box_stays_inside_the_window_and_is_steady() {
+        let body: Vec<String> = (0..80).map(|i| format!("line {i} of a long body")).collect();
+        let buttons = vec!["Yes".to_owned(), "No".to_owned()];
+        let q = Question { title: "Discard?", body: &body, buttons: &buttons, hint: "Enter / Esc", ..Default::default() };
+        let (a, screen) = box_rect(&q, 400.0, 3);
+        let (b, _) = box_rect(&q, 400.0, 30);
+        assert!(screen.contains_rect(a), "{a:?} not inside {screen:?}");
+        assert_eq!(a.height(), b.height(), "the box grew from frame to frame");
+    }
+
+    #[test]
+    fn a_short_box_after_a_tall_one_is_short_again() {
+        let body: Vec<String> = (0..80).map(|i| format!("line {i}")).collect();
+        let buttons = vec!["Yes".to_owned()];
+        let tall = Question { title: "T", body: &body, buttons: &buttons, ..Default::default() };
+        let short = Question { title: "T", buttons: &buttons, ..Default::default() };
+        let ctx = Context::default();
+        let input =
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 400.0))), ..Default::default() };
+        for q in [&tall, &tall, &short, &short, &short] {
+            let mut o = ctx.run_ui(input.clone(), |ui| {
+                show(ui.ctx(), q, &style());
+            });
+            o.textures_delta.clear();
+        }
+        let r = ctx.memory(|m| m.area_rect(Id::new("ito-confirm"))).unwrap();
+        assert!(r.height() < 120.0, "still tall: {}", r.height());
     }
 
     #[test]
