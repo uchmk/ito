@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.149.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-sftp`: SFTP で送る・取る、ふつうの同期 API（uchmk/ito#95）。中で russh + russh-sftp と tokio（Session ごとに 1 本のランタイム）を使うが、公開の API に async は出ない。
+  - `Session::connect(&Target)`・`list(dir)`・`remove(path)`・`put(local, remote, Options, &stop, progress)`・`get(remote, local, ...)`。`*`・`?` のワイルドカード、送り先がフォルダー（末尾 `/` か既存）ならその中へ。
+  - ホスト鍵は指紋（`SHA256:…`）を固定して照合し、違えば `HostKeyMismatch`。初回に指紋を見る `fingerprint(host, port, timeout)`。パスワードか鍵ファイル（パスフレーズ可）。`Debug` は秘密を出さない。
+  - 書き込みは `<名前>.part` に書いてから名前を替える。上書きは `Options { overwrite }` で明示（既定は `Exists`）。失敗・停止で `.part` は消す。接続と I/O のタイムアウト、停止の `AtomicBool`（`Stopped`）、進みの `progress(name, done, total)`。
+  - russh は `ring`（既定の aws-lc-rs ではなく）で入れる。Windows の MSVC はそのままビルドできるが、Linux・macOS 向けは C のコンパイラーが要る（Mac の外から macOS 向けは cargo-zigbuild。verify.sh が objc2 でやっているのと同じ）。
+  - テストは 127.0.0.1 に russh のサーバーを立てて本物の SSH で通す。
+
+### 使う側がやること
+
+- koyomi: `ito-sftp = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、自前の SFTP の呼び出しを載せ替える。
+
 ## [0.148.0] - 2026-10-31
 
 ### 追加

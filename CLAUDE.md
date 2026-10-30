@@ -49,6 +49,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストの押しは `ito-notify` の `Toast::open` | michi、tsumugi |
 | `ito-tail` | ログ ファイルの新しい行を追う（`Follower::new(path, From)`・`poll`・`offset`。終わりから始める・保存した位置から再開・切り詰めと入れ替えを検出・UTF-8 か Shift_JIS・ファイルを掴まない・書きかけの行は待つ） | koyomi |
 | `ito-store` | 手元の SQLite（`bundled`）。WAL・書き込みスレッド 1 本（`write` は `Pending` を返す）・`user_version` の移行・`meta`（同期の位置を行と一緒に commit）・FTS5 trigram の全文検索（`fts_sql`・`parse_query`。3 文字未満は `short`）・`describe` | fumi |
+| `ito-sftp` | SFTP で送る・取る（同期の API。中は russh + russh-sftp + tokio。指紋を固定したホスト鍵・パスワードか鍵ファイル・`*` `?`・`.part` から名前替え・停止の `AtomicBool`・進み・タイムアウト。`ring` なので Linux・macOS 向けは C が要り、Mac の外からは cargo-zigbuild） | koyomi |
 
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 
