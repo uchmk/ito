@@ -2,7 +2,7 @@
 
 use std::process::{Command, Stdio};
 
-use crate::{Level, WhyNot};
+use crate::{Filter, From, Level, Record, WhyNot};
 
 #[derive(Debug)]
 pub struct Source(String);
@@ -31,5 +31,22 @@ impl Source {
         } else {
             Err(WhyNot::Failed(status.code().unwrap_or(-1) as u32))
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Reader;
+
+pub fn reader(_channel: &str, _filter: &Filter, _from: From) -> Result<Reader, WhyNot> {
+    Err(WhyNot::Unsupported)
+}
+
+impl Reader {
+    pub fn poll(&mut self) -> Result<Vec<Record>, WhyNot> {
+        Err(WhyNot::Unsupported)
+    }
+
+    pub fn position(&self) -> u64 {
+        0
     }
 }

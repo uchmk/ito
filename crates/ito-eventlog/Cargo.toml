@@ -1,6 +1,6 @@
 [package]
 name = "ito-eventlog"
-description = "Write a line to the system log so a monitoring tool can see it: the Windows event log (Application), syslog elsewhere"
+description = "Write a line to the system log so a monitoring tool can see it, and read new Windows event log records: the Windows event log (Application), syslog elsewhere"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

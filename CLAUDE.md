@@ -24,7 +24,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は `\r`・`\n` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。1 行ずつ渡す `run_lines`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
 | `ito-power` | 電源と眠り（`Awake::hold` で動かしている間 PC を眠らせない・`wake_at` で予定の時刻に起こす／起こせない理由 `WhyNot`・`sleep_after` で何分で眠る設定か。Windows は電源要求・再開タイマー・電源プラン。macOS は `caffeinate`、Linux は `systemd-inhibit`（起こすのは未対応）） | koyomi（yagura・kura も） |
-| `ito-eventlog` | システムのログに 1 行書く（`Log::open(source)`・`write(Level, id, text)`。Windows はイベント ログ（アプリケーション）、ほかは syslog の `logger`） | koyomi |
+| `ito-eventlog` | システムのログに 1 行書く（`Log::open(source)`・`write(Level, id, text)`。Windows はイベント ログ（アプリケーション）、ほかは syslog の `logger`。読むのは `Subscription::new(channel, &Filter, From)`・`poll`・`position`（Windows のみ。Security は `Denied`）） | koyomi |
 | `ito-tray` | タスクトレイの常駐アイコン（`Tray::new(icon, tip)`・`set_state` で色と記号のバッジ（`ito-a11y::State`）・`set_tip`・`set_menu`・押した・選んだは `events()` のチャンネル、`new_with` で起こす関数も渡せる。Windows のみ、ほかは `Unsupported`） | koyomi（tsumugi の server も） |
 | `ito-secret` | 秘密（Webhook のアドレス・パスワード）を OS の資格情報ストア（Windows 資格情報マネージャー・macOS キーチェーン・Linux `secret-tool`）に置く `get`/`set`/`delete`、ログ用の `mask`。ファイルには退避しない。`ito-notify::webhook` の `secret:` 参照が使う | koyomi（yagura・tsumugi も） |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
@@ -47,6 +47,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
 | `ito-statusbar` | 窓の下のステータスバー（`show`: 側の色と上の線・左にアプリの項目・右端に時計（等幅・一番強い文字の色・ホバーで `Clock::full`・分が変わるときだけ再描画）・倍率を変えた直後の `scale_text`（`scale_changed`）。項目の `item`・`link`・`divider`・`dot`。`opacity` で入力中に薄くできる）。色は `ito_theme::colors()`。設定の画面を開いている間はアプリが隠す | fude、michi、minato、tsumugi |
 | `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストの押しは `ito-notify` の `Toast::open` | michi、tsumugi |
+| `ito-tail` | ログ ファイルの新しい行を追う（`Follower::new(path, From)`・`poll`・`offset`。終わりから始める・保存した位置から再開・切り詰めと入れ替えを検出・UTF-8 か Shift_JIS・ファイルを掴まない・書きかけの行は待つ） | koyomi |
 | `ito-store` | 手元の SQLite（`bundled`）。WAL・書き込みスレッド 1 本（`write` は `Pending` を返す）・`user_version` の移行・`meta`（同期の位置を行と一緒に commit）・FTS5 trigram の全文検索（`fts_sql`・`parse_query`。3 文字未満は `short`）・`describe` | fumi |
 
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。

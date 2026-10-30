@@ -3,6 +3,26 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.145.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-tail`: ログ ファイルの新しい行を追う（uchmk/ito#94）。
+  - `Follower::new(path, From::End | Start | Offset(n))` / `poll() -> io::Result<Vec<String>>` / `offset()`。毎回開いて閉じる（Windows は共有 読み・書き・削除で開くので、書く側の邪魔をしない）。
+  - 改行で終わった行だけ返し、書きかけの行は次の `poll` へ。`offset()` に書きかけは入らないので、保存した位置からの再開で取りこぼしも重複もない。
+  - 切り詰め（長さが位置より短い）と入れ替え（同じ名前の別のファイル）は先頭から読み直す。ファイルが無い間は空。UTF-8 でなければ Shift_JIS、BOM は外す。
+- `ito-eventlog` に読む側: `Subscription::new(channel, &Filter { ids, source, level }, From::End | Start | After(record_id))` / `poll() -> Vec<Record>` / `position()`。
+  - Windows の `EvtQuery`（`Application`・`System`・`Security` など）。`Record` は record_id・time（ISO 8601 UTC）・id・source・level・message（プロバイダーの文面。無ければ値をつないだもの）。
+  - `position()`（最後に返した record_id）を保存し、`From::After` で返すと続きから読める。Windows 以外は `WhyNot::Unsupported`。
+
+### 変更
+
+- `WhyNot` に `Denied`（読む権限が無い。Security は管理者か Event Log Readers）と `NoChannel`（その名前のログが無い）を足した。
+
+### 使う側がやること
+
+- `WhyNot` を `match` で全部並べているなら、`Denied` と `NoChannel` を足す（`_` があれば不要）。
+
 ## [0.144.0] - 2026-10-31
 
 ### 追加
