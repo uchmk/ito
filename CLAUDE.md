@@ -24,6 +24,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は `\r`・`\n` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。1 行ずつ渡す `run_lines`。Unix はプロセスグループ、Windows は `taskkill /T`） | michi（minato も） |
 | `ito-power` | 電源と眠り（`Awake::hold` で動かしている間 PC を眠らせない・`wake_at` で予定の時刻に起こす／起こせない理由 `WhyNot`・`sleep_after` で何分で眠る設定か。Windows は電源要求・再開タイマー・電源プラン。macOS は `caffeinate`、Linux は `systemd-inhibit`（起こすのは未対応）） | koyomi（yagura・kura も） |
+| `ito-tray` | タスクトレイの常駐アイコン（`Tray::new(icon, tip)`・`set_state` で色と記号のバッジ（`ito-a11y::State`）・`set_tip`・`set_menu`・押した・選んだは `events()` のチャンネル、`new_with` で起こす関数も渡せる。Windows のみ、ほかは `Unsupported`） | koyomi（tsumugi の server も） |
 | `ito-secret` | 秘密（Webhook のアドレス・パスワード）を OS の資格情報ストア（Windows 資格情報マネージャー・macOS キーチェーン・Linux `secret-tool`）に置く `get`/`set`/`delete`、ログ用の `mask`。ファイルには退避しない。`ito-notify::webhook` の `secret:` 参照が使う | koyomi（yagura・tsumugi も） |
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
 | `ito-select` | 描画で並べた文字（ガラスのレイアウト）をマウスの範囲選択でコピーする（プレビュー・詳細欄のように、部品でなく painter で描く窓向け） | kura、minato |

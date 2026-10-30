@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.134.0] - 2026-10-30
+
+### 追加
+- 新しいクレート `ito-tray`（uchmk/ito#73、koyomi の依頼）: 窓が無くても動き続けるアプリのタスクトレイのアイコン。
+  `Tray::new(icon, tip)`（`Icon::new(w, h, rgba)`）、`set_state(Some(State))`（アイコンの右下に色の丸と白い記号のバッジ。ツールチップの頭にも `State::mark`。色だけに頼らない）、
+  `set_tip`、`set_menu(Vec<Item>)`（`Item::entry(id, label)`・`Separator`・無効・チェック）、`events()`（`Event::Click`・`Event::Menu(id)`。`try_recv` で読む）。
+  `Tray::new_with(icon, tip, wake)` は、イベントを積むたびに `wake` を呼ぶ（egui なら `ctx.request_repaint()`）。落とすとアイコンが消える。
+  Windows は専用スレッドと隠れた窓で `Shell_NotifyIconW`（エクスプローラーが落ちて戻ったときは付け直す）。macOS・Linux は `Tray::new` が `Unsupported` を返す（メニューバー・StatusNotifierItem は後で）。
+  `with_badge(&Icon, State)` と `badge_color` も公開。
+
 ## [0.133.0] - 2026-10-30
 
 ### 追加
