@@ -150,6 +150,7 @@ pub fn run_with(mut cmd: Command, stop: &AtomicBool, enc: Encoding, on_line: &mu
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_group(&mut cmd);
     let mut child = cmd.spawn()?;
+    sys::adopt(&child);
     let (tx, rx) = mpsc::channel();
     let mut stderr = child.stderr.take().expect("piped");
     let err_tx = tx.clone();
@@ -307,6 +308,7 @@ pub fn run_lines_with(
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_group(&mut cmd);
     let mut child = cmd.spawn()?;
+    sys::adopt(&child);
     let (tx, rx) = mpsc::channel();
     let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     let (out_tx, err_tx) = (tx.clone(), tx.clone());
@@ -445,6 +447,78 @@ mod sys {
         }
     }
 
+    #[repr(C)]
+    struct IoCounters([u64; 6]);
+
+    #[repr(C)]
+    struct Basic {
+        per_process_user_time: i64,
+        per_job_user_time: i64,
+        flags: u32,
+        min_working_set: usize,
+        max_working_set: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct Extended {
+        basic: Basic,
+        io: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory: usize,
+        peak_job_memory: usize,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(attrs: *mut std::ffi::c_void, name: *const u16) -> *mut std::ffi::c_void;
+        fn SetInformationJobObject(job: *mut std::ffi::c_void, class: i32, info: *const std::ffi::c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
+    }
+
+    /// This process's job: its handle is never closed, so the system closes it when the process dies, and with
+    /// `KILL_ON_JOB_CLOSE` that ends every child put in it. 0 when it could not be made.
+    fn job() -> usize {
+        static JOB: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        *JOB.get_or_init(|| {
+            const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+            const KILL_ON_JOB_CLOSE: u32 = 0x2000;
+            // SAFETY: an unnamed job; `info` is a plain struct of the size the class asks for.
+            unsafe {
+                let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+                if h.is_null() {
+                    return 0;
+                }
+                let mut info: Extended = std::mem::zeroed();
+                info.basic.flags = KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    h,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    (&raw const info).cast(),
+                    size_of::<Extended>() as u32,
+                );
+                if ok == 0 {
+                    return 0;
+                }
+                h as usize
+            }
+        })
+    }
+
+    /// Put the child (and so what it starts) in this process's job, so it dies with the process. Best effort.
+    pub fn adopt(child: &Child) {
+        use std::os::windows::io::AsRawHandle;
+        let job = job();
+        if job != 0 {
+            // SAFETY: the job is open for the life of the process; the child's handle is open while `child` is.
+            unsafe { AssignProcessToJobObject(job as *mut _, child.as_raw_handle().cast()) };
+        }
+    }
+
     pub fn kill_tree(child: &mut Child) {
         let _ = Command::new("taskkill")
             .args(["/T", "/F", "/PID", &child.id().to_string()])
@@ -477,6 +551,9 @@ mod sys {
         }
     }
 
+    /// Nothing to do: a Unix child is in its own group, which dies only when [`kill_tree`] signals it.
+    pub fn adopt(_: &Child) {}
+
     pub fn kill_tree(child: &mut Child) {
         // A negative pid is the whole group, which the child leads.
         let _ = Command::new("kill")
@@ -500,6 +577,7 @@ mod sys {
             HoldHandles
         }
     }
+    pub fn adopt(_: &Child) {}
     pub fn kill_tree(_: &mut Child) {}
 }
 

@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.138.0] - 2026-10-31
+
+### 追加
+- `ito_openin::open_default(path)`（と `default_argv`）: OS 既定のアプリでファイル・フォルダーを開く（`explorer` / `open` / `xdg-open`。窓なし。無いパスは `Err`）（uchmk/ito#85）。
+- `ito-proc`: 起動した子を、このプロセスのジョブ オブジェクト（`KILL_ON_JOB_CLOSE`）に入れる。アプリが落ちても、子とその子孫は OS が殺す（Windows のみ。Unix は従来どおり `kill_tree` のときだけ）。`spawn_detached` の子は入れない（uchmk/ito#83）。
+- `ito_common::single::acquire(app, scope) -> Result<Guard, Held{pid}>`: 状態のフォルダーのロックで、アプリ（の一部）を 1 つだけ動かす。落ちても殺されても OS が外す。状態のフォルダーが使えないときは、ロックなしで `Ok`（uchmk/ito#84）。
+
 ## [0.137.2] - 2026-10-30
 
 ### 変更

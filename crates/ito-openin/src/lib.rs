@@ -248,6 +248,30 @@ fn hide_window(c: &mut Command) {
 #[cfg(not(windows))]
 fn hide_window(_: &mut Command) {}
 
+/// The command that opens `path` with the OS's own choice: `explorer` (Windows), `open` (macOS), `xdg-open`.
+pub fn default_argv(path: &Path) -> Vec<String> {
+    let program = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    // Explorer takes backslashes only; a `/` path would open Documents instead.
+    let path = if cfg!(windows) { path.to_string_lossy().replace('/', "\\") } else { path.to_string_lossy().into_owned() };
+    vec![program.to_owned(), path]
+}
+
+/// Opens a file or folder with the OS default (the program the system picks for that file, or the file
+/// manager for a folder). No window flashes, and it does not wait: reaped on a thread like [`spawn`]. An
+/// error when `path` is not there (Explorer would open some other folder without a word).
+pub fn open_default(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("{}: not found", path.display()));
+    }
+    spawn(&default_argv(path), None)
+}
+
 /// Starts `template` for `vars`; `cwd` is where it runs (a folder, mostly).
 pub fn open(template: &str, vars: &Vars, cwd: Option<&Path>) -> Result<(), String> {
     spawn(&argv(template, vars)?, cwd)
@@ -293,6 +317,18 @@ mod os {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_default_opener_is_the_systems_and_a_missing_path_is_an_error() {
+        let argv = default_argv(Path::new("a/b c.txt"));
+        assert_eq!(argv.len(), 2);
+        assert!(["explorer", "open", "xdg-open"].contains(&argv[0].as_str()));
+        if cfg!(windows) {
+            assert_eq!(argv[1], r"a\b c.txt");
+        }
+        let err = open_default(Path::new("definitely/not/here.xyz")).unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+    }
+
     use super::*;
 
     fn p(s: &str) -> Vars {
