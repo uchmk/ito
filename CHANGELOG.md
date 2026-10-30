@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.143.0] - 2026-10-31
+
+### 追加
+
+- `ito-prefs`: 一覧の選べる行 `nav_row(ui, look, NavRow)`（uchmk/ito#92、fumi の依頼。フォルダー・ブランチ・場所・カレンダーなど）。`NavRow { icon, text, count, strong, current }`: 先頭の記号（空なら無し）、文字、右端の薄い件数（`strong` ＝未読なら文字が強くなり、件数がアクセント色）、今いる行（アクセントの塗り）、ホバー、`button` と同じフォーカスの枠。列の幅いっぱいで高さはどの行も同じ。長い文字は件数の手前で「…」で切る。キーは持たない（アプリの移動に任せ、`current` を描いてクリックを返すだけ）。
+  使う側がやること: `selectable_label` を `nav_row` に置き換える。
+
 ## [0.142.0] - 2026-10-31
 
 ### 追加

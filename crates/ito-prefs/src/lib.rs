@@ -20,6 +20,7 @@ use ito_theme::{Colors, Theme};
 mod apps;
 mod keys;
 mod more;
+mod nav;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 mod notify;
 mod notify_cfg;
@@ -34,6 +35,7 @@ pub use more::{
     window_index, About, AboutAction, Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN,
     MORE_JA, WINDOW_KEYS,
 };
+pub use nav::{nav_row, Row as NavRow};
 pub use notify::{
     format_name, hook_label, mail_label, mail_rows, new_mail, notify_index, notify_page, sound_name, webhook_rows, write_mails,
     write_webhooks, End, Hook, Notify, Test,
