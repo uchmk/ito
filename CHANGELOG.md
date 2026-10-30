@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.137.1] - 2026-10-30
+
+### 修正
+- `ito_prefs::new_mail` を再エクスポートした（0.137.0 で書き忘れ。koyomi の指摘）。
+
 ## [0.137.0] - 2026-10-30
 
 ### 追加

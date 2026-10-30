@@ -34,8 +34,8 @@ pub use more::{
     MORE_JA, WINDOW_KEYS,
 };
 pub use notify::{
-    format_name, hook_label, mail_label, mail_rows, notify_index, notify_page, sound_name, webhook_rows, write_mails, write_webhooks, End,
-    Hook, Notify, Test,
+    format_name, hook_label, mail_label, mail_rows, new_mail, notify_index, notify_page, sound_name, webhook_rows, write_mails,
+    write_webhooks, End, Hook, Notify, Test,
 };
 pub use notify_cfg::{notify_window, take_clicks, test as test_notify, test_mail, Event, HookCfg, MailCfg, NotifyCfg, DONE_FAILED};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
