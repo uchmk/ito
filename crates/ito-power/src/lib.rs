@@ -3,6 +3,7 @@
 //! - [`Awake::hold`]: keep the PC from sleeping while a job runs (a guard; drop it to let the PC sleep).
 //! - [`wake_at`]: wake the PC for a time, or say [`WhyNot`] it cannot (a handle; drop it to cancel).
 //! - [`sleep_after`]: how long the PC idles before it sleeps, on the current power source.
+//! - [`on_ac`], [`network_up`], [`idle_for`]: probes for "run only when ..." conditions; `None` when the system cannot say.
 //!
 //! Windows uses power requests, a resume timer and the active power plan. macOS holds with `caffeinate`
 //! and Linux with `systemd-inhibit` (both a child process killed on drop); neither can wake the PC, so
@@ -90,9 +91,36 @@ pub fn sleep_after() -> Option<Duration> {
     sys::sleep_after()
 }
 
+/// Whether the PC runs on mains power (`Some(false)`: on battery). A PC without a battery is on mains.
+/// `None` when this is not known.
+pub fn on_ac() -> Option<bool> {
+    sys::on_ac()
+}
+
+/// Whether a network connection is up (a local network or the internet; loopback does not count).
+/// `None` when this is not known.
+pub fn network_up() -> Option<bool> {
+    sys::network_up()
+}
+
+/// How long the user has not touched the keyboard or mouse. `None` when this is not known (Linux
+/// needs `xprintidle`).
+pub fn idle_for() -> Option<Duration> {
+    sys::idle_for()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_probes_answer_or_say_unknown_without_panicking() {
+        let _ = on_ac();
+        let _ = network_up();
+        if let Some(d) = idle_for() {
+            assert!(d < Duration::from_secs(60 * 60 * 24 * 365), "{d:?}");
+        }
+    }
 
     #[test]
     fn a_time_in_the_past_cannot_be_woken_for() {

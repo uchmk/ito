@@ -5,13 +5,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::core::{GUID, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL};
+use windows::Win32::Networking::NetworkListManager::{INetworkListManager, NetworkListManager};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 use windows::Win32::System::Power::{
     GetSystemPowerStatus, PowerClearRequest, PowerCreateRequest, PowerGetActiveScheme, PowerReadACValueIndex, PowerReadDCValueIndex,
     PowerRequestSystemRequired, PowerSetRequest, SYSTEM_POWER_STATUS,
 };
+use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Threading::{
     CreateWaitableTimerW, SetWaitableTimer, POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 
 use crate::WhyNot;
 
@@ -131,5 +135,40 @@ pub fn sleep_after() -> Option<Duration> {
     match plan_value(&STANDBYIDLE, on_battery()) {
         Some(0) | None => None,
         Some(s) => Some(Duration::from_secs(s as u64)),
+    }
+}
+
+pub fn on_ac() -> Option<bool> {
+    let mut st = SYSTEM_POWER_STATUS::default();
+    // SAFETY: `st` is a valid out parameter.
+    unsafe { GetSystemPowerStatus(&mut st).ok()? };
+    match st.ACLineStatus {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+pub fn network_up() -> Option<bool> {
+    // The Network List Manager: any local network or internet connectivity, IPv4 or IPv6.
+    const LOCAL_OR_INTERNET: i32 = 0x20 | 0x40 | 0x200 | 0x400;
+    // SAFETY: COM calls on this thread; an apartment already set up in another mode is fine to use.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let nlm: INetworkListManager = CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL).ok()?;
+        let flags = nlm.GetConnectivity().ok()?.0;
+        Some(flags & LOCAL_OR_INTERNET != 0)
+    }
+}
+
+pub fn idle_for() -> Option<Duration> {
+    let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    // SAFETY: `info` is a valid out parameter with its size set.
+    unsafe {
+        if !GetLastInputInfo(&mut info).as_bool() {
+            return None;
+        }
+        // Both are 32-bit millisecond ticks that wrap together (about every 49 days).
+        Some(Duration::from_millis(GetTickCount().wrapping_sub(info.dwTime) as u64))
     }
 }

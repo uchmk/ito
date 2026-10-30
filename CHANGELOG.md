@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.139.0] - 2026-10-31
+
+### 追加
+- `ito-power`: 実行条件の調べ方 `on_ac()`（電源につながっているか。電池のない PC は `true`）・`network_up()`（ローカルかインターネットにつながっているか。ループバックは数えない）・`idle_for()`（キーボード・マウスを触っていない時間）。分からないときは `None`。
+  Windows は `GetSystemPowerStatus`・Network List Manager・`GetLastInputInfo`、macOS は `pmset`・`route`・`ioreg`、Linux は `/sys/class`（無操作時間は `xprintidle` があれば X11 のみ）（uchmk/ito#87）。
+
 ## [0.138.0] - 2026-10-31
 
 ### 追加
