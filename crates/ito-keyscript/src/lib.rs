@@ -60,7 +60,8 @@ pub enum Step {
     /// halfway meant leaving the `q` off and stopping the app from outside (#230).
     State(String),
     /// `<Quit>`: end the app whatever is open, as the window's close button
-    /// would. `q` is a key like any other, and the compare view, the pane
+    /// would. **A script that opens a window must end with it**: without a
+    /// `<Quit>` the last step ends the script but not the app. `q` is a key like any other, and the compare view, the pane
     /// and a prompt each take it for something else, so a script ending in
     /// `q` there never ended (#236).
     Quit,
@@ -152,6 +153,8 @@ pub enum Step {
     /// `<Clipboard:text>`: the last text the app copied is exactly this. Read from egui's
     /// output, so no OS clipboard is touched.
     Clipboard(String),
+    /// `<ClipboardHas:text>`: the last text the app copied contains this (a path or a state inside a longer line).
+    ClipboardHas(String),
 }
 
 /// `Step::Wheel`'s modifiers: these bits.
@@ -211,6 +214,7 @@ pub enum Press {
         present: bool,
     },
     Clipboard(String),
+    ClipboardHas(String),
 }
 
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
@@ -238,6 +242,7 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::ClickText { right, text } => Some(Press::ClickText { right: *right, text: text.clone() }),
         Step::Assert { text, present } => Some(Press::Assert { text: text.clone(), present: *present }),
         Step::Clipboard(text) => Some(Press::Clipboard(text.clone())),
+        Step::ClipboardHas(text) => Some(Press::ClipboardHas(text.clone())),
         Step::Wait(d) => Some(Press::Wait(*d)),
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
@@ -280,6 +285,7 @@ pub fn label(step: &Step) -> String {
             }
         }
         Step::Clipboard(text) => format!("<Clipboard:{}>", paste_text_escape(text)),
+        Step::ClipboardHas(text) => format!("<ClipboardHas:{}>", paste_text_escape(text)),
     }
 }
 
@@ -523,6 +529,15 @@ pub fn check_clipboard(ctx: &egui::Context, expect: &str) -> Result<(), String> 
     }
 }
 
+/// `<ClipboardHas:text>`: the last text the app copied contains `part`.
+pub fn check_clipboard_has(ctx: &egui::Context, part: &str) -> Result<(), String> {
+    match ctx.with_plugin::<Tap, _>(|t| t.copied.clone()).flatten() {
+        Some(got) if got.contains(part) => Ok(()),
+        Some(got) => Err(format!("copied `{}`, which has no `{}`", paste_text_escape(&got), paste_text_escape(part))),
+        None => Err(format!("nothing copied yet, not `{}`", paste_text_escape(part))),
+    }
+}
+
 /// How long nothing may be pressed, past any `<Wait:N>` due, before a script
 /// counts as stuck. A key waits at most five seconds for things to settle, so
 /// this is only reached when the frame loop itself has stopped running.
@@ -627,7 +642,7 @@ fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
 fn paste_text(token: &str, what: &str) -> Result<String, String> {
     let noun = match what {
         "Paste" => "a paste",
-        "Click" | "RClick" | "Assert" | "Clipboard" => "a text to look for",
+        "Click" | "RClick" | "Assert" | "Clipboard" | "ClipboardHas" => "a text to look for",
         _ => "an input method step",
     };
     let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
@@ -774,6 +789,7 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 Step::Assert { text: paste_text(&token, "Assert")?, present: !negated }
             }
             None if token.starts_with("<Clipboard:") => Step::Clipboard(paste_text(token, "Clipboard")?),
+            None if token.starts_with("<ClipboardHas:") => Step::ClipboardHas(paste_text(token, "ClipboardHas")?),
             None if read.is_some() => {
                 let (tag, noun) = read.copied().unwrap_or_else(|| unreachable!());
                 Step::Read { tag: tag.to_owned(), name: named(token, tag, noun)? }
@@ -1020,7 +1036,8 @@ impl Runner {
             .unwrap_or_else(|| PathBuf::from("."));
         // The first frames lay the window out; a key before them can land
         // before the panes exist.
-        let reads_window = steps.iter().any(|s| matches!(s, Step::ClickText { .. } | Step::Assert { .. } | Step::Clipboard(_)));
+        let reads_window =
+            steps.iter().any(|s| matches!(s, Step::ClickText { .. } | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_)));
         Self {
             reads_window,
             deadline: None,
@@ -1154,6 +1171,10 @@ impl Runner {
                 Err(why) => return self.retry(step, why, now),
             },
             Press::Clipboard(text) => match check_clipboard(ctx, &text) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::ClipboardHas(text) => match check_clipboard_has(ctx, &text) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
@@ -1571,6 +1592,14 @@ mod tests {
         assert_eq!((r.left(), r.running(), step(&mut r)), (2, false, None));
         let mut r = Runner::new(parse("j").unwrap(), None);
         assert_eq!((step(&mut r), step(&mut r), r.running()), (None, Some(Do::Done), false));
+    }
+
+    #[test]
+    fn clipboard_has_parses_and_prints_back() {
+        let steps = parse("<ClipboardHas:a/b>").unwrap();
+        assert_eq!(steps, vec![Step::ClipboardHas("a/b".into())]);
+        assert_eq!(parse(&label(&steps[0])).unwrap(), steps);
+        assert!(matches!(press(&steps[0]), Some(Press::ClipboardHas(_))));
     }
 
     /// #98: the steps that read the window parse and print back.

@@ -112,7 +112,11 @@ pub fn badge_color(state: State) -> [u8; 3] {
         State::Done => [30, 140, 60],
         State::Running | State::Focused => [40, 100, 200],
         State::Selected => [40, 100, 200],
-        State::Disabled => [110, 110, 110],
+        State::Disabled | State::NotRun | State::Skipped => [110, 110, 110],
+        State::Waiting => [80, 110, 150],
+        State::Held => [120, 80, 170],
+        State::Missed => [214, 140, 0],
+        State::Blocked => [160, 60, 60],
     }
 }
 
@@ -155,6 +159,17 @@ fn symbol(state: State, u: f32, v: f32) -> bool {
         State::Running => [-0.55f32, 0.0, 0.55].iter().any(|&x| ((u - x).powi(2) + v * v).sqrt() < t * 1.15),
         State::Disabled => seg(u, v, (-0.5, 0.0), (0.5, 0.0), t),
         State::Selected => (u * u + v * v).sqrt() < 0.32,
+        State::Waiting => (0.25..0.5).contains(&(u * u + v * v).sqrt()),
+        State::Held => seg(u, v, (-0.25, -0.45), (-0.25, 0.45), t) || seg(u, v, (0.25, -0.45), (0.25, 0.45), t),
+        State::Skipped => {
+            seg(u, v, (-0.5, -0.4), (-0.1, 0.0), t * 0.9)
+                || seg(u, v, (-0.1, 0.0), (-0.5, 0.4), t * 0.9)
+                || seg(u, v, (0.0, -0.4), (0.4, 0.0), t * 0.9)
+                || seg(u, v, (0.4, 0.0), (0.0, 0.4), t * 0.9)
+        }
+        State::Missed => seg(u, v, (0.0, -0.5), (0.0, 0.05), t) || seg(u, v, (0.0, 0.05), (0.4, 0.05), t),
+        State::NotRun => (u * u + v * v).sqrt() < 0.18,
+        State::Blocked => (0.38..0.55).contains(&(u * u + v * v).sqrt()) || seg(u, v, (-0.4, 0.4), (0.4, -0.4), t * 0.8),
         State::Focused => in_triangle((u, v), (-0.3, -0.5), (-0.3, 0.5), (0.5, 0.0)),
         State::Conflict => {
             seg(u, v, (-0.45, -0.18), (0.45, -0.18), t * 0.8)
@@ -197,8 +212,22 @@ mod tests {
         Icon::new(n, n, vec![90; (n * n * 4) as usize]).unwrap()
     }
 
-    const ALL: [State; 8] =
-        [State::Selected, State::Focused, State::Conflict, State::Error, State::Warning, State::Done, State::Running, State::Disabled];
+    const ALL: [State; 14] = [
+        State::Selected,
+        State::Focused,
+        State::Conflict,
+        State::Error,
+        State::Warning,
+        State::Done,
+        State::Running,
+        State::Disabled,
+        State::Waiting,
+        State::Held,
+        State::Skipped,
+        State::Missed,
+        State::NotRun,
+        State::Blocked,
+    ];
 
     #[test]
     fn an_icon_needs_the_right_number_of_bytes() {

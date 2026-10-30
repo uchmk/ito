@@ -3,6 +3,34 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.156.0] - 2026-10-31
+
+### 追加
+
+- `ito-a11y::State` に予定の仕事の 6 つの状態を足した（uchmk/ito#75）。色だけに頼らず、記号と読み上げの名前を持つ。
+
+  | 状態 | 記号 | en | ja |
+  |---|---|---|---|
+  | `Waiting` | ○ | waiting | 実行待ち |
+  | `Held` | ‖ | held | 保留 |
+  | `Skipped` | » | skipped | スキップ |
+  | `Missed` | ↷ | missed | 時刻を過ぎた |
+  | `NotRun` | · | not run | 未実行 |
+  | `Blocked` | ⊘ | blocked | 未確認で止めた |
+
+  「異常ありで実行中」は `State::spoken(text, &[Running, Error], lang)` で言える。`ito-tray` のバッジも 6 つ分の色と白い記号を持つ。
+- `ito-keyscript`: 台本の `<ClipboardHas:文字>`（`Step::ClipboardHas`・`Press::ClipboardHas`・`check_clipboard_has`）。最後にコピーした文字が、この文字を**含む**。
+  状態やパスを含む長い行に使う（`<Clipboard:>` は今までどおり完全一致）。tsumugi-d6 の依頼（#98）。
+
+### 変更
+
+- `ito-keyscript`: `<Quit>` の説明に、窓を開く台本は `<Quit>` で終えること（無いと最後の手順のあとも窓が残る）を書いた。
+
+### 使う側がやること
+
+- `ito_a11y::State` を `match` で全部書いているなら、6 つの腕を足す（`_ =>` で受けているなら何もしない）。色を付けるアプリは、新しい状態の色も決める（`ito-tray::badge_color` が一例）。
+- 自前の台本のループで `ito_keyscript::Press` を `match` しているなら、`Press::ClipboardHas(text)` の腕を足して `check_clipboard_has(ctx, &text)` を呼ぶ（`Runner` は何もしなくてよい）。
+
 ## [0.155.0] - 2026-10-31
 
 ### 追加

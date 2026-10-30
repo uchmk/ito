@@ -20,7 +20,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON））。アプリ自前の短い音を頼まれた瞬間に鳴らす `player`（Windows・macOS のみ、Linux は `Err`） | yagura、fude（tsumugi も載せ替える） |
 | `ito-export` | SVG の文字列のページを PNG・複数ページの PDF（文字は文字のまま）・印刷にする（resvg・svg2pdf、純 Rust。止まるのでワーカースレッドから） | fude（kura・michi も） |
 | `ito-ime` | 自前で描く入力行の入力メソッド（候補窓の位置・縦書きは列の右隣・変換中の文字を覚えて下線で描く・確定・変換中のキーを奪わない）。`ito-keyscript` の `<Preedit:>`・`<Commit:>` と組む | fude、ito-pane |
-| `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`・`<Size:WxH>`・`<Theme:名前>`・`<Lang:ja>`・`<Click:文字>`・`<Assert:文字>`・`<Clipboard:文字>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
+| `ito-keyscript` | `--keys` の台本（`<Wait>`・`<Now>`・`<Shot>`・`<State>`・`<Click>`・`<Wheel>`・`<Paste>`・`<Key:>`・`<Size:WxH>`・`<Theme:名前>`・`<Lang:ja>`・`<Click:文字>`・`<Assert:文字>`・`<Clipboard:文字>`・`<ClipboardHas:文字>`…）の解析（アプリ固有の語は `Dialect`）、egui の入力への流し込み（`Runner`、または自前のループ向けの `Press`）、終わり方の報告・panic の報告・PNG の保存 | yagura・kura（tsumugi も載せ替える） |
 | `ito-gpu` | wgpu のバックエンドの選び方（Windows は GL を先に）と `options`。`ito-pane::gpu` はこれの再エクスポート | yagura、kura |
 | `ito-proc` | 止められる子プロセス（stdout/stderr をスレッドで読む、stderr は `\r`・`\n` で 1 行ずつ渡す、止めると子のプロセスの木ごと殺して `Stopped`。1 行ずつ渡す `run_lines`。Unix はプロセスグループ、Windows は `taskkill /T`。別の Windows アカウントで動かす `run_lines_as`（`Logon`、`CreateProcessWithLogonW`、子ごとのジョブ。ほかは `Unsupported`）） | michi（minato も）、koyomi |
 | `ito-power` | 電源と眠り（`Awake::hold` で動かしている間 PC を眠らせない・`wake_at` で予定の時刻に起こす／起こせない理由 `WhyNot`・`sleep_after` で何分で眠る設定か。Windows は電源要求・再開タイマー・電源プラン。macOS は `caffeinate`、Linux は `systemd-inhibit`（起こすのは未対応）） | koyomi（yagura・kura も） |
@@ -37,7 +37,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-glossary` | 専門語の表（やさしい言い方・ホバーの説明・日英）、`easy` の表示、表の検査 `check`、点線のホバー（機能 `egui`）。語はアプリの表 | michi、tsumugi |
 | `ito-syntax` | コードの色分けの種類（path と行 → トークンの種類のバイト範囲。syntect の純 Rust + two-face、文法は 1 プロセスで 1 回。`Stream` が行をまたぐ状態を持つ） | michi、kura |
 | `ito-guide` | 初回・困りごとのガイド（Problem / Step、OS ごとの `Fix`、開閉の `Guide`、キーを取らない egui のパネル `show`（機能 `egui`）、`Level`） | michi |
-| `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前）と、スクリーンリーダー向けの `say`・`announce`（機能 `egui`）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
+| `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前。予定の仕事の `Waiting`・`Held`・`Skipped`・`Missed`・`NotRun`・`Blocked` も）と、スクリーンリーダー向けの `say`・`announce`（機能 `egui`）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
 | `ito-graph` | コミットの樹形図を行ごとに並べる（レーン・辺・ブランチの色・曲線）と、egui の描画（機能 `egui`）。Git は知らない | michi |
 | `ito-bugreport` | 不具合の報告（アプリの issue form に、版・OS・アプリが知っていることを埋めた URL。F12 から開く。全アプリで同じ行・同じ順） | kura（yagura・tsumugi は載せる予定） |
 | `ito-diff` | 2 つの文字列の行の差分（`diff_lines`・畳む `fold`・`counts`。純 Rust の `similar`。Git は知らない）。`ito-confirm` の `Question::diff` が描く | yagura、kura、koyomi |

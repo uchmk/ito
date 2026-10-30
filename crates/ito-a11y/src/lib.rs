@@ -25,6 +25,18 @@ pub enum State {
     Done,
     Running,
     Disabled,
+    /// Will start when its time, file or other work comes.
+    Waiting,
+    /// Stopped by a person until released.
+    Held,
+    /// Passed on purpose (overlap, "skip next", a person pressed skip).
+    Skipped,
+    /// The planned time went by while nothing could run (the PC was off or asleep).
+    Missed,
+    /// The flow did not reach it (after an upstream error, say). Not [`State::Disabled`], which is "unavailable".
+    NotRun,
+    /// Not run because something it needs is not approved yet.
+    Blocked,
 }
 
 impl State {
@@ -40,6 +52,12 @@ impl State {
             State::Done => "✔",
             State::Running => "…",
             State::Disabled => "–",
+            State::Waiting => "○",
+            State::Held => "‖",
+            State::Skipped => "»",
+            State::Missed => "↷",
+            State::NotRun => "·",
+            State::Blocked => "⊘",
         }
     }
 
@@ -63,6 +81,18 @@ impl State {
             (State::Running, true) => "実行中",
             (State::Disabled, false) => "unavailable",
             (State::Disabled, true) => "使えません",
+            (State::Waiting, false) => "waiting",
+            (State::Waiting, true) => "実行待ち",
+            (State::Held, false) => "held",
+            (State::Held, true) => "保留",
+            (State::Skipped, false) => "skipped",
+            (State::Skipped, true) => "スキップ",
+            (State::Missed, false) => "missed",
+            (State::Missed, true) => "時刻を過ぎた",
+            (State::NotRun, false) => "not run",
+            (State::NotRun, true) => "未実行",
+            (State::Blocked, false) => "blocked",
+            (State::Blocked, true) => "未確認で止めた",
         }
     }
 
@@ -122,8 +152,22 @@ pub fn announce(ui: &mut egui::Ui, message: &str) {
 mod tests {
     use super::*;
 
-    const ALL: [State; 8] =
-        [State::Selected, State::Focused, State::Conflict, State::Error, State::Warning, State::Done, State::Running, State::Disabled];
+    const ALL: [State; 14] = [
+        State::Selected,
+        State::Focused,
+        State::Conflict,
+        State::Error,
+        State::Warning,
+        State::Done,
+        State::Running,
+        State::Disabled,
+        State::Waiting,
+        State::Held,
+        State::Skipped,
+        State::Missed,
+        State::NotRun,
+        State::Blocked,
+    ];
 
     #[test]
     fn every_state_has_its_own_mark_and_its_names() {
@@ -144,6 +188,8 @@ mod tests {
         assert_eq!(State::spoken("main.rs", &[State::Selected, State::Conflict], "en"), "main.rs, selected, conflict");
         assert_eq!(State::spoken("main.rs", &[State::Error], "ja"), "main.rs, エラー");
         assert_eq!(State::spoken("x", &[], "en"), "x");
+        assert_eq!(State::spoken("月次", &[State::Running, State::Error], "ja"), "月次, 実行中, エラー");
+        assert_eq!(State::spoken("月次", &[State::Missed], "ja"), "月次, 時刻を過ぎた");
     }
 
     #[cfg(feature = "egui")]
