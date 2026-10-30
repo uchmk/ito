@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.148.0] - 2026-10-31
+
+### 追加
+
+- `ito-common::text`: 設定に書いた時間の長さを読む `parse_duration("30m" | "1h30m" | "90s") -> Result<u64, String>`（秒。単位は h・m・s を順に 1 回ずつ、大文字小文字と前後の空白は無視。数字だけ・空・順の違い・桁あふれは、書き方 `30m・1h30m・90s のように書く` を添えたエラー。0 は読めるので、0 を断る側が自分で見る）（uchmk/ito#76）。
+- `ito-common::text::duration_text(secs)`: `parse_duration` が同じ秒に読み戻す一番短い文字（`1h30m`、`0s`）。
+- `ito-common::text::duration_words(Duration, lang)`: 言語に合わせた時間の文字（ja: `12秒`・`41分`・`1時間5分`、ほかは英語: `12 s`・`41 min`・`1 h 5 min`）。大きい方の 2 つの単位まで、2 つ目が 0 なら出さない、日が最大（uchmk/ito#88）。`lang` は `common.toml` の言語の符号（`ja-JP` も可）。
+
+### 使う側がやること
+
+- koyomi: `koyomi-core/src/duration.rs` を `parse_duration`・`duration_text` に、`show.rs` の時間を `duration_words` に載せ替える。
+
 ## [0.147.0] - 2026-10-31
 
 ### 追加

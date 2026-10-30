@@ -109,6 +109,88 @@ pub fn duration_short(d: Duration) -> String {
     }
 }
 
+/// A length of time written in a setting (`"30m"`, `"1h30m"`, `"90s"`) as seconds. Units `h`, `m`, `s`,
+/// each at most once and in that order, every number with its unit (case and surrounding blanks do not
+/// matter). A bare number is refused (seconds or minutes? a wrong guess hangs a night job); so is an empty
+/// text. Zero parses (`"0s"`): a caller that cannot take it checks. The error names the shape to write,
+/// to show after the field's name.
+pub fn parse_duration(text: &str) -> Result<u64, String> {
+    const SHAPE: &str = "30m・1h30m・90s のように書く";
+    let t = text.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        return Err(format!("空です。{SHAPE}"));
+    }
+    let (mut total, mut rest, mut last) = (0u64, t.as_str(), 0usize);
+    while !rest.is_empty() {
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(unit) = rest[digits..].chars().next() else {
+            return Err(format!("`{text}` は単位がありません。{SHAPE}"));
+        };
+        let (rank, mul) = match unit {
+            'h' => (1, 3600),
+            'm' => (2, 60),
+            's' => (3, 1),
+            _ => return Err(format!("`{text}` を読めません。{SHAPE}")),
+        };
+        if digits == 0 {
+            return Err(format!("`{text}` を読めません。{SHAPE}"));
+        }
+        if rank <= last {
+            return Err(format!("`{text}` は単位が h・m・s の順に 1 回ずつではありません。{SHAPE}"));
+        }
+        let n: u64 = rest[..digits].parse().map_err(|_| format!("`{text}` は大きすぎます。{SHAPE}"))?;
+        total = n.checked_mul(mul).and_then(|v| total.checked_add(v)).ok_or_else(|| format!("`{text}` は大きすぎます。{SHAPE}"))?;
+        last = rank;
+        rest = &rest[digits + 1..];
+    }
+    Ok(total)
+}
+
+/// The shortest text [`parse_duration`] reads back to the same seconds: `1h30m`, `90s` is `1m30s`, `0s`.
+pub fn duration_text(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    let mut out = String::new();
+    for (n, unit) in [(h, 'h'), (m, 'm'), (s, 's')] {
+        if n > 0 {
+            out.push_str(&format!("{n}{unit}"));
+        }
+    }
+    if out.is_empty() {
+        out.push_str("0s");
+    }
+    out
+}
+
+/// A length of time in words for `lang` (`ja` or `ja-JP`: `12秒`, `41分`, `1時間5分`; anything else English:
+/// `12 s`, `41 min`, `1 h 5 min`). The two largest units, the rest cut off; a second unit of zero is left
+/// out. Days are the largest unit, so 100 hours is `4 d 4 h`.
+pub fn duration_words(d: Duration, lang: &str) -> String {
+    let secs = d.as_secs();
+    let parts = [(secs / 86400, 0), (secs / 3600 % 24, 1), (secs / 60 % 60, 2), (secs % 60, 3)];
+    let ja = lang.to_ascii_lowercase().starts_with("ja");
+    let word = |unit: usize| match (ja, unit) {
+        (true, 0) => "日",
+        (true, 1) => "時間",
+        (true, 2) => "分",
+        (true, _) => "秒",
+        (false, 0) => " d",
+        (false, 1) => " h",
+        (false, 2) => " min",
+        (false, _) => " s",
+    };
+    let Some(top) = parts.iter().position(|p| p.0 > 0) else {
+        return format!("0{}", word(3));
+    };
+    let mut out = format!("{}{}", parts[top].0, word(top));
+    if let Some(&(n, unit)) = parts.get(top + 1) {
+        if n > 0 {
+            out.push_str(if ja { "" } else { " " });
+            out.push_str(&format!("{n}{}", word(unit)));
+        }
+    }
+    out
+}
+
 /// An uptime in seconds as `3d 4h`, `4h 12m`, `12m 5s`.
 pub fn uptime(secs: u64) -> String {
     let (d, h, m, s) = (secs / 86400, secs / 3600 % 24, secs / 60 % 60, secs % 60);
@@ -124,6 +206,42 @@ pub fn uptime(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_written_length_of_time_is_read_and_refused() {
+        assert_eq!(parse_duration("30m"), Ok(1800));
+        assert_eq!(parse_duration(" 1H30m "), Ok(5400));
+        assert_eq!(parse_duration("90s"), Ok(90));
+        assert_eq!(parse_duration("2h5s"), Ok(7205));
+        assert_eq!(parse_duration("0s"), Ok(0));
+        for bad in ["", "30", "m", "5m1h", "1m1m", "1x", "1h 30m", "-5m", "99999999999999999999s", "18446744073709551615h"] {
+            let e = parse_duration(bad).unwrap_err();
+            assert!(e.contains("30m・1h30m・90s"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn the_text_of_a_length_of_time_reads_back() {
+        for (secs, text) in [(0, "0s"), (45, "45s"), (90, "1m30s"), (3600, "1h"), (5405, "1h30m5s")] {
+            assert_eq!(duration_text(secs), text);
+            assert_eq!(parse_duration(text), Ok(secs));
+        }
+    }
+
+    #[test]
+    fn durations_in_words_keep_two_units() {
+        let d = |s| Duration::from_secs(s);
+        assert_eq!(duration_words(d(12), "ja"), "12秒");
+        assert_eq!(duration_words(d(41 * 60 + 9), "ja-JP"), "41分9秒");
+        assert_eq!(duration_words(d(3900), "ja"), "1時間5分");
+        assert_eq!(duration_words(d(3605), "ja"), "1時間");
+        assert_eq!(duration_words(d(0), "ja"), "0秒");
+        assert_eq!(duration_words(d(12), "en"), "12 s");
+        assert_eq!(duration_words(d(41 * 60), "en"), "41 min");
+        assert_eq!(duration_words(d(3900), "en"), "1 h 5 min");
+        assert_eq!(duration_words(d(100 * 3600), "de"), "4 d 4 h");
+        assert_eq!(duration_words(d(0), "en"), "0 s");
+    }
 
     #[test]
     fn natural_order() {
