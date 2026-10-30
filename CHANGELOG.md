@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.146.0] - 2026-10-31
+
+### 追加
+
+- `ito-mcp`（uchmk/ito#96 の MCP の部分）:
+  - `Tool::destructive()`（閉じる・消す。`annotations.destructiveHint`）と `Tool::needs_confirm()`（アプリの窓で人が確認してから動く。`_meta["ito/needsConfirm"]`）。どちらも `writes()` を含む。
+  - `Opened`: エージェントが開いたものの集合（`insert`・`contains`・`remove`・`check`・`ids`）。閉じるツールが「自分が開いたものだけ」を閉じるのに使う。clone は同じ集合を見る。
+  - `Phase`（`Running`・`Waiting`・`Done`・`Error`、`as_str`・`parse`・`is_finished`）と、上限つきの待ち `wait(timeout, every, check)`（`MAX_WAIT` = 50 秒。1 件ずつ答えるので、長い待ちは呼び直す）、秒の引数 `arg_secs`。
+
+### 使う側がやること
+
+- `Tool { … }` を構造体リテラルで作っていれば、`destructive: false, needs_confirm: false` の 2 欄を足す（`Tool::new` を使っていれば何もしない）。
+- 閉じるツールに `.destructive()`、確認の箱を出すツールに `.needs_confirm()` を付ける。
+
 ## [0.145.0] - 2026-10-31
 
 ### 追加
