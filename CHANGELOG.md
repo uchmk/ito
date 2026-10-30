@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.137.2] - 2026-10-30
+
+### 変更
+- 雛形（`templates/app/CLAUDE.md`）に「ボタンは ito-prefs のものを使う」を追記した（`button`・`button_with` と `Tone`・`seg`・`ito-confirm`。`egui::Button` を自前で作らない）。
+
 ## [0.137.1] - 2026-10-30
 
 ### 修正

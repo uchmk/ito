@@ -24,6 +24,15 @@
 - ログは `.log`。キャッシュ・画像・WebView のデータなど、読み戻さないものは対象外。秘密の鍵は `app_dir` の中で、TOML でなくてよい。
 - 詳しくは ito の `docs/common-spec.md` の「設定の形式は TOML」。
 
+## ボタンは ito-prefs のものを使う
+
+画面のボタンを `egui::Button` で自前に作らない。大きさ・角・フォーカスの輪・テーマの色が画面ごとに変わってしまう。
+
+- ふつうのボタンは `ito_prefs::button(ui, look, "文言") -> bool`。
+- 進める側（主な操作）や、取り返しのつかない操作は `ito_prefs::button_with(ui, look, "文言", Tone::Primary / Tone::Danger) -> Response`（テーマの強調色・エラー色で塗る）。やめるなど静かなものは `Tone::Plain` のまま。
+- 区切りのボタンは `ito_prefs::seg`、確認の箱のボタンは `ito-confirm`（`Question::primary`・`danger`・`keys`）。
+- 一つの行に主なボタンは一つだけ。Esc／Enter が押すものを主にする。
+
 ## 作業ルール
 
 - 返答は日本語。コード・コメント・コミットメッセージは英語。
