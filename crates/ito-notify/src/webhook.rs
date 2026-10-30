@@ -11,6 +11,8 @@ use crate::{is_http, FORMATS};
 /// the app's words for them (tsumugi's `waiting`, kura's `failed`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Place {
+    /// What the app calls it (`accounting`), so a notice can go to some places only. Empty: no name.
+    pub name: String,
     pub url: String,
     pub format: String,
     pub states: Vec<String>,
@@ -79,7 +81,7 @@ pub fn reveal(app: &str, places: &[Place]) -> (Vec<Place>, Vec<String>) {
 }
 
 /// `places` with each http(s) address moved into the store of `app`
-/// (`webhook-1`, `webhook-2`, …, by position) and replaced by its `secret:`
+/// (`webhook-accounting` by its name, else `webhook-1`, `webhook-2`, … by position, see [`secret_name`]) and replaced by its `secret:`
 /// reference, for writing to the file. An address already a reference or
 /// empty stays. The first failure stops it, so nothing is written to a file
 /// that was meant to hold no address. Blocks: call it from a worker thread.
@@ -90,11 +92,22 @@ pub fn conceal(app: &str, places: &[Place]) -> std::io::Result<Vec<Place>> {
             out.push(p.clone());
             continue;
         }
-        let name = format!("webhook-{}", i + 1);
+        let name = secret_name(i, p);
         ito_secret::set(app, &name, p.url.trim())?;
         out.push(Place { url: format!("{SECRET}{name}"), ..p.clone() });
     }
     Ok(out)
+}
+
+/// The name of `p`'s address in the credential store: `webhook-accounting` when it has a name, else
+/// `webhook-1`, `webhook-2`, … by its position `i` (from 0).
+pub fn secret_name(i: usize, p: &Place) -> String {
+    let n: String = p.name.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if n.is_empty() {
+        format!("webhook-{}", i + 1)
+    } else {
+        format!("webhook-{n}")
+    }
 }
 
 /// The places the settings send to: `old`, the one address of before
@@ -288,7 +301,7 @@ mod tests {
         assert_eq!(reference(" secret:webhook-2 "), Some("webhook-2"));
         assert_eq!(reference("secret:"), None);
         assert_eq!(reference("https://x/y"), None);
-        let p = Place { url: "secret:webhook-1".into(), format: "ntfy".into(), states: vec!["done".into()] };
+        let p = Place { url: "secret:webhook-1".into(), format: "ntfy".into(), states: vec!["done".into()], ..Place::default() };
         assert!(p.problems(&["done"]).is_empty());
         assert!(!p.takes("done"), "the reference itself is no address");
         let (_, warnings) = reveal("ito-notify-test-none", std::slice::from_ref(&Place { url: "secret:nope".into(), ..p.clone() }));
@@ -298,7 +311,12 @@ mod tests {
     #[test]
     fn conceal_then_reveal_gives_the_address_back() {
         let app = format!("ito-notify-test-{}", std::process::id());
-        let p = Place { url: "https://hooks.example/T0/secret-token".into(), format: "slack".into(), states: vec!["done".into()] };
+        let p = Place {
+            url: "https://hooks.example/T0/secret-token".into(),
+            format: "slack".into(),
+            states: vec!["done".into()],
+            ..Place::default()
+        };
         let kept = match conceal(&app, std::slice::from_ref(&p)) {
             Err(e) if cfg!(not(windows)) => return eprintln!("skipped: {e}"),
             r => r.unwrap(),
@@ -353,8 +371,17 @@ mod tests {
     }
 
     #[test]
+    fn a_secret_is_named_by_the_place_or_its_position() {
+        let named = Place { name: "accounting".into(), ..Place::default() };
+        assert_eq!(secret_name(4, &named), "webhook-accounting");
+        assert_eq!(secret_name(4, &Place::default()), "webhook-5");
+        assert_eq!(secret_name(0, &Place { name: "a b/c".into(), ..Place::default() }), "webhook-a_b_c");
+    }
+
+    #[test]
     fn a_place_takes_its_states_and_the_old_address_comes_first() {
         let p = |url: &str, states: &[&str]| Place {
+            name: String::new(),
             url: url.into(),
             format: "ntfy".into(),
             states: states.iter().map(|s| (*s).to_owned()).collect(),

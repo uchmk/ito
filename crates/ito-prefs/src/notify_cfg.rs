@@ -40,6 +40,10 @@ pub const DONE_FAILED: [Event; 2] = [
 /// there (`[]`: none; not written: every one, see [`NotifyCfg::check`]).
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HookCfg {
+    /// What the app calls this place, to send a notice to some places only (see [`NotifyCfg::only`]).
+    /// Not written: no name. Two places should not share one ([`NotifyCfg::check`] warns).
+    #[serde(default)]
+    pub name: String,
     #[serde(default)]
     pub url: String,
     #[serde(default = "ntfy")]
@@ -156,7 +160,7 @@ impl NotifyCfg {
         let mut hooks = Vec::new();
         for (i, h) in self.webhooks.iter().enumerate() {
             let states = h.states.clone().unwrap_or_else(all);
-            let mut p = Place { url: h.url.trim().to_owned(), format: h.format.clone(), states };
+            let mut p = Place { name: h.name.trim().to_owned(), url: h.url.trim().to_owned(), format: h.format.clone(), states };
             warnings.extend(p.problems(&known).into_iter().map(|w| format!("{path}: [[notify.webhooks]] {}: {w}", i + 1)));
             if !ito_notify::FORMATS.contains(&p.format.as_str()) {
                 p.format = ntfy();
@@ -164,8 +168,31 @@ impl NotifyCfg {
             p.states.retain(|s| known.contains(&s.as_str()));
             hooks.push(p);
         }
-        let old = Place { url: url.trim().to_owned(), format: self.webhook_format.clone().unwrap_or_else(ntfy), states };
+        let mut seen: Vec<&str> = Vec::new();
+        for (i, p) in hooks.iter().enumerate().filter(|(_, p)| !p.name.is_empty()) {
+            if seen.contains(&p.name.as_str()) {
+                warnings.push(format!("{path}: [[notify.webhooks]] {}: `name` `{}` is used by another place", i + 1, p.name));
+            }
+            seen.push(&p.name);
+        }
+        let old =
+            Place { name: String::new(), url: url.trim().to_owned(), format: self.webhook_format.clone().unwrap_or_else(ntfy), states };
         self.places = webhook::places(old, hooks);
+    }
+
+    /// A copy that tells only the places named in `names` (the sound and the system's notification as
+    /// they are). Call it after [`NotifyCfg::check`]. A name no place has is ignored.
+    pub fn only(&self, names: &[&str]) -> NotifyCfg {
+        NotifyCfg {
+            places: self.places.iter().filter(|p| !p.name.is_empty() && names.contains(&p.name.as_str())).cloned().collect(),
+            ..self.clone()
+        }
+    }
+
+    /// A copy that tells only the places with no name (what a notice with no destination of its own
+    /// goes to). Call it after [`NotifyCfg::check`].
+    pub fn unnamed(&self) -> NotifyCfg {
+        NotifyCfg { places: self.places.iter().filter(|p| p.name.is_empty()).cloned().collect(), ..self.clone() }
     }
 
     /// Read the `secret:` addresses back from the OS credential store of
@@ -259,8 +286,8 @@ impl NotifyCfg {
             return webhook::conceal(app, &now).map(Some);
         }
         if switched {
-            for i in 1..=now.len() {
-                ito_secret::delete(app, &format!("webhook-{i}"))?;
+            for (i, p) in now.iter().enumerate() {
+                ito_secret::delete(app, &webhook::secret_name(i, p))?;
             }
         }
         Ok(Some(now))
@@ -379,6 +406,66 @@ mod tests {
         (n, w)
     }
 
+    #[test]
+    fn places_have_names_and_a_notice_can_go_to_some_only() {
+        let (n, w) = read(
+            "[[notify.webhooks]]
+name = \"accounting\"
+url = \"https://a.example/1\"
+
+             [[notify.webhooks]]
+name = \"ops\"
+url = \"https://a.example/2\"
+
+             [[notify.webhooks]]
+url = \"https://a.example/3\"
+",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        let urls = |n: &NotifyCfg| n.places.iter().map(|p| p.url.rsplit('/').next().unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(urls(&n), ["1", "2", "3"]);
+        assert_eq!(urls(&n.only(&["accounting"])), ["1"]);
+        assert_eq!(urls(&n.only(&["ops", "accounting", "nobody"])), ["1", "2"]);
+        assert!(n.only(&[]).places.is_empty());
+        assert_eq!(urls(&n.unnamed()), ["3"]);
+        assert_eq!(n.only(&["ops"]).system, n.system, "the rest is as it was");
+    }
+
+    #[test]
+    fn two_places_with_one_name_are_warned_of() {
+        let (_, w) = read(
+            "[[notify.webhooks]]
+name = \"a\"
+
+[[notify.webhooks]]
+name = \"a\"
+",
+        );
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("[[notify.webhooks]] 2") && w[0].contains("`a`"), "{w:?}");
+    }
+
+    #[test]
+    fn a_name_survives_the_page_and_the_file() {
+        let (n, _) = read(
+            "[[notify.webhooks]]
+name = \"ops\"
+url = \"https://a.example/2\"
+",
+        );
+        let page = n.page(&DONE_FAILED);
+        assert_eq!(page.hooks[0].name, "ops");
+        assert_eq!(page.hooks[0].place(&["done", "failed"]).name, "ops");
+        let text = crate::notify::write_webhooks("", &n.places, true).unwrap();
+        assert!(
+            text.contains(
+                "name = \"ops\"
+url ="
+            ),
+            "{text}"
+        );
+    }
+
     /// The page shows the file's lists as columns, and writes back only what
     /// was changed, as the file spells it.
     #[test]
@@ -405,7 +492,12 @@ mod tests {
         assert_eq!(was.webhooks_of(&DONE_FAILED, &p), None, "no webhook, none to write");
         p.hooks.push(Hook::new(2));
         p.hooks[0].url = "http://127.0.0.1:8765/hook".into();
-        let place = Place { url: "http://127.0.0.1:8765/hook".into(), format: "ntfy".into(), states: vec!["done".into(), "failed".into()] };
+        let place = Place {
+            url: "http://127.0.0.1:8765/hook".into(),
+            format: "ntfy".into(),
+            states: vec!["done".into(), "failed".into()],
+            ..Place::default()
+        };
         assert_eq!(was.webhooks_of(&DONE_FAILED, &p), Some(vec![place.clone()]));
         let now = NotifyCfg { places: vec![place], ..was };
         assert_eq!(now.page(&DONE_FAILED).hooks, p.hooks, "and back");

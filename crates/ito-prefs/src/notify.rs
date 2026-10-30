@@ -48,6 +48,8 @@ impl Notify {
 /// it is told of.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hook {
+    /// The place's name (not edited on the page; kept so writing it back does not lose it).
+    pub name: String,
     pub url: String,
     /// One of [`FORMATS`].
     pub format: String,
@@ -59,7 +61,12 @@ impl Hook {
     /// A hook just added: ntfy, told of every event (a row for it when there
     /// are `ends` of more than one).
     pub fn new(ends: usize) -> Hook {
-        Hook { url: String::new(), format: "ntfy".to_owned(), on: if ends > 1 { vec![true; ends] } else { Vec::new() } }
+        Hook {
+            name: String::new(),
+            url: String::new(),
+            format: "ntfy".to_owned(),
+            on: if ends > 1 { vec![true; ends] } else { Vec::new() },
+        }
     }
 
     /// The place it is, `events` being the app's words for its [`End`]s in
@@ -71,14 +78,14 @@ impl Hook {
             .filter(|(k, _)| self.on.is_empty() || self.on.get(*k).copied().unwrap_or(false))
             .map(|(_, e)| (*e).to_owned())
             .collect();
-        Place { url: self.url.clone(), format: self.format.clone(), states }
+        Place { name: self.name.clone(), url: self.url.clone(), format: self.format.clone(), states }
     }
 
     /// The hook of the place `p`: with a switch per event when `rows`, else
     /// told of every event.
     pub fn of(p: &Place, events: &[&str], rows: bool) -> Hook {
         let on = if rows { events.iter().map(|e| p.states.iter().any(|s| s == e)).collect() } else { Vec::new() };
-        Hook { url: p.url.clone(), format: p.format.clone(), on }
+        Hook { name: p.name.clone(), url: p.url.clone(), format: p.format.clone(), on }
     }
 }
 
@@ -115,7 +122,12 @@ pub fn write_webhooks(text: &str, places: &[Place], states: bool) -> Result<Stri
     let blocks: Vec<Vec<(&str, String)>> = places
         .iter()
         .map(|p| {
-            let mut b = vec![("url", quote(&p.url)), ("format", quote(&p.format))];
+            let mut b = Vec::new();
+            if !p.name.is_empty() {
+                b.push(("name", quote(&p.name)));
+            }
+            b.push(("url", quote(&p.url)));
+            b.push(("format", quote(&p.format)));
             if states {
                 b.push(("states", quote_list(&p.states)));
             }
@@ -371,6 +383,7 @@ mod tests {
     /// `hooks` webhooks, each with a switch per event when `rows`.
     fn notify(ends: usize, hooks: usize, rows: bool) -> Notify {
         let hook = |k: usize| Hook {
+            name: String::new(),
             url: format!("https://ntfy.sh/{k}"),
             format: "ntfy".to_owned(),
             on: if rows { vec![true; ends] } else { Vec::new() },
@@ -519,7 +532,7 @@ mod tests {
     #[test]
     fn a_hook_is_its_place_and_back() {
         let events = ["waiting", "error", "done"];
-        let some = Hook { url: "https://ntfy.sh/x".into(), format: "discord".into(), on: vec![true, false, true] };
+        let some = Hook { name: "x".into(), url: "https://ntfy.sh/x".into(), format: "discord".into(), on: vec![true, false, true] };
         let p = some.place(&events);
         assert_eq!(p.states, ["waiting", "done"]);
         assert_eq!(Hook::of(&p, &events, true), some);
@@ -533,6 +546,7 @@ mod tests {
     #[test]
     fn the_webhooks_are_written_as_tables_and_the_old_address_goes() {
         let place = |url: &str, format: &str, states: &[&str]| Place {
+            name: String::new(),
             url: url.into(),
             format: format.into(),
             states: states.iter().map(|s| (*s).to_owned()).collect(),

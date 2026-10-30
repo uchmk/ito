@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.135.0] - 2026-10-30
+
+### 追加
+- 通知先（`[[notify.webhooks]]`）に名前（`name`）を付けられる（uchmk/ito#79、koyomi の依頼）。アプリが 1 つの通知を一部の通知先だけに送れる。
+  - `HookCfg`・`ito_notify::webhook::Place`・設定画面の `Hook` に `name: String`（書かなければ空 = 名前なし）。設定画面の書き戻し（`write_webhooks`）は、名前があれば `name = "…"` を書く。
+  - `NotifyCfg::check` は、同じ名前の通知先が 2 つあれば警告する。
+  - `NotifyCfg::only(&["accounting"])` は、その名前の通知先だけに送る写しを返す。`NotifyCfg::unnamed()` は名前のない通知先だけの写し。どちらも `check` のあとに呼ぶ。名前のない通知先をどう扱うかはアプリが決める。
+  - `webhook::secret_name(i, &place)`: 資格情報ストアの名前。名前があれば `webhook-accounting`、なければ今までどおり `webhook-1`（位置）。`conceal` と、隠すのをやめるときの削除がこれを使う。
+
+### 変更
+- 使う側がやること: `Place { … }`・`Hook { … }` を欄ごとに書いているところに `name` を足す（`Place` は `..Place::default()` でもよい）。名前を書かないアプリの動きは変わらない。
+
 ## [0.134.1] - 2026-10-30
 
 ### 修正
