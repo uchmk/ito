@@ -135,6 +135,23 @@ pub enum Step {
     Theme(String),
     /// `<Lang:ja>`: likewise for the language (`en`, `ja`, ...).
     Lang(String),
+    /// `<Click:Copy>`, `<RClick:Copy>`: the widget whose label is that text (the
+    /// exact label, else the one label that contains it), clicked at its centre.
+    /// Read from egui's AccessKit tree, so a popup that has just opened can be
+    /// clicked by what it says. Missing or ambiguous text fails the run (#98).
+    ClickText {
+        right: bool,
+        text: String,
+    },
+    /// `<Assert:text>` / `<Assert:!text>`: some label or value in the window
+    /// contains the text (or none does). Waits a few seconds for it, then fails the run.
+    Assert {
+        text: String,
+        present: bool,
+    },
+    /// `<Clipboard:text>`: the last text the app copied is exactly this. Read from egui's
+    /// output, so no OS clipboard is touched.
+    Clipboard(String),
 }
 
 /// `Step::Wheel`'s modifiers: these bits.
@@ -184,6 +201,16 @@ pub enum Press {
     },
     Theme(String),
     Lang(String),
+    /// Steps that read the window's tree or the last copy: see [`Tree`], [`Step::ClickText`].
+    ClickText {
+        right: bool,
+        text: String,
+    },
+    Assert {
+        text: String,
+        present: bool,
+    },
+    Clipboard(String),
 }
 
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
@@ -208,6 +235,9 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Size { w, h } => Some(Press::Size { w: *w, h: *h }),
         Step::Theme(name) => Some(Press::Theme(name.clone())),
         Step::Lang(code) => Some(Press::Lang(code.clone())),
+        Step::ClickText { right, text } => Some(Press::ClickText { right: *right, text: text.clone() }),
+        Step::Assert { text, present } => Some(Press::Assert { text: text.clone(), present: *present }),
+        Step::Clipboard(text) => Some(Press::Clipboard(text.clone())),
         Step::Wait(d) => Some(Press::Wait(*d)),
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
@@ -240,6 +270,16 @@ pub fn label(step: &Step) -> String {
         Step::Size { w, h } => format!("<Size:{w}x{h}>"),
         Step::Theme(name) => format!("<Theme:{name}>"),
         Step::Lang(code) => format!("<Lang:{code}>"),
+        Step::ClickText { right, text } => format!("<{}Click:{}>", if *right { "R" } else { "" }, paste_text_escape(text)),
+        Step::Assert { text, present } => {
+            let text = paste_text_escape(text);
+            match (present, text.strip_prefix('!')) {
+                (false, _) => format!("<Assert:!{text}>"),
+                (true, Some(rest)) => format!("<Assert:\\x21{rest}>"),
+                (true, None) => format!("<Assert:{text}>"),
+            }
+        }
+        Step::Clipboard(text) => format!("<Clipboard:{}>", paste_text_escape(text)),
     }
 }
 
@@ -301,7 +341,12 @@ fn pointer(token: &str) -> Option<Result<Step, String>> {
     Some(match name {
         "Click" | "RClick" => {
             let (mods, place) = held_prefix(arg);
-            at(place).map(|at| Step::Click { right: name == "RClick", mods, at }).ok_or_else(bad)
+            // Only digits, `.` and `,` is a place (a mistyped one keeps the place error); anything else names a widget.
+            if !place.is_empty() && place.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') {
+                at(place).map(|at| Step::Click { right: name == "RClick", mods, at }).ok_or_else(bad)
+            } else {
+                paste_text(token, name).map(|text| Step::ClickText { right: name == "RClick", text })
+            }
         }
         "Hover" => at(arg).map(|at| Step::Hover { at }).ok_or_else(bad),
         "Wheel" => arg
@@ -372,6 +417,112 @@ pub fn commit_event(text: &str) -> egui::Event {
     egui::Event::Ime(egui::ImeEvent::Commit(text.to_owned()))
 }
 
+/// How long `<Click:text>` and `<Assert:text>` keep looking for the text before the run fails: a popup
+/// opens a frame or two after the click that asked for it.
+const TEXT_WAIT: Duration = Duration::from_secs(3);
+
+/// A labelled thing in the window, as egui's AccessKit tree names it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Item {
+    /// Its label, or its value (a text field's contents).
+    pub text: String,
+    /// Where it is, in points.
+    pub rect: egui::Rect,
+    pub disabled: bool,
+}
+
+/// What [`observe`] collects after each pass.
+#[derive(Default)]
+struct Tap {
+    items: Vec<Item>,
+    copied: Option<String>,
+}
+
+impl egui::Plugin for Tap {
+    fn debug_name(&self) -> &'static str {
+        "ito-keyscript"
+    }
+
+    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+        for command in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                self.copied = Some(text.clone());
+            }
+        }
+        // egui writes the whole tree each pass, so the last one is the window as it is.
+        let Some(update) = &output.platform_output.accesskit_update else { return };
+        let mut items: Vec<Item> = Vec::new();
+        for (_, node) in &update.nodes {
+            let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
+            let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+            for text in [node.label(), node.value()].into_iter().flatten().filter(|t| !t.is_empty()) {
+                let item = Item { text: text.to_owned(), rect, disabled: node.is_disabled() };
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+            }
+        }
+        self.items = items;
+    }
+}
+
+/// Start reading the window's tree and what the app copies, from the next frame on. `Runner` does this
+/// itself when the script needs it; an app with its own frame loop calls it once. Costs nothing
+/// until called (egui builds no tree otherwise).
+pub fn observe(ctx: &egui::Context) {
+    ctx.enable_accesskit();
+    ctx.add_plugin(Tap::default());
+}
+
+/// The labelled things as of the last frame; empty before [`observe`] has seen one.
+pub fn items(ctx: &egui::Context) -> Vec<Item> {
+    ctx.with_plugin::<Tap, _>(|t| t.items.clone()).unwrap_or_default()
+}
+
+fn listed(found: &[&Item]) -> String {
+    let mut names: Vec<String> = found.iter().take(12).map(|i| format!("`{}`", i.text)).collect();
+    if found.len() > 12 {
+        names.push(format!("and {} more", found.len() - 12));
+    }
+    names.join(", ")
+}
+
+/// Where `<Click:text>` clicks: the centre of the one thing whose text is `text`, or else the one
+/// whose text contains it. An error says what was found instead.
+pub fn locate(ctx: &egui::Context, text: &str) -> Result<egui::Pos2, String> {
+    let all = items(ctx);
+    let exact: Vec<&Item> = all.iter().filter(|i| i.text == text).collect();
+    let found = if exact.is_empty() { all.iter().filter(|i| i.text.contains(text)).collect() } else { exact };
+    match found.as_slice() {
+        [one] => Ok(one.rect.center()),
+        [] => {
+            let seen: Vec<&Item> = all.iter().collect();
+            Err(format!("no `{text}` in the window; it has: {}", listed(&seen)))
+        }
+        many => Err(format!("`{text}` is more than one thing: {}", listed(many))),
+    }
+}
+
+/// `<Assert:text>` (`present`) or `<Assert:!text>`.
+pub fn check(ctx: &egui::Context, text: &str, present: bool) -> Result<(), String> {
+    let all = items(ctx);
+    let found: Vec<&Item> = all.iter().filter(|i| i.text.contains(text)).collect();
+    match (present, found.is_empty()) {
+        (true, false) | (false, true) => Ok(()),
+        (true, true) => Err(format!("no `{text}` in the window; it has: {}", listed(&all.iter().collect::<Vec<_>>()))),
+        (false, false) => Err(format!("`{text}` is in the window: {}", listed(&found))),
+    }
+}
+
+/// `<Clipboard:text>`: the last text the app copied is exactly `expect`.
+pub fn check_clipboard(ctx: &egui::Context, expect: &str) -> Result<(), String> {
+    match ctx.with_plugin::<Tap, _>(|t| t.copied.clone()).flatten() {
+        Some(got) if got == expect => Ok(()),
+        Some(got) => Err(format!("copied `{}`, not `{}`", paste_text_escape(&got), paste_text_escape(expect))),
+        None => Err(format!("nothing copied yet, not `{}`", paste_text_escape(expect))),
+    }
+}
+
 /// How long nothing may be pressed, past any `<Wait:N>` due, before a script
 /// counts as stuck. A key waits at most five seconds for things to settle, so
 /// this is only reached when the frame loop itself has stopped running.
@@ -423,6 +574,15 @@ pub fn install_panic_report(done: std::path::PathBuf) {
     }));
 }
 
+/// What the done file holds for a script that failed on a step that reads the window
+/// (`<Assert:>`, `<Click:text>`, `<Clipboard:>`). The app ends with [`FAILED_EXIT`].
+pub fn failed_report(step: &str, why: &str, left: usize) -> String {
+    format!("keys: failed\nstep: {step}\nwhy: {}\nleft: {left} not pressed\n", why.replace('\n', " / "))
+}
+
+/// The exit code of an app whose script failed ([`failed_report`]).
+pub const FAILED_EXIT: i32 = 3;
+
 /// The last line of the done file when the app quit while the script ran
 /// (`q` as its last key, say): the frame that would have written `keys: done`
 /// never comes for a window that has closed, so the file was missing and read
@@ -465,7 +625,11 @@ fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
 
 /// The text in `<Paste:text>`, `<Preedit:text>` or `<Commit:text>` (`what`); see [`Step::PasteText`] for the escapes.
 fn paste_text(token: &str, what: &str) -> Result<String, String> {
-    let noun = if what == "Paste" { "a paste" } else { "an input method step" };
+    let noun = match what {
+        "Paste" => "a paste",
+        "Click" | "RClick" | "Assert" | "Clipboard" => "a text to look for",
+        _ => "an input method step",
+    };
     let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
     let inner = token.strip_prefix(&format!("<{what}:")).and_then(|t| t.strip_suffix('>')).unwrap_or("");
     let mut out = String::new();
@@ -603,6 +767,13 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             None if token.starts_with("<Paste:") => Step::PasteText(paste_text(token, "Paste")?),
             None if token.starts_with("<Preedit:") => Step::Preedit(paste_text(token, "Preedit")?),
             None if token.starts_with("<Commit:") => Step::Commit(paste_text(token, "Commit")?),
+            None if token.starts_with("<Assert:") => {
+                // The `!` is read before the escapes, so `!` is a literal one.
+                let negated = token.starts_with("<Assert:!");
+                let token = if negated { token.replacen("<Assert:!", "<Assert:", 1) } else { token.to_owned() };
+                Step::Assert { text: paste_text(&token, "Assert")?, present: !negated }
+            }
+            None if token.starts_with("<Clipboard:") => Step::Clipboard(paste_text(token, "Clipboard")?),
             None if read.is_some() => {
                 let (tag, noun) = read.copied().unwrap_or_else(|| unreachable!());
                 Step::Read { tag: tag.to_owned(), name: named(token, tag, noun)? }
@@ -725,8 +896,25 @@ pub enum Do {
     Theme(String),
     /// `<Lang:code>`: switch to it (the app decides how).
     Lang(String),
+    /// A step that reads the window found it other than the script said: write
+    /// [`failed_report`] and end with [`FAILED_EXIT`].
+    Failed {
+        step: String,
+        why: String,
+    },
     /// The last step has gone in.
     Done,
+}
+
+/// A click at `pos` as the frames of pointer events it takes.
+fn click_frames(pos: egui::Pos2, right: bool) -> VecDeque<Vec<egui::Event>> {
+    let button = if right { egui::PointerButton::Secondary } else { egui::PointerButton::Primary };
+    let modifiers = egui::Modifiers::NONE;
+    VecDeque::from([
+        vec![egui::Event::PointerMoved(pos)],
+        vec![egui::Event::PointerButton { pos, button, pressed: true, modifiers }],
+        vec![egui::Event::PointerButton { pos, button, pressed: false, modifiers }],
+    ])
 }
 
 /// A click or a drag as the frames of pointer events it takes: egui sees a
@@ -815,6 +1003,10 @@ pub struct Runner {
     pub clipboard: fn() -> String,
     finished: bool,
     progress: Option<Arc<Mutex<Progress>>>,
+    /// Some step reads the window's tree or the last copy.
+    reads_window: bool,
+    /// Until when a step that reads the window keeps looking.
+    deadline: Option<Instant>,
 }
 
 impl Runner {
@@ -828,7 +1020,10 @@ impl Runner {
             .unwrap_or_else(|| PathBuf::from("."));
         // The first frames lay the window out; a key before them can land
         // before the panes exist.
+        let reads_window = steps.iter().any(|s| matches!(s, Step::ClickText { .. } | Step::Assert { .. } | Step::Clipboard(_)));
         Self {
+            reads_window,
+            deadline: None,
             steps: steps.into(),
             next: Instant::now() + Duration::from_millis(500),
             shot: None,
@@ -898,6 +1093,9 @@ impl Runner {
         if self.finished || self.shot.is_some() {
             return None;
         }
+        if self.reads_window {
+            observe(ctx);
+        }
         let now = Instant::now();
         if now < self.next {
             return None;
@@ -943,6 +1141,22 @@ impl Runner {
             }
             Press::Theme(name) => return Some(Do::Theme(name)),
             Press::Lang(code) => return Some(Do::Lang(code)),
+            Press::ClickText { right, text } => match locate(ctx, &text) {
+                Ok(pos) => {
+                    self.deadline = None;
+                    self.pointer = click_frames(pos, right);
+                    self.next = now;
+                }
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::Assert { text, present } => match check(ctx, &text, present) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::Clipboard(text) => match check_clipboard(ctx, &text) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
             Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
             Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
             p @ (Press::Click { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
@@ -951,6 +1165,20 @@ impl Runner {
                 self.next = now;
             }
         }
+        None
+    }
+
+    /// A step that reads the window did not find what it looked for: look again next frame, until
+    /// [`TEXT_WAIT`] has passed, then fail the run.
+    fn retry(&mut self, step: &Step, why: String, now: Instant) -> Option<Do> {
+        let deadline = *self.deadline.get_or_insert(now + TEXT_WAIT);
+        if now >= deadline {
+            self.deadline = None;
+            self.finished = true;
+            return Some(Do::Failed { step: label(step), why });
+        }
+        self.steps.push_front(step.clone());
+        self.next = now + FRAME;
         None
     }
 
@@ -1202,7 +1430,7 @@ mod tests {
         assert_eq!(got[1], Step::Click { right: true, mods: 0, at: (1000, 0) });
         assert_eq!(got[2], Step::Wheel { milli: -3000, mods: 0, at: (100, 900) });
         assert_eq!(got.iter().map(label).collect::<Vec<_>>(), ["<Click:0.5,0.25>", "<RClick:1,0>", "<Wheel:-3@0.1,0.9>"]);
-        for bad in ["<Click:2,0.5>", "<Click:0.5>", "<Wheel:3>", "<Wheel:x@0.5,0.5>", "<RClick:a,b>"] {
+        for bad in ["<Click:2,0.5>", "<Click:0.5>", "<Wheel:3>", "<Wheel:x@0.5,0.5>"] {
             assert!(parse(bad).unwrap_err().contains("pointer step"), "{bad}");
         }
         let more = parse("<Wheel:C-0.25@0.5,0.5><Wheel:A-S--1@0,0><Drag:0.25,0.5-0.75,0.5>").unwrap();
@@ -1343,6 +1571,81 @@ mod tests {
         assert_eq!((r.left(), r.running(), step(&mut r)), (2, false, None));
         let mut r = Runner::new(parse("j").unwrap(), None);
         assert_eq!((step(&mut r), step(&mut r), r.running()), (None, Some(Do::Done), false));
+    }
+
+    /// #98: the steps that read the window parse and print back.
+    #[test]
+    fn text_steps_parse() {
+        let steps = parse("<Click:Save><RClick:a\\x3eb><Click:0.5,0.4><Assert:Done><Assert:!Oops><Clipboard:x\\ny>").unwrap();
+        assert_eq!(steps[0], Step::ClickText { right: false, text: "Save".into() });
+        assert_eq!(steps[1], Step::ClickText { right: true, text: "a>b".into() });
+        assert!(matches!(steps[2], Step::Click { .. }));
+        assert_eq!(steps[3], Step::Assert { text: "Done".into(), present: true });
+        assert_eq!(steps[4], Step::Assert { text: "Oops".into(), present: false });
+        assert_eq!(steps[5], Step::Clipboard("x\ny".into()));
+        for s in &steps[..2] {
+            assert_eq!(parse(&label(s)).unwrap(), vec![s.clone()]);
+        }
+        for s in &steps[3..] {
+            assert_eq!(parse(&label(s)).unwrap(), vec![s.clone()]);
+        }
+        let literal_bang = Step::Assert { text: "!x".into(), present: true };
+        assert_eq!(parse(&label(&literal_bang)).unwrap(), vec![literal_bang]);
+    }
+
+    /// #98: the runner finds a button by its label, clicks it, and fails the run when the text is
+    /// not there after the wait.
+    #[test]
+    fn the_runner_reads_the_window() {
+        let ctx = egui::Context::default();
+        let mut clicked = false;
+        let pass = |ctx: &egui::Context, raw: egui::RawInput, clicked: &mut bool| {
+            ctx.run_ui(raw, |ui| {
+                if ui.button("Save").clicked() {
+                    *clicked = true;
+                }
+                if *clicked {
+                    ui.label("Saved!");
+                    ui.ctx().copy_text("copied".into());
+                }
+            })
+            .drop_without_applying_deltas();
+        };
+        let mut r = Runner::new(parse("<Assert:Save><Click:Save><Assert:Saved!><Assert:!Nope><Clipboard:copied>").unwrap(), None);
+        let mut out = None;
+        for _ in 0..200 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                out = Some(d);
+                break;
+            }
+            pass(&ctx, raw, &mut clicked);
+        }
+        assert_eq!(out, Some(Do::Done));
+        assert!(clicked);
+
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Assert:Missing>").unwrap(), None);
+        let mut out = None;
+        for _ in 0..4 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                out = Some(d);
+                break;
+            }
+            pass(&ctx, raw, &mut false);
+            r.deadline = Some(Instant::now());
+        }
+        match out {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "<Assert:Missing>");
+                assert!(why.contains("Missing"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(failed_report("<Assert:x>", "a\nb", 2).starts_with("keys: failed\nstep: <Assert:x>\nwhy: a / b\n"));
     }
 
     /// #168 for the runner: a run nothing has moved for longer than the stall

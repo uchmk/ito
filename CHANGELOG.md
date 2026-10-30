@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.152.0] - 2026-10-31
+
+### 追加
+
+- `ito-keyscript`: 窓の中の文字で押す・確かめる台本の語（uchmk/ito#98）。egui の AccessKit の木（ラベルと値）と、アプリが最後にコピーした文字を読む。
+  - `<Click:文字>` / `<RClick:文字>`: その文字の物の真ん中を押す。完全一致を先に、なければ 1 つだけ含むもの。無い・2 つ以上なら、約 3 秒（`TEXT_WAIT`）見直してから失敗にして、窓にあるものを挙げる。`<Click:0.5,0.4>` の座標の形はそのまま使える。
+  - `<Assert:文字>` / `<Assert:!文字>`: その文字が窓にある／ない。`!` で始まる文字そのものは `\x21`。
+  - `<Clipboard:文字>`: アプリが最後にコピーした文字がこれと同じ。
+  - 文字の書き方は `<Paste:>` と同じ（`\n \t \e \\ \xNN`。`>` は `\x3e`）。
+  - 公開: `observe(ctx)`（木とコピーを読み始める。`Runner` は台本が使うときに自分で呼ぶ）、`items`・`locate`・`check`・`check_clipboard`、`Item`、`failed_report`、`FAILED_EXIT`（3）。`Press` に `ClickText`・`Assert`・`Clipboard`。
+
+### 使う側がやること
+
+- `Runner` を使うアプリ（yagura など）: `Do` に `Do::Failed { step, why }` が増えた。`match` に足し、`failed_report(&step, &why, runner.left())` を done ファイルに書いて `FAILED_EXIT` で終わる。
+- `Press` を自前のループで流すアプリ（kura）: 起動で `observe(ctx)` を 1 回呼び、`Press::ClickText`・`Assert`・`Clipboard` を `locate`・`check`・`check_clipboard` で処理する（見つからないときは数フレーム見直してから失敗にする）。
+
 ## [0.151.0] - 2026-10-31
 
 ### 追加
