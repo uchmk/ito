@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.141.0] - 2026-10-31
+
+### 追加
+
+- `ito-prefs`: 色つきのタグ（チップ）の部品（uchmk/ito#90、fumi の依頼）。`Tag { text, color, on }` を `tag(ui, look, Tag)`（ウィジェット。`button` と同じくキーとフォーカスの枠を持つ。クリックは呼ぶ側）、`paint_tag(painter, ctx, &colors, at, Tag, max_width)`（widget を使わず描く一覧の行向け。長い文字は「…」で切る）、`tag_width`（幅を測る）で描く。
+  色は外から（Gmail の色など。何色でもよい）か、`None` ならテキストから安定して選ぶ（`tag_hue`）。どちらもテーマに合わせて直す（`tag_colors`。egui なしで試せる）ので、20 の組み込みテーマの明暗すべてで文字のコントラストが 4.5 以上になる。`on` は選んだ状態で、色で塗りつぶす。
+  使う側がやること: 特になし（足しただけ）。
+
 ## [0.140.0] - 2026-10-31
 
 ### 追加
