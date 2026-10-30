@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.140.0] - 2026-10-31
+
+### 追加
+- 新しいクレート `ito-eventlog`: 監視ツール（SCOM・Zabbix・イベント ビューアー）が見られるシステムのログに 1 行書く。`Log::open(source)` と `log.write(Level, id, text)`（`Level` は `Info`・`Warning`・`Error`）。
+  Windows はアプリケーション ログに `ReportEventW` で書く（ソースの登録は要らない。登録しないと、イベント ビューアーは「説明が見つかりません」の注記つきで本文を出す。登録は管理者がレジストリに `EventMessageFile` を置く。このクレートはしない）。
+  macOS・Linux は `logger` で syslog へ（ID は本文に入る）。書けないときは `WhyNot`（uchmk/ito#86）。
+
 ## [0.139.0] - 2026-10-31
 
 ### 追加

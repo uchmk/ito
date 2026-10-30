@@ -1,0 +1,11 @@
+[package]
+name = "ito-eventlog"
+description = "Write a line to the system log so a monitoring tool can see it: the Windows event log (Application), syslog elsewhere"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security", "Win32_System_EventLog"] }
