@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.137.0] - 2026-10-30
+
+### 追加
+- 設定画面の Notifications に、メールの通知先 `[[notify.mails]]` の欄（uchmk/ito#81、koyomi の依頼）。`ito-prefs`。
+  - `mail_rows(ui, look, words, &mut Vec<Mail>, secret_cmd, &mut drafts) -> Option<usize>`: 通知先ごとに「外す」「ここに試しに送る」、サーバー・ポート・差出人・宛先（コンマ区切り）を編集できる。パスワードは値を出さず、`secret:<名前>` の参照と、それを入れるコマンド（`{secret_cmd} <名前>`）だけ。ファイルに直に書かれたものは `••••` と警告を出す。「メールの送り先を足す」で `new_mail()` を足す。押された「試しに送る」の番号を返す。
+  - `write_mails(text, &[Mail], states)`: `[[notify.mails]]` を書き戻す（コメントは残る。587 の `port`・空の `user` は書かない。パスワードは `secret:` の参照だけ書き、平文は書き戻さない）。
+  - `mail_label`・`new_mail`、`Words` に `mail`・`mail_host`…`mail_more`（EN・JA）、`notify_index` に検索の語を追加。
+  - 使う側がやること: `Words` を `EN`／`JA` でなく自前の struct 式で作っているアプリは、`mail*` の欄を足す。`Mail` は `NotifyCfg::mail_places` から取り、押された試し送りは `ito_prefs::test_mail`（ワーカースレッド）へ。保存は `write_mails`。`Notify`／`Test` は変えていない。
+
 ## [0.136.0] - 2026-10-30
 
 ### 追加
@@ -14,7 +23,7 @@
   - `Mail::problems`（host なし・port 0・from/to の形・パスワードの書き方・知らない出来事）、`NotifyCfg::check` が `[[notify.mails]] N:` を付けて警告し、同じ `name` も警告する。
   - `NotifyCfg::tell`／`tell_open` は webhook のあとにメールも送る。`only`／`unnamed` は名前でメールの通知先も選ぶ。
   - 「テストを送る」は `ito_prefs::test_mail(app, &Mail, level, title, body)`（パスワードを読むのでワーカースレッドから）。
-  - 使う側がやること: `NotifyCfg` の `mails`／`mail_places` が増えただけで、既存の `[notify]` は変わらない。パスワードは `ito_secret::set(app, "mail-ops", …)` で入れる。設定の画面（Notifications のカード）への表示は、まだ。
+  - 使う側がやること: `NotifyCfg` の `mails`／`mail_places` が増えただけで、既存の `[notify]` は変わらない。パスワードは `ito_secret::set(app, "mail-ops", …)` で入れる。設定の画面への表示は 0.137.0。
 
 ## [0.135.0] - 2026-10-30
 

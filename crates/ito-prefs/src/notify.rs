@@ -6,6 +6,7 @@
 
 use egui::{Color32, FontId, RichText};
 use ito_common::{quote, quote_list, remove_key, set_tables};
+use ito_notify::mail::Mail;
 use ito_notify::webhook::Place;
 use ito_notify::{is_http, FORMATS, SOUNDS};
 
@@ -170,6 +171,17 @@ pub fn notify_index(w: &Words) -> Vec<&'static str> {
         w.webhook_format,
         w.webhook_add,
         w.webhook_test,
+        w.mail,
+        w.mail_host,
+        w.mail_host_note,
+        w.mail_port,
+        w.mail_port_note,
+        w.mail_from,
+        w.mail_to,
+        w.mail_to_note,
+        w.mail_password,
+        w.mail_add,
+        w.mail_test,
     ]
 }
 
@@ -315,6 +327,146 @@ pub fn webhook_rows(ui: &mut egui::Ui, l: Look, w: &Words, hooks: &mut Vec<Hook>
         hooks.remove(k);
         // The fields' drafts are by place: the ones after it moved up.
         drafts.retain(|id, _| !id.starts_with("webhook-"));
+    }
+    test
+}
+
+/// The name of the `k`th of `count` mail places: "Mail", or "Mail 1", "Mail 2", ... when there are more.
+pub fn mail_label(w: &Words, count: usize, k: usize) -> String {
+    if count == 1 {
+        w.mail.to_owned()
+    } else {
+        format!("{} {}", w.mail, k + 1)
+    }
+}
+
+/// `text` with `mails` as its `[[notify.mails]]`: `name`, `host`, `port` (587 is not written), `user`, `password`
+/// (only a `secret:` reference; a plain one is never written back), `from`, `to` and, when `states`, `states`.
+/// Tables that stay keep their comments ([`set_tables`], which knows them by `name`).
+pub fn write_mails(text: &str, mails: &[Mail], states: bool) -> Result<String, String> {
+    let blocks: Vec<Vec<(&str, String)>> = mails
+        .iter()
+        .map(|m| {
+            let mut b = Vec::new();
+            if !m.name.is_empty() {
+                b.push(("name", quote(&m.name)));
+            }
+            b.push(("host", quote(&m.host)));
+            if m.port != 587 {
+                b.push(("port", m.port.to_string()));
+            }
+            if !m.user.is_empty() {
+                b.push(("user", quote(&m.user)));
+            }
+            if m.password.starts_with("secret:") {
+                b.push(("password", quote(&m.password)));
+            }
+            b.push(("from", quote(&m.from)));
+            b.push(("to", quote_list(&m.to)));
+            if states {
+                b.push(("states", quote_list(&m.states)));
+            }
+            b
+        })
+        .collect();
+    set_tables(text, "notify.mails", &blocks)
+}
+
+/// A mail place just added: nothing filled in, port 587.
+pub fn new_mail() -> Mail {
+    Mail {
+        name: String::new(),
+        host: String::new(),
+        port: 587,
+        user: String::new(),
+        password: String::new(),
+        from: String::new(),
+        to: Vec::new(),
+        states: Vec::new(),
+        secret: None,
+    }
+}
+
+/// The mail places' rows, for a card the caller opens: for each, its label with "Remove" and "Send a test
+/// here", then the server, port, sender and recipients (edited here), and the password -- never its value, only
+/// the `secret:` reference it is, with the command that stores it (`secret_cmd`, e.g. `koyomi secret set`) in the
+/// note, or a warning when it is written plainly. Then "Add a mail place". Changes `mails` in place (their
+/// `name`, `user`, `password` and `states` stay as read); the one whose test was pressed, by its place in the list.
+pub fn mail_rows(ui: &mut egui::Ui, l: Look, w: &Words, mails: &mut Vec<Mail>, secret_cmd: &str, drafts: &mut Drafts) -> Option<usize> {
+    let c = l.c;
+    let mut test = None;
+    let mut gone = None;
+    let count = mails.len();
+    for (k, m) in mails.iter_mut().enumerate() {
+        if k > 0 {
+            sep(ui, l);
+        }
+        let note = if m.host.is_empty() || m.from.is_empty() || m.to.is_empty() { w.mail_empty } else { "" };
+        row(ui, l, &mail_label(w, count, k), note, |ui| {
+            if button(ui, l, w.mail_remove) {
+                gone = Some(k);
+            }
+            if button(ui, l, w.mail_test) {
+                test = Some(k);
+            }
+        });
+        sep(ui, l);
+        let typed = row(ui, l, w.mail_host, w.mail_host_note, |ui| {
+            crate::field(ui, drafts, &format!("mail-host-{k}"), &m.host, "smtp.example.com", 260.0)
+        });
+        if let Some(t) = typed {
+            m.host = t.trim().to_owned();
+        }
+        sep(ui, l);
+        let port = m.port.to_string();
+        let typed = row(ui, l, w.mail_port, w.mail_port_note, |ui| crate::field(ui, drafts, &format!("mail-port-{k}"), &port, "587", 80.0));
+        if let Some(p) = typed.and_then(|t| t.trim().parse::<u16>().ok()).filter(|p| *p > 0) {
+            m.port = p;
+        }
+        sep(ui, l);
+        let typed =
+            row(ui, l, w.mail_from, "", |ui| crate::field(ui, drafts, &format!("mail-from-{k}"), &m.from, "jobs@example.com", 260.0));
+        if let Some(t) = typed {
+            m.from = t.trim().to_owned();
+        }
+        sep(ui, l);
+        let to = m.to.join(", ");
+        let typed =
+            row(ui, l, w.mail_to, w.mail_to_note, |ui| crate::field(ui, drafts, &format!("mail-to-{k}"), &to, "me@example.com", 260.0));
+        if let Some(t) = typed {
+            m.to = t.split(',').map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned).collect();
+        }
+        sep(ui, l);
+        let secret = m.password.starts_with("secret:");
+        let name = if m.name.is_empty() { format!("mail-{}", k + 1) } else { format!("mail-{}", m.name) };
+        let reference = if secret { m.password.trim_start_matches("secret:").to_owned() } else { name };
+        let note = w.mail_password_note.replace("{}", &format!("{secret_cmd} {reference}"));
+        row(ui, l, w.mail_password, &note, |ui| {
+            let shown = if m.password.is_empty() {
+                "—"
+            } else if secret {
+                m.password.as_str()
+            } else {
+                "••••"
+            };
+            ui.label(RichText::new(shown).size(z(ui, 12.5)).color(c.dim));
+        });
+        if !m.password.is_empty() && !secret {
+            status(ui, w.mail_password_plain, c.err);
+            ui.add_space(4.0);
+        }
+    }
+    let (label, note) = if mails.is_empty() { (w.mail, w.mail_none) } else { (w.mail_more, "") };
+    if !mails.is_empty() {
+        sep(ui, l);
+    }
+    if row(ui, l, label, note, |ui| button(ui, l, w.mail_add)) {
+        mails.push(new_mail());
+    }
+    if let Some(k) = gone {
+        mails.remove(k);
+        // The fields' drafts are by place: the ones after it moved up.
+        drafts.retain(|id, _| !id.starts_with("mail-"));
     }
     test
 }
@@ -581,5 +733,85 @@ mod tests {
         assert_eq!(sound_name(&EN, "nope"), "System default");
         assert_eq!(FORMATS.map(format_name), ["ntfy", "Slack", "Discord", "JSON"]);
         assert!(notify_index(&JA).contains(&"Windows の集中モードに従う"));
+    }
+
+    fn ops() -> Mail {
+        Mail {
+            name: "ops".to_owned(),
+            host: "smtp.example.com".to_owned(),
+            port: 465,
+            user: "jobs".to_owned(),
+            password: "secret:mail-ops".to_owned(),
+            from: "jobs@example.com".to_owned(),
+            to: vec!["a@example.com".to_owned(), "b@example.com".to_owned()],
+            states: vec!["Failed".to_owned()],
+            secret: None,
+        }
+    }
+
+    #[test]
+    fn mails_are_written_back_keeping_comments_and_never_a_plain_password() {
+        let text = "[[notify.mails]]
+name = \"ops\"
+host = \"old.example.com\" # the relay
+from = \"x\"
+to = []
+";
+        let out = write_mails(text, &[ops()], true).unwrap();
+        assert!(out.contains("host = \"smtp.example.com\" # the relay"), "{out}");
+        assert!(out.contains("port = 465") && out.contains("password = \"secret:mail-ops\""), "{out}");
+        assert!(out.contains("to = [\"a@example.com\", \"b@example.com\"]") && out.contains("states = [\"Failed\"]"), "{out}");
+        let mut plain = ops();
+        plain.password = "hunter2".to_owned();
+        let out = write_mails("", &[plain], false).unwrap();
+        assert!(!out.contains("hunter2") && !out.contains("password") && !out.contains("states"), "{out}");
+        let out = write_mails(&out, &[], false).unwrap();
+        assert!(!out.contains("mails"), "{out}");
+    }
+
+    #[test]
+    fn the_mail_card_shows_the_reference_not_a_plain_password_and_reports_a_test() {
+        let ctx = egui::Context::default();
+        let mut mails = vec![ops(), Mail { password: "hunter2".to_owned(), name: "b".to_owned(), ..ops() }];
+        let mut test = None;
+        let mut run = |mails: &mut Vec<Mail>, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0))),
+                events,
+                ..Default::default()
+            };
+            let mut drafts = Drafts::new();
+            let mut texts = Vec::new();
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let l = Look { c: ito_theme::colors(), q: "" };
+                    if let Some(k) = mail_rows(ui, l, &EN, mails, "koyomi secret set", &mut drafts) {
+                        test = Some(k);
+                    }
+                });
+            });
+            out.textures_delta.clear();
+            fn walk(s: &egui::Shape, v: &mut Vec<(String, egui::Rect)>) {
+                match s {
+                    egui::Shape::Text(t) => v.push((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2()))),
+                    egui::Shape::Vec(list) => list.iter().for_each(|s| walk(s, v)),
+                    _ => {}
+                }
+            }
+            for c in &out.shapes {
+                walk(&c.shape, &mut texts);
+            }
+            texts
+        };
+        let texts = run(&mut mails, Vec::new());
+        assert!(at(&texts, "secret:mail-ops").is_some());
+        assert!(at(&texts, EN.mail_password_plain).is_some());
+        assert!(texts.iter().all(|(t, _)| !t.contains("hunter2")));
+        assert!(at(&texts, "Mail 2").is_some() && at(&texts, EN.mail_more).is_some());
+        let tests = all(&texts, EN.mail_test);
+        assert_eq!(tests.len(), 2);
+        run(&mut mails, click(tests[1].center()));
+        run(&mut mails, Vec::new());
+        assert_eq!(test, Some(1));
     }
 }

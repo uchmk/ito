@@ -33,7 +33,10 @@ pub use more::{
     window_index, About, AboutAction, Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN,
     MORE_JA, WINDOW_KEYS,
 };
-pub use notify::{format_name, hook_label, notify_index, notify_page, sound_name, webhook_rows, write_webhooks, End, Hook, Notify, Test};
+pub use notify::{
+    format_name, hook_label, mail_label, mail_rows, notify_index, notify_page, sound_name, webhook_rows, write_mails, write_webhooks, End,
+    Hook, Notify, Test,
+};
 pub use notify_cfg::{notify_window, take_clicks, test as test_notify, test_mail, Event, HookCfg, MailCfg, NotifyCfg, DONE_FAILED};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
 pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
@@ -99,6 +102,28 @@ pub struct Words {
     pub webhook_none: &'static str,
     /// The row of "Add an address" after the webhooks.
     pub webhook_more: &'static str,
+    /// The mail places (`[[notify.mails]]`): the label of a place (numbered when there are several), its server,
+    /// port, sender, recipients, password row, the warning for a password that is not a `secret:` reference, the
+    /// buttons, and the row of "Add" when there is none / after the places.
+    pub mail: &'static str,
+    pub mail_host: &'static str,
+    pub mail_host_note: &'static str,
+    pub mail_port: &'static str,
+    pub mail_port_note: &'static str,
+    pub mail_from: &'static str,
+    pub mail_to: &'static str,
+    pub mail_to_note: &'static str,
+    pub mail_password: &'static str,
+    /// The password row's note: `{}` is the command that stores it (`koyomi secret set mail-ops`).
+    pub mail_password_note: &'static str,
+    /// A password written in the file itself: it is never shown, sent or kept.
+    pub mail_password_plain: &'static str,
+    pub mail_empty: &'static str,
+    pub mail_add: &'static str,
+    pub mail_remove: &'static str,
+    pub mail_test: &'static str,
+    pub mail_none: &'static str,
+    pub mail_more: &'static str,
     /// The Feedback card: its heading, the row's label and note, the button.
     pub bug_head: &'static str,
     pub bug_label: &'static str,
@@ -160,6 +185,23 @@ pub const EN: Words = Words {
     webhook_test: "Send a test here",
     webhook_none: "Nothing is sent elsewhere until an address is added",
     webhook_more: "Another address",
+    mail: "Mail",
+    mail_host: "Server",
+    mail_host_note: "The SMTP server; always encrypted",
+    mail_port: "Port",
+    mail_port_note: "587 starts TLS on the connection; 465 is TLS from the start",
+    mail_from: "From",
+    mail_to: "To",
+    mail_to_note: "One or more addresses, separated by commas",
+    mail_password: "Password",
+    mail_password_note: "Kept in the system's credential store; the file holds only a reference. Store it with: {}",
+    mail_password_plain: "The password is written in the file, so it is not used. Replace it with a secret: reference",
+    mail_empty: "The server or an address is not filled in yet",
+    mail_add: "Add a mail place",
+    mail_remove: "Remove",
+    mail_test: "Send a test here",
+    mail_none: "No mail is sent until a place is added",
+    mail_more: "Another mail place",
     bug_head: "FEEDBACK",
     bug_label: "Report a bug",
     bug_note: "Opens a GitHub issue with the version and system already filled in (F12)",
@@ -219,6 +261,23 @@ pub const JA: Words = Words {
     webhook_test: "ここに試しに送る",
     webhook_none: "アドレスを足すまで、ほかへは送りません",
     webhook_more: "別のアドレス",
+    mail: "メール",
+    mail_host: "サーバー",
+    mail_host_note: "SMTP サーバー。通信は必ず暗号化します",
+    mail_port: "ポート",
+    mail_port_note: "587 は接続の途中から TLS、465 は最初から TLS",
+    mail_from: "差出人",
+    mail_to: "宛先",
+    mail_to_note: "アドレスをコンマで区切って 1 つ以上",
+    mail_password: "パスワード",
+    mail_password_note: "OS の資格情報ストアに置き、ファイルには参照だけが残ります。次で登録します: {}",
+    mail_password_plain: "パスワードがファイルにそのまま書かれているため使いません。secret: の参照に置き換えてください",
+    mail_empty: "サーバーかアドレスがまだ空です",
+    mail_add: "メールの送り先を足す",
+    mail_remove: "外す",
+    mail_test: "ここに試しに送る",
+    mail_none: "送り先を足すまで、メールは送りません",
+    mail_more: "別のメールの送り先",
     bug_head: "フィードバック",
     bug_label: "不具合を報告",
     bug_note: "版と環境を埋めた GitHub の issue を開きます（F12）",
