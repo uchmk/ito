@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.151.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-service`: 本人のアカウントで動く Windows のサービス（uchmk/ito#102）。資格情報ストア・状態のフォルダー・`ito-ipc` の扉を、サインイン時に動かしたときと同じに保つ。Windows 以外は `Error::Unsupported`。
+  - `run(name, main)`: SCM が起こしたプロセスなら Running を報告して `main(Stop)` を呼び、返り値を終了コードにして Stopped を報告する。`Stop` は STOP・SHUTDOWN・PRESHUTDOWN で立つ（`is_set`・`wait(timeout)`）。コンソールから起こすと `Error::NotService`。
+  - `install(Install { name, display, description, exe, args, account, password, start })`（管理者が要る。無ければ `NeedsAdmin`）: アカウントに `SeServiceLogonRight` を付け、そのアカウントが管理者なしで start・stop・query できる DACL を設定する。`Start::AutoDelayed` は遅延自動開始。途中で失敗したらサービスを消す。パスワードは引数だけで、保存しない。アカウント無し・パスワード無し（PIN だけ）は `BadAccount`、パスワード違いは最初の start で `LogonFailed`。
+  - `uninstall(name)`・`start(name)`（動作中は成功）・`stop(name, wait)`（止まっていれば成功、間に合わなければ `Timeout`）・`state(name) -> Option<Status { state, pid }>`（`None` は未インストール）。
+  - `read_password(prompt)`: コンソールではエコーなし、パイプならそのまま読む。
+  - 引数のクォート `command_line` と DACL の `access_sddl` は公開（純粋な関数でテスト済み）。
+
+### 使う側がやること
+
+- koyomi: `ito-service = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、`koyomi service run` で `ito_service::run("koyomi", |stop| engine(stop))`、`service install` で `read_password` → `install`。サービスの本人は `start`・`stop`・`state` を管理者なしで呼べる。
+
 ## [0.150.0] - 2026-10-31
 
 ### 追加

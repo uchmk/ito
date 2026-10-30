@@ -1,0 +1,18 @@
+[package]
+name = "ito-service"
+description = "Run as a Windows service that logs on as a person's own account, and install, start, stop and query it: service logon right, DACL for that account, delayed auto start"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Authentication_Identity",
+    "Win32_System_Console",
+    "Win32_System_Services",
+] }

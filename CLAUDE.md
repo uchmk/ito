@@ -51,6 +51,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-store` | 手元の SQLite（`bundled`）。WAL・書き込みスレッド 1 本（`write` は `Pending` を返す）・`user_version` の移行・`meta`（同期の位置を行と一緒に commit）・FTS5 trigram の全文検索（`fts_sql`・`parse_query`。3 文字未満は `short`）・`describe` | fumi |
 | `ito-sftp` | SFTP で送る・取る（同期の API。中は russh + russh-sftp + tokio。指紋を固定したホスト鍵・パスワードか鍵ファイル・`*` `?`・`.part` から名前替え・停止の `AtomicBool`・進み・タイムアウト。`ring` なので Linux・macOS 向けは C が要り、Mac の外からは cargo-zigbuild） | koyomi |
 | `ito-http` | 手元の小さな HTTP の待ち受け（127.0.0.1 / `::1` だけ・全リクエストに Bearer トークンを定時間で比べる（`ito-secret` から読む `token_from_secret`）・JSON の入出力・本文と同時接続の上限・ログの関数。標準ライブラリだけ、TLS なし） | koyomi |
+| `ito-service` | Windows のサービスとして動かす（本人のアカウントで。SYSTEM ではない）。`run(name, main)` は SCM が起こしたときだけ Running を報告して `main(Stop)` を呼ぶ（STOP・SHUTDOWN・PRESHUTDOWN で `Stop` が立つ。コンソールからなら `NotService`）。`install(Install { name, display, description, exe, args, account, password, start })` は `SeServiceLogonRight` をアカウントに付け、そのアカウントが管理者なしで start/stop/query できる DACL を設定し、`AutoDelayed` に対応。`uninstall`・`start`・`stop(name, wait)`・`state(name) -> Option<Status>`・エコーなしの `read_password`。Windows 以外は `Unsupported` | koyomi（tsumugi の server も） |
 
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 
