@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.153.0] - 2026-10-31
+
+### 追加
+
+- `ito-common`（機能 `clock`）: 過去の時刻を時計の書式（`date_format`・`hour24`・`weekday`）で書く（uchmk/ito#99）。
+  - `Clock::short(&at, &now, lang)`: 一覧の行向け。今日なら時刻だけ（`11:48`）、今年なら年なしの日付（`10/29`。`DD/MM/YYYY` は `29/10`、`YYYY-MM-DD` は `10-29`）、それより前は日付全部（`2025/10/29`）。「今日」「今年」は `now` のもの。
+  - `Clock::stamp(&at, lang)`: 日付と時刻を全部（`2026/10/29 (木) 09:15`）。`date` が切れていても日付は出す（`date` は状態バーの時計だけの設定）。曜日は `weekday` に従う。
+  - 時刻は状態バーの時計と同じく `%H:%M`（24 時間でなければ `%-I:%M %p`）で、ゼロ埋めする。
+
 ## [0.152.1] - 2026-10-31
 
 ### 変更

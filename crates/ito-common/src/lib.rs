@@ -264,6 +264,34 @@ mod clock {
             now.format(&format).to_string()
         }
 
+        /// A past time as the clock writes it, with the date always (`date` off hides it only from the
+        /// status-bar clock): `2026/10/29 (木) 09:15`. The weekday follows `weekday`.
+        pub fn stamp(&self, at: &NaiveDateTime, lang: &str) -> String {
+            let whole = Clock { date: true, ..self.clone() };
+            whole.text(at, lang)
+        }
+
+        /// A past time for a list row, short as a mail list is: today the time alone (`11:48`), this
+        /// year the date without the year (`10/29`; `29/10` for `DD/MM/YYYY`), older the whole date
+        /// (`2025/10/29`). "Today" and "this year" are `now`'s.
+        pub fn short(&self, at: &NaiveDateTime, now: &NaiveDateTime, _lang: &str) -> String {
+            let time = if self.hour24 { "%H:%M" } else { "%-I:%M %p" };
+            let (whole, no_year) = match self.date_format.as_str() {
+                "YYYY-MM-DD" => ("%Y-%m-%d", "%m-%d"),
+                "MM/DD/YYYY" => ("%m/%d/%Y", "%m/%d"),
+                "DD/MM/YYYY" => ("%d/%m/%Y", "%d/%m"),
+                _ => ("%Y/%m/%d", "%m/%d"),
+            };
+            let format = if at.date() == now.date() {
+                time
+            } else if at.year() == now.year() {
+                no_year
+            } else {
+                whole
+            };
+            at.format(format).to_string()
+        }
+
         /// The whole date, for the pointer over the clock.
         pub fn full(now: &NaiveDateTime, lang: &str) -> String {
             match lang {
@@ -277,6 +305,38 @@ mod clock {
             let into = std::time::Duration::from_secs(u64::from(now.second()))
                 + std::time::Duration::from_nanos(u64::from(now.nanosecond() % 1_000_000_000));
             std::time::Duration::from_secs(60).saturating_sub(into).max(std::time::Duration::from_millis(1))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> NaiveDateTime {
+            chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap()
+        }
+
+        #[test]
+        fn short_is_the_time_the_date_or_the_whole_date() {
+            let now = at(2026, 10, 31, 12, 0);
+            let c = Clock::default();
+            assert_eq!(c.short(&at(2026, 10, 31, 11, 48), &now, "ja"), "11:48");
+            assert_eq!(c.short(&at(2026, 10, 29, 9, 15), &now, "ja"), "10/29");
+            assert_eq!(c.short(&at(2025, 10, 29, 9, 15), &now, "ja"), "2025/10/29");
+            let dmy = Clock { date_format: "DD/MM/YYYY".into(), ..Clock::default() };
+            assert_eq!(dmy.short(&at(2026, 10, 29, 9, 15), &now, "en"), "29/10");
+            assert_eq!(dmy.short(&at(2025, 10, 29, 9, 15), &now, "en"), "29/10/2025");
+            let iso = Clock { date_format: "YYYY-MM-DD".into(), hour24: false, ..Clock::default() };
+            assert_eq!(iso.short(&at(2026, 10, 29, 9, 15), &now, "en"), "10-29");
+            assert_eq!(iso.short(&at(2026, 10, 31, 15, 5), &now, "en"), "3:05 PM");
+        }
+
+        #[test]
+        fn stamp_keeps_the_date_even_when_the_clock_hides_it() {
+            let c = Clock { date: false, ..Clock::default() };
+            assert_eq!(c.stamp(&at(2026, 10, 29, 9, 15), "ja"), "2026/10/29 (木) 09:15");
+            let plain = Clock { weekday: false, ..Clock::default() };
+            assert_eq!(plain.stamp(&at(2025, 10, 29, 9, 15), "en"), "2025/10/29 09:15");
         }
     }
 }
