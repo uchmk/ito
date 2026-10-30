@@ -1,13 +1,22 @@
 [package]
 name = "ito-http"
-description = "A small local HTTP listener for an app: loopback only, a bearer token compared in constant time, JSON in and out, body and connection limits, a log callback"
+description = "A small HTTP listener for an app: loopback by default, or on the LAN with TLS only (a self-signed certificate with a fingerprint); a bearer token compared in constant time, JSON in and out, body and connection limits, a log callback; and an HTTPS client that pins the fingerprint"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# The LAN listener (`Bind::Lan`), `tls` (the certificate) and `client`. `ring` needs a C compiler on Linux and
+# macOS targets only, like ito-sftp and ito-mail.
+tls = ["dep:rustls", "dep:rcgen", "dep:sha2"]
+
 [dependencies]
 ito-secret = { path = "../ito-secret" }
 serde = "1"
 serde_json = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"], optional = true }
+sha2 = { version = "0.11", optional = true }

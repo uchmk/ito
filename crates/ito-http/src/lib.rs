@@ -1,21 +1,33 @@
 //! A small HTTP listener an app runs on its own PC so another system can start something or read a state
 //! (an inbound webhook, a local REST hook for scripts).
 //!
-//! - **Loopback only.** It binds `127.0.0.1` (and `::1` when asked); there is no setting for anything else.
+//! - **Loopback by default.** It binds `127.0.0.1` (and `::1` when asked). With the feature `tls`, [`Bind::Lan`] opens
+//!   it to the network, and then **only over TLS**: plain HTTP cannot leave the PC. The certificate is self-signed,
+//!   made on first use in a folder the app names, and known by its fingerprint ([`tls`]); a client pins that
+//!   fingerprint ([`client`]).
 //! - **A bearer token on every request**, compared in constant time; a missing or wrong one is a 401 before the body
 //!   is read and before the handler is called. The token is never logged ([`token_from_secret`] reads it from
 //!   `ito-secret`).
 //! - **Limits:** the head, the body (`max_body`, 413 before it is read), connections at once (`max_connections`, 503),
 //!   and a read timeout per connection.
-//! - JSON in and out, HTTP/1.1, one request per connection (`Connection: close`), no TLS (it never leaves the PC),
-//!   no chunked bodies.
+//! - JSON in and out, HTTP/1.1, one request per connection (`Connection: close`), no chunked bodies.
 //! - Each request is reported to a log callback as method, path (no query, which may carry a secret), status and
 //!   milliseconds.
 //!
 //! It runs on its own threads; the handler is called on a connection thread, so it must be `Send + Sync` and quick
 //! to answer (or hand the work to the app and answer "accepted").
 
+#[cfg(feature = "tls")]
+pub mod client;
+#[cfg(feature = "tls")]
+pub mod tls;
+
+#[cfg(feature = "tls")]
+pub use tls::TlsCfg;
+
 use std::io::{self, Read, Write};
+#[cfg(feature = "tls")]
+use std::net::IpAddr;
 use std::net::{Ipv4Addr, Ipv6Addr, TcpListener, TcpStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -25,9 +37,23 @@ use std::time::{Duration, Instant};
 
 const MAX_HEAD: usize = 16 * 1024;
 
+/// Where the listener is reachable from.
+#[derive(Clone, Debug, Default)]
+pub enum Bind {
+    /// `127.0.0.1` (and `::1` with `Config::ipv6`), plain HTTP.
+    #[default]
+    Loopback,
+    /// The network, over TLS only: every address (`addr: None`, `0.0.0.0`) or the one given. The certificate is made
+    /// in `tls.cert_dir` on first use; `Config::ipv6` is ignored (give `addr` an IPv6 address to listen on one).
+    #[cfg(feature = "tls")]
+    Lan { addr: Option<IpAddr>, tls: TlsCfg },
+}
+
 /// How the listener is set up. [`Config::new`] gives the defaults.
 #[derive(Clone)]
 pub struct Config {
+    /// Loopback (the default) or the LAN with TLS.
+    pub bind: Bind,
     /// Port to listen on; `0` lets the system pick (see [`Server::port`]).
     pub port: u16,
     /// Also listen on `::1` (same port). A machine without IPv6 loopback just goes without.
@@ -44,13 +70,26 @@ pub struct Config {
 
 impl Config {
     pub fn new(port: u16, token: impl Into<String>) -> Self {
-        Config { port, ipv6: false, token: token.into(), max_body: 64 * 1024, max_connections: 8, timeout: Duration::from_secs(10) }
+        Config {
+            bind: Bind::Loopback,
+            port,
+            ipv6: false,
+            token: token.into(),
+            max_body: 64 * 1024,
+            max_connections: 8,
+            timeout: Duration::from_secs(10),
+        }
     }
 }
 
 impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config").field("port", &self.port).field("ipv6", &self.ipv6).field("token", &"***").finish_non_exhaustive()
+        f.debug_struct("Config")
+            .field("bind", &self.bind)
+            .field("port", &self.port)
+            .field("ipv6", &self.ipv6)
+            .field("token", &"***")
+            .finish_non_exhaustive()
     }
 }
 
@@ -130,11 +169,16 @@ struct Shared {
     handler: Box<Handler>,
     log: Box<Log>,
     active: AtomicUsize,
+    /// Set for a LAN bind: every connection is TLS.
+    #[cfg(feature = "tls")]
+    tls: Option<Arc<rustls::ServerConfig>>,
 }
 
 /// A running listener. Dropping it (or [`Server::stop`]) stops accepting; requests already being served finish.
 pub struct Server {
     port: u16,
+    #[cfg(feature = "tls")]
+    fingerprint: Option<tls::Fingerprint>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -149,15 +193,43 @@ impl Server {
         if cfg.token.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the token is empty"));
         }
-        let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, cfg.port))?;
-        let port = v4.local_addr()?.port();
-        let mut listeners = vec![v4];
-        if cfg.ipv6 {
-            if let Ok(l) = TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
-                listeners.push(l);
+        #[cfg(feature = "tls")]
+        let mut identity = None;
+        let mut listeners;
+        let port;
+        match &cfg.bind {
+            Bind::Loopback => {
+                let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, cfg.port))?;
+                port = v4.local_addr()?.port();
+                listeners = vec![v4];
+                if cfg.ipv6 {
+                    if let Ok(l) = TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
+                        listeners.push(l);
+                    }
+                }
+            }
+            #[cfg(feature = "tls")]
+            Bind::Lan { addr, tls: tls_cfg } => {
+                let id = tls::load_or_create(tls_cfg)?;
+                let l = TcpListener::bind((addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)), cfg.port))?;
+                port = l.local_addr()?.port();
+                listeners = vec![l];
+                identity = Some(id);
             }
         }
-        let shared = Arc::new(Shared { cfg, handler: Box::new(handler), log: Box::new(log), active: AtomicUsize::new(0) });
+        #[cfg(feature = "tls")]
+        let (fingerprint, tls_config) = match &identity {
+            Some(id) => (Some(id.fingerprint()), Some(id.server_config()?)),
+            None => (None, None),
+        };
+        let shared = Arc::new(Shared {
+            cfg,
+            handler: Box::new(handler),
+            log: Box::new(log),
+            active: AtomicUsize::new(0),
+            #[cfg(feature = "tls")]
+            tls: tls_config,
+        });
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
         for l in listeners {
@@ -165,12 +237,24 @@ impl Server {
             let (shared, stop) = (shared.clone(), stop.clone());
             threads.push(std::thread::spawn(move || accept_loop(l, shared, stop)));
         }
-        Ok(Server { port, stop, threads })
+        Ok(Server {
+            port,
+            #[cfg(feature = "tls")]
+            fingerprint,
+            stop,
+            threads,
+        })
     }
 
     /// The port in use (what the system picked when `Config::port` was 0).
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// The certificate's fingerprint, to show the person (`tls::format`), for a LAN bind; `None` on loopback.
+    #[cfg(feature = "tls")]
+    pub fn fingerprint(&self) -> Option<tls::Fingerprint> {
+        self.fingerprint
     }
 
     /// Stop accepting and wait for the listener threads.
@@ -196,12 +280,17 @@ fn accept_loop(l: TcpListener, shared: Arc<Shared>, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Relaxed) {
         match l.accept() {
             Ok((s, peer)) => {
-                if !peer.ip().is_loopback() {
+                if matches!(shared.cfg.bind, Bind::Loopback) && !peer.ip().is_loopback() {
                     continue;
                 }
                 if shared.active.fetch_add(1, Ordering::AcqRel) >= shared.cfg.max_connections {
                     shared.active.fetch_sub(1, Ordering::AcqRel);
-                    let _ = respond(s, &Response::error(503, "too many connections"), shared.cfg.timeout);
+                    // On the LAN the 503 would need a handshake first, which a slow client could stall this thread with.
+                    #[cfg(feature = "tls")]
+                    if shared.tls.is_some() {
+                        continue;
+                    }
+                    let _ = respond(&mut Wire::new(s, &shared), &Response::error(503, "too many connections"));
                     continue;
                 }
                 let shared = shared.clone();
@@ -216,10 +305,75 @@ fn accept_loop(l: TcpListener, shared: Arc<Shared>, stop: Arc<AtomicBool>) {
     }
 }
 
-fn serve(mut s: TcpStream, shared: &Shared) {
+/// A connection: plain on loopback, TLS on the LAN.
+enum Wire {
+    Plain(TcpStream),
+    #[cfg(feature = "tls")]
+    Tls(Box<rustls::StreamOwned<rustls::ServerConnection, TcpStream>>),
+}
+
+impl Wire {
+    fn new(s: TcpStream, shared: &Shared) -> Wire {
+        let _ = s.set_nonblocking(false);
+        let _ = s.set_read_timeout(Some(shared.cfg.timeout));
+        let _ = s.set_write_timeout(Some(shared.cfg.timeout));
+        #[cfg(feature = "tls")]
+        if let Some(config) = &shared.tls {
+            return match rustls::ServerConnection::new(config.clone()) {
+                Ok(c) => Wire::Tls(Box::new(rustls::StreamOwned::new(c, s))),
+                Err(_) => Wire::Plain(s),
+            };
+        }
+        Wire::Plain(s)
+    }
+
+    /// Say goodbye properly (TLS close_notify) and close our side.
+    fn finish(&mut self) {
+        match self {
+            Wire::Plain(s) => {
+                let _ = s.shutdown(std::net::Shutdown::Write);
+            }
+            #[cfg(feature = "tls")]
+            Wire::Tls(t) => {
+                t.conn.send_close_notify();
+                let _ = t.flush();
+                let _ = t.sock.shutdown(std::net::Shutdown::Write);
+            }
+        }
+    }
+}
+
+impl Read for Wire {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Wire::Plain(s) => s.read(buf),
+            #[cfg(feature = "tls")]
+            Wire::Tls(t) => t.read(buf),
+        }
+    }
+}
+
+impl Write for Wire {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Wire::Plain(s) => s.write(buf),
+            #[cfg(feature = "tls")]
+            Wire::Tls(t) => t.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Wire::Plain(s) => s.flush(),
+            #[cfg(feature = "tls")]
+            Wire::Tls(t) => t.flush(),
+        }
+    }
+}
+
+fn serve(s: TcpStream, shared: &Shared) {
     let start = Instant::now();
-    let _ = s.set_nonblocking(false);
-    let _ = s.set_read_timeout(Some(shared.cfg.timeout));
+    let mut s = Wire::new(s, shared);
     let (method, path, resp) = match read_request(&mut s, shared) {
         Ok((req, token_ok)) => {
             let (m, p) = (req.method.clone(), req.path.clone());
@@ -232,7 +386,7 @@ fn serve(mut s: TcpStream, shared: &Shared) {
         }
         Err(Refused { method, path, status, message }) => (method, path, Response::error(status, message)),
     };
-    let _ = respond(s, &resp, shared.cfg.timeout);
+    let _ = respond(&mut s, &resp);
     (shared.log)(&LogLine { method, path, status: resp.status, millis: start.elapsed().as_millis() as u64 });
 }
 
@@ -248,7 +402,7 @@ fn refuse(status: u16, message: &'static str) -> Refused {
 }
 
 /// Read and check one request. `Ok((request, token_ok))`: when the token is wrong the body was not read.
-fn read_request(s: &mut TcpStream, shared: &Shared) -> Result<(Request, bool), Refused> {
+fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, bool), Refused> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
     let head_end = loop {
@@ -329,8 +483,7 @@ fn read_request(s: &mut TcpStream, shared: &Shared) -> Result<(Request, bool), R
     Ok((req, true))
 }
 
-fn respond(mut s: TcpStream, r: &Response, timeout: Duration) -> io::Result<()> {
-    let _ = s.set_write_timeout(Some(timeout));
+fn respond(s: &mut Wire, r: &Response) -> io::Result<()> {
     let body = serde_json::to_vec(&r.json).unwrap_or_else(|_| b"null".to_vec());
     let head = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
@@ -341,7 +494,7 @@ fn respond(mut s: TcpStream, r: &Response, timeout: Duration) -> io::Result<()> 
     s.write_all(head.as_bytes())?;
     s.write_all(&body)?;
     s.flush()?;
-    let _ = s.shutdown(std::net::Shutdown::Write);
+    s.finish();
     Ok(())
 }
 

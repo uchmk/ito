@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.155.0] - 2026-10-31
+
+### 追加
+
+- `ito-http` を LAN に開けられるようにした（機能 `tls`、既定は切）（uchmk/ito#104 の 1 と 2）。
+  - `Config.bind: Bind`。`Bind::Loopback`（既定、今まで通り）か `Bind::Lan { addr, tls: TlsCfg }`。LAN は **TLS だけ**で、平文の HTTP は PC の外に出ない（型で決まる）。
+  - 証明書は自己署名で、`TlsCfg::new(cert_dir)` のフォルダーに初回に作る（`ito-http-cert.der`・`ito-http-key.der`。鍵は先に書く・Unix は 0600）。2 回目からは同じものを読む。
+  - `Server::fingerprint()` と `tls::{fingerprint(cert_dir), format, parse, sha256}`。指紋は SHA-256 で、`AB:CD:…`。コロン・空白・`-`・大小どれでも読める。
+  - 指紋を固定する HTTPS のクライアント `client::Client::new(url, 指紋, token)`・`get`・`post_json`（`Reply { status, json }`）。違う証明書なら `Error::Fingerprint(見えた指紋)`。
+    初回の信頼用に `client::peek_fingerprint(url, timeout)`（見せられた指紋を返すだけ。本人に確かめさせてから固定する）。
+  - TLS は rustls（ring）。Linux・macOS 向けのビルドには C のコンパイラーが要る（ito-sftp・ito-mail と同じ）。
+
+### 使う側がやること
+
+- `Config` に欄 `bind` が増えた。`Config { … }` を直に書いているなら `bind: Bind::Loopback` を足す（`Config::new` を使っていれば何もしない）。
+- LAN に開けるなら `ito-http = { …, features = ["tls"] }`。鍵は `cert_dir` の中の秘密なので、アプリ自身の状態のフォルダーに置く。指紋は設定の画面で本人に見せる。
+- まだ無いもの: 名前つきのトークン（`Request::who`）と、HTML・ブラウザーのセッション（uchmk/ito#104 の 3 と 4）。
+
 ## [0.154.0] - 2026-10-31
 
 ### 追加
