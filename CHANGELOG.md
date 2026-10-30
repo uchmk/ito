@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.152.1] - 2026-10-31
+
+### 変更
+
+- `ito-sftp`: russh の機能 `rsa` を外した。`rsa` クレートには直っていない助言 RUSTSEC-2023-0071（Marvin、タイミング攻撃）があり、`cargo audit` が落ちていたため。`Cargo.lock` から `rsa` が消える。純 Rust のまま。
+
+### 使う側がやること
+
+- RSA のホスト鍵・RSA の鍵ファイルは使えなくなった（ed25519・ecdsa は使える）。RSA しか持たないサーバーが要るなら ito に知らせる。
+
 ## [0.152.0] - 2026-10-31
 
 ### 追加

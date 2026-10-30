@@ -634,16 +634,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crypto-primes"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3633a51a39c69ebbaa4feaa694bd83d241e4093901c84a0963b19d9bb3f0cf8f"
-dependencies = [
- "crypto-bigint",
- "rand_core",
-]
-
-[[package]]
 name = "cssparser"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1950,14 +1940,14 @@ dependencies = [
 
 [[package]]
 name = "ito-a11y"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-browser"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -1968,14 +1958,14 @@ dependencies = [
 
 [[package]]
 name = "ito-bugreport"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-common"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "chrono",
  "egui",
@@ -1992,7 +1982,7 @@ dependencies = [
 
 [[package]]
 name = "ito-confirm"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-diff",
@@ -2000,28 +1990,28 @@ dependencies = [
 
 [[package]]
 name = "ito-console"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-diff"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "similar",
 ]
 
 [[package]]
 name = "ito-eventlog"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-export"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "pdf-writer",
  "resvg 0.48.1",
@@ -2031,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "ito-fonts"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-common",
@@ -2039,7 +2029,7 @@ dependencies = [
 
 [[package]]
 name = "ito-glossary"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2047,25 +2037,25 @@ dependencies = [
 
 [[package]]
 name = "ito-gpu"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui-wgpu",
 ]
 
 [[package]]
 name = "ito-graph"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-guard"
-version = "0.152.0"
+version = "0.152.1"
 
 [[package]]
 name = "ito-guide"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2073,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "ito-help"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-keymap",
@@ -2081,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "ito-http"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-secret",
  "serde",
@@ -2090,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "ito-i18n"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-common",
  "toml",
@@ -2099,14 +2089,14 @@ dependencies = [
 
 [[package]]
 name = "ito-ime"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-ipc"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "postcard",
  "serde",
@@ -2115,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "ito-keymap"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-common",
  "ito-keys",
@@ -2125,14 +2115,14 @@ dependencies = [
 
 [[package]]
 name = "ito-keys"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-keyscript"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-common",
@@ -2142,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "ito-layout"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "serde",
@@ -2150,21 +2140,21 @@ dependencies = [
 
 [[package]]
 name = "ito-match"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "fancy-regex 0.19.2",
 ]
 
 [[package]]
 name = "ito-mcp"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ito-notices"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2172,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "ito-notify"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-secret",
  "png 0.18.1",
@@ -2181,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "ito-openin"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-common",
  "serde",
@@ -2190,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "ito-palette"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2198,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "ito-pane"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -2220,14 +2210,14 @@ dependencies = [
 
 [[package]]
 name = "ito-power"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-prefs"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-common",
@@ -2244,14 +2234,14 @@ dependencies = [
 
 [[package]]
 name = "ito-proc"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "ito-secret"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "security-framework",
  "windows",
@@ -2259,21 +2249,21 @@ dependencies = [
 
 [[package]]
 name = "ito-select"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-service"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-sftp"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "rand",
  "russh",
@@ -2284,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "ito-statusbar"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "chrono",
  "egui",
@@ -2294,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "ito-store"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-common",
  "rusqlite",
@@ -2302,7 +2292,7 @@ dependencies = [
 
 [[package]]
 name = "ito-syntax"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "syntect",
  "two-face",
@@ -2310,14 +2300,14 @@ dependencies = [
 
 [[package]]
 name = "ito-tail"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "ito-testcheck"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "serde",
  "toml",
@@ -2325,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "ito-theme"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-pane",
@@ -2335,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "ito-titlebar"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2343,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "ito-tray"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "ito-a11y",
  "windows",
@@ -2351,14 +2341,14 @@ dependencies = [
 
 [[package]]
 name = "ito-watch"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "notify",
 ]
 
 [[package]]
 name = "ito-winres"
-version = "0.152.0"
+version = "0.152.1"
 dependencies = [
  "png 0.18.1",
 ]
@@ -3264,16 +3254,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pkcs1"
-version = "0.8.0-rc.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "986d2e952779af96ea048f160fd9194e1751b4faea78bcf3ceb456efe008088e"
-dependencies = [
- "der",
- "spki",
-]
-
-[[package]]
 name = "pkcs5"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3734,25 +3714,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rsa"
-version = "0.10.0-rc.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30b2aa4ba0d89f73d1e332df05be0eeab8840351c36ca5654341dfdb57bb3caf"
-dependencies = [
- "const-oid",
- "crypto-bigint",
- "crypto-primes",
- "digest 0.11.3",
- "pkcs1",
- "pkcs8",
- "rand_core",
- "sha2 0.11.1",
- "signature",
- "spki",
- "zeroize",
-]
-
-[[package]]
 name = "rsqlite-vfs"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3818,14 +3779,12 @@ dependencies = [
  "p521",
  "pageant",
  "pbkdf2",
- "pkcs1",
  "pkcs5",
  "pkcs8",
  "polyval",
  "rand",
  "rand_core",
  "ring",
- "rsa",
  "russh-cryptovec",
  "russh-util",
  "salsa20",
@@ -4400,7 +4359,6 @@ checksum = "7b54d0ed0498daf3f78d82e00e28c8eec9d75a067c4cfbcc7a0f7d0f4077749e"
 dependencies = [
  "base64ct",
  "bytes",
- "crypto-bigint",
  "ctutils",
  "digest 0.11.3",
  "pem-rfc7468",
@@ -4423,7 +4381,6 @@ dependencies = [
  "p384",
  "p521",
  "rand_core",
- "rsa",
  "sec1",
  "sha1",
  "sha2 0.11.1",
