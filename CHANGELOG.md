@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.136.0] - 2026-10-30
+
+### 追加
+- メール（SMTP）の通知先 `[[notify.mails]]`（uchmk/ito#80、koyomi の依頼）。`ito_notify::mail` と `ito_prefs::MailCfg`。
+  - 送るのはシステムの `curl`（新しい依存なし）。webhook と同じく別スレッドで、失敗は 30 秒後に 1 回やり直し、それでも駄目なら stderr と `mail::on_failure` に出す。呼ぶ側を待たせない。
+  - 常に暗号化する。465 は最初から TLS（`smtps://`）、それ以外は STARTTLS を必須（`--ssl-reqd`）。
+  - パスワードは `secret:<名前>` の参照だけ。ファイルに直に書くと警告して送らない。`NotifyCfg::reveal(app)` が資格情報ストアから読み戻す（`secret` 欄）。`curl` には標準入力の設定で渡すので、プロセス一覧に出ない。`Debug` にも出ない。
+  - 件名 = 題、本文 = 本文（UTF-8 を base64、日本語の件名・差出人名は RFC 2047 で符号化、題の改行はヘッダーの注入にならない）。宛先は `koyomi <jobs@example.com>` の形も読む。
+  - `Mail::problems`（host なし・port 0・from/to の形・パスワードの書き方・知らない出来事）、`NotifyCfg::check` が `[[notify.mails]] N:` を付けて警告し、同じ `name` も警告する。
+  - `NotifyCfg::tell`／`tell_open` は webhook のあとにメールも送る。`only`／`unnamed` は名前でメールの通知先も選ぶ。
+  - 「テストを送る」は `ito_prefs::test_mail(app, &Mail, level, title, body)`（パスワードを読むのでワーカースレッドから）。
+  - 使う側がやること: `NotifyCfg` の `mails`／`mail_places` が増えただけで、既存の `[notify]` は変わらない。パスワードは `ito_secret::set(app, "mail-ops", …)` で入れる。設定の画面（Notifications のカード）への表示は、まだ。
+
 ## [0.135.0] - 2026-10-30
 
 ### 追加

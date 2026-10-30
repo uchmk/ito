@@ -392,6 +392,7 @@ scale: 100%           # 書くなら倍率を % で
   前の 1 つだけの形（`[notify]` の `webhook`（アドレス）・`webhook_format`・`webhook_states`）も読み、1 つ目の送り先にする
   （`webhook::places`）。設定の画面が書くときは表に移す（`ito_prefs::write_webhooks`。表はアドレスで見分け、コメントを残す）。
   知らない値は警告して既定に戻す（送り先は `Place::problems`）。
+  メールは `[[notify.mails]]`（`name`・`host`・`port`（既定 587、465 は最初から TLS）・`user`・`password`（`secret:<名前>` の参照だけ。ファイルに直に書くと警告して送らない）・`from`・`to`・`states`。`ito_notify::mail`）。
 
 ## 時計
 

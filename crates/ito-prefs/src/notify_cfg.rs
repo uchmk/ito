@@ -10,6 +10,7 @@
 //! [`NotifyCfg::edits`] and [`NotifyCfg::webhooks_of`] to write the page's
 //! changes back, and [`test`] for "Send a test".
 
+use ito_notify::mail::{self, Mail};
 use ito_notify::toast::{App, Icon};
 use ito_notify::webhook::{self, Level, Place};
 use serde::Deserialize;
@@ -51,6 +52,32 @@ pub struct HookCfg {
     pub states: Option<Vec<String>>,
 }
 
+/// A `[[notify.mails]]` table: the SMTP server, the login (the password only as a `secret:` reference), the
+/// addresses and the events sent there (not written: every one). See `ito_notify::mail`.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MailCfg {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub host: String,
+    /// Not written: 587 (STARTTLS). 465 is TLS from the start.
+    #[serde(default = "submission")]
+    pub port: u16,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: Vec<String>,
+    pub states: Option<Vec<String>>,
+}
+
+fn submission() -> u16 {
+    587
+}
+
 fn ntfy() -> String {
     "ntfy".to_owned()
 }
@@ -81,6 +108,9 @@ pub struct NotifyCfg {
     /// `[[notify.webhooks]]`, as written.
     #[serde(default)]
     pub webhooks: Vec<HookCfg>,
+    /// `[[notify.mails]]`, as written.
+    #[serde(default)]
+    pub mails: Vec<MailCfg>,
     /// The sound keys (`sound_done`, …): the app's own, so not fields.
     #[serde(flatten)]
     other: BTreeMap<String, toml::Value>,
@@ -92,6 +122,10 @@ pub struct NotifyCfg {
     /// `webhooks`. Made by [`NotifyCfg::check`], not read.
     #[serde(skip)]
     pub places: Vec<Place>,
+    /// Where it is told of by mail, in order. Made by [`NotifyCfg::check`], not read; the passwords are read
+    /// back by [`NotifyCfg::reveal`].
+    #[serde(skip)]
+    pub mail_places: Vec<Mail>,
 }
 
 fn names(events: &[Event]) -> Vec<&'static str> {
@@ -175,6 +209,31 @@ impl NotifyCfg {
             }
             seen.push(&p.name);
         }
+        let mut mails = Vec::new();
+        for (i, h) in self.mails.iter().enumerate() {
+            let mut m = Mail {
+                name: h.name.trim().to_owned(),
+                host: h.host.trim().to_owned(),
+                port: h.port,
+                user: h.user.trim().to_owned(),
+                password: h.password.trim().to_owned(),
+                from: h.from.trim().to_owned(),
+                to: h.to.iter().map(|t| t.trim().to_owned()).collect(),
+                states: h.states.clone().unwrap_or_else(all),
+                secret: None,
+            };
+            warnings.extend(m.problems(&known).into_iter().map(|w| format!("{path}: [[notify.mails]] {}: {w}", i + 1)));
+            m.states.retain(|s| known.contains(&s.as_str()));
+            mails.push(m);
+        }
+        let mut seen: Vec<&str> = Vec::new();
+        for (i, m) in mails.iter().enumerate().filter(|(_, m)| !m.name.is_empty()) {
+            if seen.contains(&m.name.as_str()) {
+                warnings.push(format!("{path}: [[notify.mails]] {}: `name` `{}` is used by another place", i + 1, m.name));
+            }
+            seen.push(&m.name);
+        }
+        self.mail_places = mails;
         let old =
             Place { name: String::new(), url: url.trim().to_owned(), format: self.webhook_format.clone().unwrap_or_else(ntfy), states };
         self.places = webhook::places(old, hooks);
@@ -185,6 +244,7 @@ impl NotifyCfg {
     pub fn only(&self, names: &[&str]) -> NotifyCfg {
         NotifyCfg {
             places: self.places.iter().filter(|p| !p.name.is_empty() && names.contains(&p.name.as_str())).cloned().collect(),
+            mail_places: self.mail_places.iter().filter(|m| !m.name.is_empty() && names.contains(&m.name.as_str())).cloned().collect(),
             ..self.clone()
         }
     }
@@ -192,7 +252,11 @@ impl NotifyCfg {
     /// A copy that tells only the places with no name (what a notice with no destination of its own
     /// goes to). Call it after [`NotifyCfg::check`].
     pub fn unnamed(&self) -> NotifyCfg {
-        NotifyCfg { places: self.places.iter().filter(|p| p.name.is_empty()).cloned().collect(), ..self.clone() }
+        NotifyCfg {
+            places: self.places.iter().filter(|p| p.name.is_empty()).cloned().collect(),
+            mail_places: self.mail_places.iter().filter(|m| m.name.is_empty()).cloned().collect(),
+            ..self.clone()
+        }
     }
 
     /// Read the `secret:` addresses back from the OS credential store of
@@ -200,8 +264,11 @@ impl NotifyCfg {
     /// the lines are for the settings' warnings. Blocks: call it from a
     /// worker thread, then hand the result to the thread that sends.
     pub fn reveal(&mut self, app: &str) -> Vec<String> {
-        let (places, warnings) = webhook::reveal(app, &self.places);
+        let (places, mut warnings) = webhook::reveal(app, &self.places);
         self.places = places;
+        let (mails, more) = mail::reveal(app, &self.mail_places);
+        self.mail_places = mails;
+        warnings.extend(more.into_iter().map(|w| format!("[[notify.mails]]: {w}")));
         warnings
     }
 
@@ -250,6 +317,7 @@ impl NotifyCfg {
             _ => send(self.focus_mode(), system.then_some(app), icon, sound, title, body),
         }
         webhook::send_all(&self.places, event, events[k].level, title, body, "");
+        mail::send_all(&self.mail_places, event, events[k].level, title, body);
     }
 
     /// As the settings' Notifications page shows it: a column per event, in
@@ -390,6 +458,19 @@ pub fn test(events: &[Event], p: &Notify, what: Test, app: App<'static>, icon: I
     }
 }
 
+/// "Send a test" to one mail place, whatever it is told of. Reads its password back from the credential store of
+/// `app` first, so it blocks: call it from a worker thread. The mail itself goes on a thread of its own; a
+/// failure comes back as a line, or is told by `ito_notify::mail::on_failure`.
+pub fn test_mail(app: &str, m: &Mail, level: Level, title: &str, body: &str) -> Result<(), String> {
+    let (mails, warnings) = mail::reveal(app, std::slice::from_ref(m));
+    let m = mails.into_iter().next().unwrap_or_else(|| m.clone());
+    if !m.ready() {
+        return Err(warnings.into_iter().chain(m.problems(&[])).next().unwrap_or_else(|| "it cannot be sent as it is".to_owned()));
+    }
+    mail::send(m, level, title.to_owned(), body.to_owned());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +485,37 @@ mod tests {
         let mut w = Vec::new();
         n.check(&DONE_FAILED, "config.toml", &mut w);
         (n, w)
+    }
+
+    #[test]
+    fn mails_are_read_checked_and_picked_by_name() {
+        let (n, w) = read(
+            "[[notify.mails]]
+name = \"ops\"
+host = \"smtp.example.com\"
+user = \"jobs@example.com\"
+password = \"secret:mail-ops\"
+from = \"koyomi <jobs@example.com>\"
+to = [\"ops@example.com\"]
+states = [\"failed\", \"nope\"]
+
+[[notify.mails]]
+host = \"smtp.example.com\"
+from = \"jobs@example.com\"
+to = [\"a@example.com\"]
+password = \"plain\"
+",
+        );
+        assert_eq!(n.mail_places.len(), 2);
+        assert_eq!((n.mail_places[0].port, n.mail_places[0].states.clone()), (587, vec!["failed".to_owned()]));
+        assert_eq!(n.mail_places[1].states, vec!["done".to_owned(), "failed".to_owned()]);
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w[0].contains("[[notify.mails]] 1") && w[0].contains("`nope`"));
+        assert!(w[1].contains("[[notify.mails]] 2") && w[1].contains("written in the file"));
+        assert!(w[2].contains("needs a `user`"));
+        assert_eq!(n.only(&["ops"]).mail_places.len(), 1);
+        assert_eq!(n.unnamed().mail_places.len(), 1);
+        assert!(n.unnamed().mail_places[0].name.is_empty());
     }
 
     #[test]

@@ -4,12 +4,13 @@
 //! address that takes JSON, to as many places as the settings list). Each runs
 //! on a thread of its own and a failure only goes to stderr, so a caller never
 //! waits on the system. No HTTP client is built in: the webhook goes through
-//! the system's `curl`.
+//! the system's `curl`. A mail ([`mail`], SMTP, `[[notify.mails]]`) goes the same way.
 //!
 //! The words of the settings (`[notify] sound_waiting`, a
 //! `[[notify.webhooks]]`'s `format`) are the same in every app that uses
 //! this: see [`SOUNDS`] and [`FORMATS`].
 
+pub mod mail;
 pub mod notifier;
 pub mod player;
 pub mod sound;
