@@ -1,0 +1,15 @@
+[package]
+name = "ito-mail"
+description = "Look at a mailbox over IMAP for new mail, read-only: sender, subject (RFC 2047 decoded) and date of each message that came since the last look"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# `ring` (not the default aws-lc-rs) needs a C compiler on Linux and macOS targets only, like ito-sftp.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+encoding_rs = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std"] }

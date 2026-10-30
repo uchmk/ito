@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.154.0] - 2026-10-31
+
+### 追加
+
+- 新しいクレート `ito-mail`: メールボックスを IMAP で見て、新しい着信を返す（uchmk/ito#101）。読むだけで、メールを変えない。
+  - `Inbox::open(&Account, password, From)`: つないで、ログインして、フォルダーを `EXAMINE`（読み取り専用）で開く。サーバー・ログイン・フォルダーが間違っていればここで `Error::Connect` / `Tls` / `Login` / `NoFolder`。
+  - `Inbox::poll()`: 前回より後に来たメール（`Mail { uid, from, name, subject, date }`）を古い順に返す。ヘッダーは `BODY.PEEK` で取るので既読にならない。切れていれば次の呼び出しでつなぎ直す（場所は失わない）。1 回に最大 200 UID。
+  - `Inbox::position()` → `Position { uid_validity, uid }`: アプリが状態に保存し、再起動後に `From::After(position)` で渡すと、二重にも取りこぼしもしない。`UIDVALIDITY` が変わっていたら終わりから始め直す。`From::End` は開いた後の着信だけ。
+  - 件名・名前は RFC 2047（`B`・`Q`、ISO-2022-JP などの文字コード、隣り合う語の間の空白は捨てる）を復号する。`Date` は `chrono::DateTime<FixedOffset>`。
+  - TLS は最初から（993）。rustls（ring）+ webpki-roots で OpenSSL なし。つなぎ・読み書きに 20 秒のタイムアウト。`ring` は ito-sftp と同じく Linux・macOS 向けのビルドで C のコンパイラーが要る。
+
+### 使う側がやること
+
+- パスワードは `ito-secret` から読んで `Inbox::open` に渡す（ファイルに置かない）。`poll` は止まるのでワーカースレッドから呼ぶ。
+- フォルダー名は ASCII のまま送る（修正 UTF-7 にはしない）。
+
 ## [0.153.0] - 2026-10-31
 
 ### 追加
