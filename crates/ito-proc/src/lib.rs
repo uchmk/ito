@@ -16,6 +16,9 @@
 //! It blocks the calling thread, so call it from a worker, never the UI thread.
 //! What the lines mean stays with the caller.
 
+#[cfg(windows)]
+mod logon;
+
 use std::io::{self, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -309,13 +312,94 @@ pub fn run_lines_with(
     own_group(&mut cmd);
     let mut child = cmd.spawn()?;
     sys::adopt(&child);
-    let (tx, rx) = mpsc::channel();
     let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
+    watch(&mut ChildProc(child), stdout, stderr, stop, enc, on_line)
+}
+
+/// An account to run a child as (see [`run_lines_as`]).
+#[derive(Clone, Copy)]
+pub struct Logon<'a> {
+    /// The account name; `DOMAIN\user` or `user@domain` also work.
+    pub user: &'a str,
+    /// Its domain, or the computer name for a local account; `None` takes it from `user`
+    /// (or, for a plain name, the local computer).
+    pub domain: Option<&'a str>,
+    pub password: &'a str,
+}
+
+impl std::fmt::Debug for Logon<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Logon").field("user", &self.user).field("domain", &self.domain).field("password", &"***").finish()
+    }
+}
+
+/// [`run_lines_with`], with the child running as another account's user.
+///
+/// Windows only (`CreateProcessWithLogonW`, with that account's profile loaded); elsewhere
+/// this is `Err(Unsupported)`. There is no elevation: an administrator account gets its
+/// filtered token, as from a normal process. The pipes, the stop flag and the kill of the
+/// whole tree (the child is put in a job of its own before it first runs) work as for
+/// [`run_lines_with`]. A wrong password, an account that may not log on here and the like come
+/// back as the system's own `io::Error` (`to_string()` is its message).
+///
+/// From `cmd` the program (give a full path: it is looked up from this process, not the account),
+/// the arguments, the working directory and the environment changes (`env`, `env_remove`) are used.
+/// The environment starts from the account's own (as its logon would build it) with `cmd`'s changes
+/// laid over it; names compare without regard to case. The password is not kept past the call.
+pub fn run_lines_as(
+    cmd: Command,
+    logon: &Logon,
+    stop: &AtomicBool,
+    enc: Encoding,
+    on_line: &mut dyn FnMut(Stream, &str) -> bool,
+) -> io::Result<Lines> {
+    #[cfg(windows)]
+    {
+        let (mut proc, stdout, stderr) = logon::spawn(&cmd, logon)?;
+        watch(&mut proc, stdout, stderr, stop, enc, on_line)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (cmd, logon, stop, enc, on_line);
+        Err(io::Error::new(io::ErrorKind::Unsupported, "running as another account is only supported on Windows"))
+    }
+}
+
+/// A started child as `watch` sees it.
+trait Proc {
+    /// Its exit status once it has exited.
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>>;
+    /// End it and everything it started.
+    fn kill(&mut self);
+}
+
+struct ChildProc(Child);
+
+impl Proc for ChildProc {
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.0.try_wait()
+    }
+
+    fn kill(&mut self) {
+        kill_tree(&mut self.0);
+    }
+}
+
+/// Read the two pipes of `proc` as lines until it ends or `stop` is set.
+fn watch(
+    proc: &mut dyn Proc,
+    stdout: impl Read + Send + 'static,
+    stderr: impl Read + Send + 'static,
+    stop: &AtomicBool,
+    enc: Encoding,
+    on_line: &mut dyn FnMut(Stream, &str) -> bool,
+) -> io::Result<Lines> {
+    let (tx, rx) = mpsc::channel();
     let (out_tx, err_tx) = (tx.clone(), tx.clone());
     let out = std::thread::Builder::new().name("ito-proc-stdout".into()).spawn(move || split_lines(stdout, Stream::Out, enc, out_tx));
     let err = std::thread::Builder::new().name("ito-proc-stderr".into()).spawn(move || split_lines(stderr, Stream::Err, enc, err_tx));
     if let Err(e) = out.and(err) {
-        kill_tree(&mut child);
+        proc.kill();
         return Err(e);
     }
     let mut kept = Vec::new();
@@ -332,7 +416,7 @@ pub fn run_lines_with(
     };
     loop {
         if stop.load(Ordering::Relaxed) {
-            kill_tree(&mut child);
+            proc.kill();
             // What the readers already got is still the caller's.
             while let Ok(p) = rx.try_recv() {
                 take(&mut kept, p, &mut out_end, &mut err_end);
@@ -343,11 +427,11 @@ pub fn run_lines_with(
             take(&mut kept, p, &mut out_end, &mut err_end);
         }
         if exited.is_none() {
-            match child.try_wait() {
+            match proc.try_wait() {
                 Ok(Some(status)) => exited = Some((status, Instant::now())),
                 Ok(None) => {}
                 Err(e) => {
-                    kill_tree(&mut child);
+                    proc.kill();
                     return Err(e);
                 }
             }
@@ -480,33 +564,32 @@ mod sys {
         fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
     }
 
+    /// A new unnamed job that ends every process in it when its last handle closes. Null when it could not be made.
+    pub fn make_job() -> *mut std::ffi::c_void {
+        const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+        const KILL_ON_JOB_CLOSE: u32 = 0x2000;
+        // SAFETY: an unnamed job; `info` is a plain struct of the size the class asks for.
+        unsafe {
+            let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if h.is_null() {
+                return h;
+            }
+            let mut info: Extended = std::mem::zeroed();
+            info.basic.flags = KILL_ON_JOB_CLOSE;
+            let ok =
+                SetInformationJobObject(h, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, (&raw const info).cast(), size_of::<Extended>() as u32);
+            if ok == 0 {
+                return std::ptr::null_mut();
+            }
+            h
+        }
+    }
+
     /// This process's job: its handle is never closed, so the system closes it when the process dies, and with
     /// `KILL_ON_JOB_CLOSE` that ends every child put in it. 0 when it could not be made.
     fn job() -> usize {
         static JOB: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-        *JOB.get_or_init(|| {
-            const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
-            const KILL_ON_JOB_CLOSE: u32 = 0x2000;
-            // SAFETY: an unnamed job; `info` is a plain struct of the size the class asks for.
-            unsafe {
-                let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
-                if h.is_null() {
-                    return 0;
-                }
-                let mut info: Extended = std::mem::zeroed();
-                info.basic.flags = KILL_ON_JOB_CLOSE;
-                let ok = SetInformationJobObject(
-                    h,
-                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-                    (&raw const info).cast(),
-                    size_of::<Extended>() as u32,
-                );
-                if ok == 0 {
-                    return 0;
-                }
-                h as usize
-            }
-        })
+        *JOB.get_or_init(|| make_job() as usize)
     }
 
     /// Put the child (and so what it starts) in this process's job, so it dies with the process. Best effort.
@@ -744,6 +827,65 @@ mod tests {
         .unwrap();
         assert!(r.stopped() && !r.ok());
         assert!(r.kept.iter().any(|(w, l)| *w == Stream::Out && l.trim() == "before"), "{:?}", r.kept);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn running_as_another_account_is_unsupported_off_windows() {
+        let stop = AtomicBool::new(false);
+        let logon = Logon { user: "nobody", domain: None, password: "x" };
+        let e = run_lines_as(say("x", "y", 0), &logon, &stop, Encoding::Utf8, &mut |_, _| false).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::Unsupported);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_wrong_account_comes_back_as_the_systems_error() {
+        let stop = AtomicBool::new(false);
+        let logon = Logon { user: "ito-proc-no-such-user", domain: None, password: "not-the-password" };
+        let e = run_lines_as(say("x", "y", 0), &logon, &stop, Encoding::Utf8, &mut |_, _| false).unwrap_err();
+        assert!(e.raw_os_error().is_some(), "{e:?}");
+        assert!(!format!("{logon:?}").contains("not-the-password"));
+        // With environment changes the logon is tried first, so the error is the same.
+        let mut c = say("x", "y", 0);
+        c.env("A", "b");
+        assert!(run_lines_as(c, &logon, &stop, Encoding::Utf8, &mut |_, _| false).unwrap_err().raw_os_error().is_some());
+    }
+
+    /// Needs a second account: `net user ito-proc-test <pw> /add`, then
+    /// `ITO_PROC_TEST_USER=ito-proc-test ITO_PROC_TEST_PASSWORD=<pw> cargo test -p ito-proc -- --ignored`,
+    /// and `net user ito-proc-test /delete` afterwards.
+    #[test]
+    #[ignore = "needs a second Windows account"]
+    #[cfg(windows)]
+    fn a_child_runs_as_the_other_account_and_stops_with_its_tree() {
+        let (user, password) = (std::env::var("ITO_PROC_TEST_USER").unwrap(), std::env::var("ITO_PROC_TEST_PASSWORD").unwrap());
+        let logon = Logon { user: &user, domain: None, password: &password };
+        let stop = AtomicBool::new(false);
+        let mut c = Command::new(r"C:\Windows\System32\cmd.exe");
+        c.args(["/C", "echo %USERNAME%"]);
+        let mut seen = Vec::new();
+        let r = run_lines_as(c, &logon, &stop, Encoding::Auto, &mut |_, l| {
+            seen.push(l.trim().to_owned());
+            false
+        })
+        .unwrap();
+        assert!(r.ok(), "{r:?}");
+        assert_eq!(seen, std::slice::from_ref(&user));
+
+        let mut c = Command::new(r"C:\Windows\System32\cmd.exe");
+        c.args(["/C", "ping -n 60 127.0.0.1"]);
+        let began = Instant::now();
+        let r = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(1500));
+                stop.store(true, Ordering::Relaxed);
+            });
+            run_lines_as(c, &logon, &stop, Encoding::Auto, &mut |_, _| false)
+        })
+        .unwrap();
+        assert!(r.stopped());
+        assert!(began.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

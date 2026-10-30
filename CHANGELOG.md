@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.147.0] - 2026-10-31
+
+### 追加
+
+- `ito-proc`: 別の Windows アカウントで子プロセスを動かす `run_lines_as(cmd, &Logon { user, domain, password }, stop, enc, on_line)`（uchmk/ito#97）。
+  - `CreateProcessWithLogonW`（`LOGON_WITH_PROFILE`）。標準入出力は今までどおりこちらのパイプ、止めると子の木ごと終わる。子は一時停止で作り、専用のジョブ オブジェクトに入れてから動かす（別アカウントのプロセスは `taskkill` できないので、ジョブを終わらせる。こちらが死んでもジョブが閉じて終わる）。
+  - 間違ったパスワード・ログオンの権限が無い、などはシステムの `io::Error` のまま返る。パスワードの幅広文字の領域は呼び出しの後で 0 で潰す。`Logon` の `Debug` はパスワードを `***` にする。
+  - Windows 以外は `Err(Unsupported)`。昇格はしない（管理者のアカウントも UAC で絞られたトークン）。
+  - `cmd` から使うのはプログラム・引数・作業フォルダー。環境変数は、アカウント自身のブロック（`LogonUserW` → `CreateEnvironmentBlock`）に `cmd.env(..)`・`env_remove(..)` を重ねたもの（名前は大文字小文字を区別しない）。`env` が無ければ `LogonUserW` はせず、ログオンのままの環境。プログラムはフルパスで渡す（探すのはこちらのプロセスから）。
+  - 別のアカウントが要るテストは `#[ignore]`（`net user ito-proc-test <pw> /add` と環境変数 `ITO_PROC_TEST_USER` / `ITO_PROC_TEST_PASSWORD`）。
+
+### 使う側がやること
+
+- koyomi: `run_lines_with` の代わりに `run_lines_as` を呼ぶ。パスワードは `ito-secret` から読んだものをそのまま渡す。
+
 ## [0.146.0] - 2026-10-31
 
 ### 追加
