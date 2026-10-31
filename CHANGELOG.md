@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.165.0] - 2026-10-31
+
+### 追加
+
+- `ito-prefs`: `secret_field`（uchmk/ito#107）。秘密（トークン・パスワード・OAuth のクライアント シークレット）を `ito-secret` に渡すための、伏せ字の 1 行の入力欄。
+  - `secret_field(ui, look, &mut drafts, id, hint, &SecretWords { show, hide }, width) -> Option<String>`。Enter か欄を離れたときに打った秘密を 1 度だけ返す（Esc と空の欄は `None`）。
+  - 欄は常に空から始まり、保存済みの秘密は見せない。`hint` は「保存済み」「未保存」をアプリが渡す。取り出したあと `Drafts` には何も残らない。
+  - 右の「表示 / 隠す」ボタンで伏せ字を切り替える（ボタンを押しても欄を離れた扱いにならない）。`secret_taken` は離れたときの判定だけの関数。
+
+### 使う側がやること
+
+- 秘密を打つ欄の `ito_prefs::field` を `secret_field` に替える。返った文字列は `ito_secret::set` に渡し、設定のファイルには書かない。
+
 ## [0.164.0] - 2026-10-31
 
 ### 追加

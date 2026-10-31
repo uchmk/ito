@@ -25,6 +25,7 @@ pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEY
 mod notify;
 mod notify_cfg;
 mod openin;
+mod secret;
 mod shell;
 mod tag;
 mod updates;
@@ -42,6 +43,7 @@ pub use notify::{
 };
 pub use notify_cfg::{notify_window, take_clicks, test as test_notify, test_mail, Event, HookCfg, MailCfg, NotifyCfg, DONE_FAILED};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
+pub use secret::{secret_field, taken as secret_taken, SecretWords};
 pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
 pub use tag::{
     fit as fit_tag, paint_tag, parse_hex, settle_tag_colors, tag, tag_colors, tag_hue, tag_picker, tag_slot, tag_width, Tag, TAG_PALETTE,
