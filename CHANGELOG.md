@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.162.0] - 2026-10-31
+
+### 追加
+
+- `ito-oauth`（uchmk/ito#106）。デスクトップアプリの OAuth 2.0 サインインと、それが使う HTTPS クライアント。純 Rust（rustls + ring、webpki の根）、ブロッキング。
+  - `sign_in(&GOOGLE, &Client { id, secret }, &[scope…], |url| …, &stop, &Options::default())`: RFC 8252 のインストール型。同意の URL を `open` に渡し、`127.0.0.1` の乱数ポートで code を受け、PKCE（S256）と `state` を確かめて交換する。
+    favicon や state の違う要求では待ちをやめない。「許可しない」は `Error::Denied`、停止の旗は `Cancelled`、`Options::timeout`（既定 5 分）は `Timeout`。
+  - `Session`: `start(app, account, provider, client, tokens)` でリフレッシュ トークンを `ito-secret` に置く（ファイルには置かない）。`resume` で前回のサインインを戻し、`token()` は期限の 1 分前から更新する。
+    `invalid_grant` は `Error::Refused`（秘密も消す）。`sign_out()` は秘密を消してから revoke する。
+  - `https::request(method, url, bearer, body, timeout)`: 2xx だけ `Ok`。ほかは `Error::Status { code, retry_after, body }`（`retryable()` は 429・5xx・通信の失敗・タイムアウト）。chunked と Content-Length、本文は 32 MiB まで。`http://` はループバックだけ（試験用）。
+  - `Tokens`・`Session` の `Debug` はトークンを出さない。
+
+### 使う側がやること
+
+- fumi: 自前の仮実装（mock）をこれに替える。`Client` の id は Google Cloud の「デスクトップ アプリ」のクライアント。
+- koyomi（任意）: `ito-mail` の XOAUTH2 に `Session::token()` を渡せる。
+
 ## [0.161.0] - 2026-10-31
 
 ### 追加
