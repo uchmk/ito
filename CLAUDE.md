@@ -6,7 +6,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | クレート | 中身 | 主に使う側 |
 |---|---|---|
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |
-| `ito-layout` | 矩形をペインに分ける木と、egui の仕切り | tsumugi、kura、yagura |
+| `ito-layout` | 矩形をペインに分ける木と、egui の仕切り。`panels` の機能で、幅を変えられる egui のパネル（`Panels::show`: 中身が少なくても縮まない・ドラッグした大きさを `state_dir` の `panels.toml` に覚える） | tsumugi、kura、yagura、fumi |
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する | tsumugi、yagura |
 | `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd） | yagura |
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |

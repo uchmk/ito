@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.159.0] - 2026-10-31
+
+### 追加
+
+- `ito-layout` の `panels` の機能（uchmk/ito#105）: 幅を変えられる egui のパネルの大きさを覚える `Panels`。
+  - `Panels::load(state_dir)` で `panels.toml`（`[size]` にパネルの名前ごとの大きさ）を読む。`None`（`--keys`）は何も読まず書かない。
+  - `Panels::show(ui, Side, 名前, 既定, tune, add)` は覚えた大きさから始め、中身をパネルいっぱいに描く。egui は描いた大きさを覚えるので、中身が少ないパネルが縮んだままになるのを防ぐ。
+  - 覚えるのは縁をドラッグした大きさだけで、離したときに `kept::Writer` で書く。窓を小さくしたり最小化したりして押し縮められた大きさは覚えない。
+
 ## [0.158.0] - 2026-10-31
 
 ### 追加
@@ -1105,7 +1114,8 @@ fude の 4 つの crate-request（uchmk/ito#52〜#55）。
 
 ### 追加
 
-- scripts/lanes: `lane-trust.ps1`（`Set-ClaudeFolderTrust`）。レーンの一時フォルダー（`<scratch>un-<日時>\projN`）で Claude Code を起動すると「このフォルダーを信頼しますか」で止まり、Enter を押すまで進まなかった。`~/.claude.json` の `projects["<フォルダー>"].hasTrustDialogAccepted` を一時フォルダーの親に 1 回だけ書いて、下の実行用フォルダーを全部信頼済みにする（親が信頼済みなら子も通ることを実機で確かめた）。書いたら `$true`、既にある・設定が無い・書けないときは `$false`（実行は止めない）。ほかの項目は触らない。`check-ps1.ps1` に確かめを足した。
+- scripts/lanes: `lane-trust.ps1`（`Set-ClaudeFolderTrust`）。レーンの一時フォルダー（`<scratch>
+un-<日時>\projN`）で Claude Code を起動すると「このフォルダーを信頼しますか」で止まり、Enter を押すまで進まなかった。`~/.claude.json` の `projects["<フォルダー>"].hasTrustDialogAccepted` を一時フォルダーの親に 1 回だけ書いて、下の実行用フォルダーを全部信頼済みにする（親が信頼済みなら子も通ることを実機で確かめた）。書いたら `$true`、既にある・設定が無い・書けないときは `$false`（実行は止めない）。ほかの項目は触らない。`check-ps1.ps1` に確かめを足した。
 
 ### 使う側がやること
 

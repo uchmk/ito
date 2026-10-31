@@ -12,6 +12,9 @@ pub mod columns;
 #[cfg(feature = "egui")]
 pub mod ui;
 
+#[cfg(feature = "panels")]
+pub mod panels;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

@@ -11,7 +11,10 @@ repository.workspace = true
 serde = ["dep:serde"]
 # The dividers drawn and dragged in egui (`ui::dividers`).
 egui = ["dep:egui"]
+# Resizable egui panels whose sizes are kept in `panels.toml` (`panels`).
+panels = ["egui", "serde", "dep:ito-common"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 egui = { version = "0.36", optional = true }
+ito-common = { path = "../ito-common", optional = true }
