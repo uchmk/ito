@@ -25,13 +25,14 @@ pub mod tls;
 #[cfg(feature = "tls")]
 pub use tls::TlsCfg;
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 #[cfg(feature = "tls")]
 use std::net::IpAddr;
 use std::net::{Ipv4Addr, Ipv6Addr, TcpListener, TcpStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -58,8 +59,21 @@ pub struct Config {
     pub port: u16,
     /// Also listen on `::1` (same port). A machine without IPv6 loopback just goes without.
     pub ipv6: bool,
-    /// The bearer token every request must send. Must not be empty.
+    /// The bearer token every request must send (its name, in [`Request::who`], is `"default"`). May be empty only
+    /// when `tokens` has one.
     pub token: String,
+    /// More tokens, each with a name the handler learns through [`Request::who`] (a role, an audit trail).
+    /// Add them with [`Config::token_named`]. The name must not be empty.
+    pub tokens: Vec<(String, String)>,
+    /// Exact paths a `GET` may fetch with no token (the page that signs in: `/`, `/app.js`). The handler is called
+    /// with `who` `None`; anything with data behind it must check `who` itself.
+    pub public: Vec<String>,
+    /// Browser sessions: `POST /session` with a good bearer token sets an `HttpOnly; SameSite=Strict` cookie
+    /// (`Secure` on TLS) that stands in for the header afterwards; `GET /session` says who; `DELETE /session` signs
+    /// out. A request that has only the cookie and changes something (not `GET`/`HEAD`) must send `X-Ito-Csrf: 1`.
+    pub sessions: bool,
+    /// How long a session lasts (default 8 hours).
+    pub session_ttl: Duration,
     /// Largest body accepted, in bytes (default 64 KiB).
     pub max_body: usize,
     /// Most connections served at once (default 8); one more gets a 503.
@@ -75,10 +89,26 @@ impl Config {
             port,
             ipv6: false,
             token: token.into(),
+            tokens: Vec::new(),
+            public: Vec::new(),
+            sessions: false,
+            session_ttl: Duration::from_secs(8 * 3600),
             max_body: 64 * 1024,
             max_connections: 8,
             timeout: Duration::from_secs(10),
         }
+    }
+
+    /// One more token, known to the handler as `name`.
+    pub fn token_named(mut self, name: impl Into<String>, token: impl Into<String>) -> Self {
+        self.tokens.push((name.into(), token.into()));
+        self
+    }
+
+    /// A path a `GET` may fetch with no token.
+    pub fn public_path(mut self, path: impl Into<String>) -> Self {
+        self.public.push(path.into());
+        self
     }
 }
 
@@ -89,6 +119,7 @@ impl std::fmt::Debug for Config {
             .field("port", &self.port)
             .field("ipv6", &self.ipv6)
             .field("token", &"***")
+            .field("tokens", &self.tokens.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -105,6 +136,9 @@ pub fn token_from_secret(app: &str, name: &str) -> io::Result<String> {
 /// A request, after the token was checked.
 #[derive(Debug, Clone)]
 pub struct Request {
+    /// The name of the token (or session) that let it in: `"default"` for `Config::token`, else the name from
+    /// [`Config::token_named`]. `None` only for a [`Config::public`] path.
+    pub who: Option<String>,
     pub method: String,
     /// The path, percent-decoded (UTF-8), without the query.
     pub path: String,
@@ -130,16 +164,32 @@ impl Request {
     }
 }
 
-/// An answer: a status and a JSON value.
+/// An answer: a status and a JSON value, or bytes with a content type ([`Response::bytes`]).
 #[derive(Debug, Clone)]
 pub struct Response {
     pub status: u16,
     pub json: serde_json::Value,
+    /// When set, sent instead of `json`: the content type and the bytes.
+    pub raw: Option<(String, Vec<u8>)>,
+    /// Headers to add (`Set-Cookie`, `Location`…). Names and values must not hold a line break.
+    pub headers: Vec<(String, String)>,
 }
 
 impl Response {
     pub fn new(status: u16, json: serde_json::Value) -> Self {
-        Response { status, json }
+        Response { status, json, raw: None, headers: Vec::new() }
+    }
+
+    /// Not JSON: a page, a script, a style sheet, an image (`content_type` such as `text/html; charset=utf-8`).
+    /// Meant for files embedded in the exe with `include_bytes!`.
+    pub fn bytes(status: u16, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
+        Response { raw: Some((content_type.to_string(), body.into())), ..Self::new(status, serde_json::Value::Null) }
+    }
+
+    /// One more header on the answer.
+    pub fn with_header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.to_string(), value.to_string()));
+        self
     }
 
     pub fn ok(json: serde_json::Value) -> Self {
@@ -169,6 +219,8 @@ struct Shared {
     handler: Box<Handler>,
     log: Box<Log>,
     active: AtomicUsize,
+    /// Signed-in browsers: the random id in the cookie → who and until when.
+    sessions: Mutex<HashMap<String, (String, Instant)>>,
     /// Set for a LAN bind: every connection is TLS.
     #[cfg(feature = "tls")]
     tls: Option<Arc<rustls::ServerConfig>>,
@@ -190,8 +242,11 @@ impl Server {
         handler: impl Fn(Request) -> Response + Send + Sync + 'static,
         log: impl Fn(&LogLine) + Send + Sync + 'static,
     ) -> io::Result<Server> {
-        if cfg.token.is_empty() {
+        if cfg.token.is_empty() && cfg.tokens.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the token is empty"));
+        }
+        if cfg.tokens.iter().any(|(name, token)| name.is_empty() || token.is_empty()) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "a named token has an empty name or value"));
         }
         #[cfg(feature = "tls")]
         let mut identity = None;
@@ -227,6 +282,7 @@ impl Server {
             handler: Box::new(handler),
             log: Box::new(log),
             active: AtomicUsize::new(0),
+            sessions: Mutex::new(HashMap::new()),
             #[cfg(feature = "tls")]
             tls: tls_config,
         });
@@ -375,10 +431,12 @@ fn serve(s: TcpStream, shared: &Shared) {
     let start = Instant::now();
     let mut s = Wire::new(s, shared);
     let (method, path, resp) = match read_request(&mut s, shared) {
-        Ok((req, token_ok)) => {
+        Ok((req, auth)) => {
             let (m, p) = (req.method.clone(), req.path.clone());
-            if !token_ok {
+            if auth == Auth::No {
                 (m, p, Response::error(401, "unauthorized"))
+            } else if let (true, "/session") = (shared.cfg.sessions, p.as_str()) {
+                (m, p, session_call(shared, &req, auth))
             } else {
                 let r = catch_unwind(AssertUnwindSafe(|| (shared.handler)(req)));
                 (m, p, r.unwrap_or_else(|_| Response::error(500, "internal error")))
@@ -401,8 +459,105 @@ fn refuse(status: u16, message: &'static str) -> Refused {
     Refused { method: String::new(), path: String::new(), status, message }
 }
 
-/// Read and check one request. `Ok((request, token_ok))`: when the token is wrong the body was not read.
-fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, bool), Refused> {
+/// How a request got in.
+#[derive(Debug, Clone, PartialEq)]
+enum Auth {
+    /// Not at all: a 401 (the body was not read).
+    No,
+    /// A `GET` of a [`Config::public`] path.
+    Public,
+    /// A bearer token.
+    Bearer,
+    /// A session cookie, with its id.
+    Cookie(String),
+}
+
+/// The name of the token `given` is, if any. Every token is compared, so the time does not tell which one is close.
+fn token_name(cfg: &Config, given: &[u8]) -> Option<String> {
+    let mut found = None;
+    if !cfg.token.is_empty() && ct_eq(given, cfg.token.as_bytes()) {
+        found = Some("default".to_string());
+    }
+    for (name, token) in &cfg.tokens {
+        if ct_eq(given, token.as_bytes()) && found.is_none() {
+            found = Some(name.clone());
+        }
+    }
+    found
+}
+
+/// The value of cookie `name` in a `Cookie` header.
+fn cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header.split(';').filter_map(|p| p.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v)
+}
+
+const SESSION_COOKIE: &str = "ito_session";
+const MAX_SESSIONS: usize = 256;
+
+/// The session `id` → who, while it lasts.
+fn session_who(shared: &Shared, id: &str) -> Option<String> {
+    let mut map = shared.sessions.lock().ok()?;
+    match map.get(id) {
+        Some((who, until)) if *until > Instant::now() => Some(who.clone()),
+        Some(_) => {
+            map.remove(id);
+            None
+        }
+        None => None,
+    }
+}
+
+fn new_session(shared: &Shared, who: &str) -> io::Result<String> {
+    let mut raw = [0u8; 32];
+    getrandom::fill(&mut raw).map_err(|e| io::Error::other(e.to_string()))?;
+    let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let mut map = shared.sessions.lock().map_err(|_| io::Error::other("session table poisoned"))?;
+    let now = Instant::now();
+    map.retain(|_, (_, until)| *until > now);
+    if map.len() >= MAX_SESSIONS {
+        if let Some(oldest) = map.iter().min_by_key(|(_, (_, until))| *until).map(|(k, _)| k.clone()) {
+            map.remove(&oldest);
+        }
+    }
+    map.insert(id.clone(), (who.to_string(), now + shared.cfg.session_ttl));
+    Ok(id)
+}
+
+fn cookie_header(shared: &Shared, value: &str, max_age: u64) -> String {
+    #[cfg(feature = "tls")]
+    let secure = if shared.tls.is_some() { "; Secure" } else { "" };
+    #[cfg(not(feature = "tls"))]
+    let secure = {
+        let _ = shared;
+        ""
+    };
+    format!("{SESSION_COOKIE}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}")
+}
+
+/// `/session`: sign in (`POST`, with the bearer token), who am I (`GET`), sign out (`DELETE`).
+fn session_call(shared: &Shared, req: &Request, auth: Auth) -> Response {
+    let who = req.who.clone().unwrap_or_default();
+    match (req.method.as_str(), auth) {
+        ("POST", Auth::Bearer) => match new_session(shared, &who) {
+            Ok(id) => Response::ok(serde_json::json!({ "who": who }))
+                .with_header("Set-Cookie", &cookie_header(shared, &id, shared.cfg.session_ttl.as_secs())),
+            Err(_) => Response::error(500, "could not make a session"),
+        },
+        ("POST", _) => Response::error(401, "sign in with the bearer token"),
+        ("GET", _) => Response::ok(serde_json::json!({ "who": who })),
+        ("DELETE", Auth::Cookie(id)) => {
+            if let Ok(mut map) = shared.sessions.lock() {
+                map.remove(&id);
+            }
+            Response::ok(serde_json::json!({ "ok": true })).with_header("Set-Cookie", &cookie_header(shared, "", 0))
+        }
+        ("DELETE", _) => Response::ok(serde_json::json!({ "ok": true })),
+        _ => Response::error(405, "method not allowed"),
+    }
+}
+
+/// Read and check one request. `Ok((request, auth))`: when `auth` is [`Auth::No`] the body was not read.
+fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, Auth), Refused> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
     let head_end = loop {
@@ -434,10 +589,30 @@ fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, bool), Refuse
         headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
     }
     let header = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
-    let token_ok = header("authorization")
+    let bearer = header("authorization")
         .and_then(|v| v.split_once(' '))
-        .is_some_and(|(scheme, t)| scheme.eq_ignore_ascii_case("bearer") && ct_eq(t.trim().as_bytes(), shared.cfg.token.as_bytes()));
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .and_then(|(_, t)| token_name(&shared.cfg, t.trim().as_bytes()));
+    let (mut auth, mut who) = match bearer {
+        Some(name) => (Auth::Bearer, Some(name)),
+        None => (Auth::No, None),
+    };
+    if auth == Auth::No && shared.cfg.sessions {
+        if let Some(id) = header("cookie").and_then(|c| cookie(c, SESSION_COOKIE)) {
+            if let Some(name) = session_who(shared, id) {
+                // The cookie rides along by itself, so a change needs a header a page of another site cannot add.
+                if !matches!(method, "GET" | "HEAD" | "OPTIONS") && header("x-ito-csrf") != Some("1") {
+                    return Err(named(403, "send X-Ito-Csrf: 1"));
+                }
+                (auth, who) = (Auth::Cookie(id.to_string()), Some(name));
+            }
+        }
+    }
+    if auth == Auth::No && method == "GET" && shared.cfg.public.contains(&path) {
+        auth = Auth::Public;
+    }
     let mut req = Request {
+        who,
         method: method.to_string(),
         path: path.clone(),
         query: raw_query
@@ -451,8 +626,8 @@ fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, bool), Refuse
         headers: Vec::new(),
         body: Vec::new(),
     };
-    if !token_ok {
-        return Ok((req, false));
+    if auth == Auth::No {
+        return Ok((req, auth));
     }
     if header("transfer-encoding").is_some() {
         return Err(named(501, "chunked bodies are not supported"));
@@ -480,17 +655,25 @@ fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, bool), Refuse
     }
     req.headers = headers;
     req.body = body;
-    Ok((req, true))
+    Ok((req, auth))
 }
 
 fn respond(s: &mut Wire, r: &Response) -> io::Result<()> {
-    let body = serde_json::to_vec(&r.json).unwrap_or_else(|_| b"null".to_vec());
-    let head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
+    let (content_type, body) = match &r.raw {
+        Some((ct, bytes)) => (ct.replace(['\r', '\n'], ""), bytes.clone()),
+        None => ("application/json; charset=utf-8".to_string(), serde_json::to_vec(&r.json).unwrap_or_else(|_| b"null".to_vec())),
+    };
+    let mut head = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n",
         r.status,
         reason(r.status),
+        content_type,
         body.len()
     );
+    for (name, value) in &r.headers {
+        head.push_str(&format!("{}: {}\r\n", name.replace(['\r', '\n', ':'], ""), value.replace(['\r', '\n'], "")));
+    }
+    head.push_str("\r\n");
     s.write_all(head.as_bytes())?;
     s.write_all(&body)?;
     s.flush()?;
@@ -558,7 +741,6 @@ fn percent_decode(s: &str, plus: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     const TOKEN: &str = "s3cret-token";
 
@@ -671,6 +853,139 @@ mod tests {
         for t in slow {
             assert_eq!(t.join().unwrap().0, 200);
         }
+    }
+
+    /// The whole answer text.
+    fn call_text(port: u16, raw: &str) -> String {
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        s.write_all(raw.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    }
+
+    fn start_with(cfg: Config) -> Server {
+        Server::start(cfg, |r| Response::ok(serde_json::json!({ "who": r.who, "path": r.path })), |_| {}).unwrap()
+    }
+
+    #[test]
+    fn named_tokens_tell_the_handler_who_came() {
+        let cfg = Config::new(0, TOKEN).token_named("viewer", "v-token").token_named("admin", "a-token");
+        let srv = start_with(cfg);
+        for (t, who) in [(TOKEN, "default"), ("v-token", "viewer"), ("a-token", "admin")] {
+            let (st, body) = call(srv.port(), &req("GET", "/x", Some(t), ""));
+            assert_eq!((st, body["who"].as_str()), (200, Some(who)), "{t}");
+        }
+        assert_eq!(call(srv.port(), &req("GET", "/x", Some("v-tokeN"), "")).0, 401);
+        assert!(!format!("{:?}", Config::new(0, TOKEN).token_named("viewer", "v-token")).contains("v-token"));
+    }
+
+    #[test]
+    fn only_named_tokens_are_enough_and_empty_ones_are_refused() {
+        let mut cfg = Config::new(0, "");
+        cfg.tokens.push(("admin".into(), "a-token".into()));
+        let srv = start_with(cfg);
+        assert_eq!(call(srv.port(), &req("GET", "/", Some("a-token"), "")).0, 200);
+        assert_eq!(call(srv.port(), &req("GET", "/", Some(""), "")).0, 401);
+        assert!(Server::start(Config::new(0, ""), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+        assert!(Server::start(Config::new(0, TOKEN).token_named("", "x"), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+        assert!(Server::start(Config::new(0, TOKEN).token_named("n", ""), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+    }
+
+    #[test]
+    fn bytes_are_sent_as_given_and_a_public_path_needs_no_token() {
+        let cfg = Config::new(0, TOKEN).public_path("/");
+        let srv = Server::start(
+            cfg,
+            |r| match r.path.as_str() {
+                "/" => Response::bytes(200, "text/html; charset=utf-8", "<h1>hi</h1>").with_header("X-Frame-Options", "DENY"),
+                _ => Response::ok(serde_json::json!({ "who": r.who })),
+            },
+            |_| {},
+        )
+        .unwrap();
+        let out = call_text(srv.port(), "GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+        assert!(out.contains("Content-Type: text/html; charset=utf-8\r\n"), "{out}");
+        assert!(out.contains("X-Frame-Options: DENY\r\n") && out.contains("X-Content-Type-Options: nosniff\r\n"), "{out}");
+        assert!(out.ends_with("<h1>hi</h1>"), "{out}");
+        // Only a GET of that exact path; the rest still wants the token.
+        assert_eq!(call(srv.port(), "POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n").0, 401);
+        assert_eq!(call(srv.port(), "GET /data HTTP/1.1\r\n\r\n").0, 401);
+        assert_eq!(call(srv.port(), "GET /?x=1 HTTP/1.1\r\n\r\n").0, 200);
+    }
+
+    #[test]
+    fn a_header_value_cannot_split_the_answer() {
+        let srv = Server::start(
+            Config::new(0, TOKEN),
+            |_| Response::ok(serde_json::Value::Null).with_header("X-A", "one\r\nSet-Cookie: evil=1"),
+            |_| {},
+        )
+        .unwrap();
+        let out = call_text(srv.port(), &req("GET", "/", Some(TOKEN), ""));
+        assert!(!out.contains("\r\nSet-Cookie"), "{out}");
+    }
+
+    fn cookie_of(out: &str) -> String {
+        let line = out.lines().find(|l| l.starts_with("Set-Cookie: ")).unwrap_or_else(|| panic!("no cookie in {out}"));
+        line["Set-Cookie: ".len()..].split(';').next().unwrap().to_string()
+    }
+
+    #[test]
+    fn a_session_stands_in_for_the_token_and_changes_need_the_csrf_header() {
+        let mut cfg = Config::new(0, TOKEN).token_named("admin", "a-token");
+        cfg.sessions = true;
+        let srv = start_with(cfg);
+        let port = srv.port();
+        // No cookie, no token: 401. A wrong token cannot sign in.
+        assert_eq!(call(port, &req("GET", "/session", None, "")).0, 401);
+        assert_eq!(call(port, &req("POST", "/session", Some("nope"), "")).0, 401);
+        let out = call_text(port, &req("POST", "/session", Some("a-token"), ""));
+        assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+        let set = out.lines().find(|l| l.starts_with("Set-Cookie: ")).unwrap();
+        assert!(set.contains("HttpOnly") && set.contains("SameSite=Strict") && !set.contains("Secure"), "{set}");
+        assert!(!out.contains("a-token"));
+        let cookie = cookie_of(&out);
+        let with_cookie = |method: &str, extra: &str| {
+            call(port, &format!("{method} /x HTTP/1.1\r\nCookie: {cookie}\r\n{extra}Content-Length: 0\r\n\r\n"))
+        };
+        let (st, body) = with_cookie("GET", "");
+        assert_eq!((st, body["who"].as_str()), (200, Some("admin")));
+        assert_eq!(with_cookie("POST", "").0, 403);
+        assert_eq!(with_cookie("POST", "X-Ito-Csrf: 0\r\n").0, 403);
+        assert_eq!(with_cookie("POST", "X-Ito-Csrf: 1\r\n").0, 200);
+        // The bearer header never needs it.
+        assert_eq!(call(port, &req("POST", "/x", Some("a-token"), "")).0, 200);
+        // A forged id is no session.
+        assert_eq!(call(port, "GET /x HTTP/1.1\r\nCookie: ito_session=00\r\n\r\n").0, 401);
+        // Who am I, then sign out; the cookie is dead afterwards.
+        let (st, body) = call(port, &format!("GET /session HTTP/1.1\r\nCookie: {cookie}\r\n\r\n"));
+        assert_eq!((st, body["who"].as_str()), (200, Some("admin")));
+        let out = call_text(port, &format!("DELETE /session HTTP/1.1\r\nCookie: {cookie}\r\nX-Ito-Csrf: 1\r\n\r\n"));
+        assert!(out.starts_with("HTTP/1.1 200") && out.contains("Max-Age=0"), "{out}");
+        assert_eq!(with_cookie("GET", "").0, 401);
+    }
+
+    #[test]
+    fn without_sessions_the_cookie_and_the_session_path_do_nothing() {
+        let srv = start_with(Config::new(0, TOKEN));
+        let out = call_text(srv.port(), &req("POST", "/session", Some(TOKEN), ""));
+        assert!(!out.contains("Set-Cookie"), "{out}");
+        assert_eq!(call(srv.port(), "GET /x HTTP/1.1\r\nCookie: ito_session=00\r\n\r\n").0, 401);
+    }
+
+    #[test]
+    fn an_expired_session_is_gone() {
+        let mut cfg = Config::new(0, TOKEN);
+        cfg.sessions = true;
+        cfg.session_ttl = Duration::from_millis(100);
+        let srv = start_with(cfg);
+        let cookie = cookie_of(&call_text(srv.port(), &req("POST", "/session", Some(TOKEN), "")));
+        let get = || call(srv.port(), &format!("GET /x HTTP/1.1\r\nCookie: {cookie}\r\n\r\n")).0;
+        assert_eq!(get(), 200);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(get(), 401);
     }
 
     #[test]

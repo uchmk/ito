@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.158.0] - 2026-10-31
+
+### 追加
+
+- `ito-http`（uchmk/ito#104 の 3・4）。
+  - 名前つきのトークン: `Config::token_named(name, token)`。どれで来たかは `Request::who`（`None` は `Config::new` の既定のトークン）。
+    既定のトークンを空にできるのは、名前つきが 1 つ以上あるときだけ。名前や値が空なら `start` が断る。`Debug` はトークンの名前だけを出す。
+  - 公開パス: `Config::public_path("/")`。そのパスへの GET だけ、トークンなしで通す（ログイン画面の HTML など）。
+  - 生の本文: `Response::bytes(status, content_type, body)` と `with_header(name, value)`。見出しの値の改行は取り除き、`X-Content-Type-Options: nosniff` を付ける。
+  - ブラウザ向けのセッション（`Config::sessions = true`、`session_ttl` 既定 8 時間、上限 256）。`POST /session` に Bearer で入ると
+    `ito_session` の Cookie（HttpOnly・SameSite=Strict・TLS なら Secure）を返し、以後は Cookie がトークンの代わりになる。
+    Cookie での GET/HEAD/OPTIONS 以外は `X-Ito-Csrf: 1` が要る（無ければ 403）。`GET /session` は誰か、`DELETE /session` は出る。
+    Bearer のときは今までどおり何も要らない。
+
+### 使う側がやること
+
+- `Request` と `Response` を `{ … }` で直に作っているなら、`who`・`raw`・`headers` を足す（`Response::ok` などの関数を使っていれば何もしない）。
+- 依存に `getrandom` が増えた（セッションの ID 用）。
+
 ## [0.157.0] - 2026-10-31
 
 ### 追加
