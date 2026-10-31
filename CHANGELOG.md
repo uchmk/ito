@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.160.0] - 2026-10-31
+
+### 追加
+
+- `ito-agent`（uchmk/ito#96）。AI エージェントにアプリを教える。
+  - `setup(&App, &Home, &Options)`・`status`・`remove(&App, &Home, dry_run)`。どれも冪等で、`dry_run` は同じ `Report`（`lines` と `changed`）を返して何も書かない。
+  - Claude Code: スキル `~/.claude/skills/<app>/SKILL.md`、MCP は `~/.claude.json` の `mcpServers.<app>`、SessionStart の hook は `~/.claude/settings.json`。
+    Codex: `~/.codex/config.toml` の `[mcp_servers.<app>]`（コメントと並びは残る）。他のキー・サーバ・hook は順序ごと残す。
+  - アプリの状態のフォルダーの manifest（`App::manifest`）にハッシュを記録する。`State` は `Missing`・`Installed`・`Stale`（自分が入れた後、触られていない）・`Edited`（ユーザーが変えた。`force` でだけ置き換える）。
+    `remove` は manifest にあって今も同じものだけ消し、編集されたものは残して言う。`Options::hook = false` は hook を入れず、入れた hook は外す。
+  - 壊れた JSON / TOML は書き潰さずエラー。書き込みは同じフォルダーに書いてから名前替え。見つからない（`~/.claude` などが無い）エージェントは、`Options::agents` で名指しされない限り飛ばす。
+  - テストは `Home::under(root)`、または環境変数 `ITO_AGENT_HOME` と `Home::detect()`。
+
+### 使う側がやること
+
+- `App { name, skill, mcp: Some(Launch::new("<app>", &["mcp"])), hook: Some("<app> hook session-start".into()), manifest }` を作って、`<app> skill setup|status|remove` から呼ぶ。`Report::lines` は `ito-console::out` で出す。
+
 ## [0.159.0] - 2026-10-31
 
 ### 追加

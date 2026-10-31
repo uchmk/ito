@@ -1,0 +1,16 @@
+[package]
+name = "ito-agent"
+description = "Teaching AI coding agents about an app: write its skill file, register its MCP server and a SessionStart hook for Claude Code and Codex, idempotently, and take back only what was installed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# `preserve_order`: the user's `~/.claude.json` and `settings.json` keep their key order when a key is added.
+serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+# Codex's `config.toml` keeps its comments and layout.
+toml_edit = "0.25"
+sha2 = "0.11"
