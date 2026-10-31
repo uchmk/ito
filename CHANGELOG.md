@@ -1114,8 +1114,7 @@ fude の 4 つの crate-request（uchmk/ito#52〜#55）。
 
 ### 追加
 
-- scripts/lanes: `lane-trust.ps1`（`Set-ClaudeFolderTrust`）。レーンの一時フォルダー（`<scratch>
-un-<日時>\projN`）で Claude Code を起動すると「このフォルダーを信頼しますか」で止まり、Enter を押すまで進まなかった。`~/.claude.json` の `projects["<フォルダー>"].hasTrustDialogAccepted` を一時フォルダーの親に 1 回だけ書いて、下の実行用フォルダーを全部信頼済みにする（親が信頼済みなら子も通ることを実機で確かめた）。書いたら `$true`、既にある・設定が無い・書けないときは `$false`（実行は止めない）。ほかの項目は触らない。`check-ps1.ps1` に確かめを足した。
+- scripts/lanes: `lane-trust.ps1`（`Set-ClaudeFolderTrust`）。レーンの一時フォルダー（`<scratch>un-<日時>\projN`）で Claude Code を起動すると「このフォルダーを信頼しますか」で止まり、Enter を押すまで進まなかった。`~/.claude.json` の `projects["<フォルダー>"].hasTrustDialogAccepted` を一時フォルダーの親に 1 回だけ書いて、下の実行用フォルダーを全部信頼済みにする（親が信頼済みなら子も通ることを実機で確かめた）。書いたら `$true`、既にある・設定が無い・書けないときは `$false`（実行は止めない）。ほかの項目は触らない。`check-ps1.ps1` に確かめを足した。
 
 ### 使う側がやること
 
