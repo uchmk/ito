@@ -43,6 +43,21 @@ pub struct Client {
     pub secret: Option<String>,
 }
 
+impl Client {
+    /// Read the `client_secret_*.json` Google lets you download for an OAuth client: `{"installed": {…}}` (a desktop app) or
+    /// `{"web": {…}}`. Takes `client_id` and `client_secret`; an empty or missing secret is `None`.
+    pub fn from_google_json(json: &str) -> Result<Client, Error> {
+        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| Error::Bad(format!("not a JSON file: {e}")))?;
+        let section = v
+            .get("installed")
+            .or_else(|| v.get("web"))
+            .ok_or_else(|| Error::Bad("neither \"installed\" nor \"web\" is in the file".into()))?;
+        let text = |k: &str| section.get(k).and_then(|x| x.as_str()).map(str::trim).filter(|x| !x.is_empty());
+        let id = text("client_id").ok_or_else(|| Error::Bad("client_id is missing or empty".into()))?;
+        Ok(Client { id: id.to_owned(), secret: text("client_secret").map(str::to_owned) })
+    }
+}
+
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").field("id", &self.id).field("secret", &self.secret.as_ref().map(|_| "…")).finish()
@@ -379,6 +394,23 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn google_json_installed_and_web() {
+        let c = Client::from_google_json(r#"{"installed":{"client_id":"a.apps","client_secret":"s","x":1}}"#).unwrap();
+        assert_eq!((c.id.as_str(), c.secret.as_deref()), ("a.apps", Some("s")));
+        let c = Client::from_google_json(r#"{"web":{"client_id":"b","client_secret":""}}"#).unwrap();
+        assert_eq!((c.id.as_str(), c.secret), ("b", None));
+        assert!(!format!("{:?}", Client::from_google_json(r#"{"installed":{"client_id":"a","client_secret":"hunter2"}}"#).unwrap())
+            .contains("hunter2"));
+    }
+
+    #[test]
+    fn google_json_errors() {
+        for bad in ["", "[]", r#"{"other":{}}"#, r#"{"installed":{"client_id":" "}}"#, r#"{"installed":{}}"#] {
+            assert!(matches!(Client::from_google_json(bad), Err(Error::Bad(_))), "{bad}");
+        }
+    }
     use super::*;
     use std::collections::HashMap;
     use std::net::TcpListener;

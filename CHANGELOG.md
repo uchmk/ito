@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.164.0] - 2026-10-31
+
+### 追加
+
+- `ito-oauth`: `Client::from_google_json(&str)`。Google がダウンロードさせる `client_secret_*.json`（`{"installed": {…}}` か `{"web": {…}}`）から `client_id` と `client_secret` を読んで `Client` にする。
+  どちらのキーも無い・JSON でない・`client_id` が空のときは `Error::Bad`。`client_secret` が空・無いときは `None`。`Debug` は今までどおり秘密を隠す。
+
+### 使う側がやること
+
+- 設定画面の「JSON から読む…」で `ito-dialog` で選んだファイルの中身を `Client::from_google_json` に渡し、id は設定に、秘密は `ito-secret` に置く。
+
 ## [0.163.0] - 2026-10-31
 
 ### 追加
