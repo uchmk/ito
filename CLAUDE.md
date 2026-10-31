@@ -103,6 +103,10 @@ crates.io には出さない。使う側は git の依存を `rev` で固定し�
 - 使う側は `ito-pane = { git = "https://github.com/uchmk/ito", rev = "…" }` で読む。**1 つのアプリの中では、全部のクレートを同じ `rev` にそろえる。**
 - **直しはここで入れ、push してから、使う側の `rev` を上げる**（`cargo build` で使う側の `Cargo.lock` も合わせる）。
   公開の API を変えたときは、CHANGELOG に使う側がやることを書く（例: 構造体に欄を足したら、使う側の `Foo { … }` に何を足すか）。
+- **ito の中（クレート・`templates/app`・`scripts/lanes`・ワークフローの雛形・版・CHANGELOG）を直すのは ito のセッションだけ。**
+  アプリのセッションは ito の `main` に直接入れない。足したい・直したいときは `crate-request` の Issue を立てるか、ito のセッションにメッセージで頼む。
+  手元で一緒に直す（下の `--config patch`）のは試すためで、push は ito のセッションがする。
+  アプリの中の `scripts/` の写し（`lanes.sh sync` が書くもの）も、アプリでは直さず ito で直してから `rev` を上げて写す。
 - 使う側とここを手元で一緒に直すときは、使う側で `rev` を書き換えずに、ローカルの ito を差し込む:
 
   ```sh
