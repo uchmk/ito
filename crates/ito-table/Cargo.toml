@@ -1,0 +1,11 @@
+[package]
+name = "ito-table"
+description = "A table handed over as CSV (UTF-8 with BOM, CRLF, RFC 4180) or as an Excel workbook (.xlsx, pure Rust)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rust_xlsxwriter = "0.102"

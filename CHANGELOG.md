@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.161.0] - 2026-10-31
+
+### 追加
+
+- `ito-table`（uchmk/ito#82）。表を CSV と Excel のブック（`.xlsx`）で渡す。
+  - `Table::new(&["日付", …])`・`row([Cell…])`・`sheet(名前)`。セルは `Cell::Text`・`Number`・`Stamp`（`Stamp::date`・`Stamp::new`）で、`&str`・`String`・数・`Stamp` から `.into()` で作る。
+    短い行は空で埋め、長い行は切る。
+  - `csv(path)`・`csv_string()`: UTF-8 の BOM・CRLF・RFC 4180。`=` `+` `@`・タブ・CR で始まる文字（と、続きのある `-`）は Excel が式として実行しないよう `'` を前に付ける（`.xlsx` の文字は常に文字列なのでそのまま）。
+  - `xlsx(path)`・`xlsx_bytes()`: 1 枚のシート、見出しは太字で固定、列幅は中身に合わせる（全角は 2 桁）、日時は本物の日付（並べ替え・絞り込みができる）。純 Rust（`rust_xlsxwriter`）。ありえない日付は panic せず `Err`。
+  - ファイルは隣に書いてから名前替え。止まるのでワーカースレッドから呼ぶ。
+
+### 使う側がやること
+
+- koyomi は `crates/koyomi/src/csv.rs` の自前の CSV をやめて `ito_table::Table` に移す（`--csv <file>` はそのまま、`.xlsx` を足せる）。
+
 ## [0.160.0] - 2026-10-31
 
 ### 追加
