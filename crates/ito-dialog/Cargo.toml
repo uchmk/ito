@@ -1,0 +1,11 @@
+[package]
+name = "ito-dialog"
+description = "Native open / save file dialogs for uchmk apps (a thin wrapper over rfd)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }

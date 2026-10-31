@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.163.0] - 2026-10-31
+
+### 追加
+
+- `ito-dialog`（uchmk/ito#77）。OS 標準の「開く」「保存」ダイアログ（Windows は共通アイテム ダイアログ、macOS は NSOpenPanel、Linux はデスクトップ ポータル）。`rfd` の薄い包みで、Linux でも gtk を要らない。
+  - `Dialog::new().title(..).directory(..).file_name(..).filter(Filter::new("TOML", &["toml"]))` に対して `open_file()`（`Option<PathBuf>`）・`open_files()`（取り消しは空の `Vec`）・`open_folder()`・`save_file()`（提案名と開始フォルダー）。
+  - どれも答えが出るまで止まる。`ito_dialog::spawn(move || d.open_file())` が別スレッドで呼び、`Receiver` を返す（egui の毎フレームで `try_recv`）。
+  - 親の窓は渡さない（最初の版）。必要になったら足す。
+
+### 使う側がやること
+
+- `ito-dialog = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、独自の `rfd` の依存を外す。
+
 ## [0.162.0] - 2026-10-31
 
 ### 追加
