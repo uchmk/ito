@@ -16,6 +16,7 @@
 //! It blocks the calling thread, so call it from a worker, never the UI thread.
 //! What the lines mean stays with the caller.
 
+mod event;
 mod signal;
 pub use signal::stop_requested;
 #[cfg(windows)]
@@ -343,16 +344,21 @@ pub fn run_lines_soft(
     on_line: &mut dyn FnMut(Stream, &str) -> bool,
 ) -> io::Result<Lines> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut event = None;
     let shared = if grace.is_zero() {
         own_group(&mut cmd);
         false
     } else {
+        event = event::StopEvent::create();
+        if let Some(e) = &event {
+            cmd.env(event::ENV, e.name());
+        }
         sys::own_group_soft(&mut cmd)
     };
     let mut child = cmd.spawn()?;
     sys::adopt(&child);
     let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
-    watch(&mut ChildProc { child, shared }, stdout, stderr, stop, grace, enc, on_line)
+    watch(&mut ChildProc { child, shared, event }, stdout, stderr, stop, grace, enc, on_line)
 }
 
 /// An account to run a child as (see [`run_lines_as`]).
@@ -465,6 +471,8 @@ struct ChildProc {
     child: Child,
     /// Whether it shares this process's console (Windows), which decides how it is asked.
     shared: bool,
+    /// The named event the child (a windows-subsystem one has no console) can also be asked through.
+    event: Option<event::StopEvent>,
 }
 
 impl Proc for ChildProc {
@@ -477,7 +485,9 @@ impl Proc for ChildProc {
     }
 
     fn ask(&mut self) -> bool {
-        sys::ask(&self.child, self.shared)
+        // Both ways: a child with a console gets CTRL_BREAK, one that watches the event gets that.
+        let evented = self.event.as_ref().is_some_and(|e| e.set());
+        sys::ask(&self.child, self.shared) || evented
     }
 }
 
@@ -920,6 +930,16 @@ mod tests {
             return;
         }
         let asked = stop_requested();
+        #[cfg(windows)]
+        if std::env::var_os("ITO_PROC_NOCONSOLE").is_some() {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn FreeConsole() -> i32;
+            }
+            // Like a windows-subsystem program: no console, so CTRL_BREAK has nowhere to arrive.
+            // SAFETY: plain call; this test child owns its console state.
+            unsafe { FreeConsole() };
+        }
         println!("ready");
         let until = Instant::now() + Duration::from_secs(60);
         while !asked.load(Ordering::Relaxed) && Instant::now() < until {
@@ -980,6 +1000,17 @@ mod tests {
         let line = format!("& '{}' --exact tests::obliging_child --nocapture --test-threads=1", inner.get_program().to_string_lossy());
         let mut c = Command::new("powershell");
         c.args(["-NoProfile", "-Command", &line]).env("ITO_PROC_OBLIGING", "1");
+        let (r, took) = soft(c, Duration::from_secs(20));
+        assert_eq!(r.ending, Ending::Asked, "{r:?}");
+        assert!(took < Duration::from_secs(15), "{took:?}");
+    }
+
+    /// A child with no console at all (a windows-subsystem program) is asked through the named event.
+    #[test]
+    #[cfg(windows)]
+    fn a_child_without_a_console_is_asked_through_the_event() {
+        let mut c = obliging();
+        c.env("ITO_PROC_NOCONSOLE", "1");
         let (r, took) = soft(c, Duration::from_secs(20));
         assert_eq!(r.ending, Ending::Asked, "{r:?}");
         assert!(took < Duration::from_secs(15), "{took:?}");

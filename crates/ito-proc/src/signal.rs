@@ -33,11 +33,19 @@ mod imp {
         1
     }
 
+    fn set() {
+        ASKED.store(true, Ordering::Relaxed);
+    }
+
     pub fn install() {
         static ONCE: Once = Once::new();
         // SAFETY: `handler` is a plain `extern "system"` function that only stores into a static atomic.
         ONCE.call_once(|| unsafe {
             SetConsoleCtrlHandler(Some(handler), 1);
+            // The parent's named event reaches a child that has no console to send CTRL_BREAK to.
+            if let Ok(name) = std::env::var(crate::event::ENV) {
+                crate::event::watch_named(&name, set);
+            }
         });
     }
 }

@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.188.0] - 2026-11-01
+
+### 追加
+
+- `ito-proc`: 窓のプログラム（コンソールを持たない）の子にも「止まって」が届く（#127）。
+  - `run_lines_soft` は、`grace` が 0 でないとき Windows で名前つきのイベント（`Local\ito-proc-stop-<pid>-<n>`）を作り、環境変数 `ITO_PROC_STOP_EVENT` で子に名前を渡す。止めるときは `CTRL_BREAK` に加えてこのイベントも立てる（どちらかが届けば `Asked`）。
+  - `stop_requested()` は、この環境変数があればイベントを別スレッドで待ち、立ったら旗を真にする。コンソールがあってもなくても、窓のエンジン → 窓の子（PowerShell を通さない形）でも効く。環境変数は子孫に引き継がれるので、間に `powershell -Command` を挟んでも中のプログラムに届く。
+  - 届かない形: イベントを待つのは `stop_requested()` を呼んだ子だけ（呼ばない子は今までどおり `grace` のあとで殺される）。別アカウントの子（`run_lines_as_soft`）は今までどおり頼めない。Unix は変わらない（SIGTERM）。
+
+### 使う側がやること
+
+- 無し（`rev` を上げるだけ）。koyomi: `koyomi ssh run` は起動の早い段階で `stop_requested()` を呼ぶこと（呼んだときにイベントの待ち受けが始まる）。PowerShell を通さず直に動かしてよい。
+
 ## [0.187.0] - 2026-11-01
 
 ### 追加
