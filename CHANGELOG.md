@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.169.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 作成ウィンドウの部品（fumi の依頼）。
+  - `Mark` に `Minimize`・`Expand`・`Restore`・`Emoji`・`Underline`・`Strike`・`Format`（計 46）。
+  - `SplitButton::new(mark, words, menu_said).tone(..).key(..).mark_last().show(ui)`: 本体とメニュー（下向きの山）の二つ割りボタン。`SplitResponse { main, menu }`。
+  - `chips(ui, look, &mut Vec<String>, &mut String, hint)`（言葉を変えるなら `chips_with`）: 宛先のチップ入力。Enter・`,`・`;` で確定、空の欄の Backspace で最後を外す、折り返す。`ChipsResponse { changed, removed, input }`。候補は `input.rect` の下にアプリが出す。
+  - `FloatCard::new(id, title).badge(..).corner(..).size(w, h).avoid_bottom(h).minimized(..).expanded(..).show(ctx, look, |ui| ..)`: 隅に浮くカード（見出しに ─ ⤢ ✕）。最小化・全面の状態はアプリが持ち、`FloatResponse { minimize, expand, close, inner, rect }` で反転する。
+
+### 使う側がやること
+
+- 仮の部品を置き換え、`rev` を上げる。
+
 ## [0.168.2] - 2026-11-01
 
 ### 修正

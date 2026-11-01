@@ -87,11 +87,25 @@ pub enum Mark {
     Bold,
     /// A slanted "I".
     Italic,
+    /// A bar low in the box: shrink a window to its title.
+    Minimize,
+    /// Two corners pointing out: fill the window.
+    Expand,
+    /// Two corners pointing in: back from filling the window.
+    Restore,
+    /// A smiling face.
+    Emoji,
+    /// A "U" over a line.
+    Underline,
+    /// An "S" struck through.
+    Strike,
+    /// An "A" over a short line: text formatting.
+    Format,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 39] = [
+    pub const ALL: [Mark; 46] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -131,6 +145,13 @@ impl Mark {
         Mark::Bell,
         Mark::Bold,
         Mark::Italic,
+        Mark::Minimize,
+        Mark::Expand,
+        Mark::Restore,
+        Mark::Emoji,
+        Mark::Underline,
+        Mark::Strike,
+        Mark::Format,
     ];
 }
 
@@ -338,6 +359,53 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             seg((-1.0, -5.0), (4.0, -5.0));
             seg((-4.0, 5.0), (1.0, 5.0));
             seg((2.5, -5.0), (-1.5, 5.0));
+        }
+        Mark::Minimize => {
+            seg((-5.0, 3.5), (5.0, 3.5));
+        }
+        Mark::Expand => {
+            p.add(path(pts(&[(0.5, -5.5), (5.5, -5.5), (5.5, -0.5)])));
+            seg((5.5, -5.5), (1.0, -1.0));
+            p.add(path(pts(&[(-0.5, 5.5), (-5.5, 5.5), (-5.5, 0.5)])));
+            seg((-5.5, 5.5), (-1.0, 1.0));
+        }
+        Mark::Restore => {
+            p.add(path(pts(&[(-5.5, -1.0), (-1.0, -1.0), (-1.0, -5.5)])));
+            seg((-1.0, -1.0), (-5.5, -5.5));
+            p.add(path(pts(&[(5.5, 1.0), (1.0, 1.0), (1.0, 5.5)])));
+            seg((1.0, 1.0), (5.5, 5.5));
+        }
+        Mark::Emoji => {
+            p.circle_stroke(m, 6.0 * k, line);
+            dot(-2.2, -1.8, 0.9);
+            dot(2.2, -1.8, 0.9);
+            p.add(path(arc(0.0, 0.0, 3.4, 0.15 * PI, 0.85 * PI)));
+        }
+        Mark::Underline => {
+            let mut v = pts(&[(-3.5, -6.0), (-3.5, 0.5)]);
+            v.extend(arc(0.0, 0.5, 3.5, PI, 0.0));
+            v.push(at(3.5, -6.0));
+            p.add(path(v));
+            seg((-5.5, 6.0), (5.5, 6.0));
+        }
+        Mark::Strike => {
+            p.add(path(pts(&[
+                (3.5, -3.5),
+                (2.0, -5.0),
+                (-2.0, -5.0),
+                (-3.5, -3.0),
+                (-1.5, -1.0),
+                (1.5, 1.0),
+                (3.5, 3.0),
+                (2.0, 5.0),
+                (-2.0, 5.0),
+                (-3.5, 3.5),
+            ])));
+            seg((-6.0, 0.0), (6.0, 0.0));
+        }
+        Mark::Format => {
+            p.add(path(pts(&[(-4.5, 5.0), (0.0, -5.5), (4.5, 5.0)])));
+            seg((-2.5, 1.5), (2.5, 1.5));
         }
     }
 }

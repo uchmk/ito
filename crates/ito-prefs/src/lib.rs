@@ -24,6 +24,8 @@ mod more;
 mod nav;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
 pub use mark::{icon_button, mark, mark_button, IconButton, Mark};
+mod compose;
+pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 mod parts;
 pub use parts::{attachment, avatar, notice, pill, AttachmentResponse};
 mod notify;
