@@ -147,11 +147,13 @@ pub enum Mark {
     Compare,
     /// An arrow from outside into an open box: bring in (the opposite of a download).
     Import,
+    /// Three stacked boxes with a light each: a server (a machine you reach over the network).
+    Server,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 70] = [
+    pub const ALL: [Mark; 71] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -222,6 +224,7 @@ impl Mark {
         Mark::Rerun,
         Mark::Compare,
         Mark::Import,
+        Mark::Server,
     ];
 }
 
@@ -588,6 +591,14 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             p.add(path(pts(&[(-1.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-1.0, 6.0)])));
             seg((-6.5, 0.0), (2.0, 0.0));
             p.add(path(pts(&[(-1.0, -3.0), (2.0, 0.0), (-1.0, 3.0)])));
+        }
+        Mark::Server => {
+            for y in [-6.0, -1.5, 3.0] {
+                p.rect_stroke(Rect::from_min_max(at(-6.5, y), at(6.5, y + 3.5)), 1.5 * k, line, StrokeKind::Middle);
+            }
+            for y in [-4.25, 0.25, 4.75] {
+                dot(-3.8, y, 0.8);
+            }
         }
         Mark::Lock => {
             p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);

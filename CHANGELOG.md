@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.186.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `Mark::Server`（積んだ 3 つの箱に点が 1 つずつ。ネットの向こうの機械・サーバー）。`Mark::ALL` は 71 個になった。
+
+### 使う側がやること
+
+- koyomi: ssh の印を `Mark::Link` から `Mark::Server` に替える。
+
 ## [0.185.0] - 2026-11-01
 
 ### 追加
