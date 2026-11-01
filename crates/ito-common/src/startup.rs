@@ -71,6 +71,20 @@ pub fn refuse_temp(exe: &Path) -> Result<(), String> {
     }
 }
 
+/// What the settings' Startup switch does, in one blocking call (run it on a worker thread): find this program, let
+/// `refuse` say no (only when turning on; pass `|_| Ok(())` for none, or [`refuse_temp`]), then [`set`] and read
+/// [`enabled`] back. Returns what the OS says now, and the reason when the switch did not stay where it was put
+/// (for `ito_prefs::startup_card_with`).
+pub fn apply(app: &str, args: &[&str], on: bool, refuse: impl Fn(&Path) -> Result<(), String>) -> (bool, Option<String>) {
+    let done = std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| {
+        if on {
+            refuse(&exe)?;
+        }
+        set(app, &exe, args, on)
+    });
+    (enabled(app), done.err())
+}
+
 /// Whether `app` starts at login now.
 #[cfg(not(windows))]
 pub fn enabled(app: &str) -> bool {
@@ -148,6 +162,12 @@ pub fn set(app: &str, exe: &Path, args: &[&str], on: bool) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_says_why_when_refused() {
+        let (_, why) = apply("ito-apply-test", &[], true, |_| Err("no".to_owned()));
+        assert_eq!(why.as_deref(), Some("no"));
+    }
 
     #[test]
     fn refuse_temp_says_no_only_for_temp() {

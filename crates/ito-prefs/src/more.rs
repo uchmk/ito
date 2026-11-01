@@ -347,11 +347,25 @@ pub fn window_index(w: &MoreWords) -> Vec<&'static str> {
 /// asked on a worker thread), `None` until it answers. Returns the new state
 /// of the switch when it was clicked; the app calls `startup::set` off the UI thread.
 pub fn startup_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, now: Option<bool>) -> Option<bool> {
+    startup_card_with(ui, l, w, now, None)
+}
+
+/// [`startup_card`] with `problem`: why the switch did not stay where it was put (the `Err` of
+/// `ito_common::startup::apply`, or a refusal in the app's own words). It shows under the switch in the error
+/// tone until the app passes `None` again (clear it on the next click); the screen reader reads it with the card.
+pub fn startup_card_with(ui: &mut egui::Ui, l: Look, w: &MoreWords, now: Option<bool>, problem: Option<&str>) -> Option<bool> {
     let mut toggled = None;
     section(ui, l, w.startup, |ui| {
         let note = if now.is_none() { w.startup_checking } else { w.startup_note };
         if row(ui, l, w.startup_label, note, |ui| ui.add_enabled_ui(now.is_some(), |ui| switch(ui, l, now.unwrap_or(false))).inner) {
             toggled = now.map(|n| !n);
+        }
+        if let Some(p) = problem.filter(|p| !p.is_empty()) {
+            sep(ui, l);
+            ui.add_space(z(ui, 8.0));
+            let r = ui.add(egui::Label::new(egui::RichText::new(p).size(z(ui, 12.5)).color(l.c.err)).wrap());
+            ito_a11y::say(&r, ito_a11y::Role::Label, p);
+            ui.add_space(z(ui, 8.0));
         }
     });
     toggled
@@ -756,6 +770,7 @@ mod tests {
                 let l = Look { c: ito_theme::colors(), q: "" };
                 got.0 = window_card(ui, l, w, &WindowPrefs::default());
                 got.1 = startup_card(ui, l, w, Some(false));
+                assert_eq!(startup_card_with(ui, l, w, Some(false), Some("in Temp")), None);
                 got.2 = advanced_card(ui, l, w, true);
                 got.3 = about_page(ui, l, w, &crate::EN, "app", &a);
                 got.4 = backup_card(ui, l, w, Path::new("/tmp/app-settings.toml"));

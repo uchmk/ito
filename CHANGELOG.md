@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.192.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `startup_card_with(ui, l, w, now, problem: Option<&str>)`。スイッチが置いた所に残らなかった理由（`Some`）を、スイッチの下にエラーの色で出す（読み上げもする）。`startup_card` は今までどおり（`problem` なし）。
+- `ito-common`: `startup::apply(app, args, on, refuse) -> (bool, Option<String>)`。ワーカースレッドで呼ぶ。`current_exe` → `refuse`（入れるときだけ。`|_| Ok(())` か `startup::refuse_temp`、アプリ独自でもよい）→ `set` → `enabled` の順に回し、OS の今の状態と、失敗・断りの理由を返す（uchmk/ito#131）。
+
+### 使う側がやること
+
+- 破壊的な変更は無い。`startup_card` を `startup_card_with(…, self.startup_problem.as_deref())` に替え、`startup::apply` の結果の `.1` を `startup_problem` に入れる（次のクリックで消す）。
+- koyomi: Temp の断りを `refuse` に渡し、`KOYOMI_ALLOW_TEMP=1` の抜け道もそこに入れる。kura・fude・minato・yagura の `let _ =` や独自のエラー行は置き換えられる。
+
 ## [0.191.0] - 2026-11-01
 
 ### 追加

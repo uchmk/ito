@@ -45,9 +45,9 @@ mod updates;
 pub use apps::{add_edit, apps_card, note as apps_note, AppsForm, AppsWords};
 pub use more::{
     about_index, about_page, about_text, advanced_card, advanced_index, backup_card, backup_index, default_order, default_order_grouped,
-    fonts_card, fonts_index, forget_place, keeps_place, mono_font_card, mono_font_index, startup_card, startup_index, window_card,
-    window_index, About, AboutAction, Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS, MONO_FONT_KEY, MORE_EN,
-    MORE_JA, WINDOW_KEYS,
+    fonts_card, fonts_index, forget_place, keeps_place, mono_font_card, mono_font_index, startup_card, startup_card_with, startup_index,
+    window_card, window_index, About, AboutAction, Advanced, Backup, FontChange, Fonts, MoreWords, Page, WindowOut, FONT_KEYS,
+    MONO_FONT_KEY, MORE_EN, MORE_JA, WINDOW_KEYS,
 };
 pub use nav::{nav_row, Row as NavRow};
 pub use notify::{
