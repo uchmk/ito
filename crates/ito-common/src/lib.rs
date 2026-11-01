@@ -63,6 +63,43 @@ pub fn env_dir(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+/// Whether `path` sits in a temporary folder: `std::env::temp_dir()`, `%TEMP%`, `%TMP%` (and `/tmp`, `/var/tmp`
+/// on Unix). Both sides are canonicalized first, so a short name (`YUU06~1`) or a link matches, and on
+/// Windows the comparison ignores case. A file that does not exist yet is judged by its folder.
+///
+/// A program that registers itself to run later (a service, a start-at-login entry) should refuse to when this
+/// is true: the cleanup deletes the file, an exe opened inside a zip runs from `%TEMP%`, and security software
+/// takes a persistence set up from there for what it looks like.
+pub fn in_temp(path: &Path) -> bool {
+    fn plain(p: PathBuf) -> PathBuf {
+        let s = p.to_string_lossy().into_owned();
+        // `canonicalize` on Windows answers `\\?\C:\…` (or `\\?\UNC\…`); drop the marker so both sides look alike.
+        let s = match s.strip_prefix(r"\\?\UNC\") {
+            Some(rest) => format!(r"\\{rest}"),
+            None => s.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(s),
+        };
+        PathBuf::from(if cfg!(windows) { s.to_lowercase() } else { s })
+    }
+    fn real(p: &Path) -> PathBuf {
+        if let Ok(c) = std::fs::canonicalize(p) {
+            return plain(c);
+        }
+        if let (Some(dir), Some(name)) = (p.parent(), p.file_name()) {
+            if let Ok(c) = std::fs::canonicalize(dir) {
+                return plain(c.join(name));
+            }
+        }
+        plain(p.to_path_buf())
+    }
+    let mut roots = vec![std::env::temp_dir()];
+    roots.extend(["TEMP", "TMP"].iter().filter_map(|v| env_dir(v)));
+    if cfg!(unix) {
+        roots.extend([PathBuf::from("/tmp"), PathBuf::from("/var/tmp")]);
+    }
+    let target = real(path);
+    roots.iter().any(|r| target.starts_with(real(r)))
+}
+
 /// The user's home folder: `USERPROFILE` on Windows, `HOME` elsewhere; `None`
 /// when it is not set or is empty.
 pub fn home_dir() -> Option<PathBuf> {
@@ -1100,6 +1137,20 @@ pub fn watch(paths: Vec<PathBuf>, every: Duration, mut on_change: impl FnMut(&[P
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn temp_is_found_and_other_places_are_not() {
+        use super::in_temp;
+        let t = std::env::temp_dir();
+        assert!(in_temp(&t.join("no-such-dir-ito").join("x.exe")));
+        assert!(in_temp(&t.join("x.exe")));
+        let home = super::home_dir().unwrap();
+        if !in_temp(&home) {
+            assert!(!in_temp(&home.join("koyomi").join("koyomi.exe")));
+        }
+        #[cfg(windows)]
+        assert!(in_temp(&std::path::PathBuf::from(t.to_string_lossy().to_uppercase()).join("X.EXE")));
+    }
+
     #[test]
     fn user_dirs_fill_in_home_and_refuse_the_relative() {
         let home = std::env::temp_dir();

@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.191.0] - 2026-11-01
+
+### 追加
+
+- `ito-common`: `in_temp(path) -> bool`。`path` が一時フォルダー（`std::env::temp_dir()`・`%TEMP%`・`%TMP%`。Unix は `/tmp`・`/var/tmp` も）の中かを返す。両側を `canonicalize` してから比べるので、短い名前（`YUU06~1`）やリンクでも合い、Windows は大文字小文字を区別しない。まだ無いファイルは、置き場所のフォルダーで決める。
+- `ito-common::startup::refuse_temp(exe) -> Result<(), String>`: `in_temp` を見て、中なら文言つきの `Err`。`set` と `ito_service::install` は自分では断らない（呼ぶ側が、パスワードを聞く前などに呼ぶ）。
+
+一時フォルダーの exe は、掃除で消され、zip の中から開くと `%TEMP%` で動き、そこから作った常駐は Defender に `Behavior:Win32/Persistence.A!ml` として消される（koyomi の実測）ので、断る。
+
+### 使う側がやること
+
+- 断りたいアプリだけ、登録の前に `ito_common::in_temp(&exe)`（または `startup::refuse_temp`）を呼ぶ。呼ばなければこれまでどおり。koyomi の持ち主の判断で、koyomi・tsumugi の server はまだ呼ばない。
+
 ## [0.190.0] - 2026-11-01
 
 ### 直した

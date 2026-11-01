@@ -61,6 +61,16 @@ fn path_of(app: &str) -> Result<PathBuf, String> {
     entry_path(app, &home, xdg.as_deref()).ok_or_else(|| "no entry file on this OS".to_owned())
 }
 
+/// `Err` (with a sentence) when `exe` sits in a temporary folder (see [`crate::in_temp`]). `set` does not call this
+/// itself: an app that wants to refuse calls it first.
+pub fn refuse_temp(exe: &Path) -> Result<(), String> {
+    if crate::in_temp(exe) {
+        Err(format!("{} is in a temporary folder; move it somewhere permanent and run it from there", exe.display()))
+    } else {
+        Ok(())
+    }
+}
+
 /// Whether `app` starts at login now.
 #[cfg(not(windows))]
 pub fn enabled(app: &str) -> bool {
@@ -138,6 +148,12 @@ pub fn set(app: &str, exe: &Path, args: &[&str], on: bool) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refuse_temp_says_no_only_for_temp() {
+        let exe = std::env::temp_dir().join("app.exe");
+        assert!(refuse_temp(&exe).is_err());
+    }
 
     #[test]
     fn the_command_line_quotes_the_program_and_the_odd_arguments() {
