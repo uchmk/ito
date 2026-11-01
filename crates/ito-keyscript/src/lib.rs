@@ -97,6 +97,13 @@ pub enum Step {
     },
     /// `<Hover:0.5,0.4>`: the pointer moved there with no button, so a hover
     /// style or a cursor shape can be read from `<State:>`.
+    /// `<DClick:0.5,0.4>`: the left button pressed and let go twice at that place, close enough together to be egui's
+    /// `double_clicked()` however slow the frames are (two `<Click:>` steps in a row are only that by luck). `C-` / `A-` / `S-`
+    /// hold a key as for `<Click:>`.
+    DClick {
+        mods: u8,
+        at: At,
+    },
     Hover {
         at: At,
     },
@@ -144,6 +151,8 @@ pub enum Step {
         right: bool,
         text: String,
     },
+    /// `<DClick:Copy>`: a double click at the centre of the widget with that text, which is looked up once.
+    DClickText(String),
     /// `<Assert:text>` / `<Assert:!text>`: some label or value in the window
     /// contains the text (or none does). Waits a few seconds for it, then fails the run.
     Assert {
@@ -186,6 +195,10 @@ pub enum Press {
         mods: u8,
         at: At,
     },
+    DClick {
+        mods: u8,
+        at: At,
+    },
     Hover {
         at: At,
     },
@@ -209,6 +222,7 @@ pub enum Press {
         right: bool,
         text: String,
     },
+    DClickText(String),
     Assert {
         text: String,
         present: bool,
@@ -228,6 +242,7 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Commit(t) => Some(Press::Events(vec![commit_event(t)])),
         Step::Read { tag, name } => Some(Press::Read { tag: tag.clone(), name: name.clone() }),
         Step::Click { right, mods, at } => Some(Press::Click { right: *right, mods: *mods, at: *at }),
+        Step::DClick { mods, at } => Some(Press::DClick { mods: *mods, at: *at }),
         Step::Hover { at } => Some(Press::Hover { at: *at }),
         Step::Wheel { milli, mods, at } => Some(Press::Wheel { milli: *milli, mods: *mods, at: *at }),
         Step::Drag { from, to } => Some(Press::Drag { from: *from, to: *to }),
@@ -240,6 +255,7 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Theme(name) => Some(Press::Theme(name.clone())),
         Step::Lang(code) => Some(Press::Lang(code.clone())),
         Step::ClickText { right, text } => Some(Press::ClickText { right: *right, text: text.clone() }),
+        Step::DClickText(text) => Some(Press::DClickText(text.clone())),
         Step::Assert { text, present } => Some(Press::Assert { text: text.clone(), present: *present }),
         Step::Clipboard(text) => Some(Press::Clipboard(text.clone())),
         Step::ClipboardHas(text) => Some(Press::ClipboardHas(text.clone())),
@@ -266,6 +282,7 @@ pub fn label(step: &Step) -> String {
         Step::Commit(t) => format!("<Commit:{}>", paste_text_escape(t)),
         Step::Read { tag, name } => format!("<{tag}:{name}>"),
         Step::Click { right, mods, at } => format!("<{}Click:{}{}>", if *right { "R" } else { "" }, held_text(*mods), at_text(*at)),
+        Step::DClick { mods, at } => format!("<DClick:{}{}>", held_text(*mods), at_text(*at)),
         Step::Hover { at } => format!("<Hover:{}>", at_text(*at)),
         Step::Wheel { milli, mods, at } => {
             format!("<Wheel:{}{}@{}>", held_text(*mods), *milli as f32 / 1000.0, at_text(*at))
@@ -276,6 +293,7 @@ pub fn label(step: &Step) -> String {
         Step::Theme(name) => format!("<Theme:{name}>"),
         Step::Lang(code) => format!("<Lang:{code}>"),
         Step::ClickText { right, text } => format!("<{}Click:{}>", if *right { "R" } else { "" }, paste_text_escape(text)),
+        Step::DClickText(text) => format!("<DClick:{}>", paste_text_escape(text)),
         Step::Assert { text, present } => {
             let text = paste_text_escape(text);
             match (present, text.strip_prefix('!')) {
@@ -354,6 +372,14 @@ fn pointer(token: &str) -> Option<Result<Step, String>> {
                 paste_text(token, name).map(|text| Step::ClickText { right: name == "RClick", text })
             }
         }
+        "DClick" => {
+            let (mods, place) = held_prefix(arg);
+            if !place.is_empty() && place.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') {
+                at(place).map(|at| Step::DClick { mods, at }).ok_or_else(bad)
+            } else {
+                paste_text(token, name).map(Step::DClickText)
+            }
+        }
         "Hover" => at(arg).map(|at| Step::Hover { at }).ok_or_else(bad),
         "Wheel" => arg
             .split_once('@')
@@ -381,6 +407,14 @@ pub fn pointer_events(press: &Press, rect: egui::Rect) -> Vec<egui::Event> {
                 egui::Event::PointerButton { pos, button, pressed: true, modifiers },
                 egui::Event::PointerButton { pos, button, pressed: false, modifiers },
             ]
+        }
+        Press::DClick { mods, at } => {
+            let (pos, button, modifiers) = (place(*at), egui::PointerButton::Primary, modifiers(*mods));
+            let pair = [true, false].map(|pressed| egui::Event::PointerButton { pos, button, pressed, modifiers });
+            let mut events = vec![egui::Event::PointerMoved(pos)];
+            events.extend(pair.clone());
+            events.extend(pair);
+            events
         }
         Press::Wheel { milli, mods, at } => {
             let modifiers = modifiers(*mods);
@@ -642,7 +676,7 @@ fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
 fn paste_text(token: &str, what: &str) -> Result<String, String> {
     let noun = match what {
         "Paste" => "a paste",
-        "Click" | "RClick" | "Assert" | "Clipboard" | "ClipboardHas" => "a text to look for",
+        "Click" | "RClick" | "DClick" | "Assert" | "Clipboard" | "ClipboardHas" => "a text to look for",
         _ => "an input method step",
     };
     let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
@@ -933,12 +967,25 @@ fn click_frames(pos: egui::Pos2, right: bool) -> VecDeque<Vec<egui::Event>> {
     ])
 }
 
+/// A double click at `pos`: the move, then two press-and-release pairs, each pair in one frame so that a slow frame cannot
+/// push the second out of egui's double-click window.
+fn dclick_frames(pos: egui::Pos2) -> VecDeque<Vec<egui::Event>> {
+    let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+    let pair = || [true, false].map(|pressed| egui::Event::PointerButton { pos, button, pressed, modifiers }).to_vec();
+    VecDeque::from([vec![egui::Event::PointerMoved(pos)], pair(), pair()])
+}
+
 /// A click or a drag as the frames of pointer events it takes: egui sees a
 /// press and a release in one frame as a click, never as a drag.
 fn pointer_frames(press: &Press, rect: egui::Rect) -> VecDeque<Vec<egui::Event>> {
     let events = pointer_events(press, rect);
     match press {
         Press::Click { .. } => events.into_iter().map(|e| vec![e]).collect(),
+        Press::DClick { .. } => {
+            let mut it = events.into_iter();
+            let (moved, rest): (Vec<_>, Vec<_>) = (it.next().into_iter().collect(), it.collect());
+            VecDeque::from([moved, rest[..2].to_vec(), rest[2..].to_vec()])
+        }
         Press::Drag { from, to } => {
             let place = |(x, y): At| rect.min + egui::vec2(rect.width() * x as f32 / 1000.0, rect.height() * y as f32 / 1000.0);
             let (a, b) = (place(*from), place(*to));
@@ -1036,8 +1083,9 @@ impl Runner {
             .unwrap_or_else(|| PathBuf::from("."));
         // The first frames lay the window out; a key before them can land
         // before the panes exist.
-        let reads_window =
-            steps.iter().any(|s| matches!(s, Step::ClickText { .. } | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_)));
+        let reads_window = steps.iter().any(|s| {
+            matches!(s, Step::ClickText { .. } | Step::DClickText(_) | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_))
+        });
         Self {
             reads_window,
             deadline: None,
@@ -1166,6 +1214,14 @@ impl Runner {
                 }
                 Err(why) => return self.retry(step, why, now),
             },
+            Press::DClickText(text) => match locate(ctx, &text) {
+                Ok(pos) => {
+                    self.deadline = None;
+                    self.pointer = dclick_frames(pos);
+                    self.next = now;
+                }
+                Err(why) => return self.retry(step, why, now),
+            },
             Press::Assert { text, present } => match check(ctx, &text, present) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
@@ -1180,7 +1236,7 @@ impl Runner {
             },
             Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
             Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
-            p @ (Press::Click { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
+            p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
                 let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
                 self.pointer = pointer_frames(&p, rect);
                 self.next = now;
@@ -1423,6 +1479,40 @@ mod tests {
         assert_eq!(press(&got[2]), Some(Press::Events(vec![commit_event("日本\n")])));
         assert_eq!(label(&got[2]), "<Commit:日本\\n>");
         assert!(parse("<Commit:\\q>").unwrap_err().contains("not an input method step"));
+    }
+
+    /// `<DClick:>` parses by place or by text, round-trips, and makes egui report `double_clicked()` once.
+    #[test]
+    fn a_double_click_is_one_double_click() {
+        let got = parse("<DClick:0.5,0.5><DClick:C-0.1,0.2><DClick:Open>").unwrap();
+        assert_eq!(got[0], Step::DClick { mods: 0, at: (500, 500) });
+        assert_eq!(got[2], Step::DClickText("Open".into()));
+        assert_eq!(got.iter().map(label).collect::<Vec<_>>(), ["<DClick:0.5,0.5>", "<DClick:C-0.1,0.2>", "<DClick:Open>"]);
+        assert!(parse("<DClick:2,2>").is_err());
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let p = press(&got[0]).unwrap();
+        let frames = pointer_frames(&p, rect);
+        assert_eq!(frames.len(), 3);
+        let ctx = egui::Context::default();
+        let (mut single, mut double) = (0, 0);
+        let mut run = |events: Vec<egui::Event>| {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), events, ..Default::default() }, |ui| {
+                let r = ui.interact(
+                    egui::Rect::from_min_size(egui::pos2(50.0, 50.0), egui::vec2(100.0, 100.0)),
+                    egui::Id::new("b"),
+                    egui::Sense::click(),
+                );
+                single += r.clicked() as u32;
+                double += r.double_clicked() as u32;
+            });
+            out.textures_delta.clear();
+        };
+        run(vec![]);
+        for f in frames {
+            run(f);
+        }
+        run(vec![]);
+        assert_eq!(double, 1, "single clicks {single}");
     }
 
     /// A click holds `C-` / `A-` / `S-` like a wheel does, and `<Hover:>` only moves the pointer.

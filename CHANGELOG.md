@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.181.0] - 2026-11-01
+
+### 追加
+
+- `ito-keyscript`: ダブル クリック `<DClick:0.5,0.4>`（`C-` / `A-` / `S-` つき）と `<DClick:文字>`（ウィジェットの中心を 1 回だけ探す）。`Step::DClick`・`Step::DClickText`、`Press::DClick`・`Press::DClickText`。押して離す組を 2 つ、1 組を 1 フレームに入れるので、フレームが遅くても egui の `double_clicked()` の窓に入る。`<Click:>` を 2 つ続けても二度押しになるのは運だった（koyomi の依頼、#122）。
+
+### 使う側がやること
+
+- 自前のループで `Press` を `match` しているアプリは、`Press::DClick`・`Press::DClickText` の腕を足す（`pointer_frames` / `pointer_events` に渡せば `DClick` は動く。`DClickText` は `Click` の文字の探し方で位置を決めてから 3 フレームの二度押しを流す）。`Runner` を使うアプリは何もしなくてよい。
+
 ## [0.180.0] - 2026-11-01
 
 ### 追加
