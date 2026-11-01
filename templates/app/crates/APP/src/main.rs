@@ -79,10 +79,9 @@ impl App {
             eprintln!("{{app}}: {w}");
         }
         let themes = ito_theme::builtin();
-        let choice = common.theme.as_deref().unwrap_or("system");
-        let dark = common.dark_theme.as_deref().unwrap_or("{{app}} Dark");
-        let light = common.light_theme.as_deref().unwrap_or("{{app}} Light");
-        if let Ok(theme) = ito_theme::pick(&themes, choice, dark, light, false) {
+        // No theme of the app's own: `theme_choice(None)` gives the common defaults (themes that exist).
+        let (choice, dark, light) = common.theme_choice(None);
+        if let Ok(theme) = ito_theme::pick(&themes, &choice, &dark, &light, false) {
             ito_theme::set(theme.colors);
         }
         cc.egui_ctx.set_visuals(ito_theme::colors().visuals());

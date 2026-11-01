@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.192.1] - 2026-11-01
+
+### 修正
+
+- `templates/app`: 窓の起動のテーマを `common.theme_choice(None)` で決める。今までは `{{app}} Dark` / `{{app}} Light` という無い名前を既定にしていて、common.toml にテーマが無い PC で `ito_theme::pick` が失敗した（uchmk/ito#130）。
+
+### 使う側がやること
+
+- 雛形から作った既存のアプリで `"<app> Dark"` / `"<app> Light"` を既定にしている所（fumi の `crates/fumi/src/settings.rs:511` など）は `theme_choice(None)` に替える。
+
 ## [0.192.0] - 2026-11-01
 
 ### 追加
