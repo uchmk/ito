@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.182.0] - 2026-11-01
+
+### 追加
+
+- `ito-sftp`: SSH でコマンドを 1 つ走らせる `exec(&Target, command, &ExecOptions, &stop, &mut |Stream, &[u8]|)`（SFTP を始めないので、SFTP の無いサーバーでも使える）と、つないだ `Session` で走らせる `Session::exec`。つなぎ方は今までと同じ（`Target`・指紋を固定したホスト鍵・パスワードか鍵）。
+  - 標準出力・標準エラー（`Stream::Stdout` / `Stderr`）を届いた順にコールバックへ流す。
+  - 戻りは `Exit { status, signal, env_refused }`。`success()` は終了コード 0。シグナルで終わったときは `signal`（`TERM` など）。
+  - `ExecOptions { env, timeout }`: `env` は `env` リクエストで頼む（サーバーは `AcceptEnv` の分だけ受けるので、断られた名前は `env_refused` に入り、失敗にはしない）。`timeout` は全体の時間（`None` は終わるまで待つ）。
+  - 停止の旗か時間切れで `Error::Stopped` / `Error::Timeout`。どちらも先に相手のプロセスへ `TERM` を送ってからチャンネルを閉じる。
+  - 終了コードを受け取る前に切れたら `Error::Lost`。接続・認証・ホスト鍵の失敗は今までの `Error` のまま。
+- 手元に SSH サーバーが無いので、テストは終了コードの判定と、つながらないときの `Error::Connect` まで。実機の確認は koyomi の側で。
+
+### 使う側がやること
+
+- 無し（足しただけ）。koyomi の依頼 #123。
+
 ## [0.181.0] - 2026-11-01
 
 ### 追加

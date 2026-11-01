@@ -270,12 +270,166 @@ pub fn fingerprint(host: &str, port: u16, timeout: Duration) -> Result<String, E
     }
 }
 
+/// Connect, check the host key and log in (no subsystem or command yet).
+async fn login(t: &Target) -> Result<client::Handle<Check>, Error> {
+    let seen = Arc::new(Mutex::new(None));
+    let mut ssh = open_ssh(&t.host, t.port, Some(t.host_key.clone()), t.connect_timeout, seen).await?;
+    let attempt = async {
+        let res = match &t.auth {
+            Auth::Password(p) => ssh.authenticate_password(t.user.clone(), p.clone()).await,
+            Auth::Key { path, passphrase } => {
+                let key = russh::keys::load_secret_key(path, passphrase.as_deref()).map_err(|e| Error::Key(e.to_string()))?;
+                ssh.authenticate_publickey(t.user.clone(), PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256))).await
+            }
+        };
+        match res {
+            Ok(r) if r.success() => Ok(()),
+            Ok(_) => Err(Error::AuthRefused),
+            Err(e) => Err(Error::Connect(e.to_string())),
+        }
+    };
+    tokio::time::timeout(t.connect_timeout, attempt).await.map_err(|_| Error::Connect("ログインが時間切れ".into()))??;
+    Ok(ssh)
+}
+
+/// Which stream a chunk of command output came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
+/// `fn(stream, bytes)`, called as output arrives (chunks are not split at line ends or characters).
+pub type Output<'a> = &'a mut dyn FnMut(Stream, &[u8]);
+
+/// What to run with.
+#[derive(Debug, Clone, Default)]
+pub struct ExecOptions {
+    /// Environment variables asked of the server (`env` requests). Servers usually accept only a few
+    /// (`AcceptEnv`); the refused names come back in [`Exit::env_refused`].
+    pub env: Vec<(String, String)>,
+    /// For the whole run. `None` waits as long as the command runs (the stop flag still works).
+    pub timeout: Option<Duration>,
+}
+
+/// How a command ended.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Exit {
+    /// The exit code, unless the process was killed by a signal.
+    pub status: Option<u32>,
+    /// The signal that ended it (`TERM`, `KILL`, …), with the server's message if any.
+    pub signal: Option<String>,
+    /// Environment variables the server did not accept.
+    pub env_refused: Vec<String>,
+}
+
+impl Exit {
+    /// Exited with code 0.
+    pub fn success(&self) -> bool {
+        self.status == Some(0)
+    }
+}
+
+/// Connect, log in and run one command, streaming its output to `output`. See [`Session::exec`].
+/// Does not start SFTP, so it works against servers that have none.
+pub fn exec(target: &Target, command: &str, opts: &ExecOptions, stop: &AtomicBool, output: Output) -> Result<Exit, Error> {
+    let rt = runtime()?;
+    let r = rt.block_on(async {
+        let ssh = login(target).await?;
+        run_command(&ssh, target.connect_timeout, command, opts, stop, output).await
+    });
+    rt.shutdown_background();
+    r
+}
+
+/// Waits for the server's yes or no to a request (the next Success / Failure).
+async fn reply(chan: &mut russh::Channel<client::Msg>, wait: Duration) -> Result<bool, Error> {
+    use russh::ChannelMsg as M;
+    let r = tokio::time::timeout(wait, async {
+        loop {
+            match chan.wait().await {
+                Some(M::Success) => return Ok(true),
+                Some(M::Failure) => return Ok(false),
+                Some(M::Close) | None => return Err(Error::Lost("コマンドを始める前に切れました".into())),
+                Some(_) => {}
+            }
+        }
+    })
+    .await;
+    r.unwrap_or(Err(Error::Timeout))
+}
+
+async fn run_command(
+    ssh: &client::Handle<Check>,
+    open_timeout: Duration,
+    command: &str,
+    opts: &ExecOptions,
+    stop: &AtomicBool,
+    output: Output<'_>,
+) -> Result<Exit, Error> {
+    use russh::ChannelMsg as M;
+    let started = tokio::time::Instant::now();
+    let mut chan = tokio::time::timeout(open_timeout, ssh.channel_open_session())
+        .await
+        .map_err(|_| Error::Connect("チャンネルが時間切れ".into()))?
+        .map_err(|e| Error::Connect(e.to_string()))?;
+    let mut exit = Exit::default();
+    for (k, v) in &opts.env {
+        chan.set_env(true, k.clone(), v.clone()).await.map_err(|e| Error::Lost(e.to_string()))?;
+        if !reply(&mut chan, open_timeout).await? {
+            exit.env_refused.push(k.clone());
+        }
+    }
+    chan.exec(true, command.as_bytes().to_vec()).await.map_err(|e| Error::Lost(e.to_string()))?;
+    if !reply(&mut chan, open_timeout).await? {
+        return Err(Error::Other("サーバーがコマンドを受け付けませんでした".into()));
+    }
+    loop {
+        let over = if stop.load(Ordering::Relaxed) {
+            Some(Error::Stopped)
+        } else if opts.timeout.is_some_and(|t| started.elapsed() >= t) {
+            Some(Error::Timeout)
+        } else {
+            None
+        };
+        if let Some(e) = over {
+            // Ask the process to end, then drop the channel; neither may block the way out.
+            let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                let _ = chan.signal(russh::Sig::TERM).await;
+                let _ = chan.close().await;
+            })
+            .await;
+            return Err(e);
+        }
+        let Ok(msg) = tokio::time::timeout(Duration::from_millis(100), chan.wait()).await else { continue };
+        match msg {
+            Some(M::Data { data }) => output(Stream::Stdout, &data),
+            Some(M::ExtendedData { data, ext: 1 }) => output(Stream::Stderr, &data),
+            Some(M::ExitStatus { exit_status }) => exit.status = Some(exit_status),
+            Some(M::ExitSignal { signal_name, error_message, .. }) => {
+                let name = match signal_name {
+                    russh::Sig::Custom(c) => c,
+                    other => format!("{other:?}"),
+                };
+                exit.signal = Some(if error_message.is_empty() { name } else { format!("{name}: {error_message}") });
+            }
+            Some(M::Close) | None => break,
+            Some(_) => {}
+        }
+    }
+    if exit.status.is_none() && exit.signal.is_none() {
+        return Err(Error::Lost("終了コードを受け取る前に切れました".into()));
+    }
+    Ok(exit)
+}
+
 /// An open SFTP session. Dropping it disconnects.
 pub struct Session {
     rt: Option<tokio::runtime::Runtime>,
     sftp: SftpSession,
     _ssh: client::Handle<Check>,
     io_timeout: Duration,
+    connect_timeout: Duration,
 }
 
 impl Session {
@@ -283,7 +437,9 @@ impl Session {
     pub fn connect(target: &Target) -> Result<Session, Error> {
         let rt = runtime()?;
         match rt.block_on(Self::open(target)) {
-            Ok((sftp, ssh)) => Ok(Session { rt: Some(rt), sftp, _ssh: ssh, io_timeout: target.io_timeout }),
+            Ok((sftp, ssh)) => {
+                Ok(Session { rt: Some(rt), sftp, _ssh: ssh, io_timeout: target.io_timeout, connect_timeout: target.connect_timeout })
+            }
             Err(e) => {
                 rt.shutdown_background();
                 Err(e)
@@ -292,23 +448,7 @@ impl Session {
     }
 
     async fn open(t: &Target) -> Result<(SftpSession, client::Handle<Check>), Error> {
-        let seen = Arc::new(Mutex::new(None));
-        let mut ssh = open_ssh(&t.host, t.port, Some(t.host_key.clone()), t.connect_timeout, seen).await?;
-        let login = async {
-            let res = match &t.auth {
-                Auth::Password(p) => ssh.authenticate_password(t.user.clone(), p.clone()).await,
-                Auth::Key { path, passphrase } => {
-                    let key = russh::keys::load_secret_key(path, passphrase.as_deref()).map_err(|e| Error::Key(e.to_string()))?;
-                    ssh.authenticate_publickey(t.user.clone(), PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256))).await
-                }
-            };
-            match res {
-                Ok(r) if r.success() => Ok(()),
-                Ok(_) => Err(Error::AuthRefused),
-                Err(e) => Err(Error::Connect(e.to_string())),
-            }
-        };
-        tokio::time::timeout(t.connect_timeout, login).await.map_err(|_| Error::Connect("ログインが時間切れ".into()))??;
+        let ssh = login(t).await?;
         let subsystem = async {
             let channel = ssh.channel_open_session().await.map_err(|e| Error::Connect(e.to_string()))?;
             channel.request_subsystem(true, "sftp").await.map_err(|e| Error::Connect(format!("sftp を始められません: {e}")))?;
@@ -317,6 +457,13 @@ impl Session {
         };
         let sftp = tokio::time::timeout(t.connect_timeout, subsystem).await.map_err(|_| Error::Connect("sftp が時間切れ".into()))??;
         Ok((sftp, ssh))
+    }
+
+    /// Run one command over this connection and stream its output, like [`exec`] without a new login.
+    /// Returns when the command ends ([`Exit`]), the stop flag is set ([`Error::Stopped`]) or
+    /// `opts.timeout` passes ([`Error::Timeout`]); the last two ask the remote process to end (`TERM`).
+    pub fn exec(&self, command: &str, opts: &ExecOptions, stop: &AtomicBool, output: Output) -> Result<Exit, Error> {
+        self.run(run_command(&self._ssh, self.connect_timeout, command, opts, stop, output))
     }
 
     fn run<T>(&self, f: impl Future<Output = Result<T, Error>>) -> Result<T, Error> {
@@ -669,6 +816,22 @@ mod tests {
         assert!(!format!("{a:?}").contains("hunter2"));
         let k = Auth::Key { path: "k".into(), passphrase: Some("hunter2".into()) };
         assert!(!format!("{k:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn exit_success_means_code_zero() {
+        assert!(Exit { status: Some(0), ..Default::default() }.success());
+        assert!(!Exit { status: Some(1), ..Default::default() }.success());
+        assert!(!Exit { signal: Some("TERM".into()), ..Default::default() }.success());
+    }
+
+    #[test]
+    fn exec_to_nowhere_says_why() {
+        let t = Target::new("127.0.0.1", "u", Auth::Password("p".into()), "SHA256:x");
+        let t = Target { port: 1, connect_timeout: Duration::from_secs(2), ..t };
+        let stop = AtomicBool::new(false);
+        let r = exec(&t, "true", &ExecOptions::default(), &stop, &mut |_, _| {});
+        assert!(matches!(r, Err(Error::Connect(_))), "{r:?}");
     }
 
     #[test]
