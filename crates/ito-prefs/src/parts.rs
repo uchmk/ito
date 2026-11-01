@@ -75,6 +75,32 @@ pub fn notice(ui: &mut Ui, l: Look, m: Mark, text: &str, action: Option<&str>) -
     out
 }
 
+/// The ghost shown where a list has nothing yet: a large dim `m`, the `title` (what is empty) and a `hint` (what to do),
+/// centred in the space left, with one button `action` ("Add a task") under them when the user may add. Returns the
+/// button's response. Show it instead of the list when the list is empty (`if items.is_empty()`); leave `action` as `None`
+/// where nothing can be added (a filter that matched nothing, a read-only list).
+pub fn empty_state(ui: &mut Ui, l: Look, m: Mark, title: &str, hint: &str, action: Option<&str>) -> Option<Response> {
+    let c = l.c;
+    let mut out = None;
+    ui.vertical_centered(|ui| {
+        ui.add_space((ui.available_height() * 0.25).max(z(ui, 16.0)));
+        let glyph = z(ui, 40.0);
+        let (rect, r) = ui.allocate_exact_size(Vec2::splat(glyph), Sense::hover());
+        mark(ui.painter(), rect, m, mix(c.bg, c.dim, 0.6));
+        ito_a11y::say(&r, Said::Label, "");
+        ui.add_space(z(ui, 6.0));
+        ui.add(egui::Label::new(egui::RichText::new(title).color(c.dim).size(z(ui, 15.0))).wrap());
+        if !hint.is_empty() {
+            ui.add(egui::Label::new(egui::RichText::new(hint).color(mix(c.bg, c.dim, 0.7))).wrap());
+        }
+        if let Some(a) = action {
+            ui.add_space(z(ui, 10.0));
+            out = Some(button_with(ui, l, a, Tone::Plain));
+        }
+    });
+    out
+}
+
 /// What a click on an [`attachment`] card did.
 #[derive(Debug)]
 pub struct AttachmentResponse {
@@ -190,6 +216,8 @@ mod tests {
             let short = pill(ui, l, "All", None).rect.width();
             let long = pill(ui, l, "All", Some(Mark::ChevronDown)).rect.width();
             assert!(long > short);
+            assert!(empty_state(ui, l, Mark::Info, "No tasks", "Add one to start", Some("Add")).is_some());
+            assert!(empty_state(ui, l, Mark::Info, "No match", "", None).is_none());
         });
         out.textures_delta.clear();
     }

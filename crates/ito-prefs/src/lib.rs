@@ -30,7 +30,7 @@ pub use chrono::NaiveDate;
 pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 pub use date::{format_date, month_grid, month_picker, parse_date, shift_months, DateField, DateResponse, DateWords, DayLook, RangeField};
 mod parts;
-pub use parts::{attachment, avatar, notice, pill, AttachmentResponse};
+pub use parts::{attachment, avatar, empty_state, notice, pill, AttachmentResponse};
 mod notify;
 mod notify_cfg;
 mod openin;

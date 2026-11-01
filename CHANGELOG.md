@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.173.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `empty_state(ui, look, mark, title, hint, action)`。一覧が空のときの薄い絵＋文言（何が空か・何をすればよいか）と、追加できるときだけ出す 1 つのボタン。押されたかは返り値の `Response`。
+
+#### 使う側がやること
+
+- 空の一覧の自前の「ありません」を `empty_state` に置き換える（`if items.is_empty()` の中で呼ぶ）。追加できない空（絞り込みで 0 件・読み取り専用）は `action` を `None` にする。
+
 ## [0.172.0] - 2026-11-01
 
 ### 追加
