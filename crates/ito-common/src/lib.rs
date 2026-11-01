@@ -20,6 +20,7 @@ pub mod apps;
 pub mod bundle;
 #[cfg(feature = "dirwatch")]
 pub mod dirwatch;
+pub mod filename;
 pub mod fonts;
 pub mod kept;
 mod os_theme;
@@ -31,6 +32,8 @@ pub mod startup;
 pub mod text;
 pub mod update;
 pub mod window;
+
+pub use filename::safe_file_name;
 
 pub use os_theme::OsLight;
 

@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.184.0] - 2026-11-01
+
+### 追加
+
+- `ito-common`: `safe_file_name(name) -> String`（`filename::safe_file_name`）。メールの添付・ダウンロード・アーカイブの中の名前のように、他人が決めた名前を、フォルダーの下に書ける 1 つの名前の部品にする。`dir.join(結果)` は `dir` の外に出ない。
+  - `/ \ : * ? " < > |` と制御文字は `_`。`.`・`..`・空・点と空白だけの名前は `_`。末尾の点と空白（Windows で消える）は取る。
+  - `CON`・`PRN`・`AUX`・`NUL`・`COM1`-`COM9`・`LPT1`-`LPT9`（拡張子付きも）は頭に `_`。
+  - 拡張子は残し、255 バイトを超えるときは本体を UTF-8 の字の途中で切らずに切る。すでに良い名前はそのまま返る。
+
+### 使う側がやること
+
+- fumi: 添付を temp に書く前に `ito_common::safe_file_name(&attachment.name)` を通す。kura の展開など、他人の名前でファイルを作るところも同じ。
+
 ## [0.183.1] - 2026-11-01
 
 ### 修正
