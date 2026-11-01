@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.166.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 印の付いた枠のボタン `icon_button` と、印だけを描く `mark`（uchmk/ito#112、koyomi の依頼）。
+  - `Mark`: Search・Download・Upload・Play・Pause・ChevronLeft・ChevronRight・Plus・Close・Refresh・Copy（`Mark::ALL` で全部）。字体の記号でなく 1.5 の線で描くので、どのテーマ・高コントラストにも合う。
+  - `icon_button(ui, Mark, words, said) -> Response`: 地は `raised`・縁は `border`、ポインタの下かキーの上では `hover` と `border_strong`。印は `dim`（熱いときは `fg`）、文字は `ui` の Body の大きさ、フォーカスの輪は `run`。読み上げは `ito_a11y::say(Role::Button, said)`。`said` が文字と違うときだけホバーに出る。
+  - `mark_button(ui, Mark, said, side) -> Response`: 印だけの正方形のボタン（畳む印・閉じる印）。`side` は字の拡大の前の点数。
+  - `mark(painter, rect, Mark, colour)`: 印だけ。`rect` の短い辺を 14 として拡げ縮みする。
+- `ito-prefs` が `ito-a11y`（機能 `egui`）に依る。
+
+### 使う側がやること
+
+- koyomi: `icon_button`・`enum Icon`・`fold_button` を `ito_prefs::icon_button`・`mark_button(…, Mark::ChevronRight / ChevronLeft, …, 22.0)` に置き換える。
+
 ## [0.165.0] - 2026-10-31
 
 ### 追加

@@ -19,9 +19,11 @@ use ito_theme::{Colors, Theme};
 
 mod apps;
 mod keys;
+mod mark;
 mod more;
 mod nav;
 pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
+pub use mark::{icon_button, mark, mark_button, Mark};
 mod notify;
 mod notify_cfg;
 mod openin;

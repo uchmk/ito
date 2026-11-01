@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 egui = { version = "0.36", default-features = false }
+ito-a11y = { path = "../ito-a11y", features = ["egui"] }
 ito-common = { path = "../ito-common" }
 ito-i18n = { path = "../ito-i18n" }
 ito-keymap = { path = "../ito-keymap" }
