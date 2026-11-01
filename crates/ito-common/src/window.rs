@@ -147,6 +147,7 @@ impl Window {
     /// hands the window to the app's creator hidden (`CreationContext`).
     /// Only on Windows; elsewhere the window is already where `opening` said.
     pub fn put(&self, window: &impl HasWindowHandle) {
+        sys::follow_dpi(window);
         sys::put(self, window);
     }
 
@@ -156,6 +157,16 @@ impl Window {
     fn pixel(&self) -> Option<(i32, i32)> {
         (self.scale > 0.0).then(|| ((self.x * self.scale).round() as i32, (self.y * self.scale).round() as i32))
     }
+}
+
+/// Let Windows place the window when it crosses to a screen of another scale
+/// (Win+Left/Right, Aero Snap). winit sets its own size on `WM_DPICHANGED` and
+/// the snap stops half way over the edge; this applies the rectangle Windows
+/// suggested after winit's own handling, as Chrome does. [`Window::put`] and
+/// [`Saved::put`] call it; call it yourself in eframe's creator when the app
+/// uses neither. Only on Windows, safe to call more than once.
+pub fn follow_dpi(window: &impl HasWindowHandle) {
+    sys::follow_dpi(window);
 }
 
 /// How to make the window: egui's `ViewportBuilder::with_position`,
@@ -190,14 +201,43 @@ mod sys {
     use super::{Screen, Window};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::core::BOOL;
-    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
     use windows::Win32::UI::HiDpi::{
         GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
     };
+    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        IsWindowVisible, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE,
+        IsWindowVisible, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, WM_DPICHANGED,
     };
+
+    unsafe extern "system" fn dpi_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: usize, _data: usize) -> LRESULT {
+        // SAFETY: the subclass chain of the app's own window, on its thread.
+        let r = unsafe { DefSubclassProc(h, m, w, l) };
+        if m == WM_DPICHANGED && l.0 != 0 {
+            // SAFETY: for WM_DPICHANGED, lParam points to the suggested RECT.
+            let rc = unsafe { *(l.0 as *const RECT) };
+            // SAFETY: `h` is this window; winit has handled the message.
+            let _ =
+                unsafe { SetWindowPos(h, None, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE) };
+        }
+        r
+    }
+
+    pub fn follow_dpi(window: &impl HasWindowHandle) {
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+            return;
+        };
+        let hwnd = HWND(raw.hwnd.get() as *mut std::ffi::c_void);
+        // SAFETY: `hwnd` is the app's window, made on this thread; setting the
+        // same subclass id again only replaces it.
+        unsafe {
+            let _ = SetWindowSubclass(hwnd, Some(dpi_proc), 0x1_7050, 0);
+        }
+    }
 
     /// `MONITORINFOF_PRIMARY` (in WindowsAndMessaging, not worth the feature).
     const PRIMARY: u32 = 1;
@@ -294,6 +334,8 @@ mod sys {
     pub const PUTS: bool = false;
 
     pub fn put(_: &super::Window, _: &impl raw_window_handle::HasWindowHandle) {}
+
+    pub fn follow_dpi(_: &impl raw_window_handle::HasWindowHandle) {}
 }
 
 /// `window.toml` in `dir`.
@@ -421,6 +463,7 @@ impl Saved {
 
     /// [`Window::put`], in eframe's creator while the window is hidden.
     pub fn put(&self, window: &impl HasWindowHandle) {
+        sys::follow_dpi(window);
         if let Some(w) = self.place {
             w.put(window);
         }

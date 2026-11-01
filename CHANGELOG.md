@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.205.0] - 2026-11-02
+
+### 修正
+
+- `ito-common`: 倍率の違うモニターの間で Win+←/→ が、隣のモニターに半分かかったところで止まるのを直した（uchmk/ito#136）。
+  winit は `WM_DPICHANGED` で Windows の提案の矩形ではなく自分で決めたサイズに置き直すので、スナップが途中で止まっていた。
+  `window::follow_dpi(&window)` が、winit の処理のあとで提案の矩形を当てる（Chrome と同じ）。`Window::put`・`Saved::put` が呼ぶので、
+  すでに `put` を呼んでいるアプリは `rev` を上げるだけでよい。呼んでいないアプリは eframe の creator で `follow_dpi(cc)` を呼ぶ。Windows 以外では何もしない。
+
 ## [0.204.0] - 2026-11-01
 
 ### 追加
