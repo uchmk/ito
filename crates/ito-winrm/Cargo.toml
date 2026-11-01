@@ -1,0 +1,19 @@
+[package]
+name = "ito-winrm"
+description = "Run a command on a Windows PC over WinRM (WS-Management cmd shell): live stdout/stderr, exit code, stop flag, timeout, pinned certificate fingerprint. Pure Rust."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+getrandom = "0.4"
+sha2 = "0.11"
+base64 = "0.22"
+webpki-roots = "1"
+# `ring` (not the default aws-lc-rs) needs a C compiler on Linux and macOS targets only, like ito-mail.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.195.0] - 2026-11-01
+
+### 追加
+
+- 新しいクレート `ito-winrm`: Windows の PC で WinRM（WS-Management の cmd シェル）越しにコマンドを走らせる。`exec(&Target, command, &ExecOptions, &stop, &mut |Stream, &[u8]| …) -> Result<Exit, Error>` は `ito_sftp::exec` と同じ形（`Stream`・`ExecOptions { env, timeout }`・`Exit { status }`）。出力は届いた順に渡り、`stop` を立てる／時間切れになると、リモートのコマンドに終了を頼み（Signal）、シェルを消してから `Stopped`／`Timeout` を返す。止まるのでワーカースレッドから呼ぶ。
+- HTTPS（5986、`Target::https`）は証明書の SHA-256 を固定できる（違えば `Error::Fingerprint(見えた指紋)`）。初回は `peek_fingerprint(host, port, timeout, &stop)` で指紋を見て、利用者に確かめてもらってから固定する。`fingerprint::{sha256, format, parse}`。HTTP（5985、`Target::http`）も使えるが、Basic のパスワードが平文で流れるので信頼できる網だけ。純 Rust（rustls + ring）なので Linux・macOS からも使える。
+- まだ無いもの: NTLM／Kerberos（今は Basic だけ。PC 側で `AllowUnencrypted` と Basic を許す設定が要る）。要るアプリは #132 に書く。
+
+### 使う側がやること
+
+- koyomi: `ito-winrm = { git = "https://github.com/uchmk/ito", rev = "…" }` を足す。
+
 ## [0.194.1] - 2026-11-01
 
 ### 修正
