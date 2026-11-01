@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.173.1] - 2026-11-01
+
+### 変更
+
+- `templates/app`: 雛形の本体の画面を `ito_prefs::empty_state` の空のゴーストにした（以前は見出しと文字だけ）。雛形の `CLAUDE.md` に「空の一覧は `empty_state`」の規約（出す条件は呼ぶ側・追加できる空だけボタン・追加できない空は `None`）を足した。
+
+#### 使う側がやること
+
+- 既存のアプリは何もしなくてよい。雛形の規約を自分の `CLAUDE.md` に写してもよい。
+
 ## [0.173.0] - 2026-11-01
 
 ### 追加
