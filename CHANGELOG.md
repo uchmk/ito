@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.177.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 編集フォームの部品（koyomi の依頼）。
+  - `form_label(ui, l, label, need, note, &FormWords)`: 12px の太字・dim のラベル。`Need::Required` は ` *`（`c.err`）、`Optional` は `(任意)`、`Plain` は無し。`note` は後ろに小さく。読み上げは「ラベル, 必須／任意」。言葉は `FormWords::{en, ja, of(lang)}`。
+  - `InputField::new(id).name(..).mark(Mark::Folder).unit("秒").hint(..).mono().width(w).error(bool).show(ui, &mut String)`: 枠つきの 1 行の欄（`c.bg`・1px `c.border`・角 6、フォーカスで `c.run` の輪、`error` で `c.err`）。
+  - `CodeBox::new(id).name(..).title("run").aside("1行に1つ").rows(3).error(bool).show(ui, &mut String)`: 行番号つきの等幅の複数行の欄。折り返しても番号は 1 行に 1 つで、スクロールにも付いてくる。
+  - `fieldset(ui, l, title, aside, body)`: カードでない節。見出し（Heading）と右端の大文字の aside、1px の線、本文。
+  - `Mark::Lock`（南京錠。`Mark::ALL` は 64）。
+- 欄は `Id::new(("ito-input"/"ito-codebox", id))` の安定した id を持ち、`.name(..)` が読み上げ・`--keys` の `<Click:文字>` の名前になる（既定は id）。
+
+### 使う側がやること
+
+- `Mark` を網羅して match しているアプリは `Mark::Lock` の腕を足す。
+
 ## [0.176.0] - 2026-11-01
 
 ### 追加

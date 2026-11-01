@@ -133,11 +133,13 @@ pub enum Mark {
     Globe,
     CalendarOff,
     CalendarCheck,
+    /// A padlock.
+    Lock,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 63] = [
+    pub const ALL: [Mark; 64] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -201,6 +203,7 @@ impl Mark {
         Mark::Globe,
         Mark::CalendarOff,
         Mark::CalendarCheck,
+        Mark::Lock,
     ];
 }
 
@@ -541,6 +544,14 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             } else {
                 p.add(path(vec![at(-2.5, 3.0), at(-0.8, 4.8), at(2.6, 1.0)]));
             }
+        }
+        Mark::Lock => {
+            p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);
+            let mut v = vec![at(-3.0, -0.5), at(-3.0, -3.0)];
+            v.extend(arc(0.0, -3.0, 3.0, PI, 2.0 * PI));
+            v.push(at(3.0, -0.5));
+            p.add(path(v));
+            p.circle_filled(at(0.0, 3.0), 1.0 * k, colour);
         }
         Mark::Globe => {
             p.circle_stroke(m, 6.0 * k, line);
