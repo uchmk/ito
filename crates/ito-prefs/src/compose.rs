@@ -182,6 +182,9 @@ pub fn chips_with(ui: &mut Ui, l: Look, list: &mut Vec<String>, input: &mut Stri
     let mut changed = false;
     let was_empty = input.is_empty();
     let mut field = None;
+    // The field's id is taken here, from the place of the row, so adding or taking away a chip (which moves the auto ids inside
+    // the row) does not change it and the field keeps the focus.
+    let field_id = ui.next_auto_id().with("ito-chips-input");
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(z(ui, 6.0), z(ui, 4.0));
         let mut gone = None;
@@ -227,7 +230,12 @@ pub fn chips_with(ui: &mut Ui, l: Look, list: &mut Vec<String>, input: &mut Stri
         }
         let room = ui.available_width().max(z(ui, 140.0));
         let r = ui.add(
-            egui::TextEdit::singleline(input).hint_text(hint).frame(egui::Frame::NONE).desired_width(room).margin(Vec2::new(2.0, 2.0)),
+            egui::TextEdit::singleline(input)
+                .hint_text(hint)
+                .id(field_id)
+                .frame(egui::Frame::NONE)
+                .desired_width(room)
+                .margin(Vec2::new(2.0, 2.0)),
         );
         ito_a11y::say(&r, Said::Label, hint);
         field = Some(r);
@@ -236,7 +244,8 @@ pub fn chips_with(ui: &mut Ui, l: Look, list: &mut Vec<String>, input: &mut Stri
     if commit(list, input, false) {
         changed = true;
     }
-    let enter = input_r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    // `lost_focus` is true on the frame Enter lets go of the field, which also holds while the OS window is not focused.
+    let enter = (input_r.has_focus() || input_r.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter));
     if input_r.lost_focus() || enter {
         if commit(list, input, true) {
             changed = true;
@@ -296,6 +305,7 @@ pub struct FloatCard<'a> {
     badge: Option<&'a str>,
     corner: Align2,
     size: Vec2,
+    avoid_top: f32,
     avoid_bottom: f32,
     minimized: bool,
     expanded: bool,
@@ -310,6 +320,7 @@ impl<'a> FloatCard<'a> {
             badge: None,
             corner: Align2::RIGHT_BOTTOM,
             size: Vec2::new(580.0, 540.0),
+            avoid_top: 0.0,
             avoid_bottom: 0.0,
             minimized: false,
             expanded: false,
@@ -335,7 +346,15 @@ impl<'a> FloatCard<'a> {
         self
     }
 
-    /// A height at the bottom of the window to keep clear (a status bar).
+    /// A height at the top of the window to keep clear (the title bar), in points at zoom 1: it follows the letters' zoom, so
+    /// pass `ito_titlebar::HEIGHT` as it is. The card, expanded or not, stays below it.
+    pub fn avoid_top(mut self, h: f32) -> Self {
+        self.avoid_top = h;
+        self
+    }
+
+    /// A height at the bottom of the window to keep clear (a status bar), in points at zoom 1: it follows the letters' zoom,
+    /// so pass `ito_statusbar::HEIGHT` as it is.
     pub fn avoid_bottom(mut self, h: f32) -> Self {
         self.avoid_bottom = h;
         self
@@ -360,7 +379,10 @@ impl<'a> FloatCard<'a> {
     fn place(&self, zoom: f32, screen: Rect) -> Rect {
         let margin = 16.0 * zoom;
         let head = 36.0 * zoom;
-        let room = Rect::from_min_max(screen.min + Vec2::splat(margin), screen.max - Vec2::new(margin, margin + self.avoid_bottom));
+        let room = Rect::from_min_max(
+            screen.min + Vec2::new(margin, margin + self.avoid_top * zoom),
+            screen.max - Vec2::new(margin, margin + self.avoid_bottom * zoom),
+        );
         let want = if self.expanded {
             room.size()
         } else {
@@ -524,6 +546,31 @@ mod tests {
         out.textures_delta.clear();
         assert!(rects[0].width() > 100.0);
         assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn the_field_keeps_its_id_when_a_chip_comes_and_goes() {
+        let ctx = Context::default();
+        let mut input = String::new();
+        let mut ids = vec![];
+        for n in [0usize, 1, 3, 0] {
+            let mut list: Vec<String> = (0..n).map(|k| format!("a{k}@x.jp")).collect();
+            let mut out = ctx.run_ui(screen(), |ui| {
+                ids.push(chips(ui, look(), &mut list, &mut input, "To").input.id);
+            });
+            out.textures_delta.clear();
+        }
+        assert!(ids.windows(2).all(|w| w[0] == w[1]), "{ids:?}");
+    }
+
+    #[test]
+    fn a_float_card_stays_below_the_top_and_follows_the_zoom() {
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0));
+        let card = FloatCard::new("c", "t").avoid_top(40.0).avoid_bottom(24.0).expanded(true);
+        for zoom in [1.0, 1.5] {
+            let r = card.place(zoom, screen);
+            assert!(r.top() >= (16.0 + 40.0) * zoom - 0.5 && r.bottom() <= screen.bottom() - (16.0 + 24.0) * zoom + 0.5, "{r:?}");
+        }
     }
 
     #[test]

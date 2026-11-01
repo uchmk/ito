@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.175.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `FloatCard::avoid_top(h)`。上に空ける高さ（タイトルバー）。広げたカード（`expanded`）もこの下に収まる（fumi の依頼）。
+
+### 変更
+
+- `ito-prefs`: `FloatCard::avoid_bottom(h)` と `avoid_top(h)` は、文字の倍率に合わせて伸びる（zoom 1 の点で渡す）。
+- `ito-prefs`: `chips`／`chips_with` の入力欄の id を、チップの数が変わっても変えない（以前は Enter・`,`・`;` でチップが増えるたびに id が変わり、欄がフォーカスを失った）。
+  Enter の判定は、OS の窓にフォーカスがなくても（`--keys`）効く（`lost_focus` も見る）。
+
+#### 使う側がやること
+
+- `avoid_bottom` に倍率を掛けた値を渡していたら、zoom 1 の点（`ito_statusbar::HEIGHT` のまま）に戻す。
+- チップ欄に自前で `request_focus` を返していた回避は外してよい。
+
 ## [0.174.0] - 2026-11-01
 
 ### 追加
