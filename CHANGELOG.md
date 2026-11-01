@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.183.0] - 2026-11-01
+
+### 追加
+
+- 新しいクレート `ito-zip`: zip にファイルを足す・中を見る・1 つ読み出す。純 Rust（`zip` の deflate）で、Windows・macOS・Linux で同じ。名前は UTF-8 なのでエクスプローラーでも開ける。
+  - `add(zip, &[Source::new(path, "中の名前")], OnExisting)`・`add_dir(zip, dir, prefix, on)`（下のフォルダーを `prefix/相対パス` で全部）・`add_bytes(zip, &[(name, bytes)], on)`。zip が無ければ作り、あれば足す。
+  - 書くのは `<zip>.part`。flush して `sync_all` してから名前替えで本物に替えるので、途中で落ちても元の zip は無傷で、`.part` も残らない。元の中身は再圧縮せずにそのまま写す。
+  - `OnExisting::Replace`（同じ名前は置き換える）か `Refuse`（`Error::Exists`。zip は触らない）。戻りの `Added { added, replaced, bytes }`。
+  - `list(zip) -> Vec<Entry { name, size, packed, modified, is_dir }>`、`read(zip, name)`、`read_to(zip, name, &mut impl Write)`。
+  - 中の名前は相対の `/` 区切りだけ。`..`・先頭の `/`・ドライブ・`\\` は `Error::BadName`。`Error::{Io, Corrupt, NotFound, Exists, BadName}`。時刻は UTC で保存。止まるのでワーカースレッドから。
+
+### 使う側がやること
+
+- koyomi: `kind = "zip"` の PowerShell の `Compress-Archive` を `ito_zip::add_dir` / `add` に替える。`ito-zip` を足して全部の ito のクレートと同じ `rev` にそろえる。
+
 ## [0.182.0] - 2026-11-01
 
 ### 追加

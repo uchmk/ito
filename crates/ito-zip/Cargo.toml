@@ -1,0 +1,11 @@
+[package]
+name = "ito-zip"
+description = "Put files into a zip and read them back: add to an existing zip safely (.part then rename), list, read one entry. Pure Rust, deflate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
