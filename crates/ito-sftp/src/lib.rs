@@ -238,13 +238,15 @@ async fn open_ssh(
     port: u16,
     pin: Option<String>,
     timeout: Duration,
+    stop: &AtomicBool,
     seen: Arc<Mutex<Option<String>>>,
 ) -> Result<client::Handle<Check>, Error> {
     let config = Arc::new(client::Config { inactivity_timeout: None, ..Default::default() });
     let handler = Check { pin: pin.clone(), seen: seen.clone() };
-    let attempt = tokio::time::timeout(timeout, client::connect(config, (host.to_string(), port), handler)).await;
+    let attempt = step(timeout, stop, async { Ok::<_, Error>(client::connect(config, (host.to_string(), port), handler).await) }).await;
     match attempt {
-        Err(_) => Err(Error::Connect("時間切れ".into())),
+        Err(Error::Timeout) => Err(Error::Connect("時間切れ".into())),
+        Err(e) => Err(e),
         Ok(Ok(h)) => Ok(h),
         Ok(Err(e)) => {
             let actual = seen.lock().unwrap().clone();
@@ -260,7 +262,7 @@ async fn open_ssh(
 pub fn fingerprint(host: &str, port: u16, timeout: Duration) -> Result<String, Error> {
     let rt = runtime()?;
     let seen = Arc::new(Mutex::new(None));
-    let r = rt.block_on(open_ssh(host, port, None, timeout, seen.clone()));
+    let r = rt.block_on(open_ssh(host, port, None, timeout, &AtomicBool::new(false), seen.clone()));
     let got = seen.lock().unwrap().clone();
     rt.shutdown_background();
     match (got, r) {
@@ -271,9 +273,9 @@ pub fn fingerprint(host: &str, port: u16, timeout: Duration) -> Result<String, E
 }
 
 /// Connect, check the host key and log in (no subsystem or command yet).
-async fn login(t: &Target) -> Result<client::Handle<Check>, Error> {
+async fn login(t: &Target, stop: &AtomicBool) -> Result<client::Handle<Check>, Error> {
     let seen = Arc::new(Mutex::new(None));
-    let mut ssh = open_ssh(&t.host, t.port, Some(t.host_key.clone()), t.connect_timeout, seen).await?;
+    let mut ssh = open_ssh(&t.host, t.port, Some(t.host_key.clone()), t.connect_timeout, stop, seen).await?;
     let attempt = async {
         let res = match &t.auth {
             Auth::Password(p) => ssh.authenticate_password(t.user.clone(), p.clone()).await,
@@ -288,7 +290,10 @@ async fn login(t: &Target) -> Result<client::Handle<Check>, Error> {
             Err(e) => Err(Error::Connect(e.to_string())),
         }
     };
-    tokio::time::timeout(t.connect_timeout, attempt).await.map_err(|_| Error::Connect("ログインが時間切れ".into()))??;
+    match step(t.connect_timeout, stop, attempt).await {
+        Err(Error::Timeout) => return Err(Error::Connect("ログインが時間切れ".into())),
+        r => r?,
+    }
     Ok(ssh)
 }
 
@@ -335,7 +340,7 @@ impl Exit {
 pub fn exec(target: &Target, command: &str, opts: &ExecOptions, stop: &AtomicBool, output: Output) -> Result<Exit, Error> {
     let rt = runtime()?;
     let r = rt.block_on(async {
-        let ssh = login(target).await?;
+        let ssh = login(target, stop).await?;
         run_command(&ssh, target.connect_timeout, command, opts, stop, output).await
     });
     rt.shutdown_background();
@@ -343,9 +348,9 @@ pub fn exec(target: &Target, command: &str, opts: &ExecOptions, stop: &AtomicBoo
 }
 
 /// Waits for the server's yes or no to a request (the next Success / Failure).
-async fn reply(chan: &mut russh::Channel<client::Msg>, wait: Duration) -> Result<bool, Error> {
+async fn reply(chan: &mut russh::Channel<client::Msg>, wait: Duration, stop: &AtomicBool) -> Result<bool, Error> {
     use russh::ChannelMsg as M;
-    let r = tokio::time::timeout(wait, async {
+    step(wait, stop, async {
         loop {
             match chan.wait().await {
                 Some(M::Success) => return Ok(true),
@@ -355,8 +360,7 @@ async fn reply(chan: &mut russh::Channel<client::Msg>, wait: Duration) -> Result
             }
         }
     })
-    .await;
-    r.unwrap_or(Err(Error::Timeout))
+    .await
 }
 
 async fn run_command(
@@ -369,19 +373,36 @@ async fn run_command(
 ) -> Result<Exit, Error> {
     use russh::ChannelMsg as M;
     let started = tokio::time::Instant::now();
-    let mut chan = tokio::time::timeout(open_timeout, ssh.channel_open_session())
-        .await
-        .map_err(|_| Error::Connect("チャンネルが時間切れ".into()))?
-        .map_err(|e| Error::Connect(e.to_string()))?;
+    let mut chan =
+        match step(open_timeout, stop, async { ssh.channel_open_session().await.map_err(|e| Error::Connect(e.to_string())) }).await {
+            Err(Error::Timeout) => return Err(Error::Connect("チャンネルが時間切れ".into())),
+            r => r?,
+        };
     let mut exit = Exit::default();
     for (k, v) in &opts.env {
         chan.set_env(true, k.clone(), v.clone()).await.map_err(|e| Error::Lost(e.to_string()))?;
-        if !reply(&mut chan, open_timeout).await? {
+        if !reply(&mut chan, open_timeout, stop).await? {
             exit.env_refused.push(k.clone());
         }
     }
+    // Stopped before the command is sent: nothing starts on the server.
+    if stop.load(Ordering::Relaxed) {
+        let _ = tokio::time::timeout(Duration::from_secs(2), chan.close()).await;
+        return Err(Error::Stopped);
+    }
     chan.exec(true, command.as_bytes().to_vec()).await.map_err(|e| Error::Lost(e.to_string()))?;
-    if !reply(&mut chan, open_timeout).await? {
+    let accepted = match reply(&mut chan, open_timeout, stop).await {
+        Err(Error::Stopped) => {
+            let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                let _ = chan.signal(russh::Sig::TERM).await;
+                let _ = chan.close().await;
+            })
+            .await;
+            return Err(Error::Stopped);
+        }
+        r => r?,
+    };
+    if !accepted {
         return Err(Error::Other("サーバーがコマンドを受け付けませんでした".into()));
     }
     loop {
@@ -448,7 +469,7 @@ impl Session {
     }
 
     async fn open(t: &Target) -> Result<(SftpSession, client::Handle<Check>), Error> {
-        let ssh = login(t).await?;
+        let ssh = login(t, &AtomicBool::new(false)).await?;
         let subsystem = async {
             let channel = ssh.channel_open_session().await.map_err(|e| Error::Connect(e.to_string()))?;
             channel.request_subsystem(true, "sftp").await.map_err(|e| Error::Connect(format!("sftp を始められません: {e}")))?;
@@ -823,6 +844,30 @@ mod tests {
         assert!(Exit { status: Some(0), ..Default::default() }.success());
         assert!(!Exit { status: Some(1), ..Default::default() }.success());
         assert!(!Exit { signal: Some("TERM".into()), ..Default::default() }.success());
+    }
+
+    #[test]
+    fn a_stop_during_the_handshake_returns_at_once() {
+        use std::sync::atomic::AtomicBool;
+        // A server that accepts and then says nothing, so the handshake never gets going.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let t = Target {
+            port,
+            connect_timeout: Duration::from_secs(30),
+            ..Target::new("127.0.0.1", "u", Auth::Password("p".into()), "SHA256:x")
+        };
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let s2 = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            s2.store(true, Ordering::Relaxed);
+        });
+        let started = std::time::Instant::now();
+        let r = exec(&t, "true", &ExecOptions::default(), &stop, &mut |_, _| {});
+        assert!(matches!(r, Err(Error::Stopped)), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(l);
     }
 
     #[test]
