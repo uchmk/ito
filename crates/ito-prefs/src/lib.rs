@@ -943,6 +943,19 @@ pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options:
 /// while it has the keys, and a click picks the part under it. The value
 /// picked, when it changed.
 pub fn seg<T: PartialEq + Copy>(ui: &mut egui::Ui, l: Look, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
+    seg_named(ui, l, id, "", now, options).0
+}
+
+/// [`seg`] with a screen-reader `name` for the group ("Day type"; the reader hears the name and the picked option, e.g.
+/// "Day type: Off") and the group's `Response` besides the changed value. An empty `name` reads just the picked option.
+pub fn seg_named<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    l: Look,
+    id: &str,
+    name: &str,
+    now: T,
+    options: &[(T, &str)],
+) -> (Option<T>, egui::Response) {
     let c = l.c;
     let font = FontId::proportional(z(ui, 12.5));
     let pad = z(ui, 12.0);
@@ -1003,7 +1016,10 @@ pub fn seg<T: PartialEq + Copy>(ui: &mut egui::Ui, l: Look, id: &str, now: T, op
         x += w;
     }
     focus_ring(ui, &resp);
-    to.filter(|k| Some(*k) != at).map(|k| options[k].0)
+    let picked = to.and_then(|k| options.get(k)).map_or("", |o| o.1);
+    let said = if name.is_empty() { picked.to_owned() } else { format!("{name}: {picked}") };
+    ito_a11y::say(&resp, ito_a11y::Role::Button, &said);
+    (to.filter(|k| Some(*k) != at).map(|k| options[k].0), resp)
 }
 
 /// Where the pick goes for this frame's keys. Left and Right stop at the ends.
@@ -1964,5 +1980,22 @@ mod tests {
         frame(&ctx, &mut state, Vec::new(), Keys { find: true, ..Keys::default() });
         let (_, texts) = frame(&ctx, &mut state, Vec::new(), Keys::default());
         assert!(texts.iter().any(|(t, _)| t == "Mode"), "the theme page's own rows");
+    }
+}
+
+#[cfg(test)]
+mod seg_named_tests {
+    use super::*;
+
+    #[test]
+    fn a_named_group_returns_its_response() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let look = Look { c: ito_theme::colors(), q: "" };
+            let (changed, r) = seg_named(ui, look, "day", "Day type", 1u8, &[(0, "On"), (1, "Off")]);
+            assert_eq!(changed, None);
+            assert!(r.rect.width() > 0.0);
+        });
+        out.textures_delta.clear();
     }
 }

@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.174.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `seg_named(ui, look, id, name, now, options) -> (Option<T>, Response)`。区切りのボタンの組に読み上げの名前を付け（「名前: 選んだ項目」）、組の `Response` を返す。`seg` は名前なしの同じ動きで、今まで通り（koyomi の依頼）。`seg` も選んだ項目を読み上げるようになった。
+
+#### 使う側がやること
+
+- 既存の `seg` はそのまま動く。組に名前を付けたいところだけ `seg_named` に替える。
+
 ## [0.173.1] - 2026-11-01
 
 ### 変更
