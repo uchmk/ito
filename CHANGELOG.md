@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.179.1] - 2026-11-01
+
+### 修正
+
+- `ito-prefs`: `CodeBox` が、渡された幅より 0.3〜0.5 pt 広く描いていた（エディターの幅が描画の格子に切り上がる）。自動の大きさの親（`Panel::right` など）が毎フレーム広がった。エディターを 1 pt 内側に取る。幅を変えた検査 `the_parts_stay_inside_their_room` を足した（koyomi の報告）。
+
 ## [0.179.0] - 2026-11-01
 
 ### 追加

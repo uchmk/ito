@@ -308,7 +308,9 @@ impl<'a> CodeBox<'a> {
                             .code_editor()
                             .lock_focus(true)
                             .desired_rows(self.rows)
-                            .desired_width(ui.available_width())
+                            // A hair under the room: the editor rounds its width up to the layout grid, and a form that is a
+                            // hair too wide makes an auto-sized parent grow every frame.
+                            .desired_width((ui.available_width() - 1.0).max(40.0))
                             .show(ui);
                         // A number at the first row of each line of text.
                         let mut n = 0;
@@ -392,6 +394,42 @@ mod tests {
                 assert!(r.rect.height() > 0.0);
             });
         });
+    }
+
+    /// A form part never grows past the room it was given, even at a fractional scale: an auto-sized parent would grow every frame.
+    #[test]
+    fn the_parts_stay_inside_their_room() {
+        for ppp in [1.0, 1.26, 1.5, 1.75] {
+            for width in [363.125_f32, 300.3, 411.7] {
+                let ctx = egui::Context::default();
+                let mut over = Vec::new();
+                let mut text = String::from(
+                    "a
+b",
+                );
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 600.0))),
+                        viewports: std::iter::once((
+                            egui::ViewportId::ROOT,
+                            egui::ViewportInfo { native_pixels_per_point: Some(ppp), ..Default::default() },
+                        ))
+                        .collect(),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_max_width(width);
+                        let room = ui.max_rect().width();
+                        CodeBox::new("c").aside("x").rows(4).show(ui, &mut text);
+                        over.push(ui.min_rect().width() - room);
+                        InputField::new("i").rows(3).show(ui, &mut text.clone());
+                        over.push(ui.min_rect().width() - room);
+                    },
+                );
+                out.textures_delta.clear();
+                assert!(over.iter().all(|o| *o <= 1e-3), "ppp {ppp} width {width}: {over:?}");
+            }
+        }
     }
 
     #[test]
