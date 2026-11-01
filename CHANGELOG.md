@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.202.0] - 2026-11-01
+
+### 追加
+
+- `ito-mail::Attachment::cid`（fumi からの依頼）。`Some("logo@x")` を付けて `html` の `<img src="cid:logo@x">` から参照すると、`compose` はそのファイルを
+  添付ではなく `multipart/related` の中の `Content-ID`・`Content-Disposition: inline` の部品にする（`multipart/alternative` の text/html の側に入れる）。
+  `html` が無い・id が空のときは今まで通りの添付。`ito-markdown` は変更なし（`cid:` は通り、`to_html` の `image` 関数で解ける）。
+
+### 変更（使う側がやること）
+
+- `Attachment { … }` に `cid: None` を足す（インラインにしないもの）。
+
 ## [0.201.0] - 2026-11-01
 
 ### 追加

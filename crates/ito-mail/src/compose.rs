@@ -34,6 +34,9 @@ pub struct Attachment<'a> {
     /// The media type; `None` is guessed from the extension (`application/octet-stream` when unknown).
     pub mime: Option<&'a str>,
     pub bytes: &'a [u8],
+    /// A `Content-ID` (without the angle brackets) makes this an inline part of the HTML body (`<img src="cid:…">`)
+    /// instead of an attachment. Without `html`, or with an empty id, it is attached as usual.
+    pub cid: Option<&'a str>,
 }
 
 /// The message as bytes, ready to send. `now` is the `Date` (in UTC).
@@ -62,7 +65,8 @@ pub fn compose(m: &Outgoing, now: SystemTime) -> Vec<u8> {
 
     let mut out = Vec::new();
     let body_kind = if m.html.is_some() { Kind::Alternative } else { Kind::Text };
-    if m.files.is_empty() {
+    let inline = |f: &Attachment| m.html.is_some() && f.cid.map(clean).is_some_and(|c| !c.is_empty());
+    if m.files.iter().all(inline) {
         out.extend(part_headers_and_body(m, body_kind, &mut h).into_bytes());
         return finish(h, out);
     }
@@ -71,7 +75,7 @@ pub fn compose(m: &Outgoing, now: SystemTime) -> Vec<u8> {
     let mut tmp = String::new();
     let body = part_headers_and_body(m, body_kind, &mut tmp);
     let mut b = format!("--{outer}\r\n{tmp}\r\n{body}");
-    for f in m.files {
+    for f in m.files.iter().filter(|f| !inline(f)) {
         let mime = f.mime.map(clean).filter(|s| !s.is_empty()).unwrap_or_else(|| guess_mime(f.name).to_owned());
         let name = clean(f.name);
         b.push_str(&format!("--{outer}\r\n"));
@@ -106,11 +110,34 @@ fn part_headers_and_body(m: &Outgoing, kind: Kind, hdrs: &mut String) -> String 
             let b = boundary();
             hdrs.push_str(&format!("Content-Type: multipart/alternative; boundary=\"{b}\"\r\n"));
             let mut s = String::new();
-            for (ty, body) in [("text/plain", text), ("text/html", crlf(html))] {
+            s.push_str(&format!(
+                "--{b}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}",
+                wrap76(&encode64(text.as_bytes()))
+            ));
+            let html_part = |s: &mut String| {
                 s.push_str(&format!(
-                    "--{b}\r\nContent-Type: {ty}; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}",
-                    wrap76(&encode64(body.as_bytes()))
+                    "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}",
+                    wrap76(&encode64(crlf(html).as_bytes()))
                 ));
+            };
+            let pics: Vec<&Attachment> = m.files.iter().filter(|f| f.cid.map(clean).is_some_and(|c| !c.is_empty())).collect();
+            if pics.is_empty() {
+                s.push_str(&format!("--{b}\r\n"));
+                html_part(&mut s);
+            } else {
+                let r = boundary();
+                s.push_str(&format!("--{b}\r\nContent-Type: multipart/related; type=\"text/html\"; boundary=\"{r}\"\r\n\r\n--{r}\r\n"));
+                html_part(&mut s);
+                for f in pics {
+                    let mime = f.mime.map(clean).filter(|s| !s.is_empty()).unwrap_or_else(|| guess_mime(f.name).to_owned());
+                    let name = clean(f.name);
+                    s.push_str(&format!("--{r}\r\nContent-Type: {mime}; {}\r\n", name_params("name", &name)));
+                    s.push_str("Content-Transfer-Encoding: base64\r\n");
+                    s.push_str(&format!("Content-ID: <{}>\r\n", clean(f.cid.unwrap_or(""))));
+                    s.push_str(&format!("Content-Disposition: inline; {}\r\n\r\n", name_params("filename", &name)));
+                    s.push_str(&wrap76(&encode64(f.bytes)));
+                }
+                s.push_str(&format!("--{r}--\r\n"));
             }
             s.push_str(&format!("--{b}--\r\n"));
             s
@@ -424,8 +451,8 @@ mod tests {
             text: "see attached",
             html: Some("<p>see attached</p>"),
             files: &[
-                Attachment { name: "報告 書.pdf", mime: None, bytes: b"%PDF-1 \x00\xff data" },
-                Attachment { name: "plain.csv", mime: Some("text/csv"), bytes: b"a,b\n" },
+                Attachment { name: "報告 書.pdf", mime: None, bytes: b"%PDF-1 \x00\xff data", cid: None },
+                Attachment { name: "plain.csv", mime: Some("text/csv"), bytes: b"a,b\n", cid: None },
             ],
             ..Default::default()
         };
@@ -447,6 +474,29 @@ mod tests {
         assert_eq!(unb64(data), b"%PDF-1 \x00\xff data");
         assert!(parts[3].contains("Content-Type: text/csv; name=\"plain.csv\""));
         assert!(parts[4].starts_with("--"));
+    }
+
+    #[test]
+    fn inline_pictures_go_beside_the_html() {
+        let m = Outgoing {
+            from: "a@example.com",
+            to: "b@example.com",
+            text: "hi",
+            html: Some("<img src=\"cid:logo@x\">"),
+            files: &[Attachment { name: "logo.png", mime: None, bytes: b"PNG1", cid: Some("logo@x") }],
+            ..Default::default()
+        };
+        let (hs, body) = parse(&compose(&m, when()));
+        assert!(get(&hs, "Content-Type").starts_with("multipart/alternative"));
+        assert!(body.contains("multipart/related; type=\"text/html\""), "{body}");
+        assert!(body.contains("Content-ID: <logo@x>"));
+        assert!(body.contains("Content-Disposition: inline; "));
+        assert!(!body.contains("multipart/mixed"));
+        // Without html the id is ignored and the file is a plain attachment.
+        let m = Outgoing { html: None, ..m };
+        let (hs, body) = parse(&compose(&m, when()));
+        assert!(get(&hs, "Content-Type").starts_with("multipart/mixed"));
+        assert!(body.contains("Content-Disposition: attachment; ") && !body.contains("Content-ID"));
     }
 
     #[test]
