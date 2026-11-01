@@ -1,6 +1,9 @@
 //! A mock WinRM endpoint (plain and TLS) that answers the cmd-shell messages, to run `exec` against.
 
-use ito_winrm::{exec, fingerprint, peek_fingerprint, Error, ExecOptions, Stream, Target};
+use base64::Engine;
+use hmac::{Hmac, KeyInit, Mac};
+use ito_winrm::{exec, fingerprint, peek_fingerprint, Auth, Error, ExecOptions, Stream, Target};
+use md4::{Digest, Md4};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +22,8 @@ enum Mode {
     Hang,
     /// Refuses the credentials.
     Deny,
+    /// Like `Normal`, but a connection must sign in with the NTLM handshake first (user "me", password "pw").
+    Ntlm,
 }
 
 #[derive(Default)]
@@ -27,8 +32,57 @@ struct Seen {
     auth: Vec<String>,
 }
 
+const SERVER_CHALLENGE: [u8; 8] = [8, 7, 6, 5, 4, 3, 2, 1];
+
+fn utf16(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+fn hmac_md5(key: &[u8], parts: &[&[u8]]) -> Vec<u8> {
+    let mut m = <Hmac<md5::Md5> as KeyInit>::new_from_slice(key).unwrap();
+    for p in parts {
+        m.update(p);
+    }
+    m.finalize().into_bytes().to_vec()
+}
+
+/// NTLM message 2 with a timestamp in its target info.
+fn ntlm_challenge() -> Vec<u8> {
+    let mut info = vec![7, 0, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+    info.extend([0; 4]);
+    let mut m = b"NTLMSSP\0".to_vec();
+    m.extend(2u32.to_le_bytes());
+    m.extend([0; 8]);
+    m.extend((0x1u32 | 0x200 | 0x8_0000 | 0x80_0000).to_le_bytes());
+    m.extend(SERVER_CHALLENGE);
+    m.extend([0; 8]);
+    m.extend((info.len() as u16).to_le_bytes());
+    m.extend((info.len() as u16).to_le_bytes());
+    m.extend(48u32.to_le_bytes());
+    m.extend(info);
+    m
+}
+
+/// Does message 3 prove user "me" with password "pw"?
+fn ntlm_proves(m: &[u8]) -> bool {
+    let u16_at = |at: usize| u16::from_le_bytes([m[at], m[at + 1]]) as usize;
+    let u32_at = |at: usize| u32::from_le_bytes(m[at..at + 4].try_into().unwrap()) as usize;
+    if m.len() < 64 || &m[..8] != b"NTLMSSP\0" || u32_at(8) != 3 {
+        return false;
+    }
+    let field = |at: usize| &m[u32_at(at + 4)..u32_at(at + 4) + u16_at(at)];
+    let (nt, user) = (field(20), field(36));
+    if user != utf16("me").as_slice() || nt.len() < 16 {
+        return false;
+    }
+    let md4: [u8; 16] = Md4::digest(utf16("pw")).into();
+    let key = hmac_md5(&md4, &[&utf16("ME"), &utf16("")]);
+    hmac_md5(&key, &[&SERVER_CHALLENGE, &nt[16..]]) == nt[..16]
+}
+
 fn serve<S: Read + Write>(mut s: S, mode: Mode, seen: Arc<Mutex<Seen>>) {
     let mut receives = 0;
+    let mut signed = false;
     loop {
         let mut buf = vec![];
         let mut b = [0u8; 1];
@@ -51,6 +105,26 @@ fn serve<S: Read + Write>(mut s: S, mode: Mode, seen: Arc<Mutex<Seen>>) {
         let auth = head.lines().find_map(|l| l.strip_prefix("Authorization: ")).unwrap_or("").to_owned();
         let action =
             body.split("<a:Action").nth(1).and_then(|r| r.split('>').nth(1)).and_then(|r| r.split('<').next()).unwrap_or("").to_owned();
+        if mode == Mode::Ntlm && !signed {
+            let token = auth.strip_prefix("Negotiate ").and_then(|t| base64::engine::general_purpose::STANDARD.decode(t).ok());
+            let reply = match token {
+                Some(t) if t.get(8) == Some(&1) => {
+                    let c = base64::engine::general_purpose::STANDARD.encode(ntlm_challenge());
+                    Some(format!("HTTP/1.1 401 X\r\nWWW-Authenticate: Negotiate {c}\r\nContent-Length: 0\r\n\r\n"))
+                }
+                Some(t) if ntlm_proves(&t) => {
+                    signed = true;
+                    None
+                }
+                _ => Some("HTTP/1.1 401 X\r\nWWW-Authenticate: Negotiate\r\nContent-Length: 0\r\n\r\n".to_owned()),
+            };
+            if let Some(r) = reply {
+                if s.write_all(r.as_bytes()).and_then(|()| s.flush()).is_err() {
+                    return;
+                }
+                continue;
+            }
+        }
         {
             let mut g = seen.lock().unwrap();
             g.auth.push(auth);
@@ -161,6 +235,29 @@ fn a_command_streams_its_output_and_ends_with_its_code() {
     assert_eq!(g.actions, ["Create", "Command", "Receive", "Receive", "Receive", "Delete"]);
     // Basic "me:pw"
     assert!(g.auth.iter().all(|a| a == "Basic bWU6cHc="));
+}
+
+#[test]
+fn ntlm_signs_in_once_per_connection_and_streams_like_basic() {
+    let (port, seen) = plain(Mode::Ntlm);
+    let t = local(port, false, None).with_auth(Auth::Ntlm);
+    let (r, out, err) = run(&t, &ExecOptions::default(), &AtomicBool::new(false));
+    assert_eq!(r.unwrap().status, Some(7));
+    assert_eq!((out.as_str(), err.as_str()), ("hello", "oops"));
+    let g = seen.lock().unwrap();
+    assert_eq!(g.actions.iter().filter(|a| a.as_str() == "Create").count(), 1);
+    // Only the first request of a connection carries message 3; the rest of it has no header.
+    assert!(g.auth.iter().all(|a| a.is_empty() || a.starts_with("Negotiate ")));
+    assert!(g.auth.iter().filter(|a| !a.is_empty()).count() < g.auth.len());
+}
+
+#[test]
+fn ntlm_with_a_wrong_password_is_auth_refused() {
+    let (port, _) = plain(Mode::Ntlm);
+    let mut t = local(port, false, None).with_auth(Auth::Ntlm);
+    t.password = "nope".into();
+    let (r, ..) = run(&t, &ExecOptions::default(), &AtomicBool::new(false));
+    assert_eq!(r.unwrap_err(), Error::AuthRefused);
 }
 
 #[test]

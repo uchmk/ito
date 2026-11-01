@@ -1,7 +1,7 @@
 //! A small HTTP/1.1 client for one WinRM endpoint: a kept-alive connection (plain or TLS with a pinned certificate),
 //! `POST` with a SOAP body, the reply read by `Content-Length` or chunked.
 
-use crate::{fingerprint, Error};
+use crate::{fingerprint, ntlm, Error};
 use base64::Engine;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::WebPkiSupportedAlgorithms;
@@ -62,19 +62,29 @@ pub(crate) struct Endpoint {
     /// The certificate's SHA-256, when pinned. `None` checks the certificate against the public roots.
     pub pin: Option<[u8; 32]>,
     pub connect_timeout: Duration,
-    /// `Authorization` header value.
-    pub authorization: String,
+    pub credential: Credential,
+}
+
+/// How requests sign in.
+pub(crate) enum Credential {
+    /// The `Authorization` header value, sent with every request.
+    Basic(String),
+    /// NTLMv2 once per connection (`Negotiate` / `NTLM` handshake), then nothing.
+    Ntlm { user: String, password: String },
 }
 
 pub(crate) struct Http<'a> {
     ep: &'a Endpoint,
     stop: &'a AtomicBool,
     conn: Option<Conn>,
+    /// The connection has signed in (NTLM): its requests carry no `Authorization`.
+    signed: bool,
 }
 
-/// A reply: status and body text.
+/// A reply: status, the `WWW-Authenticate` lines and body text.
 pub(crate) struct Reply {
     pub status: u16,
+    pub www_authenticate: Vec<String>,
     pub body: String,
 }
 
@@ -84,7 +94,7 @@ pub(crate) fn basic(user: &str, password: &str) -> String {
 
 impl<'a> Http<'a> {
     pub fn new(ep: &'a Endpoint, stop: &'a AtomicBool) -> Self {
-        Http { ep, stop, conn: None }
+        Http { ep, stop, conn: None, signed: false }
     }
 
     /// Send `body` and read the reply, waiting up to `wait` for it. A kept connection that the server closed is
@@ -94,8 +104,9 @@ impl<'a> Http<'a> {
             let reused = self.conn.is_some();
             if self.conn.is_none() {
                 self.conn = Some(connect(self.ep, self.stop)?);
+                self.signed = false;
             }
-            match self.round(body, wait) {
+            match self.sign_in_and_send(body, wait) {
                 Ok(r) => return Ok(r),
                 Err(Error::Lost(_)) if reused && attempt == 0 => self.conn = None,
                 Err(e) => {
@@ -107,22 +118,60 @@ impl<'a> Http<'a> {
         Err(Error::Lost("the connection kept closing".to_owned()))
     }
 
-    fn round(&mut self, body: &str, wait: Duration) -> Result<Reply, Error> {
+    /// Basic: every request carries the header. NTLM: the first request of a connection goes through the handshake.
+    fn sign_in_and_send(&mut self, body: &str, wait: Duration) -> Result<Reply, Error> {
+        let (user, password) = match &self.ep.credential {
+            Credential::Basic(h) => return self.round(Some(h), body, wait),
+            Credential::Ntlm { user, password } => (user, password),
+        };
+        if self.signed {
+            return self.round(None, body, wait);
+        }
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let first = self.round(Some(&format!("Negotiate {}", b64.encode(ntlm::negotiate()))), "", wait)?;
+        let (scheme, token) = first
+            .www_authenticate
+            .iter()
+            .find_map(|h| {
+                let (s, t) = h.split_once(' ')?;
+                (s.eq_ignore_ascii_case("negotiate") || s.eq_ignore_ascii_case("ntlm")).then(|| (s.to_owned(), t.trim().to_owned()))
+            })
+            .ok_or_else(|| Error::Other("the server does not offer NTLM or Negotiate".to_owned()))?;
+        let challenge = b64
+            .decode(token)
+            .ok()
+            .and_then(|m| ntlm::parse_challenge(&m))
+            .ok_or_else(|| Error::Other("the server's NTLM challenge could not be read".to_owned()))?;
+        let mut client = [0u8; 8];
+        getrandom::fill(&mut client).map_err(|e| Error::Other(format!("no random numbers: {e}")))?;
+        let token = b64.encode(ntlm::authenticate(&challenge, user, password, client, filetime()));
+        let reply = self.round(Some(&format!("{scheme} {token}")), body, wait)?;
+        self.signed = reply.status != 401;
+        Ok(reply)
+    }
+
+    fn round(&mut self, authorization: Option<&str>, body: &str, wait: Duration) -> Result<Reply, Error> {
         let ep = self.ep;
         let conn = self.conn.as_mut().ok_or_else(|| Error::Lost("no connection".to_owned()))?;
+        let auth = authorization.map(|a| format!("Authorization: {a}\r\n")).unwrap_or_default();
         let head = format!(
-            "POST {} HTTP/1.1\r\nHost: {}:{}\r\nAuthorization: {}\r\nContent-Type: application/soap+xml;charset=UTF-8\r\n\
+            "POST {} HTTP/1.1\r\nHost: {}:{}\r\n{auth}Content-Type: application/soap+xml;charset=UTF-8\r\n\
 Content-Length: {}\r\nConnection: Keep-Alive\r\n\r\n",
             ep.path,
             ep.host,
             ep.port,
-            ep.authorization,
             body.len()
         );
         conn.tcp().set_write_timeout(Some(ep.connect_timeout)).map_err(lost)?;
         conn.write_all(head.as_bytes()).and_then(|()| conn.write_all(body.as_bytes())).and_then(|()| conn.flush()).map_err(lost)?;
         read_reply(conn, wait, self.stop)
     }
+}
+
+/// Now as a Windows FILETIME (100 ns ticks since 1601-01-01).
+fn filetime() -> u64 {
+    let since_unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    (since_unix.as_nanos() / 100) as u64 + 116_444_736_000_000_000
 }
 
 fn lost(e: io::Error) -> Error {
@@ -362,6 +411,13 @@ fn read_reply(conn: &mut Conn, wait: Duration, stop: &AtomicBool) -> Result<Repl
         .and_then(|l| l.split(' ').nth(1))
         .and_then(|s| s.parse::<u16>().ok())
         .ok_or_else(|| Error::Other("not an HTTP reply".to_owned()))?;
+    let www_authenticate: Vec<String> = lines
+        .clone()
+        .filter_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim().eq_ignore_ascii_case("www-authenticate").then(|| v.trim().to_owned())
+        })
+        .collect();
     let header = |name: &str| {
         lines.clone().find_map(|l| {
             let (k, v) = l.split_once(':')?;
@@ -395,5 +451,5 @@ fn read_reply(conn: &mut Conn, wait: Duration, stop: &AtomicBool) -> Result<Repl
         let n = header("content-length").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
         r.take(n)?
     };
-    Ok(Reply { status, body: String::from_utf8_lossy(&body).into_owned() })
+    Ok(Reply { status, www_authenticate, body: String::from_utf8_lossy(&body).into_owned() })
 }

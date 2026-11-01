@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.199.0] - 2026-11-01
+
+### 追加
+
+- `ito-winrm` に NTLMv2 のサインイン。`Auth { Basic, Ntlm }` と `Target::with_auth(Auth)`（既定は `Basic` で今までどおり）。
+  `Authorization: Negotiate <message 1>` を空の本文で送り、401 の `WWW-Authenticate` の message 2 から message 3 を作って本物の要求を送る（サーバーの書き方に合わせ `Negotiate`／`NTLM`）。
+  つながっている間は 2 つ目以降の要求にヘッダーを付けない（つなぎ直したらやり直す）。署名・封印・MIC はなし（HTTPS 前提）。純 Rust（`md4`・`md-5`・`hmac`）。
+  MS-NLMP のテスト ベクター（NTOWFv2・NTProofStr）と、モックの握手で確かめた。Kerberos と `Auth::Negotiate` は未実装（ドメインの環境ができてから。uchmk/ito#134）。
+
+### 使う側がやること
+
+- NTLM で入るなら `Target::https(..).with_auth(Auth::Ntlm)`。ユーザーはドメインなら `DOMAIN
+ame`、ローカル アカウントなら `name`（`name@realm` は ドメイン無しの名前のまま）。HTTPS で使う。
+- `Basic` のままなら何も変わらない。`Target` の欄が 1 つ増えたので、`Target { .. }` を直接組み立てているなら `auth: Auth::Basic` を足す。
+
 ## [0.198.0] - 2026-11-01
 
 ### 追加

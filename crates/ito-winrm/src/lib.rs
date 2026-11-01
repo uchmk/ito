@@ -3,10 +3,11 @@
 //! Same shape as `ito_sftp::exec`: [`exec`] blocks (run it on a worker thread), calls `output` for each piece of
 //! stdout / stderr, ends with the exit code, and stops when the `stop` flag is set or the timeout runs out (it then
 //! asks the remote command to end and deletes the shell). Pure Rust (rustls + ring), so it runs from Linux and macOS
-//! as well. Basic authentication, over HTTPS with a pinned certificate fingerprint ([`peek_fingerprint`] shows it the
+//! as well. Basic or NTLMv2 authentication ([`Auth`]), over HTTPS with a pinned certificate fingerprint ([`peek_fingerprint`] shows it the
 //! first time) or over plain HTTP when the caller says so.
 
 mod http;
+mod ntlm;
 mod soap;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,6 +55,18 @@ pub enum Stream {
 /// Called with each piece of output, in order.
 pub type Output<'a> = &'a mut dyn FnMut(Stream, &[u8]);
 
+/// How to sign in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Auth {
+    /// User and password in every request. The server must allow Basic (off by default on Windows), and only
+    /// local accounts work. Use it over HTTPS.
+    #[default]
+    Basic,
+    /// NTLMv2 (the `Negotiate` / `NTLM` handshake once per connection), for local accounts (`name`) and domain
+    /// accounts (`DOMAIN\name`). No message sealing, so use it over HTTPS: on plain HTTP a default WinRM refuses it.
+    Ntlm,
+}
+
 /// Where and as whom.
 #[derive(Debug, Clone)]
 pub struct Target {
@@ -63,6 +76,7 @@ pub struct Target {
     pub https: bool,
     pub user: String,
     pub password: String,
+    pub auth: Auth,
     /// The certificate's SHA-256 (HTTPS). `None` checks it against the public roots, which a PC's self-signed
     /// certificate will not pass.
     pub pin: Option<[u8; 32]>,
@@ -81,6 +95,7 @@ impl Target {
             https: true,
             user: user.to_owned(),
             password: password.to_owned(),
+            auth: Auth::Basic,
             pin,
             path: "/wsman".to_owned(),
             connect_timeout: Duration::from_secs(15),
@@ -92,6 +107,12 @@ impl Target {
         Target { port: 5985, https: false, pin: None, ..Target::https(host, user, password, None) }
     }
 
+    /// The same target signing in as `auth`.
+    pub fn with_auth(mut self, auth: Auth) -> Target {
+        self.auth = auth;
+        self
+    }
+
     fn endpoint(&self) -> http::Endpoint {
         http::Endpoint {
             host: self.host.clone(),
@@ -100,7 +121,10 @@ impl Target {
             path: self.path.clone(),
             pin: self.pin,
             connect_timeout: self.connect_timeout,
-            authorization: http::basic(&self.user, &self.password),
+            credential: match self.auth {
+                Auth::Basic => http::Credential::Basic(http::basic(&self.user, &self.password)),
+                Auth::Ntlm => http::Credential::Ntlm { user: self.user.clone(), password: self.password.clone() },
+            },
         }
     }
 
