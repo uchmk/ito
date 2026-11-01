@@ -31,9 +31,11 @@ pub mod single;
 pub mod startup;
 pub mod text;
 pub mod update;
+pub mod web;
 pub mod window;
 
 pub use filename::safe_file_name;
+pub use web::{mark_from_web, runs_code};
 
 pub use os_theme::OsLight;
 

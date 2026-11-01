@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.185.0] - 2026-11-01
+
+### 追加
+
+- `ito-common`: ネットから来たファイルの扱い（`web`、`ito_common::` にも出ている）。
+  - `mark_from_web(path, from: Option<&str>) -> io::Result<()>`: ブラウザーと同じ「ネットから来た」印を付ける。Windows は `Zone.Identifier` の ADS に `ZoneId=3`（`from` があれば `HostUrl=`。制御文字は落とすので行は足せない）、macOS は `com.apple.quarantine`、ほかは何もしない。FAT などの印を持てない所は `Ok(())`。ファイルが無ければ `NotFound`（空のファイルは作らない）。
+  - `runs_code(name) -> bool`: 最後の拡張子（大文字小文字を区別しない。末尾の点と空白は無視）が、プログラム・スクリプト・ショートカット・ディスクイメージ・インストーラーなど動く種類か（exe bat cmd ps1 js vbs lnk url msi iso dmg sh jar など。マクロ付きの Office も）。
+
+### 使う側がやること
+
+- fumi: 添付を `ito_openin::open_default` で開く前に `runs_code(name)` を見て、`true` なら直接は開かず「保存してから自分で開いてください」と出す。保存したファイルにも、開くために temp に書いたファイルにも `mark_from_web(&path, Some(url))` を付ける。
+
 ## [0.184.0] - 2026-11-01
 
 ### 追加
