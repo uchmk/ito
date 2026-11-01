@@ -12,7 +12,11 @@ use windows::Win32::Security::Authentication::Identity::{
 };
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW};
 use windows::Win32::Security::{LookupAccountNameW, PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE};
-use windows::Win32::System::Console::{GetConsoleMode, GetStdHandle, SetConsoleMode, CONSOLE_MODE, STD_INPUT_HANDLE};
+use windows::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_CHAR};
+use windows::Win32::System::Console::{
+    AttachConsole, GetConsoleMode, GetStdHandle, ReadConsoleW, SetConsoleMode, WriteConsoleW, ATTACH_PARENT_PROCESS, CONSOLE_MODE,
+    STD_INPUT_HANDLE,
+};
 use windows::Win32::System::Services::*;
 
 const DELETE: u32 = 0x0001_0000;
@@ -376,27 +380,70 @@ pub fn state(name: &str) -> Result<Option<Status>, Error> {
 }
 
 pub fn read_password(prompt: &str) -> Result<String, Error> {
-    eprint!("{prompt}");
-    // SAFETY: the standard input handle is valid for the life of the process (or an error).
-    let h: HANDLE = unsafe { GetStdHandle(STD_INPUT_HANDLE) }.map_err(map)?;
+    // SAFETY: the standard input handle is valid for the life of the process, or null / an error.
+    let std_in = unsafe { GetStdHandle(STD_INPUT_HANDLE) }.ok().filter(|h| !h.is_invalid() && !h.0.is_null());
+    // A pipe or a file is read as is. A character device (or no handle at all) is the console, which a windowed exe
+    // has to attach to first.
+    // SAFETY: `h` is a handle from `GetStdHandle`.
+    let piped = std_in.is_some_and(|h| unsafe { GetFileType(h) } != FILE_TYPE_CHAR);
+    if piped {
+        eprint!("{prompt}");
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map_err(|e| Error::Failed(e.raw_os_error().unwrap_or(0) as u32))?;
+        return Ok(line.trim_end_matches(['\r', '\n']).to_string());
+    }
+    ask_on_console(prompt)
+}
+
+/// Write `text` to the console output `out`.
+fn console_write(out: HANDLE, text: &str) {
+    let w: Vec<u16> = text.encode_utf16().collect();
+    let mut done = 0u32;
+    // SAFETY: `out` is a console output handle and `w` outlives the call.
+    unsafe {
+        let _ = WriteConsoleW(out, &w, Some(&mut done), None);
+    }
+}
+
+fn ask_on_console(prompt: &str) -> Result<String, Error> {
+    use std::os::windows::io::AsRawHandle;
+    // Already attached is `ERROR_ACCESS_DENIED`; no parent console is an error too. Both are fine to ignore: opening
+    // `CONIN$` below says whether there is a console.
+    // SAFETY: no arguments to get wrong.
+    let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    let open = |name: &str| std::fs::OpenOptions::new().read(true).write(true).open(name);
+    let (Ok(cin), Ok(cout)) = (open("CONIN$"), open("CONOUT$")) else { return Err(Error::NoConsole) };
+    let (hin, hout) = (HANDLE(cin.as_raw_handle()), HANDLE(cout.as_raw_handle()));
+    console_write(hout, prompt);
     let mut mode = CONSOLE_MODE(0);
-    // SAFETY: `mode` receives the mode; this fails when stdin is a pipe, which is read as is.
-    let console = unsafe { GetConsoleMode(h, &mut mode) }.is_ok();
-    if console {
-        // SAFETY: the handle is a console input handle.
-        unsafe { SetConsoleMode(h, CONSOLE_MODE(mode.0 & !ENABLE_ECHO_INPUT)) }.map_err(map)?;
-    }
-    let mut line = String::new();
-    let read = std::io::stdin().read_line(&mut line);
-    if console {
-        // SAFETY: restore the mode read above.
-        unsafe {
-            let _ = SetConsoleMode(h, mode);
+    // SAFETY: `mode` receives the mode of the console input handle.
+    unsafe { GetConsoleMode(hin, &mut mode) }.map_err(|_| Error::NoConsole)?;
+    // SAFETY: the handle is a console input handle.
+    unsafe { SetConsoleMode(hin, CONSOLE_MODE(mode.0 & !ENABLE_ECHO_INPUT)) }.map_err(map)?;
+    let mut text: Vec<u16> = Vec::new();
+    let mut failed = None;
+    loop {
+        let mut buf = [0u16; 256];
+        let mut n = 0u32;
+        // SAFETY: `buf` and `n` outlive the call.
+        if let Err(e) = unsafe { ReadConsoleW(hin, buf.as_mut_ptr().cast(), buf.len() as u32, &mut n, None) } {
+            failed = Some(map(e));
+            break;
         }
-        eprintln!();
+        text.extend_from_slice(&buf[..n as usize]);
+        if n == 0 || text.last() == Some(&(b'\n' as u16)) {
+            break;
+        }
     }
-    read.map_err(|e| Error::Failed(e.raw_os_error().unwrap_or(0) as u32))?;
-    Ok(line.trim_end_matches(['\r', '\n']).to_string())
+    // SAFETY: restore the mode read above.
+    unsafe {
+        let _ = SetConsoleMode(hin, mode);
+    }
+    console_write(hout, "\r\n");
+    if let Some(e) = failed {
+        return Err(e);
+    }
+    Ok(String::from_utf16_lossy(&text).trim_end_matches(['\r', '\n']).to_string())
 }
 
 #[cfg(test)]

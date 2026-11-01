@@ -46,6 +46,8 @@ pub enum Error {
     LogonFailed,
     /// The service did not reach the state in time.
     Timeout,
+    /// There is no console to ask on and no piped input (a windowed exe started without a terminal).
+    NoConsole,
     /// The system refused (the OS error number).
     Failed(u32),
 }
@@ -62,6 +64,7 @@ impl fmt::Display for Error {
             Error::BadAccount => f.write_str("the account does not exist or has no password"),
             Error::LogonFailed => f.write_str("the account or password is wrong (the service could not log on)"),
             Error::Timeout => f.write_str("the service did not change state in time"),
+            Error::NoConsole => f.write_str("there is no console to type the password in (pipe it in, or run this from a terminal)"),
             Error::Failed(n) => write!(f, "the system refused (error {n})"),
         }
     }
@@ -228,7 +231,9 @@ pub fn state(name: &str) -> Result<Option<Status>, Error> {
     sys::state(name)
 }
 
-/// Read a password from the console without echoing it (piped input is read as is). The prompt goes to stderr.
+/// Read a password from the console without echoing it (piped input is read as is). The prompt goes to stderr, or to the
+/// console. A windowed exe (no console of its own) attaches to its parent's console first, as `ito-console` does for output;
+/// with neither a console nor piped input it returns [`Error::NoConsole`].
 pub fn read_password(prompt: &str) -> Result<String, Error> {
     sys::read_password(prompt)
 }

@@ -20,6 +20,19 @@
 
 - `attachment(ui, look, name, size_text)` の呼び出しに 5 つ目の引数 `download_words` を足す。
 
+## [0.168.1] - 2026-11-01
+
+### 修正
+
+- `ito-service`: `read_password` が、窓のアプリ（`windows_subsystem = "windows"`）の `.exe` でも使える（uchmk/ito#116、koyomi の依頼）。
+  標準入力がパイプ・ファイルならこれまで通りそのまま読む。そうでなければ親のコンソールにつなぎ（`ito-console` と同じ。つながっていても無害）、`CONIN$` / `CONOUT$` を開いて、
+  文言を `WriteConsoleW` で出し、エコーを切って `ReadConsoleW` で 1 行読む。
+- `ito-service`: コンソールもパイプも無いときは `Error::NoConsole`（`Failed(0)` ではなく）を返す。
+
+### 使う側がやること
+
+- `ito_service::Error` を `match` している所は `NoConsole` の腕を足す（「パスワードをパイプで渡すか、端末から実行してください」と案内する）。
+
 ## [0.167.1] - 2026-11-01
 
 ### 追加
