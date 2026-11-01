@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.171.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 日付の欄（koyomi の #118）。`YYYY-MM-DD` の文字欄（打つ・貼るはそのまま）の右にカレンダーの印があり、押すか Alt+↓ で下に月のグリッドが開く。テーマ・読み上げ（`ito-a11y`）・`--keys` の `<Click:2026-11-05>` に従う。
+  - `DateField::new(id, DateWords::ja()).empty_ok().range(min, max).monday_first(bool).today(d).width(w).day_look(&|d| Some(DayLook { ink, tip })).show(ui, look, &mut String) -> DateResponse { response, changed, valid, open }`。`.multi()` でコンマ区切りの一覧（日を押すと入り切り、グリッドは開いたまま。書き出しは `2026-11-05, 2026-11-20`）。
+  - `RangeField::new(id, words).show(ui, look, &mut from, &mut to)`: 開始と終了の 2 欄に 1 つのグリッド。1 回目の押しが開始、2 回目が終了（前後は入れ替わる）。終了を探している間は間の日が薄く光る。
+  - `month_picker(ui, look, id, &words, &anchor_response, &mut (year, month)) -> bool`: 任意の `Response` の下に年（◀ ▶）と 12 の月を出す。月が選ばれたら true。
+  - グリッドのキー: ←→ で 1 日、↑↓ で 1 週、PageUp/PageDown で 1 か月、Home で今日、Enter で選ぶ、Esc で閉じる。見出しを押すと年・月の選びに替わり、「今日」で戻る。今日は輪、選んだ日は塗り、`min..=max` の外は押せない。
+  - 言葉は `DateWords`（`en()`・`ja()`・`for_lang(code)`。月・曜日（日曜始まり）・見出し `{y}`/`{m}`/`{month}` ほか）で渡す。文字は直書きしない。
+  - `parse_date`（`2026-11-05`・`2026/1/5`）・`format_date`・`shift_months`・`month_grid` も出す。日付の型は chrono の `NaiveDate`（`ito_prefs::NaiveDate` で再エクスポート）。`ito-prefs` に chrono（`clock`）の依存を足した。
+
+### 使う側がやること
+
+- 手書きの `YYYY-MM-DD` 欄を `DateField`／`RangeField` に置き換える。`DateWords` は `ito_i18n` の言語に合わせて `DateWords::for_lang(&lang)` で作る。
+
 ## [0.170.0] - 2026-11-01
 
 ### 追加

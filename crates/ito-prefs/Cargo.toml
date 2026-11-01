@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 egui = { version = "0.36", default-features = false }
 ito-a11y = { path = "../ito-a11y", features = ["egui"] }
 ito-common = { path = "../ito-common" }
