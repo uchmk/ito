@@ -1,0 +1,10 @@
+[package]
+name = "ito-markdown"
+description = "Markdown for a writing box: wrap a selection (bold / italic / underline / strike / link / lists), read blocks and inline marks, write HTML and plain text. No UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.196.0] - 2026-11-01
+
+### 追加
+
+- 新しいクレート `ito-markdown`（#133 の 1 つ目。依存なし・UI なし）: 書く欄の Markdown。minato の `composer.rs` から切り出した。`wrap`・`link`・`Tool`（`Tool::ALL` は 13 個。どれを出すかはアプリが選ぶ）・`tool(text, a, b, Tool)`（選択範囲に印を付ける。下線は `<u>…</u>`、打ち消しは `~~`）、読む側の `blocks`（段落の改行は空白に畳む）・`blocks_hard`（段落の中の改行を残す）・`Block`・`spans`・`Span { bold, italic, strike, underline, code, image, link }`・`html_inline`。
+- 書き出し: `to_html(text, &|src| …)`（メール本文向け。見出し・箇条書き・タスク `☐`/`☑`・引用・コード・表・罫線・段落、段落の中の改行は `<br>`、本文は全部エスケープ、`javascript:`・`vbscript:`・`data:` のリンクは `#`、画像の `src` は呼ぶ側の関数で `cid:` などに替える）と `to_plain(text)`（印を落とし、`- `・`1.`・`> ` は残し、リンクは `text (url)`）。
+- まだ無いもの: egui の書く欄とプレビューの描画（#133 の 2 つ目。minato の `md_ui.rs`・`compose_ui.rs` から切り出す）。
+
+### 使う側がやること
+
+- fumi: `ito-markdown` を `rev` で読み、本文の送信に `to_html`（`image` は添付の `cid:`）と `to_plain` を使う。ツールバーの下線・打ち消しは `Tool::Underline`・`Tool::Strike`。minato は `composer.rs` の同じ関数を置き換えられる（egui の部品が入るまで待ってもよい）。
+
 ## [0.195.0] - 2026-11-01
 
 ### 追加
