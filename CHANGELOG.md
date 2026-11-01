@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.197.0] - 2026-11-01
+
+### 追加
+
+- `ito-markdown` に機能 `egui`（#133 の 2 つ目。`egui` と `ito-theme` を足すだけ。機能なしは今までどおり依存なし）。
+  - `layout(&Painter, text, width, size) -> Md`・`Md::paint(&Painter, x, y)`・`Md::height`: プレビューの描画。見出し（大きい 2 つは下線）・箇条書き・番号・タスク・引用・コード・表・罫線・`<summary>`・段落、印は太字・斜体・下線・打ち消し・コード・リンク。色は `ito_theme::colors()`（強調は `blue`、地は `side`）。
+  - `Writing`（`new(id)`・`text`・`preview`・`apply(Tool)`・`show(ui, field_rect, empty, size) -> Out`）: 渡された矩形に書く欄（複数行・バーなし・キャレットを追う）かプレビュー（ホイールで上から送る）を描く。Ctrl+B / I / K / U が選択範囲に印を付ける（ツールバーのボタンは `apply` で同じ道を通る）、Ctrl+P がプレビューの切り替え、Ctrl+Enter が `Out::Send { close: false }`、Ctrl+Shift+Enter が `Send { close: true }`、Esc はプレビューを閉じ、閉じていれば `Out::Leave`。ショートカットは欄に届く前に取る。
+  - 枠・見出し・ツールバー・ボタン・ピッカー・キー表は載せない（アプリの側）。Alt+文字のキー（minato のピッカー）もアプリの側で、`show` の前に取る。
+
+### 使う側がやること
+
+- minato: `md_ui.rs` を `ito_markdown::{layout, Md}` に置き換える（検索語の色付け `layout_lit` と選択のコピー `select::note` はまだ無い。要るなら `crate-request`）。`compose_ui.rs` の欄の部分を `Writing::show` に替える。`Compose.text`・`preview`・`tool` は `Writing` が持つ。
+- fumi: `Writing` を欄に使い、メール本文は `to_html` で作る。
+
 ## [0.196.0] - 2026-11-01
 
 ### 追加

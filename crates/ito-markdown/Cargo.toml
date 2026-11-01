@@ -7,4 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# The egui preview painter and the writing box.
+egui = ["dep:egui", "dep:ito-theme"]
+
 [dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }

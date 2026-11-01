@@ -1,7 +1,16 @@
 //! The pure parts of a Markdown writing box: wrapping a selection for Ctrl+B / I / U and the toolbar, a small Markdown
 //! reader ([`blocks`], [`spans`]) and its two outputs, HTML ([`to_html`]) and plain text ([`to_plain`]).
 //! Underline has no Markdown, so it is the tag `<u>…</u>`, kept as typed and read back as [`Span::underline`].
-//! Cut out of minato's composer.
+//! Cut out of minato's composer. With the feature `egui`: [`Md`] (the preview painter) and [`Writing`] (the box).
+
+#[cfg(feature = "egui")]
+mod edit;
+#[cfg(feature = "egui")]
+mod paint;
+#[cfg(feature = "egui")]
+pub use edit::{Out, Writing};
+#[cfg(feature = "egui")]
+pub use paint::{layout, Md};
 
 /// `text` with `left` and `right` put around the characters `a..b` (counted
 /// in chars). Returns the new text and the selection, still on the same
