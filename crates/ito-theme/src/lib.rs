@@ -501,6 +501,104 @@ pub fn pick<'a>(themes: &'a [Theme], choice: &str, dark: &str, light: &str, os_l
     })
 }
 
+/// `#rrggbb`, or `rgba(r, g, b, a)` when the colour is not opaque.
+fn css_color(c: Color32) -> String {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("rgba({r}, {g}, {b}, {:.3})", f32::from(a) / 255.0)
+    }
+}
+
+impl Colors {
+    /// The colours as CSS custom properties (one per line, no selector), for a page an app serves:
+    /// the base ones (`--bg`, `--side`, `--panel`, `--border`, `--fg`, `--dim`, `--wait`, `--run`, `--err`,
+    /// `--done`, `--blue`, `--magenta`), the mixed ones (`--raised`, `--border-strong`, `--chosen`, `--hover`,
+    /// `--strong`, `--faint`, `--wait-bg`, `--wait-text`, `--on-accent`, `--selection`) and `color-scheme`.
+    /// Each is `#rrggbb`, or `rgba(...)` where the alpha is under 255.
+    pub fn css_vars(&self) -> String {
+        let rows: [(&str, Color32); 22] = [
+            ("bg", self.bg),
+            ("side", self.side),
+            ("panel", self.panel),
+            ("border", self.border),
+            ("fg", self.fg),
+            ("dim", self.dim),
+            ("wait", self.wait),
+            ("run", self.run),
+            ("err", self.err),
+            ("done", self.done),
+            ("blue", self.blue),
+            ("magenta", self.magenta),
+            ("raised", self.raised()),
+            ("border-strong", self.border_strong()),
+            ("chosen", self.chosen()),
+            ("hover", self.hover()),
+            ("strong", self.strong()),
+            ("faint", self.faint()),
+            ("wait-bg", self.wait_bg()),
+            ("wait-text", self.wait_text()),
+            ("on-accent", self.on_accent()),
+            ("selection", self.selection()),
+        ];
+        let mut out = String::new();
+        for (name, c) in rows {
+            out.push_str(&format!(
+                "  --{name}: {};
+",
+                css_color(c)
+            ));
+        }
+        out.push_str(&format!(
+            "  color-scheme: {};
+",
+            if self.light { "light" } else { "dark" }
+        ));
+        out
+    }
+}
+
+/// A whole style sheet for the theme `choice` names, picked the way the window picks ([`pick`] with the
+/// same names; the choice `system` follows the browser instead of the OS this runs on).
+///
+/// - A fixed theme gives one `:root { … }`.
+/// - `system` puts the `dark` theme in `:root` and the `light` one in
+///   `@media (prefers-color-scheme: light) { :root { … } }`.
+/// - `high_contrast` gives each theme's [`Colors::high_contrast`] colours.
+pub fn stylesheet(themes: &[Theme], choice: &str, dark: &str, light: &str, high_contrast: bool) -> Result<String, String> {
+    let colors = |t: &Theme| if high_contrast { t.colors.high_contrast() } else { t.colors };
+    if choice == "system" {
+        let (d, l) = (pick(themes, choice, dark, light, false)?, pick(themes, choice, dark, light, true)?);
+        let (d, l) = (colors(d).css_vars(), colors(l).css_vars());
+        let indented: String = l
+            .lines()
+            .map(|row| {
+                format!(
+                    "  {row}
+"
+                )
+            })
+            .collect();
+        return Ok(format!(
+            ":root {{
+{d}}}
+@media (prefers-color-scheme: light) {{
+  :root {{
+{indented}  }}
+}}
+"
+        ));
+    }
+    let t = pick(themes, choice, dark, light, false)?;
+    Ok(format!(
+        ":root {{
+{}}}
+",
+        colors(t).css_vars()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -511,6 +609,53 @@ mod tests {
         assert_eq!(zoomed(&ctx, 12.0), 18.0);
         set_text_zoom(&ctx, f32::NAN);
         assert_eq!(text_zoom(&ctx), 1.0);
+    }
+
+    #[test]
+    fn css_has_every_colour_and_the_scheme() {
+        let t = builtin();
+        let css = stylesheet(&t, "dark", "tsumugi Dark", "tsumugi Light", false).unwrap();
+        for n in [
+            "bg",
+            "side",
+            "panel",
+            "border",
+            "fg",
+            "dim",
+            "wait",
+            "run",
+            "err",
+            "done",
+            "blue",
+            "magenta",
+            "raised",
+            "border-strong",
+            "chosen",
+            "hover",
+            "strong",
+            "faint",
+            "wait-bg",
+            "wait-text",
+            "on-accent",
+            "selection",
+        ] {
+            assert!(css.contains(&format!("--{n}: ")), "{n}");
+        }
+        assert!(css.starts_with(":root {") && css.contains("color-scheme: dark;"), "{css}");
+        assert!(stylesheet(&t, "light", "", "", false).unwrap().contains("color-scheme: light;"));
+        assert!(stylesheet(&t, "nope", "", "", false).is_err());
+    }
+
+    #[test]
+    fn system_puts_light_under_the_media_query_and_alpha_is_rgba() {
+        let t = builtin();
+        let css = stylesheet(&t, "system", "tsumugi Dark", "tsumugi Light", false).unwrap();
+        let (root, media) = css.split_once("@media (prefers-color-scheme: light)").unwrap();
+        assert!(root.contains("color-scheme: dark;") && media.contains("color-scheme: light;"), "{css}");
+        assert_eq!(css_color(Color32::from_rgb(1, 2, 255)), "#0102ff");
+        assert!(css_color(Color32::from_rgba_unmultiplied(10, 20, 30, 128)).starts_with("rgba(10, 20, 30, 0.50"));
+        let hc = stylesheet(&t, "dark", "", "", true).unwrap();
+        assert_ne!(hc, stylesheet(&t, "dark", "", "", false).unwrap());
     }
 
     use super::*;

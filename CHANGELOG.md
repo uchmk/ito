@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.189.0] - 2026-11-01
+
+### 追加
+
+- `ito-theme`: テーマの色を CSS にする（#128）。アプリが `ito-http` で配るページを、窓と同じテーマで見せる。
+  - `Colors::css_vars() -> String`: カスタム プロパティを 1 行ずつ（セレクターなし）。基本の `--bg --side --panel --border --fg --dim --wait --run --err --done --blue --magenta`、混ぜて作る `--raised --border-strong --chosen --hover --strong --faint --wait-bg --wait-text --on-accent --selection`、`color-scheme`。色は `#rrggbb`、透明があれば `rgba(...)`。
+  - `stylesheet(themes, choice, dark, light, high_contrast) -> Result<String, String>`: `pick` と同じ選び方で 1 枚のシートにする。固定のテーマは `:root { … }` 1 つ。`system` は暗いほうを `:root` に、明るいほうを `@media (prefers-color-scheme: light) { :root { … } }` に入れる（決めるのはエンジンの OS でなくブラウザー）。`high_contrast` は `Colors::high_contrast()` の色。
+
+### 使う側がやること
+
+- koyomi: common.toml とテーマのフォルダーを `prefs.rs` と同じに読み、`GET /theme.css` で `stylesheet(…)` を返す。`app.css` は `var(--…)` だけにする。
+
 ## [0.188.0] - 2026-11-01
 
 ### 追加
