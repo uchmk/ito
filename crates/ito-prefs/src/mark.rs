@@ -149,11 +149,23 @@ pub enum Mark {
     Import,
     /// Three stacked boxes with a light each: a server (a machine you reach over the network).
     Server,
+    /// A large letter H over two short lines: a heading.
+    Heading,
+    /// A heavy bar down the left of two lines of text: a quotation.
+    Quote,
+    /// Angle brackets round a slash: code.
+    Code,
+    /// Three lines, each led by a dot: a bulleted list.
+    Bullets,
+    /// Three lines, each led by a short stroke (a number): a numbered list.
+    Numbers,
+    /// Three lines, the first led by a checked box: a task list.
+    Tasks,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 71] = [
+    pub const ALL: [Mark; 77] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -225,6 +237,12 @@ impl Mark {
         Mark::Compare,
         Mark::Import,
         Mark::Server,
+        Mark::Heading,
+        Mark::Quote,
+        Mark::Code,
+        Mark::Bullets,
+        Mark::Numbers,
+        Mark::Tasks,
     ];
 }
 
@@ -599,6 +617,43 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             for y in [-4.25, 0.25, 4.75] {
                 dot(-3.8, y, 0.8);
             }
+        }
+        Mark::Heading => {
+            seg((-4.5, -5.5), (-4.5, 5.5));
+            seg((4.5, -5.5), (4.5, 5.5));
+            seg((-4.5, 0.0), (4.5, 0.0));
+        }
+        Mark::Quote => {
+            seg((-5.5, -5.0), (-5.5, 5.0));
+            seg((-2.0, -3.0), (6.0, -3.0));
+            seg((-2.0, 0.5), (6.0, 0.5));
+            seg((-2.0, 4.0), (3.5, 4.0));
+        }
+        Mark::Code => {
+            p.add(path(pts(&[(-2.5, -4.5), (-6.5, 0.0), (-2.5, 4.5)])));
+            p.add(path(pts(&[(2.5, -4.5), (6.5, 0.0), (2.5, 4.5)])));
+            seg((1.0, -5.5), (-1.0, 5.5));
+        }
+        Mark::Bullets => {
+            for y in [-4.5, 0.0, 4.5] {
+                dot(-5.2, y, 1.1);
+                seg((-1.5, y), (6.5, y));
+            }
+        }
+        Mark::Numbers => {
+            for y in [-4.5, 0.0, 4.5] {
+                seg((-6.0, y), (-4.0, y));
+                seg((-1.5, y), (6.5, y));
+            }
+        }
+        Mark::Tasks => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -6.0), at(-2.5, -2.0)), 1.0 * k, line, StrokeKind::Middle);
+            p.add(path(pts(&[(-5.7, -4.0), (-4.7, -3.0), (-3.4, -5.0)])));
+            seg((0.0, -4.0), (6.5, -4.0));
+            seg((-6.0, 0.5), (-3.0, 0.5));
+            seg((0.0, 0.5), (6.5, 0.5));
+            seg((-6.0, 5.0), (-3.0, 5.0));
+            seg((0.0, 5.0), (6.5, 5.0));
         }
         Mark::Lock => {
             p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);

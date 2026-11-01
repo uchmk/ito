@@ -24,6 +24,9 @@ pub enum Out {
 pub struct Writing {
     pub text: String,
     pub preview: bool,
+    /// Take the focus back whenever it is lost, and consume the shortcuts whatever widget has focus (the default).
+    /// Off: the box only reacts to the keys while it has focus (or shows the preview), and leaves them to others otherwise.
+    pub grab: bool,
     id: Id,
     pending: Option<Tool>,
 }
@@ -31,7 +34,12 @@ pub struct Writing {
 impl Writing {
     /// `id`: any value that is unique to this box (it keys the field's cursor and the preview's scroll).
     pub fn new(id: impl std::hash::Hash + std::fmt::Debug) -> Writing {
-        Writing { text: String::new(), preview: false, id: Id::new(("ito-markdown-writing", id)), pending: None }
+        Writing { text: String::new(), preview: false, grab: true, id: Id::new(("ito-markdown-writing", id)), pending: None }
+    }
+
+    /// Ask for the focus at the next [`show`](Writing::show), once (for `grab` off).
+    pub fn focus(&self, ctx: &egui::Context) {
+        ctx.memory_mut(|m| m.request_focus(self.id));
     }
 
     /// The field's id, to ask for or test focus.
@@ -48,7 +56,11 @@ impl Writing {
     /// The shortcuts above are consumed first, so the field never sees them.
     pub fn show(&mut self, ui: &mut Ui, field: Rect, empty: &str, size: f32) -> Out {
         let ctx = ui.ctx().clone();
+        let listen = self.grab || self.preview || ctx.memory(|m| m.has_focus(self.id));
         let (send_close, send, preview, bold, italic, link, under, esc) = ctx.input_mut(|i| {
+            if !listen {
+                return (false, false, false, false, false, false, false, false);
+            }
             (
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter),
                 i.consume_key(Modifiers::COMMAND, Key::Enter),
@@ -111,7 +123,7 @@ impl Writing {
                 .show(&mut child, |ui| ui.add(edit));
             // Only when it has lost it: asking again ends an IME composition.
             ctx.memory_mut(|m| {
-                if !m.has_focus(self.id) {
+                if self.grab && !m.has_focus(self.id) {
                     m.request_focus(self.id)
                 }
             });
@@ -175,6 +187,17 @@ mod tests {
         assert_eq!(frame(&mut w, vec![key(Key::Escape, Modifiers::NONE)]), Out::Stay);
         assert!(!w.preview);
         assert_eq!(frame(&mut w, vec![key(Key::Escape, Modifiers::NONE)]), Out::Leave);
+    }
+
+    #[test]
+    fn without_grab_the_keys_are_left_to_others_until_it_has_focus() {
+        let mut w = Writing::new("t3");
+        w.grab = false;
+        assert_eq!(frame(&mut w, vec![key(Key::Enter, Modifiers::COMMAND)]), Out::Stay);
+        // The preview still listens, so Esc can leave it.
+        w.preview = true;
+        frame(&mut w, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(!w.preview);
     }
 
     #[test]

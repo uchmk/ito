@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.198.0] - 2026-11-01
+
+### 追加
+
+- `ito-markdown::Writing` に `grab: bool`（既定 true で今までどおり）と `focus(&Context)`。`grab = false` のあいだは、箱にフォーカスがある（またはプレビュー中）ときだけ
+  Ctrl+Enter・Ctrl+P/B/I/K/U・Esc を消費し、フォーカスを取り返さない。他の欄と同居するアプリ向け。
+- `ito-prefs::Mark` に `Heading`・`Quote`・`Code`・`Bullets`・`Numbers`・`Tasks`（77 個に）。
+
+### 使う側がやること
+
+- fumi・minato: `rev` を上げる。`Mark` を全部 `match` している所があれば 6 つ足す。同居する欄があれば `writing.grab = false` にし、箱を使い始めるとき `focus` を呼ぶ。
+
 ## [0.197.0] - 2026-11-01
 
 ### 追加
