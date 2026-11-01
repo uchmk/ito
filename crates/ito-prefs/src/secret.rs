@@ -54,10 +54,10 @@ pub fn secret_field(ui: &mut egui::Ui, l: Look, drafts: &mut Drafts, id: &str, h
             drafts.insert(id.to_owned(), Draft { text: text.clone(), sent: None });
         }
         // Pressing the eye takes the focus off the field; that is not "leaving it".
-        let on_eye = ui.input(|i| {
-            i.pointer.any_pressed()
-                && i.pointer.interact_pos().is_some_and(|p| ui.data(|d| d.get_temp::<egui::Rect>(eye_id)).is_some_and(|r| r.contains(p)))
-        });
+        // (Read the rect before `input`: `data` inside the `input` closure waits on a lock `input` holds.)
+        let eye_rect = ui.data(|d| d.get_temp::<egui::Rect>(eye_id));
+        let on_eye =
+            ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| eye_rect.is_some_and(|r| r.contains(p))));
         if resp.lost_focus() && !on_eye {
             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
             taken_text = taken(&text, escape);
@@ -78,7 +78,25 @@ pub fn secret_field(ui: &mut egui::Ui, l: Look, drafts: &mut Drafts, id: &str, h
 
 #[cfg(test)]
 mod tests {
-    use super::taken;
+    use super::*;
+
+    #[test]
+    fn a_press_while_the_field_is_drawn_does_not_deadlock() {
+        let ctx = egui::Context::default();
+        let mut drafts = Drafts::default();
+        let words = SecretWords { show: "Show", hide: "Hide" };
+        let look = Look { c: ito_theme::colors(), q: "" };
+        let at = egui::pos2(20.0, 20.0);
+        let press =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        for events in [vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            let raw = egui::RawInput { events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                secret_field(ui, look, &mut drafts, "k", "hint", &words, 300.0);
+            });
+            out.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn typed_text_is_taken_once() {

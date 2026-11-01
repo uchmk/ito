@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.194.1] - 2026-11-01
+
+### 修正
+
+- `ito-prefs`: `secret_field` が、マウスを押すとアプリごと固まるのを直した（v0.165.0 から）。`ui.input` の中で `ui.data` を呼んでいて、egui のロックを入れ子に取っていた。目のボタンの矩形を先に読んでから `input` で調べる。ポインタを押すテストを足した。使う側がやることは `rev` を上げるだけ。
+
 ## [0.194.0] - 2026-11-01
 
 ### 追加
