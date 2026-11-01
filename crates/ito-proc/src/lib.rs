@@ -16,6 +16,8 @@
 //! It blocks the calling thread, so call it from a worker, never the UI thread.
 //! What the lines mean stays with the caller.
 
+mod signal;
+pub use signal::stop_requested;
 #[cfg(windows)]
 mod elevate;
 #[cfg(windows)]
@@ -250,6 +252,19 @@ pub struct Lines {
     pub status: Option<ExitStatus>,
     /// The kept lines, in the order they came.
     pub kept: Vec<(Stream, String)>,
+    /// Whether it ran to its end, ended after being asked to stop, or was killed.
+    pub ending: Ending,
+}
+
+/// How a child that was run with [`run_lines_soft`] (or any `run_lines*`) came to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ending {
+    /// It exited by itself; the stop flag was not set first.
+    Exited,
+    /// The stop flag was set, the child was asked to stop, and it ended within the grace. `status` is its own.
+    Asked,
+    /// The tree was killed: the stop flag was set with no grace (or the child could not be asked), or the grace ran out.
+    Killed,
 }
 
 impl Lines {
@@ -304,18 +319,40 @@ pub fn run_lines(cmd: Command, stop: &AtomicBool, on_line: &mut dyn FnMut(Stream
 }
 
 /// [`run_lines`], reading both pipes' lines in `enc`.
-pub fn run_lines_with(
+pub fn run_lines_with(cmd: Command, stop: &AtomicBool, enc: Encoding, on_line: &mut dyn FnMut(Stream, &str) -> bool) -> io::Result<Lines> {
+    run_lines_soft(cmd, stop, Duration::ZERO, enc, on_line)
+}
+
+/// [`run_lines_with`] with a soft stop: when `stop` is set the child's process tree is first *asked* to stop,
+/// and killed only if it is still running after `grace`. [`Lines::ending`] says which happened
+/// ([`Ending::Asked`] or [`Ending::Killed`]). A `grace` of zero kills at once, as [`run_lines_with`] does.
+///
+/// - Unix: `SIGTERM` to the child's process group.
+/// - Windows: `CTRL_BREAK_EVENT` to the child's process group (it is started with `CREATE_NEW_PROCESS_GROUP`),
+///   which reaches what it started too, a `powershell -Command` and its children among them. A program that
+///   does not handle the event dies of it, which counts as ended. The child shares this process's console when
+///   there is one; otherwise it has a hidden console of its own and this process attaches to it for a moment
+///   to send the event.
+///
+/// The child watches for the ask with [`stop_requested`]. If it cannot be asked at all, it is killed at once.
+pub fn run_lines_soft(
     mut cmd: Command,
     stop: &AtomicBool,
+    grace: Duration,
     enc: Encoding,
     on_line: &mut dyn FnMut(Stream, &str) -> bool,
 ) -> io::Result<Lines> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    own_group(&mut cmd);
+    let shared = if grace.is_zero() {
+        own_group(&mut cmd);
+        false
+    } else {
+        sys::own_group_soft(&mut cmd)
+    };
     let mut child = cmd.spawn()?;
     sys::adopt(&child);
     let (stdout, stderr) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
-    watch(&mut ChildProc(child), stdout, stderr, stop, enc, on_line)
+    watch(&mut ChildProc { child, shared }, stdout, stderr, stop, grace, enc, on_line)
 }
 
 /// An account to run a child as (see [`run_lines_as`]).
@@ -355,14 +392,28 @@ pub fn run_lines_as(
     enc: Encoding,
     on_line: &mut dyn FnMut(Stream, &str) -> bool,
 ) -> io::Result<Lines> {
+    run_lines_as_soft(cmd, logon, stop, Duration::ZERO, enc, on_line)
+}
+
+/// [`run_lines_as`] with the grace of [`run_lines_soft`]. A child of another account has a console this
+/// process cannot reach, so it can not be asked: it is killed at once whatever `grace` is, and
+/// [`Lines::ending`] is [`Ending::Killed`].
+pub fn run_lines_as_soft(
+    cmd: Command,
+    logon: &Logon,
+    stop: &AtomicBool,
+    grace: Duration,
+    enc: Encoding,
+    on_line: &mut dyn FnMut(Stream, &str) -> bool,
+) -> io::Result<Lines> {
     #[cfg(windows)]
     {
         let (mut proc, stdout, stderr) = logon::spawn(&cmd, logon)?;
-        watch(&mut proc, stdout, stderr, stop, enc, on_line)
+        watch(&mut proc, stdout, stderr, stop, grace, enc, on_line)
     }
     #[cfg(not(windows))]
     {
-        let _ = (cmd, logon, stop, enc, on_line);
+        let _ = (cmd, logon, stop, grace, enc, on_line);
         Err(io::Error::new(io::ErrorKind::Unsupported, "running as another account is only supported on Windows"))
     }
 }
@@ -404,17 +455,29 @@ trait Proc {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>>;
     /// End it and everything it started.
     fn kill(&mut self);
+    /// Ask it and everything it started to stop; whether the ask could be made.
+    fn ask(&mut self) -> bool {
+        false
+    }
 }
 
-struct ChildProc(Child);
+struct ChildProc {
+    child: Child,
+    /// Whether it shares this process's console (Windows), which decides how it is asked.
+    shared: bool,
+}
 
 impl Proc for ChildProc {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.0.try_wait()
+        self.child.try_wait()
     }
 
     fn kill(&mut self) {
-        kill_tree(&mut self.0);
+        kill_tree(&mut self.child);
+    }
+
+    fn ask(&mut self) -> bool {
+        sys::ask(&self.child, self.shared)
     }
 }
 
@@ -424,6 +487,7 @@ fn watch(
     stdout: impl Read + Send + 'static,
     stderr: impl Read + Send + 'static,
     stop: &AtomicBool,
+    grace: Duration,
     enc: Encoding,
     on_line: &mut dyn FnMut(Stream, &str) -> bool,
 ) -> io::Result<Lines> {
@@ -447,14 +511,22 @@ fn watch(
         Seen::End(Stream::Out) => *out_end = true,
         Seen::End(Stream::Err) => *err_end = true,
     };
+    let mut asked: Option<Instant> = None;
     loop {
-        if stop.load(Ordering::Relaxed) {
+        let stopping = stop.load(Ordering::Relaxed);
+        if stopping && asked.is_none() && !grace.is_zero() && exited.is_none() && proc.ask() {
+            asked = Some(Instant::now());
+        }
+        // With no grace it is the old way: killed even if it just exited. With one, only a child
+        // still running is killed, and only once the ask has had its time (or could not be made).
+        let give_up = stopping && (grace.is_zero() || (exited.is_none() && asked.is_none_or(|t| t.elapsed() >= grace)));
+        if give_up {
             proc.kill();
             // What the readers already got is still the caller's.
             while let Ok(p) = rx.try_recv() {
                 take(&mut kept, p, &mut out_end, &mut err_end);
             }
-            return Ok(Lines { status: None, kept });
+            return Ok(Lines { status: None, kept, ending: Ending::Killed });
         }
         if let Ok(p) = rx.recv_timeout(POLL) {
             take(&mut kept, p, &mut out_end, &mut err_end);
@@ -474,7 +546,7 @@ fn watch(
             while let Ok(p) = rx.try_recv() {
                 take(&mut kept, p, &mut out_end, &mut err_end);
             }
-            return Ok(Lines { status: Some(status), kept });
+            return Ok(Lines { status: Some(status), kept, ending: if asked.is_some() { Ending::Asked } else { Ending::Exited } });
         }
     }
 }
@@ -517,6 +589,49 @@ mod sys {
 
     pub fn own_group(cmd: &mut Command) {
         cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+        fn AttachConsole(pid: u32) -> i32;
+        fn FreeConsole() -> i32;
+        fn GenerateConsoleCtrlEvent(kind: u32, group: u32) -> i32;
+        fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
+    }
+
+    /// Give the command its own process group so it can be sent `CTRL_BREAK_EVENT`. With a console of ours
+    /// it shares that (no window); without one it gets a hidden console of its own. Whether it shares ours.
+    pub fn own_group_soft(cmd: &mut Command) -> bool {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        let mut one = 0u32;
+        // SAFETY: a buffer of one entry; the call only fills it and returns the count.
+        let shared = unsafe { GetConsoleProcessList(&mut one, 1) } > 0;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | if shared { 0 } else { CREATE_NO_WINDOW });
+        shared
+    }
+
+    /// Send `CTRL_BREAK_EVENT` to the child's group. Without a shared console, attach to the child's for
+    /// the moment (this process has none, so nothing of ours is lost) and let go again.
+    pub fn ask(child: &Child, shared: bool) -> bool {
+        const CTRL_BREAK_EVENT: u32 = 1;
+        static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let pid = child.id();
+        // SAFETY: plain console calls; the handler change is undone and only this process's console state moves.
+        unsafe {
+            if shared {
+                return GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0;
+            }
+            let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+            if AttachConsole(pid) == 0 {
+                return false;
+            }
+            SetConsoleCtrlHandler(None, 1);
+            let sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0;
+            FreeConsole();
+            SetConsoleCtrlHandler(None, 0);
+            sent
+        }
     }
 
     pub fn detach(cmd: &mut Command) {
@@ -659,6 +774,22 @@ mod sys {
         cmd.process_group(0);
     }
 
+    pub fn own_group_soft(cmd: &mut Command) -> bool {
+        cmd.process_group(0);
+        false
+    }
+
+    /// `SIGTERM` to the child's group.
+    pub fn ask(child: &Child, _shared: bool) -> bool {
+        Command::new("kill")
+            .args(["-TERM", "--", &format!("-{}", child.id())])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
     pub struct HoldHandles;
 
     impl HoldHandles {
@@ -686,6 +817,12 @@ mod sys {
     use std::process::{Child, Command};
 
     pub fn own_group(_: &mut Command) {}
+    pub fn own_group_soft(_: &mut Command) -> bool {
+        false
+    }
+    pub fn ask(_: &Child, _: bool) -> bool {
+        false
+    }
     pub fn detach(_: &mut Command) {}
     pub struct HoldHandles;
     impl HoldHandles {
@@ -767,6 +904,102 @@ mod tests {
             c.arg("60");
             c
         }
+    }
+
+    /// A child that ends when asked to stop: this test binary again, running `obliging_child`.
+    fn obliging() -> Command {
+        let mut c = Command::new(std::env::current_exe().unwrap());
+        c.args(["--exact", "tests::obliging_child", "--nocapture", "--test-threads=1"]).env("ITO_PROC_OBLIGING", "1");
+        c
+    }
+
+    /// The other side of `obliging`: does nothing unless run as that child, then waits for the ask and returns.
+    #[test]
+    fn obliging_child() {
+        if std::env::var_os("ITO_PROC_OBLIGING").is_none() {
+            return;
+        }
+        let asked = stop_requested();
+        println!("ready");
+        let until = Instant::now() + Duration::from_secs(60);
+        while !asked.load(Ordering::Relaxed) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::process::exit(if asked.load(Ordering::Relaxed) { 0 } else { 3 });
+    }
+
+    /// A child that shrugs the ask off: Ctrl+Break only makes `ping` print its statistics.
+    fn stubborn() -> Command {
+        #[cfg(windows)]
+        {
+            sleeper()
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = Command::new("sh");
+            c.args(["-c", "trap '' TERM; while :; do sleep 1; done"]);
+            c
+        }
+    }
+
+    fn soft(job: Command, grace: Duration) -> (Lines, Duration) {
+        let stop = AtomicBool::new(false);
+        let began = Instant::now();
+        let r = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(1500));
+                stop.store(true, Ordering::Relaxed);
+            });
+            run_lines_soft(job, &stop, grace, Encoding::Utf8, &mut |_, _| false)
+        });
+        (r.unwrap(), began.elapsed())
+    }
+
+    #[test]
+    fn a_child_that_obeys_ends_within_the_grace_and_is_not_killed() {
+        let (r, took) = soft(obliging(), Duration::from_secs(20));
+        assert_eq!(r.ending, Ending::Asked, "{r:?}");
+        assert!(r.ok(), "the child saw the ask and left with 0: {r:?}");
+        assert!(took < Duration::from_secs(15), "{took:?}");
+    }
+
+    #[test]
+    fn a_child_that_does_not_obey_is_killed_when_the_grace_runs_out() {
+        let (r, took) = soft(stubborn(), Duration::from_secs(2));
+        assert_eq!(r.ending, Ending::Killed, "{r:?}");
+        assert!(r.stopped());
+        assert!(took >= Duration::from_millis(3000) && took < Duration::from_secs(15), "{took:?}");
+    }
+
+    /// `powershell -Command` ignores `CTRL_BREAK` itself, but the program it runs is in the same group and
+    /// gets it; PowerShell then ends when that program does.
+    #[test]
+    #[cfg(windows)]
+    fn a_powershell_command_in_between_passes_the_ask_on() {
+        let inner = obliging();
+        let line = format!("& '{}' --exact tests::obliging_child --nocapture --test-threads=1", inner.get_program().to_string_lossy());
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-Command", &line]).env("ITO_PROC_OBLIGING", "1");
+        let (r, took) = soft(c, Duration::from_secs(20));
+        assert_eq!(r.ending, Ending::Asked, "{r:?}");
+        assert!(took < Duration::from_secs(15), "{took:?}");
+    }
+
+    #[test]
+    fn no_grace_kills_at_once_and_a_plain_run_says_exited() {
+        let (r, took) = soft(sleeper(), Duration::ZERO);
+        assert_eq!(r.ending, Ending::Killed);
+        assert!(took < Duration::from_secs(10), "{took:?}");
+        let stop = AtomicBool::new(false);
+        let r = run_lines_soft(say("x", "y", 0), &stop, Duration::from_secs(5), Encoding::Utf8, &mut |_, _| false).unwrap();
+        assert_eq!(r.ending, Ending::Exited);
+    }
+
+    #[test]
+    fn the_stop_flag_of_the_child_starts_false_and_is_always_the_same() {
+        let a = stop_requested();
+        assert!(!a.load(Ordering::Relaxed));
+        assert!(std::ptr::eq(a, stop_requested()));
     }
 
     /// Set `stop` after a moment while `job` runs.

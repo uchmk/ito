@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.187.0] - 2026-11-01
+
+### 追加
+
+- `ito-proc`: 止め方を 2 段にする（先に頼み、猶予のあとで殺す）。
+  - 親の側: `run_lines_soft(cmd, stop, grace, enc, on_line)`（`run_lines_as_soft` もある）。`stop` が立つと、子の木に「止まって」を送り、`grace` のあとまだ動いていれば今までどおり木ごと殺す。`grace` が 0 なら今までと同じ（`run_lines_with`・`run_lines_as` はこれを呼ぶ）。
+    - Unix は子のプロセスグループに `SIGTERM`。Windows は `CREATE_NEW_PROCESS_GROUP` で起こして `CTRL_BREAK_EVENT` を送る（こちらにコンソールがあれば子はそれを共有し、無ければ子の隠しコンソールにつなぎ直して送る）。
+    - `powershell -Command` を挟んでも、中で動いているプログラムは同じグループなので合図を受ける（PowerShell 自身は CTRL_BREAK では終わらないが、中のプログラムが終われば終わる）。合図を受けても終わらないプログラム（`ping` など）は猶予のあとで殺す。
+    - 別アカウントの子（`run_lines_as_soft`）は、そのコンソールに届かないので頼めない。すぐ殺し、`ending` は `Killed`。
+  - 結果: `Lines` に `ending: Ending` を足した。`Exited`（自分で終わった）・`Asked`（頼まれて猶予のうちに終わった。`status` は子自身のもの）・`Killed`（殺した。`status` は `None` で `stopped()` は真）。
+  - 子の側: `stop_requested() -> &'static AtomicBool`。Windows は CTRL_C・CTRL_BREAK・コンソールを閉じる・ログオフ・シャットダウン、ほかは `SIGINT`・`SIGTERM` で真になる。初めて呼んだときに受け口を入れる（それまでの「その場で死ぬ」は無くなるので、旗を見て自分で返ること）。`ito_sftp::exec` の停止の旗にそのまま渡せる。
+
+### 使う側がやること
+
+- `Lines { … }` を自分で作っている所は無いはず（欄が 1 つ増えた）。`match` で全部の欄を分解している所があれば `ending` を足す。
+- koyomi: `koyomi ssh run` の側で `ito_proc::stop_requested()` を `exec` の停止の旗に渡し、親の側を `run_lines_soft(…, Duration::from_secs(10), …)` にする。「止めた（相手も止めた）」は `Ending::Asked`、「殺した」は `Ending::Killed`。
+
 ## [0.186.0] - 2026-11-01
 
 ### 追加
