@@ -90,10 +90,13 @@ impl Panels {
                 self.size.insert(name.to_owned(), now.round());
                 self.unsaved = true;
             }
-        } else if self.size(name).is_none() {
-            // No size chosen yet: forget what egui remembered, so `default` is read again
-            // next frame. The first frame has no window size (egui uses 10000x10000), and
-            // a default worked out from that would otherwise stick.
+        } else if self.size(name).is_none() && {
+            let screen = ui.ctx().content_rect();
+            screen.width() >= 9000.0 || screen.height() >= 9000.0
+        } {
+            // The first frame has no window size (egui uses 10000x10000), and a default worked
+            // out from that would stick. Forget it for that frame only: later on a panel with
+            // no chosen size must still be free to grow to its contents.
             ui.ctx().data_mut(|d| d.remove::<egui::containers::panel::PanelState>(id));
         } else if self.unsaved && !ui.ctx().input(|i| i.pointer.any_down()) {
             self.unsaved = false;
@@ -153,6 +156,24 @@ mod tests {
             w = show(&ctx, real);
         }
         assert!((w - 550.0).abs() < 1.0, "got {w}");
+    }
+
+    #[test]
+    fn a_panel_with_no_saved_size_grows_to_its_contents() {
+        let (ctx, mut panels) = (egui::Context::default(), Panels::load(None));
+        let real = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0)));
+        let mut h = 0.0;
+        for _ in 0..4 {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: real, ..Default::default() }, |ui| {
+                h = panels
+                    .show(ui, Side::Bottom, "compose", 200.0, |p| p, |ui| ui.allocate_space(egui::vec2(10.0, 260.0)).0)
+                    .response
+                    .rect
+                    .height();
+            });
+            out.textures_delta.clear();
+        }
+        assert!(h >= 260.0, "got {h}");
     }
 
     fn button(at: egui::Pos2, pressed: bool) -> egui::Event {

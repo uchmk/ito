@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.168.2] - 2026-11-01
+
+### 修正
+
+- `ito-layout`: `Panels::show` は、サイズを覚えていないパネルの egui の記憶を、窓の大きさがまだ無い最初の 1 フレームだけ捨てる（0.168.0 では毎フレーム捨てていたので、`default` より高い・広い中身が伸びず、下のものに重なった）。fumi の報告。
+
+### 使う側がやること
+
+- なし。`rev` を上げるだけ。
+
 ## [0.168.0] - 2026-11-01
 
 ### 追加
