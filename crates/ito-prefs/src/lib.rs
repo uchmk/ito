@@ -26,9 +26,11 @@ pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEY
 pub use mark::{icon_button, mark, mark_button, IconButton, Mark};
 mod compose;
 mod date;
+mod emoji;
 pub use chrono::NaiveDate;
 pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 pub use date::{format_date, month_grid, month_picker, parse_date, shift_months, DateField, DateResponse, DateWords, DayLook, RangeField};
+pub use emoji::{emoji_picker, EmojiWords, CATEGORIES as EMOJI_CATEGORIES};
 mod parts;
 pub use parts::{attachment, avatar, empty_state, notice, pill, AttachmentResponse};
 mod notify;

@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.176.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 絵文字ピッカー `emoji_picker(ui, look, id, &anchor, &EmojiWords) -> Option<&'static str>`。アプリが描くボタン（`mark_button(.., Mark::Emoji, ..)` など）の `Response` を渡すと、押すたびに開閉し、ボタンの上に 5 つの分類（顔・手・ハート・もの・記号）の 8 列の表を出す。選ぶ・Esc・外を押す、で閉じる。分類の名前は `EmojiWords`（`en()`・`ja()`・`for_lang`）。一覧は `EMOJI_CATEGORIES`（fumi の依頼）。
+
+### 使う側がやること
+
+- 返信の窓の足の「テンプレートと保存時刻の間」に `mark_button` を置き、その `Response` を `emoji_picker` に渡す。返った絵文字を本文のカーソル位置へ入れる。
+
 ## [0.175.0] - 2026-11-01
 
 ### 追加
