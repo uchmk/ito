@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.193.0] - 2026-11-01
+
+### 追加
+
+- `ito-titlebar`: `brand(ui, rect, name, logo: impl FnOnce(u32) -> Vec<u8>) -> f32`。左の枠にアプリのロゴと名前を描き、終わりの x を返す（koyomi が自前で書いていたものと同じ見た目: 32 px の絵を 16 px で、名前は 13 px の `fg`）。`logo(px)` はアプリの `icon::pixels`（RGBA、`px` 四方）。テクスチャは 1 度だけ作って egui の文脈に置くので、アプリは持たなくてよい。
+
+### 使う側がやること
+
+- `ito_titlebar::show(ui, &spec, |ui, rect| ito_titlebar::brand(ui, rect, &name, icon::pixels), …)`。koyomi は自前の `logo` の欄と `LOGO_PX` を消して置き換えられる（fumi は名前だけを描いていた所を替える）。
+
 ## [0.192.1] - 2026-11-01
 
 ### 修正

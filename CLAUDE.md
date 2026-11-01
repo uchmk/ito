@@ -44,7 +44,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-confirm` | やる前の確認の重ね表示（行・本文・差分・注・ボタン（`marks` で印つき）。押された番号を返す。3 つ以上はカード: 動詞の見出し・結果の数字・戻せるか・キーの札、おすすめは緑・戻せないものは赤） | yagura、kura |
 | `ito-help` | キーのヘルプ（`ito-keymap` の一覧を見出しとキーと説明の行にして、渡された矩形に描く） | yagura、kura |
 | `ito-console` | Windows の窓のアプリの前に置くコンソールの前段（`<app>.exe` の横の `<app>.com`、`front`。文字で答えるコマンドは待って渡し、ほかは窓が開いたら戻る）と、答えを書く `out`・`err`（誰も読まないパイプでも panic せずに捨てる） | kura、yagura、tsumugi、minato、michi |
-| `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`）。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
+| `ito-titlebar` | 窓の自前のタイトルバー（ドラッグ・ダブルクリックで最大化・最小化/最大化/閉じる、中央のパレットの箱とその右のベル（未読のバッジ）、左右にアプリの枠、枠なし窓の `resize_edges`、左の枠に置くロゴと名前 `brand`（絵はアプリの `icon::pixels`、テクスチャは 1 度だけ作って文脈に置く））。色は `ito_theme::colors()`。文言とキーの表示は呼ぶ側から渡す | tsumugi、michi、minato |
 | `ito-statusbar` | 窓の下のステータスバー（`show`: 側の色と上の線・左にアプリの項目・右端に時計（等幅・一番強い文字の色・ホバーで `Clock::full`・分が変わるときだけ再描画）・倍率を変えた直後の `scale_text`（`scale_changed`）。項目の `item`・`link`・`divider`・`dot`。`opacity` で入力中に薄くできる）。色は `ito_theme::colors()`。設定の画面を開いている間はアプリが隠す | fude、michi、minato、tsumugi |
 | `ito-notices` | ベルが開く通知の一覧（新しい順・未読は明るく・時刻と種類の色の点・行き先 `go` を押すと `Action::Open`・↑↓/Enter/Esc・すべて既読）と、バッジ用の `unread`/`any_error`。文言は `Words` で渡す。色は `ito_theme::colors()`。トーストの押しは `ito-notify` の `Toast::open` | michi、tsumugi |
 | `ito-tail` | ログ ファイルの新しい行を追う（`Follower::new(path, From)`・`poll`・`offset`。終わりから始める・保存した位置から再開・切り詰めと入れ替えを検出・UTF-8 か Shift_JIS・ファイルを掴まない・書きかけの行は待つ） | koyomi |

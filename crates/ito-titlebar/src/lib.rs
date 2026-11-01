@@ -109,6 +109,46 @@ pub fn left_limit(rect: Rect) -> f32 {
     rect.right() - MARGIN - COMPACT_W - BELL_SPAN - MARGIN
 }
 
+/// The pixels the logo is made at; it is drawn at [`LOGO_SIZE`] points, so it stays sharp at 2x.
+pub const LOGO_PX: u32 = 32;
+/// The logo's size in points.
+pub const LOGO_SIZE: f32 = 16.0;
+
+/// The app's logo and name at the left of `rect` (the left slot's rect); returns where they end (x), for the slot's
+/// return value. `logo(px)` is the app's RGBA pixels, `px` square (its `icon::pixels`); the texture is made once and
+/// kept in the context, so the app keeps no field. The name is 13 px proportional in the theme's `fg`.
+pub fn brand(ui: &mut Ui, rect: Rect, name: &str, logo: impl FnOnce(u32) -> Vec<u8>) -> f32 {
+    let ctx = ui.ctx().clone();
+    let key = egui::Id::new(("ito-titlebar-logo", name));
+    let tex = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
+        Some(t) => Some(t),
+        None => {
+            let px = LOGO_PX as usize;
+            let rgba = logo(LOGO_PX);
+            (rgba.len() == px * px * 4).then(|| {
+                let t = ctx.load_texture(
+                    format!("ito-titlebar-logo-{name}"),
+                    egui::ColorImage::from_rgba_unmultiplied([px, px], &rgba),
+                    egui::TextureOptions::LINEAR,
+                );
+                ctx.data_mut(|d| d.insert_temp(key, t.clone()));
+                t
+            })
+        }
+    };
+    let mut x = rect.left() + 20.0 - LOGO_SIZE / 2.0;
+    if let Some(t) = tex {
+        let at = Rect::from_center_size(Pos2::new(rect.left() + 20.0, rect.center().y), Vec2::splat(LOGO_SIZE));
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        ui.painter().image(t.id(), at, uv, Color32::WHITE);
+        x = at.right() + 8.0;
+    }
+    let galley = ui.painter().layout_no_wrap(name.to_owned(), FontId::proportional(13.0), ito_theme::colors().fg);
+    let right = x + galley.size().x;
+    ui.painter().galley(Pos2::new(x, rect.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+    right
+}
+
 /// The bar in `ui.max_rect()`. `left` draws in the rect that is the bar
 /// less the caption buttons and the Mac's room, and returns where it ended
 /// (x); `right` gets what is left on the right of the bell (or of `left`,
@@ -533,5 +573,33 @@ mod tests {
         assert_eq!(edge_at(r, Pos2::new(400.0, 2.0)), Some(D::North));
         assert_eq!(edge_at(r, Pos2::new(400.0, 4.0)), None);
         assert_eq!(edge_at(r, Pos2::new(900.0, 300.0)), None);
+    }
+
+    #[test]
+    fn the_brand_makes_its_logo_once_and_returns_where_it_ends() {
+        let ctx = egui::Context::default();
+        let calls = std::cell::Cell::new(0);
+        let mut ends = Vec::new();
+        for _ in 0..2 {
+            let mut full = ctx.run_ui(
+                egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, HEIGHT))), ..Default::default() },
+                |ui| {
+                    let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(200.0, HEIGHT));
+                    ends.push(brand(ui, rect, "app", |px| {
+                        calls.set(calls.get() + 1);
+                        vec![255; (px * px * 4) as usize]
+                    }));
+                },
+            );
+            full.textures_delta.clear();
+        }
+        assert_eq!(calls.get(), 1);
+        assert!(ends[0] > 20.0 + LOGO_SIZE / 2.0 + 8.0 && (ends[0] - ends[1]).abs() < 0.01);
+        // A logo of the wrong size is left out; the name still draws.
+        let mut full = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(200.0, HEIGHT));
+            assert!(brand(ui, rect, "other", |_| vec![0; 3]) > 0.0);
+        });
+        full.textures_delta.clear();
     }
 }
