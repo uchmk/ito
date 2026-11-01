@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.201.0] - 2026-11-01
+
+### 追加
+
+- `ito-http` の tailnet の口（uchmk/ito#135）。`Config::tailnet = Some(Tailnet::new(port).login("alice@example.com", "owner").tag("tag:koyomi-ha", "standby"))`。
+  - tailnet のアドレス（`100.64.0.0/10`・`fd7a:115c:a1e0::/48`）だけに bind した平文 HTTP の口を、loopback／LAN の口に並べて足す。`addrs` を空にすると tailscaled の status から自分のアドレスを使う。tailnet の外のアドレスは `start` が断る。
+  - token の無い要求は、接続元を tailscaled の LocalAPI の whois で確かめ、タグ付きの端末はタグ、ほかはログイン名で `Tailnet` の一覧に引いて `Request::who` を決める。一覧に無い・知らない相手・tailscaled に届かない（3 秒）は 401。token は今までどおり併用できる。token が空でも `tailnet` があれば `start` できる。
+  - whois で通る要求はクッキーと同じ扱い。変える要求（`GET`・`HEAD`・`OPTIONS` 以外）は `X-Ito-Csrf: 1` が無ければ 403、`Host` はこの PC の tailnet のアドレス・MagicDNS の名前（と `Tailnet::hosts`）に限る（無ければ 403）。bearer の要求には課さない。
+  - `LocalApi`（Windows は名前付きパイプ、Unix は tailscaled のソケット。Windows の通常ユーザーで動くことを確かめた）、差し替えられる `Whois` の trait、`is_tailnet_ip`、`Server::tailnet_port()`。
+- `LogLine` に `who` と `via: Via`（`Token`・`Session`・`Tailscale`・`Public`・`Denied`）。
+
+### 使う側がやること
+
+- `LogLine { … }` を自分で組み立てているなら `who`・`via` を足す（ログを読むだけなら要らない）。`Config { … }` を欄ごと書いているなら `tailnet: None` を足す（`Config::new` なら要らない）。
+- koyomi: `[[http.user]]` にログイン名／タグを書けるようにし、`Config::tailnet` に渡す。
+
 ## [0.200.0] - 2026-11-01
 
 ### 追加

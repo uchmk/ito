@@ -11,6 +11,8 @@
 //! - **Limits:** the head, the body (`max_body`, 413 before it is read), connections at once (`max_connections`, 503),
 //!   and a read timeout per connection.
 //! - JSON in and out, HTTP/1.1, one request per connection (`Connection: close`), no chunked bodies.
+//! - **On the tailnet, no token:** [`Config::tailnet`] adds a plain-HTTP listener on tailnet addresses only, where Tailscale's
+//!   whois decides `who` ([`tailnet`]); a token still works there.
 //! - Each request is reported to a log callback as method, path (no query, which may carry a secret), status and
 //!   milliseconds.
 //!
@@ -19,17 +21,20 @@
 
 #[cfg(feature = "tls")]
 pub mod client;
+pub mod tailnet;
 #[cfg(feature = "tls")]
 pub mod tls;
 
 #[cfg(feature = "tls")]
 pub use tls::TlsCfg;
 
+pub use tailnet::Tailnet;
+
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-#[cfg(feature = "tls")]
+#[cfg(any(feature = "tls", test))]
 use std::net::IpAddr;
-use std::net::{Ipv4Addr, Ipv6Addr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -74,6 +79,9 @@ pub struct Config {
     pub sessions: bool,
     /// How long a session lasts (default 8 hours).
     pub session_ttl: Duration,
+    /// A second listener on the tailnet only, where Tailscale's whois says who is calling ([`tailnet`]). `None`
+    /// (the default) opens nothing. With it, `token` and `tokens` may all be empty.
+    pub tailnet: Option<Tailnet>,
     /// Largest body accepted, in bytes (default 64 KiB).
     pub max_body: usize,
     /// Most connections served at once (default 8); one more gets a 503.
@@ -93,6 +101,7 @@ impl Config {
             public: Vec::new(),
             sessions: false,
             session_ttl: Duration::from_secs(8 * 3600),
+            tailnet: None,
             max_body: 64 * 1024,
             max_connections: 8,
             timeout: Duration::from_secs(10),
@@ -120,6 +129,7 @@ impl std::fmt::Debug for Config {
             .field("ipv6", &self.ipv6)
             .field("token", &"***")
             .field("tokens", &self.tokens.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
+            .field("tailnet", &self.tailnet)
             .finish_non_exhaustive()
     }
 }
@@ -202,9 +212,27 @@ impl Response {
     }
 }
 
+/// How a request was let in, for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    /// Not at all (a 401, or the request was refused before it was judged).
+    Denied,
+    /// A bearer token.
+    Token,
+    /// A session cookie.
+    Session,
+    /// Tailscale's whois on the tailnet listener.
+    Tailscale,
+    /// A [`Config::public`] path.
+    Public,
+}
+
 /// One served request, for the app's log. Nothing secret is in it.
 #[derive(Debug, Clone)]
 pub struct LogLine {
+    /// Who was let in (`None` when nobody was) and how.
+    pub who: Option<String>,
+    pub via: Via,
     pub method: String,
     pub path: String,
     pub status: u16,
@@ -221,6 +249,8 @@ struct Shared {
     active: AtomicUsize,
     /// Signed-in browsers: the random id in the cookie → who and until when.
     sessions: Mutex<HashMap<String, (String, Instant)>>,
+    /// What the `Host` header may be on the tailnet listener: this PC's addresses and names.
+    hosts: Vec<String>,
     /// Set for a LAN bind: every connection is TLS.
     #[cfg(feature = "tls")]
     tls: Option<Arc<rustls::ServerConfig>>,
@@ -229,6 +259,7 @@ struct Shared {
 /// A running listener. Dropping it (or [`Server::stop`]) stops accepting; requests already being served finish.
 pub struct Server {
     port: u16,
+    tailnet_port: Option<u16>,
     #[cfg(feature = "tls")]
     fingerprint: Option<tls::Fingerprint>,
     stop: Arc<AtomicBool>,
@@ -242,7 +273,7 @@ impl Server {
         handler: impl Fn(Request) -> Response + Send + Sync + 'static,
         log: impl Fn(&LogLine) + Send + Sync + 'static,
     ) -> io::Result<Server> {
-        if cfg.token.is_empty() && cfg.tokens.is_empty() {
+        if cfg.token.is_empty() && cfg.tokens.is_empty() && cfg.tailnet.is_none() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the token is empty"));
         }
         if cfg.tokens.iter().any(|(name, token)| name.is_empty() || token.is_empty()) {
@@ -272,6 +303,31 @@ impl Server {
                 identity = Some(id);
             }
         }
+        let mut tail_listeners = Vec::new();
+        let mut tailnet_port = None;
+        let mut hosts = Vec::new();
+        if let Some(t) = &cfg.tailnet {
+            if t.logins.is_empty() && t.tags.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "the tailnet listener has no login or tag to let in"));
+            }
+            if t.logins.iter().chain(&t.tags).any(|(k, w)| k.is_empty() || w.is_empty()) {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "a tailnet login or tag has an empty name"));
+            }
+            let status = t.whois.status();
+            let addrs = tailnet::bind_addrs(t, &status)?;
+            hosts = t.hosts.clone();
+            hosts.extend(addrs.iter().map(|a| a.to_string()));
+            if let Ok(st) = &status {
+                hosts.extend(st.names.iter().cloned());
+            }
+            let mut tport = t.port;
+            for a in addrs {
+                let l = TcpListener::bind((a, tport))?;
+                tport = l.local_addr()?.port();
+                tail_listeners.push(l);
+            }
+            tailnet_port = Some(tport);
+        }
         #[cfg(feature = "tls")]
         let (fingerprint, tls_config) = match &identity {
             Some(id) => (Some(id.fingerprint()), Some(id.server_config()?)),
@@ -283,18 +339,20 @@ impl Server {
             log: Box::new(log),
             active: AtomicUsize::new(0),
             sessions: Mutex::new(HashMap::new()),
+            hosts,
             #[cfg(feature = "tls")]
             tls: tls_config,
         });
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
-        for l in listeners {
+        for (l, kind) in listeners.into_iter().map(|l| (l, Kind::Main)).chain(tail_listeners.into_iter().map(|l| (l, Kind::Tailnet))) {
             l.set_nonblocking(true)?;
             let (shared, stop) = (shared.clone(), stop.clone());
-            threads.push(std::thread::spawn(move || accept_loop(l, shared, stop)));
+            threads.push(std::thread::spawn(move || accept_loop(l, shared, stop, kind)));
         }
         Ok(Server {
             port,
+            tailnet_port,
             #[cfg(feature = "tls")]
             fingerprint,
             stop,
@@ -305,6 +363,11 @@ impl Server {
     /// The port in use (what the system picked when `Config::port` was 0).
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// The tailnet listener's port, when [`Config::tailnet`] is set.
+    pub fn tailnet_port(&self) -> Option<u16> {
+        self.tailnet_port
     }
 
     /// The certificate's fingerprint, to show the person (`tls::format`), for a LAN bind; `None` on loopback.
@@ -332,26 +395,39 @@ impl Drop for Server {
     }
 }
 
-fn accept_loop(l: TcpListener, shared: Arc<Shared>, stop: Arc<AtomicBool>) {
+/// Which listener a connection came in on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// Loopback or the LAN (TLS).
+    Main,
+    /// The tailnet: plain HTTP, whois decides who.
+    Tailnet,
+}
+
+fn accept_loop(l: TcpListener, shared: Arc<Shared>, stop: Arc<AtomicBool>, kind: Kind) {
     while !stop.load(Ordering::Relaxed) {
         match l.accept() {
             Ok((s, peer)) => {
-                if matches!(shared.cfg.bind, Bind::Loopback) && !peer.ip().is_loopback() {
+                let allowed = match kind {
+                    Kind::Main => !matches!(shared.cfg.bind, Bind::Loopback) || peer.ip().is_loopback(),
+                    Kind::Tailnet => tailnet::is_tailnet_ip(peer.ip()),
+                };
+                if !allowed {
                     continue;
                 }
                 if shared.active.fetch_add(1, Ordering::AcqRel) >= shared.cfg.max_connections {
                     shared.active.fetch_sub(1, Ordering::AcqRel);
                     // On the LAN the 503 would need a handshake first, which a slow client could stall this thread with.
                     #[cfg(feature = "tls")]
-                    if shared.tls.is_some() {
+                    if kind == Kind::Main && shared.tls.is_some() {
                         continue;
                     }
-                    let _ = respond(&mut Wire::new(s, &shared), &Response::error(503, "too many connections"));
+                    let _ = respond(&mut Wire::new(s, &shared, kind), &Response::error(503, "too many connections"));
                     continue;
                 }
                 let shared = shared.clone();
                 std::thread::spawn(move || {
-                    serve(s, &shared);
+                    serve(s, &shared, kind, peer);
                     shared.active.fetch_sub(1, Ordering::AcqRel);
                 });
             }
@@ -369,12 +445,14 @@ enum Wire {
 }
 
 impl Wire {
-    fn new(s: TcpStream, shared: &Shared) -> Wire {
+    fn new(s: TcpStream, shared: &Shared, kind: Kind) -> Wire {
         let _ = s.set_nonblocking(false);
         let _ = s.set_read_timeout(Some(shared.cfg.timeout));
         let _ = s.set_write_timeout(Some(shared.cfg.timeout));
+        #[cfg(not(feature = "tls"))]
+        let _ = kind;
         #[cfg(feature = "tls")]
-        if let Some(config) = &shared.tls {
+        if let (Kind::Main, Some(config)) = (kind, &shared.tls) {
             return match rustls::ServerConnection::new(config.clone()) {
                 Ok(c) => Wire::Tls(Box::new(rustls::StreamOwned::new(c, s))),
                 Err(_) => Wire::Plain(s),
@@ -427,25 +505,32 @@ impl Write for Wire {
     }
 }
 
-fn serve(s: TcpStream, shared: &Shared) {
+fn serve(s: TcpStream, shared: &Shared, kind: Kind, peer: SocketAddr) {
     let start = Instant::now();
-    let mut s = Wire::new(s, shared);
-    let (method, path, resp) = match read_request(&mut s, shared) {
+    let mut s = Wire::new(s, shared, kind);
+    let (who, via, method, path, resp) = match read_request(&mut s, shared, kind, peer) {
         Ok((req, auth)) => {
-            let (m, p) = (req.method.clone(), req.path.clone());
+            let (m, p, who) = (req.method.clone(), req.path.clone(), req.who.clone());
+            let via = match &auth {
+                Auth::No => Via::Denied,
+                Auth::Public => Via::Public,
+                Auth::Bearer => Via::Token,
+                Auth::Cookie(_) => Via::Session,
+                Auth::Tailnet => Via::Tailscale,
+            };
             if auth == Auth::No {
-                (m, p, Response::error(401, "unauthorized"))
+                (None, via, m, p, Response::error(401, "unauthorized"))
             } else if let (true, "/session") = (shared.cfg.sessions, p.as_str()) {
-                (m, p, session_call(shared, &req, auth))
+                (who, via, m, p, session_call(shared, &req, auth, kind))
             } else {
                 let r = catch_unwind(AssertUnwindSafe(|| (shared.handler)(req)));
-                (m, p, r.unwrap_or_else(|_| Response::error(500, "internal error")))
+                (who, via, m, p, r.unwrap_or_else(|_| Response::error(500, "internal error")))
             }
         }
-        Err(Refused { method, path, status, message }) => (method, path, Response::error(status, message)),
+        Err(Refused { method, path, status, message }) => (None, Via::Denied, method, path, Response::error(status, message)),
     };
     let _ = respond(&mut s, &resp);
-    (shared.log)(&LogLine { method, path, status: resp.status, millis: start.elapsed().as_millis() as u64 });
+    (shared.log)(&LogLine { who, via, method, path, status: resp.status, millis: start.elapsed().as_millis() as u64 });
 }
 
 struct Refused {
@@ -470,6 +555,8 @@ enum Auth {
     Bearer,
     /// A session cookie, with its id.
     Cookie(String),
+    /// Tailscale's whois, on the tailnet listener.
+    Tailnet,
 }
 
 /// The name of the token `given` is, if any. Every token is compared, so the time does not tell which one is close.
@@ -523,24 +610,25 @@ fn new_session(shared: &Shared, who: &str) -> io::Result<String> {
     Ok(id)
 }
 
-fn cookie_header(shared: &Shared, value: &str, max_age: u64) -> String {
-    #[cfg(feature = "tls")]
-    let secure = if shared.tls.is_some() { "; Secure" } else { "" };
-    #[cfg(not(feature = "tls"))]
-    let secure = {
-        let _ = shared;
-        ""
-    };
+fn cookie_header(secure: bool, value: &str, max_age: u64) -> String {
+    let secure = if secure { "; Secure" } else { "" };
     format!("{SESSION_COOKIE}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}")
 }
 
 /// `/session`: sign in (`POST`, with the bearer token), who am I (`GET`), sign out (`DELETE`).
-fn session_call(shared: &Shared, req: &Request, auth: Auth) -> Response {
+fn session_call(shared: &Shared, req: &Request, auth: Auth, kind: Kind) -> Response {
+    #[cfg(feature = "tls")]
+    let secure = kind == Kind::Main && shared.tls.is_some();
+    #[cfg(not(feature = "tls"))]
+    let secure = {
+        let _ = kind;
+        false
+    };
     let who = req.who.clone().unwrap_or_default();
     match (req.method.as_str(), auth) {
         ("POST", Auth::Bearer) => match new_session(shared, &who) {
             Ok(id) => Response::ok(serde_json::json!({ "who": who }))
-                .with_header("Set-Cookie", &cookie_header(shared, &id, shared.cfg.session_ttl.as_secs())),
+                .with_header("Set-Cookie", &cookie_header(secure, &id, shared.cfg.session_ttl.as_secs())),
             Err(_) => Response::error(500, "could not make a session"),
         },
         ("POST", _) => Response::error(401, "sign in with the bearer token"),
@@ -549,7 +637,7 @@ fn session_call(shared: &Shared, req: &Request, auth: Auth) -> Response {
             if let Ok(mut map) = shared.sessions.lock() {
                 map.remove(&id);
             }
-            Response::ok(serde_json::json!({ "ok": true })).with_header("Set-Cookie", &cookie_header(shared, "", 0))
+            Response::ok(serde_json::json!({ "ok": true })).with_header("Set-Cookie", &cookie_header(secure, "", 0))
         }
         ("DELETE", _) => Response::ok(serde_json::json!({ "ok": true })),
         _ => Response::error(405, "method not allowed"),
@@ -557,7 +645,7 @@ fn session_call(shared: &Shared, req: &Request, auth: Auth) -> Response {
 }
 
 /// Read and check one request. `Ok((request, auth))`: when `auth` is [`Auth::No`] the body was not read.
-fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, Auth), Refused> {
+fn read_request(s: &mut Wire, shared: &Shared, kind: Kind, peer: SocketAddr) -> Result<(Request, Auth), Refused> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
     let head_end = loop {
@@ -605,6 +693,23 @@ fn read_request(s: &mut Wire, shared: &Shared) -> Result<(Request, Auth), Refuse
                     return Err(named(403, "send X-Ito-Csrf: 1"));
                 }
                 (auth, who) = (Auth::Cookie(id.to_string()), Some(name));
+            }
+        }
+    }
+    if auth == Auth::No && kind == Kind::Tailnet {
+        if let Some(t) = &shared.cfg.tailnet {
+            // Failing to ask, not knowing the peer and not listing it all end the same way: no `who`, a 401.
+            let found = tailnet::whois_within(&t.whois, peer, Duration::from_secs(3)).ok().flatten().and_then(|id| t.who(&id));
+            if let Some(name) = found {
+                // The peer's address says who it is, so any page the person has open could make it call: the same
+                // two guards as a cookie, and the Host must be this PC's (a rebound name would carry another).
+                if !header("host").is_some_and(|h| tailnet::host_allowed(h, &shared.hosts)) {
+                    return Err(named(403, "host not allowed"));
+                }
+                if !matches!(method, "GET" | "HEAD" | "OPTIONS") && header("x-ito-csrf") != Some("1") {
+                    return Err(named(403, "send X-Ito-Csrf: 1"));
+                }
+                (auth, who) = (Auth::Tailnet, Some(name));
             }
         }
     }
@@ -1009,5 +1114,113 @@ mod tests {
         assert_eq!(percent_decode("a+c", true).as_deref(), Some("a c"));
         assert_eq!(percent_decode("%E3%81", false), None);
         assert_eq!(percent_decode("%4", false), None);
+    }
+
+    /// A whois that answers one fixed way; the status is the real PC's (the tests skip without tailscaled).
+    struct Fake(Option<tailnet::Identity>, bool);
+    impl tailnet::Whois for Fake {
+        fn whois(&self, _: SocketAddr) -> io::Result<Option<tailnet::Identity>> {
+            if self.1 {
+                Err(io::Error::other("tailscaled is down"))
+            } else {
+                Ok(self.0.clone())
+            }
+        }
+        fn status(&self) -> io::Result<tailnet::Status> {
+            tailnet::LocalApi::default().status()
+        }
+    }
+
+    type TailRig = (Server, IpAddr, Arc<Mutex<Vec<LogLine>>>);
+
+    fn tail_server(w: Fake, f: impl Fn(Request) -> Response + Send + Sync + 'static) -> Option<TailRig> {
+        let st = tailnet::LocalApi::default().status().ok()?;
+        let ip = *st.addrs.iter().find(|a| a.is_ipv4())?;
+        let mut t = Tailnet::new(0).login("alice@example.com", "owner").tag("tag:ha", "standby");
+        t.addrs = vec![ip];
+        t.whois = Arc::new(w);
+        let mut cfg = Config::new(0, TOKEN);
+        cfg.tailnet = Some(t);
+        cfg.timeout = Duration::from_millis(800);
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let l = lines.clone();
+        Some((Server::start(cfg, f, move |x| l.lock().unwrap().push(x.clone())).unwrap(), ip, lines))
+    }
+
+    fn tcall(ip: IpAddr, port: u16, raw: &str) -> u16 {
+        let mut s = TcpStream::connect((ip, port)).unwrap();
+        s.write_all(raw.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
+    }
+
+    fn alice() -> tailnet::Identity {
+        tailnet::Identity { login: Some("alice@example.com".into()), ..Default::default() }
+    }
+
+    #[test]
+    fn tailnet_lets_a_listed_login_in_without_a_token() {
+        let Some((srv, ip, log)) = tail_server(Fake(Some(alice()), false), |r| Response::ok(serde_json::json!({ "who": r.who }))) else {
+            return;
+        };
+        let port = srv.tailnet_port().unwrap();
+        let host = format!("Host: {ip}:{port}\r\n");
+        assert_eq!(tcall(ip, port, &format!("GET /x HTTP/1.1\r\n{host}\r\n")), 200);
+        // A change needs the CSRF header; a wrong Host is refused (DNS rebinding).
+        assert_eq!(tcall(ip, port, &format!("POST /x HTTP/1.1\r\n{host}Content-Length: 0\r\n\r\n")), 403);
+        assert_eq!(tcall(ip, port, &format!("POST /x HTTP/1.1\r\n{host}X-Ito-Csrf: 1\r\nContent-Length: 0\r\n\r\n")), 200);
+        assert_eq!(tcall(ip, port, "GET /x HTTP/1.1\r\nHost: evil.example\r\n\r\n"), 403);
+        assert_eq!(tcall(ip, port, "GET /x HTTP/1.1\r\n\r\n"), 403);
+        // The token still works, with any Host (it is not ambient).
+        assert_eq!(
+            tcall(
+                ip,
+                port,
+                &format!("POST /x HTTP/1.1\r\nHost: evil.example\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: 0\r\n\r\n")
+            ),
+            200
+        );
+        srv.stop();
+        let l = log.lock().unwrap();
+        assert_eq!((l[0].via, l[0].who.as_deref()), (Via::Tailscale, Some("owner")));
+        assert_eq!((l[1].via, l[1].status), (Via::Denied, 403));
+        assert_eq!((l[5].via, l[5].who.as_deref()), (Via::Token, Some("default")));
+    }
+
+    #[test]
+    fn tailnet_shuts_out_the_unlisted_and_the_unreachable() {
+        let bob = tailnet::Identity { login: Some("bob@example.com".into()), ..Default::default() };
+        let tagged_other = tailnet::Identity { login: None, tags: vec!["tag:other".into()], node: String::new() };
+        let cases = [Fake(None, false), Fake(Some(bob), false), Fake(Some(tagged_other), false), Fake(Some(alice()), true)];
+        for w in cases {
+            let Some((srv, ip, _)) = tail_server(w, |_| panic!("the handler must not run")) else { return };
+            let port = srv.tailnet_port().unwrap();
+            assert_eq!(tcall(ip, port, &format!("GET /x HTTP/1.1\r\nHost: {ip}\r\n\r\n")), 401);
+            srv.stop();
+        }
+    }
+
+    #[test]
+    fn tailnet_tag_gets_its_own_name_and_loopback_ignores_whois() {
+        let ha = tailnet::Identity { login: None, tags: vec!["tag:ha".into()], node: String::new() };
+        let Some((srv, ip, _)) = tail_server(Fake(Some(ha), false), |r| Response::ok(serde_json::json!({ "who": r.who }))) else { return };
+        let (tp, lp) = (srv.tailnet_port().unwrap(), srv.port());
+        assert_eq!(tcall(ip, tp, &format!("GET /x HTTP/1.1\r\nHost: {ip}\r\n\r\n")), 200);
+        // The main (loopback) listener never asks Tailscale: no token, no entry.
+        assert_eq!(call(lp, "GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n").0, 401);
+        srv.stop();
+    }
+
+    #[test]
+    fn tailnet_refuses_to_start_on_a_bad_setup() {
+        let mut cfg = Config::new(0, TOKEN);
+        cfg.tailnet = Some(Tailnet::new(0)); // nobody listed
+        assert!(Server::start(cfg, |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+        let mut t = Tailnet::new(0).login("a@b.c", "owner");
+        t.addrs = vec!["0.0.0.0".parse().unwrap()]; // not a tailnet address
+        let mut cfg = Config::new(0, TOKEN);
+        cfg.tailnet = Some(t);
+        assert!(Server::start(cfg, |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
     }
 }
