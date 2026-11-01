@@ -1,6 +1,6 @@
 [package]
 name = "ito-mail"
-description = "Look at a mailbox over IMAP for new mail, read-only: sender, subject (RFC 2047 decoded) and date of each message that came since the last look"
+description = "Look at a mailbox over IMAP for new mail, read-only (sender, subject, date), and compose an outgoing message as RFC 5322 bytes (RFC 2047 words, base64 body, multipart with attachments)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,4 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 encoding_rs = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+getrandom = "0.4"

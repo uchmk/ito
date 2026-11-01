@@ -14,6 +14,9 @@
 //! Subjects and names are decoded from RFC 2047 (`=?UTF-8?B?…?=`, `=?ISO-2022-JP?B?…?=`, `Q` too).
 //! Folder names are sent as they are (ASCII; modified UTF-7 is not encoded).
 
+mod compose;
+pub use compose::{compose, Attachment, Outgoing};
+
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};

@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.180.0] - 2026-11-01
+
+### 追加
+
+- `ito-mail`: 送るメールを RFC 5322 の生のバイトに組む `compose(&Outgoing, SystemTime) -> Vec<u8>`（`Outgoing`・`Attachment`）。CRLF・`MIME-Version`・`Date`（UTC）・From のドメインと乱数の `Message-ID`・`In-Reply-To`/`References`。件名と表示名は RFC 2047（`=?UTF-8?B?…?=`、1 語 75 文字以内で折る）、`"` や `,` のある名前は引用符で包む。本文は UTF-8 の base64（76 文字ごと）、HTML があれば `multipart/alternative`、添付があれば `multipart/mixed`（ファイル名は RFC 2231 の `filename*` と RFC 2047 の `name=` の両方、`mime` が `None` なら拡張子から）。境界は乱数。ヘッダーに CR/LF は入らない。読み返す検査つき（fumi の依頼）。
+
+### 使う側がやること
+
+- 送るなら `ito_mail::compose` の結果を SMTP か Gmail `messages/send` の `raw`（base64url）へ。`Outgoing` は `..Default::default()` で埋められる。
+
 ## [0.179.1] - 2026-11-01
 
 ### 修正
