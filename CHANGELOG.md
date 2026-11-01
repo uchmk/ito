@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.200.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs::Mark::Desktop`（78 個に）。画面と台の印（Windows の PC。ラックの `Server` に対して）。koyomi の winrm の部品の棚用。
+
+### 使う側がやること
+
+- `Mark` を網羅して `match` しているなら、`Desktop` の腕を足す。
+
 ## [0.199.0] - 2026-11-01
 
 ### 追加

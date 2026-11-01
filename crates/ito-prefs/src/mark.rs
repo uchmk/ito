@@ -161,11 +161,13 @@ pub enum Mark {
     Numbers,
     /// Three lines, the first led by a checked box: a task list.
     Tasks,
+    /// A screen on a stand: a PC (a Windows machine you reach, as against the rack of `Server`).
+    Desktop,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 77] = [
+    pub const ALL: [Mark; 78] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -243,6 +245,7 @@ impl Mark {
         Mark::Bullets,
         Mark::Numbers,
         Mark::Tasks,
+        Mark::Desktop,
     ];
 }
 
@@ -654,6 +657,11 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             seg((0.0, 0.5), (6.5, 0.5));
             seg((-6.0, 5.0), (-3.0, 5.0));
             seg((0.0, 5.0), (6.5, 5.0));
+        }
+        Mark::Desktop => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -6.0), at(6.5, 2.5)), 1.5 * k, line, StrokeKind::Middle);
+            seg((0.0, 2.5), (0.0, 5.5));
+            seg((-3.5, 6.0), (3.5, 6.0));
         }
         Mark::Lock => {
             p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);
