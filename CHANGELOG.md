@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.170.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `Mark` に `Save`・`Undo`・`Redo`・`Arrange`・`ArrowDown`・`ArrowRight`・`Settings`・`Terminal`・`Flow`・`Branch`・`Merge`・`File`・`Person`・`Folder`・`Globe`（計 61。koyomi の #117）。
+- `ito-prefs`: `IconButton::drag()`。クリックに加えてドラッグも受ける（部品の棚から引き出す用）。
+
+### 使う側がやること
+
+- `match` で `Mark` を網羅している所があれば、新しい 15 個を足す。
+
 ## [0.169.0] - 2026-11-01
 
 ### 追加

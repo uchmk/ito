@@ -101,11 +101,41 @@ pub enum Mark {
     Strike,
     /// An "A" over a short line: text formatting.
     Format,
+    /// A floppy disk.
+    Save,
+    /// A curved arrow turning back (counter-clockwise).
+    Undo,
+    /// A curved arrow turning on (clockwise).
+    Redo,
+    /// Boxes on a grid: tidy a layout.
+    Arrange,
+    /// A plain arrow down.
+    ArrowDown,
+    /// A plain arrow right.
+    ArrowRight,
+    /// A gear.
+    Settings,
+    /// A box with a prompt and a cursor.
+    Terminal,
+    /// Three nodes joined by lines.
+    Flow,
+    /// One line forking into two.
+    Branch,
+    /// Two lines joining into one.
+    Merge,
+    /// A page with a folded corner.
+    File,
+    /// Head and shoulders.
+    Person,
+    /// A folder.
+    Folder,
+    /// A globe.
+    Globe,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 46] = [
+    pub const ALL: [Mark; 61] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -152,6 +182,21 @@ impl Mark {
         Mark::Underline,
         Mark::Strike,
         Mark::Format,
+        Mark::Save,
+        Mark::Undo,
+        Mark::Redo,
+        Mark::Arrange,
+        Mark::ArrowDown,
+        Mark::ArrowRight,
+        Mark::Settings,
+        Mark::Terminal,
+        Mark::Flow,
+        Mark::Branch,
+        Mark::Merge,
+        Mark::File,
+        Mark::Person,
+        Mark::Folder,
+        Mark::Globe,
     ];
 }
 
@@ -407,6 +452,85 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             p.add(path(pts(&[(-4.5, 5.0), (0.0, -5.5), (4.5, 5.0)])));
             seg((-2.5, 1.5), (2.5, 1.5));
         }
+        Mark::Save => {
+            p.add(closed(pts(&[(-6.0, -6.0), (3.5, -6.0), (6.0, -3.5), (6.0, 6.0), (-6.0, 6.0)])));
+            p.add(path(pts(&[(-3.0, -6.0), (-3.0, -2.5), (2.5, -2.5), (2.5, -6.0)])));
+            p.add(path(pts(&[(-3.5, 6.0), (-3.5, 1.5), (3.5, 1.5), (3.5, 6.0)])));
+        }
+        Mark::Undo | Mark::Redo => {
+            let s = if mark == Mark::Redo { -1.0 } else { 1.0 };
+            let mut v = pts(&[(s * -5.5, -3.0), (s * 1.0, -3.0)]);
+            v.extend((0..=16).map(|i| -PI / 2.0 + PI * i as f32 / 16.0).map(|a| at(s * (1.0 + 4.5 * a.cos()), 1.5 + 4.5 * a.sin())));
+            v.push(at(s * -2.0, 6.0));
+            p.add(path(v));
+            p.add(path(pts(&[(s * -3.0, -5.5), (s * -5.5, -3.0), (s * -3.0, -0.5)])));
+        }
+        Mark::Arrange => {
+            for (x, y) in [(-6.0, -6.0), (1.0, -6.0), (-6.0, 1.0), (1.0, 1.0)] {
+                p.rect_stroke(Rect::from_min_max(at(x, y), at(x + 5.0, y + 5.0)), 1.0 * k, line, StrokeKind::Middle);
+            }
+        }
+        Mark::ArrowDown => {
+            seg((0.0, -6.0), (0.0, 6.0));
+            p.add(path(pts(&[(-4.0, 2.0), (0.0, 6.0), (4.0, 2.0)])));
+        }
+        Mark::ArrowRight => {
+            seg((-6.0, 0.0), (6.0, 0.0));
+            p.add(path(pts(&[(2.0, -4.0), (6.0, 0.0), (2.0, 4.0)])));
+        }
+        Mark::Settings => {
+            let mut v = Vec::new();
+            for i in 0..8 {
+                let a = i as f32 * PI / 4.0;
+                for (r, d) in [(4.8, -0.38), (6.6, -0.2), (6.6, 0.2), (4.8, 0.38)] {
+                    v.push(at(r * (a + d).cos(), r * (a + d).sin()));
+                }
+            }
+            p.add(closed(v));
+            p.circle_stroke(m, 2.2 * k, line);
+        }
+        Mark::Terminal => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -5.0), at(6.5, 5.0)), 1.5 * k, line, StrokeKind::Middle);
+            p.add(path(pts(&[(-3.5, -2.0), (-1.0, 0.0), (-3.5, 2.0)])));
+            seg((1.0, 2.2), (3.5, 2.2));
+        }
+        Mark::Flow => {
+            for (x, y) in [(0.0, -4.5), (-4.5, 4.5), (4.5, 4.5)] {
+                p.circle_stroke(at(x, y), 1.7 * k, line);
+            }
+            seg((-0.8, -3.0), (-3.7, 2.8));
+            seg((0.8, -3.0), (3.7, 2.8));
+        }
+        Mark::Branch => {
+            seg((0.0, -6.0), (0.0, 0.0));
+            p.add(path(pts(&[(-4.0, 4.0), (0.0, 0.0), (4.0, 4.0)])));
+            dot(-4.0, 4.5, 1.3);
+            dot(4.0, 4.5, 1.3);
+        }
+        Mark::Merge => {
+            seg((0.0, 0.0), (0.0, 6.0));
+            p.add(path(pts(&[(-4.0, -4.0), (0.0, 0.0), (4.0, -4.0)])));
+            dot(-4.0, -4.5, 1.3);
+            dot(4.0, -4.5, 1.3);
+        }
+        Mark::File => {
+            p.add(closed(pts(&[(-4.5, -6.5), (1.5, -6.5), (5.0, -3.0), (5.0, 6.5), (-4.5, 6.5)])));
+            p.add(path(pts(&[(1.5, -6.5), (1.5, -3.0), (5.0, -3.0)])));
+        }
+        Mark::Person => {
+            p.circle_stroke(at(0.0, -2.5), 3.0 * k, line);
+            let mut v = arc(0.0, 6.5, 5.5, PI, 2.0 * PI);
+            v.push(at(-5.5, 6.5));
+            p.add(path(v));
+        }
+        Mark::Folder => {
+            p.add(closed(pts(&[(-6.5, -4.5), (-2.0, -4.5), (-0.5, -2.5), (6.5, -2.5), (6.5, 5.5), (-6.5, 5.5)])));
+        }
+        Mark::Globe => {
+            p.circle_stroke(m, 6.0 * k, line);
+            p.add(path((0..=24).map(|i| 2.0 * PI * i as f32 / 24.0).map(|a| at(2.8 * a.cos(), 6.0 * a.sin())).collect()));
+            seg((-6.0, 0.0), (6.0, 0.0));
+        }
     }
 }
 
@@ -441,11 +565,12 @@ pub struct IconButton<'a> {
     key: Option<&'a str>,
     wide: bool,
     mark_last: bool,
+    drag: bool,
 }
 
 impl<'a> IconButton<'a> {
     pub fn new(mark: Mark, words: &'a str) -> Self {
-        IconButton { mark, words, said: words, tone: Tone::Plain, key: None, wide: false, mark_last: false }
+        IconButton { mark, words, said: words, tone: Tone::Plain, key: None, wide: false, mark_last: false, drag: false }
     }
 
     /// The spoken name, and the tip when it differs from the words.
@@ -478,6 +603,12 @@ impl<'a> IconButton<'a> {
         self
     }
 
+    /// Also sense drags (a part dragged out of a shelf, or clicked to add).
+    pub fn drag(mut self) -> Self {
+        self.drag = true;
+        self
+    }
+
     pub fn show(self, ui: &mut Ui) -> Response {
         let c = ito_theme::colors();
         let font = egui::TextStyle::Body.resolve(ui.style());
@@ -497,7 +628,7 @@ impl<'a> IconButton<'a> {
             }
         }
         let size = Vec2::new(w, ui.spacing().interact_size.y.max(z(ui, 26.0)));
-        let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+        let (rect, r) = ui.allocate_exact_size(size, if self.drag { Sense::click_and_drag() } else { Sense::click() });
         let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
         let r = if self.said != self.words { r.on_hover_text(self.said) } else { r };
         ito_a11y::say(&r, Said::Button, self.said);
