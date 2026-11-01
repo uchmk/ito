@@ -128,12 +128,13 @@ pub struct InputField<'a> {
     mono: bool,
     width: Option<f32>,
     error: bool,
+    rows: usize,
 }
 
 impl<'a> InputField<'a> {
     /// `id` tells this field from another (and is the name a screen reader hears until [`name`](Self::name) is set).
     pub fn new(id: &'a str) -> Self {
-        InputField { id, name: id, mark: None, unit: "", hint: "", mono: false, width: None, error: false }
+        InputField { id, name: id, mark: None, unit: "", hint: "", mono: false, width: None, error: false, rows: 1 }
     }
 
     /// The name a screen reader hears (and a `--keys` script clicks by): the visible label of the field.
@@ -174,6 +175,12 @@ impl<'a> InputField<'a> {
         self
     }
 
+    /// More than one row makes it a multiline prose field in the same frame (no gutter; see [`CodeBox`] for code).
+    pub fn rows(mut self, rows: usize) -> Self {
+        self.rows = rows.max(1);
+        self
+    }
+
     /// The field; its response is the text edit's (`changed()`, `lost_focus()`).
     pub fn show(self, ui: &mut Ui, text: &mut String) -> Response {
         let c = ito_theme::colors();
@@ -194,9 +201,10 @@ impl<'a> InputField<'a> {
                     mark(ui.painter(), r, m, c.dim);
                 }
                 let room = (ui.available_width() - unit_w).max(20.0);
+                let edit =
+                    if self.rows > 1 { egui::TextEdit::multiline(text).desired_rows(self.rows) } else { egui::TextEdit::singleline(text) };
                 let r = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .id(id)
+                    edit.id(id)
                         .frame(egui::Frame::NONE)
                         .hint_text(RichText::new(self.hint).color(mix(c.bg, c.dim, 0.6)))
                         .font(FontId::new(size, family))
@@ -379,6 +387,7 @@ mod tests {
                     form_label(ui, look(), "Timeout", need, "per line", &FormWords::ja());
                 }
                 InputField::new("t").name("Timeout").mark(Mark::Lock).unit("s").hint("30").mono().width(200.0).error(true).show(ui, &mut a);
+                InputField::new("n").rows(3).show(ui, &mut b.clone());
                 let r = CodeBox::new("c").title("run").aside("per line").rows(3).show(ui, &mut b);
                 assert!(r.rect.height() > 0.0);
             });

@@ -135,11 +135,23 @@ pub enum Mark {
     CalendarCheck,
     /// A padlock.
     Lock,
+    /// A square: stop for good (a kill), not a pause.
+    Stop,
+    /// A triangle with a bar after it: skip this one.
+    Skip,
+    /// A printer.
+    Print,
+    /// A circling arrow round a play triangle: run again (not a reload).
+    Rerun,
+    /// Two sheets side by side.
+    Compare,
+    /// An arrow from outside into an open box: bring in (the opposite of a download).
+    Import,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 64] = [
+    pub const ALL: [Mark; 70] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -204,6 +216,12 @@ impl Mark {
         Mark::CalendarOff,
         Mark::CalendarCheck,
         Mark::Lock,
+        Mark::Stop,
+        Mark::Skip,
+        Mark::Print,
+        Mark::Rerun,
+        Mark::Compare,
+        Mark::Import,
     ];
 }
 
@@ -544,6 +562,32 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             } else {
                 p.add(path(vec![at(-2.5, 3.0), at(-0.8, 4.8), at(2.6, 1.0)]));
             }
+        }
+        Mark::Stop => {
+            p.rect_stroke(Rect::from_min_max(at(-4.5, -4.5), at(4.5, 4.5)), 1.5 * k, line, StrokeKind::Middle);
+        }
+        Mark::Skip => {
+            p.add(Shape::convex_polygon(vec![at(-5.0, -5.0), at(2.0, 0.0), at(-5.0, 5.0)], Color32::TRANSPARENT, line));
+            seg((5.5, -5.0), (5.5, 5.0));
+        }
+        Mark::Print => {
+            p.add(closed(pts(&[(-3.5, -2.0), (-3.5, -6.5), (3.5, -6.5), (3.5, -2.0)])));
+            p.add(closed(pts(&[(-3.5, 1.0), (-6.5, 1.0), (-6.5, -2.0), (6.5, -2.0), (6.5, 1.0), (3.5, 1.0)])));
+            p.add(closed(pts(&[(-3.5, 0.0), (3.5, 0.0), (3.5, 6.5), (-3.5, 6.5)])));
+        }
+        Mark::Rerun => {
+            p.add(path(arc(0.0, 0.0, 5.5, 0.15 * PI, 1.7 * PI)));
+            p.add(path(pts(&[(1.2, -4.3), (4.0, -4.0), (3.6, -6.4)])));
+            p.add(Shape::convex_polygon(vec![at(-1.5, -2.5), at(2.5, 0.0), at(-1.5, 2.5)], Color32::TRANSPARENT, line));
+        }
+        Mark::Compare => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -5.5), at(-0.8, 5.5)), 1.5 * k, line, StrokeKind::Middle);
+            p.rect_stroke(Rect::from_min_max(at(0.8, -5.5), at(6.5, 5.5)), 1.5 * k, line, StrokeKind::Middle);
+        }
+        Mark::Import => {
+            p.add(path(pts(&[(-1.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-1.0, 6.0)])));
+            seg((-6.5, 0.0), (2.0, 0.0));
+            p.add(path(pts(&[(-1.0, -3.0), (2.0, 0.0), (-1.0, 3.0)])));
         }
         Mark::Lock => {
             p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);

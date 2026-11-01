@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.178.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 印を 6 つ（#120、koyomi の依頼）: `Mark::Stop`（四角。止める・強制終了）、`Skip`（三角と棒。飛ばす）、`Print`（プリンタ）、`Rerun`（三角を囲む回る矢印。`Refresh` は読み直し）、`Compare`（並んだ 2 枚）、`Import`（箱へ入る矢印。`Download` の逆）。`Mark::ALL` は 70。
+- `ito-prefs`: `InputField::rows(n)`。2 以上なら同じ枠・輪のまま複数行の文章の欄（行番号なし。コードは `CodeBox`）。
+
+### 使う側がやること
+
+- `Mark` を網羅して match しているアプリは 6 つの腕を足す。
+
 ## [0.177.0] - 2026-11-01
 
 ### 追加
