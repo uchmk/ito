@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.178.1] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `emoji_picker_open(ctx, id) -> bool`。ピッカーが開いているか。アプリの Esc の処理より先に聞けば、ピッカーの Esc でカードごと閉じずに済む（fumi の依頼）。
+
+### 修正
+
+- `ito-prefs`: `emoji_picker` が、呼ばれなかったフレームをまたぐと閉じる。開いたままカードが消えても、次に出したときに開いた状態で出ない。
+
 ## [0.178.0] - 2026-11-01
 
 ### 追加

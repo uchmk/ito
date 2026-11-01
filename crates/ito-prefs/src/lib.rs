@@ -31,7 +31,7 @@ mod form;
 pub use chrono::NaiveDate;
 pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 pub use date::{format_date, month_grid, month_picker, parse_date, shift_months, DateField, DateResponse, DateWords, DayLook, RangeField};
-pub use emoji::{emoji_picker, EmojiWords, CATEGORIES as EMOJI_CATEGORIES};
+pub use emoji::{emoji_picker, emoji_picker_open, EmojiWords, CATEGORIES as EMOJI_CATEGORIES};
 pub use form::{fieldset, form_label, CodeBox, FormWords, InputField, Need};
 mod parts;
 pub use parts::{attachment, avatar, empty_state, notice, pill, AttachmentResponse};

@@ -68,6 +68,14 @@ pub const CATEGORIES: [&[&str]; 5] = [
 struct Pop {
     open: bool,
     tab: usize,
+    /// The last frame the picker was called in: a gap means its card went away, so it is shut.
+    seen: u64,
+}
+
+/// Whether the picker `id` is open: ask before the app's own Esc handling, which would otherwise close the card the
+/// picker is in (the picker takes its Esc only when it is drawn).
+pub fn emoji_picker_open(ctx: &Context, id: &str) -> bool {
+    ctx.data(|d| d.get_temp::<Pop>(Id::new(("ito-emoji", id)))).is_some_and(|p| p.open)
 }
 
 /// The emoji picker for `anchor`, the app's button. `id` tells this picker from another. The emoji picked this frame, if any.
@@ -75,6 +83,11 @@ pub fn emoji_picker(ui: &mut Ui, l: Look, id: &str, anchor: &Response, words: &E
     let ctx = ui.ctx().clone();
     let key = Id::new(("ito-emoji", id));
     let mut st: Pop = ctx.data_mut(|d| d.get_temp(key)).unwrap_or_default();
+    let frame = ctx.cumulative_frame_nr();
+    if st.open && frame > st.seen + 1 {
+        st.open = false;
+    }
+    st.seen = frame;
     if anchor.clicked() {
         st.open = !st.open;
     }
@@ -189,7 +202,7 @@ mod tests {
             out.textures_delta.clear();
             got
         };
-        let open = || ctx.data(|d| d.get_temp::<Pop>(Id::new(("ito-emoji", "t")))).is_some_and(|p| p.open);
+        let open = || emoji_picker_open(&ctx, "t");
         frame(vec![]);
         for e in click(button.center()) {
             frame(vec![e]);
@@ -219,7 +232,7 @@ mod tests {
             });
             out.textures_delta.clear();
         };
-        let open = || ctx.data(|d| d.get_temp::<Pop>(Id::new(("ito-emoji", "t")))).is_some_and(|p| p.open);
+        let open = || emoji_picker_open(&ctx, "t");
         frame(vec![]);
         for e in click(button.center()) {
             frame(vec![e]);
