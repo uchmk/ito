@@ -3,9 +3,10 @@
 //! The marks are strokes, not font glyphs, so they follow every theme and high contrast; the colours are the theme's
 //! (`raised` / `border` / `hover` / `border_strong` / `fg` / `dim`, the focus ring `run`).
 
-use crate::{focus_ring, take_keys, z};
+use crate::{focus_ring, take_keys, z, Tone};
 use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use ito_a11y::Role as Said;
+use ito_theme::mix;
 use std::f32::consts::PI;
 
 /// A mark. Each is drawn in a 14 x 14 box, scaled to the rect it is given.
@@ -32,11 +33,65 @@ pub enum Mark {
     Refresh,
     /// Two sheets, one over the other.
     Copy,
+    /// A tray (a mailbox's inbox).
+    Inbox,
+    /// A five-point star, outlined.
+    Star,
+    /// A five-point star, filled.
+    StarFilled,
+    /// A flag on a pole.
+    Flag,
+    /// A clock face (snoozed).
+    Clock,
+    /// Gmail's importance marker: a tag with a notch.
+    Important,
+    /// A paper plane (sent).
+    Send,
+    /// A calendar page (scheduled).
+    Calendar,
+    /// A pencil (drafts).
+    Pencil,
+    /// An envelope (all mail).
+    Mail,
+    /// A box with a lid (archive).
+    Archive,
+    /// A triangle with "!" (spam, a warning).
+    Warning,
+    /// A bin.
+    Trash,
+    /// A tag with a hole (a label).
+    Label,
+    /// An arrow turning back.
+    Reply,
+    /// Two arrows turning back.
+    ReplyAll,
+    /// An arrow turning on.
+    Forward,
+    /// A paper clip (an attachment).
+    Paperclip,
+    /// Two chain links.
+    Link,
+    /// Three dots.
+    More,
+    /// Three bars, shorter and shorter.
+    Sort,
+    /// A tick.
+    Check,
+    ChevronDown,
+    ChevronUp,
+    /// A circle with an "i".
+    Info,
+    /// A bell.
+    Bell,
+    /// A bold "B".
+    Bold,
+    /// A slanted "I".
+    Italic,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 11] = [
+    pub const ALL: [Mark; 39] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -48,6 +103,34 @@ impl Mark {
         Mark::Close,
         Mark::Refresh,
         Mark::Copy,
+        Mark::Inbox,
+        Mark::Star,
+        Mark::StarFilled,
+        Mark::Flag,
+        Mark::Clock,
+        Mark::Important,
+        Mark::Send,
+        Mark::Calendar,
+        Mark::Pencil,
+        Mark::Mail,
+        Mark::Archive,
+        Mark::Warning,
+        Mark::Trash,
+        Mark::Label,
+        Mark::Reply,
+        Mark::ReplyAll,
+        Mark::Forward,
+        Mark::Paperclip,
+        Mark::Link,
+        Mark::More,
+        Mark::Sort,
+        Mark::Check,
+        Mark::ChevronDown,
+        Mark::ChevronUp,
+        Mark::Info,
+        Mark::Bell,
+        Mark::Bold,
+        Mark::Italic,
     ];
 }
 
@@ -61,6 +144,13 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
     let at = |x: f32, y: f32| m + Vec2::new(x, y) * k;
     let line = Stroke::new(1.5 * k, colour);
     let path = |pts: Vec<Pos2>| Shape::line(pts, line);
+    let closed = |pts: Vec<Pos2>| Shape::closed_line(pts, line);
+    let pts = |v: &[(f32, f32)]| -> Vec<Pos2> { v.iter().map(|&(x, y)| at(x, y)).collect() };
+    let arc = |cx: f32, cy: f32, r: f32, from: f32, to: f32| -> Vec<Pos2> {
+        (0..=16).map(|i| from + (to - from) * i as f32 / 16.0).map(|a| at(cx + r * a.cos(), cy + r * a.sin())).collect()
+    };
+    let seg = |a: (f32, f32), b: (f32, f32)| p.line_segment([at(a.0, a.1), at(b.0, b.1)], line);
+    let dot = |x: f32, y: f32, r: f32| p.circle_filled(at(x, y), r * k, colour);
     match mark {
         Mark::Search => {
             let o = at(-1.5, -1.5);
@@ -108,52 +198,296 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             p.add(path(vec![at(-2.0, 2.0), at(-6.0, 2.0), at(-6.0, -6.0), at(2.0, -6.0), at(2.0, -2.0)]));
             p.rect_stroke(Rect::from_min_max(at(-2.0, -2.0), at(6.0, 6.0)), 1.5 * k, line, StrokeKind::Middle);
         }
+        Mark::Inbox => {
+            p.add(closed(pts(&[(-6.0, 0.5), (-4.0, -5.0), (4.0, -5.0), (6.0, 0.5), (6.0, 5.5), (-6.0, 5.5)])));
+            p.add(path(pts(&[(-6.0, 0.5), (-2.5, 0.5), (-1.5, 2.5), (1.5, 2.5), (2.5, 0.5), (6.0, 0.5)])));
+        }
+        Mark::Star | Mark::StarFilled => {
+            let star: Vec<Pos2> = (0..10)
+                .map(|i| {
+                    let (r, a) = (if i % 2 == 0 { 6.8 } else { 2.9 }, -PI / 2.0 + i as f32 * PI / 5.0);
+                    at(r * a.cos(), r * a.sin() + 0.5)
+                })
+                .collect();
+            if mark == Mark::StarFilled {
+                // A star is seen whole from its middle: a fan of triangles fills it.
+                for i in 0..10 {
+                    p.add(Shape::convex_polygon(vec![at(0.0, 0.5), star[i], star[(i + 1) % 10]], colour, Stroke::NONE));
+                }
+            }
+            p.add(closed(star));
+        }
+        Mark::Flag => {
+            seg((-4.5, -6.5), (-4.5, 6.5));
+            p.add(path(pts(&[(-4.5, -5.5), (5.5, -5.5), (3.0, -2.5), (5.5, 0.5), (-4.5, 0.5)])));
+        }
+        Mark::Clock => {
+            p.circle_stroke(m, 6.0 * k, line);
+            p.add(path(pts(&[(0.0, -3.0), (0.0, 0.0), (3.0, 1.5)])));
+        }
+        Mark::Important => {
+            p.add(closed(pts(&[(-6.5, -4.5), (2.0, -4.5), (6.5, 0.0), (2.0, 4.5), (-6.5, 4.5), (-3.5, 0.0)])));
+        }
+        Mark::Send => {
+            p.add(closed(pts(&[(-6.0, -5.5), (6.5, 0.0), (-6.0, 5.5), (-4.0, 0.0)])));
+            seg((-4.0, 0.0), (1.5, 0.0));
+        }
+        Mark::Calendar => {
+            p.rect_stroke(Rect::from_min_max(at(-6.0, -4.5), at(6.0, 6.0)), 1.5 * k, line, StrokeKind::Middle);
+            seg((-6.0, -1.0), (6.0, -1.0));
+            seg((-3.0, -6.5), (-3.0, -3.0));
+            seg((3.0, -6.5), (3.0, -3.0));
+        }
+        Mark::Pencil => {
+            p.add(closed(pts(&[(-6.0, 6.0), (-5.0, 2.0), (2.0, -5.0), (5.0, -2.0), (-2.0, 5.0)])));
+            seg((-1.0, -2.0), (2.0, 1.0));
+        }
+        Mark::Mail => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -4.5), at(6.5, 4.5)), 1.5 * k, line, StrokeKind::Middle);
+            p.add(path(pts(&[(-6.0, -4.0), (0.0, 1.0), (6.0, -4.0)])));
+        }
+        Mark::Archive => {
+            p.rect_stroke(Rect::from_min_max(at(-6.5, -5.5), at(6.5, -2.0)), 1.0 * k, line, StrokeKind::Middle);
+            p.add(path(pts(&[(-5.5, -2.0), (-5.5, 5.5), (5.5, 5.5), (5.5, -2.0)])));
+            seg((-2.0, 1.0), (2.0, 1.0));
+        }
+        Mark::Warning => {
+            p.add(closed(pts(&[(0.0, -6.0), (6.5, 5.5), (-6.5, 5.5)])));
+            seg((0.0, -1.5), (0.0, 1.5));
+            dot(0.0, 3.5, 0.9);
+        }
+        Mark::Trash => {
+            seg((-6.0, -3.5), (6.0, -3.5));
+            p.add(path(pts(&[(-2.0, -3.5), (-2.0, -5.5), (2.0, -5.5), (2.0, -3.5)])));
+            p.add(path(pts(&[(-4.5, -3.5), (-3.8, 6.0), (3.8, 6.0), (4.5, -3.5)])));
+            seg((-1.5, -0.5), (-1.5, 3.5));
+            seg((1.5, -0.5), (1.5, 3.5));
+        }
+        Mark::Label => {
+            p.add(closed(pts(&[(-6.5, -4.0), (1.5, -4.0), (6.5, 0.0), (1.5, 4.0), (-6.5, 4.0)])));
+            dot(-3.5, 0.0, 1.1);
+        }
+        Mark::Reply | Mark::ReplyAll | Mark::Forward => {
+            // The arrow turns back to the left; Forward is the same turned about.
+            let s = if mark == Mark::Forward { -1.0 } else { 1.0 };
+            let head = |dx: f32| path(pts(&[(s * (-1.0 + dx), -4.5), (s * (-5.0 + dx), -0.5), (s * (-1.0 + dx), 3.5)]));
+            let dx = if mark == Mark::ReplyAll { 1.5 } else { 0.0 };
+            p.add(head(dx));
+            if mark == Mark::ReplyAll {
+                p.add(head(-2.0));
+            }
+            p.add(path(pts(&[(s * (-4.5 + dx), -0.5), (s * (1.0 + dx), -0.5), (s * (4.5 + dx), 1.5), (s * (5.0 + dx), 5.5)])));
+        }
+        Mark::Paperclip => {
+            let mut v = pts(&[(0.0, 2.5), (0.0, -3.0)]);
+            v.extend(arc(1.5, -3.0, 1.5, PI, 2.0 * PI));
+            v.extend(pts(&[(3.0, -3.0), (3.0, 3.5)]));
+            v.extend(arc(0.0, 3.5, 3.0, 0.0, PI));
+            v.extend(pts(&[(-3.0, 3.5), (-3.0, -3.8)]));
+            v.extend(arc(0.0, -3.8, 3.0, PI, 1.5 * PI));
+            p.add(path(v));
+        }
+        Mark::Link => {
+            // Two open links turned up to the right, with a bar across.
+            let r = |x: f32, y: f32| at((x + y) * std::f32::consts::FRAC_1_SQRT_2, (y - x) * std::f32::consts::FRAC_1_SQRT_2);
+            for sg in [1.0_f32, -1.0] {
+                let mut v = vec![r(-sg, -2.5)];
+                v.extend((0..=12).map(|i| 1.5 * PI - PI * i as f32 / 12.0).map(|a| r(sg * (-3.5 + 2.5 * a.cos()), 2.5 * a.sin())));
+                v.push(r(-sg, 2.5));
+                p.add(path(v));
+            }
+            p.line_segment([r(-1.5, 0.0), r(1.5, 0.0)], line);
+        }
+        Mark::More => {
+            for x in [-4.5, 0.0, 4.5] {
+                dot(x, 0.0, 1.3);
+            }
+        }
+        Mark::Sort => {
+            seg((-6.0, -4.0), (6.0, -4.0));
+            seg((-6.0, 0.0), (3.0, 0.0));
+            seg((-6.0, 4.0), (0.0, 4.0));
+        }
+        Mark::Check => {
+            p.add(path(pts(&[(-5.0, 0.5), (-1.5, 4.0), (5.5, -4.0)])));
+        }
+        Mark::ChevronDown | Mark::ChevronUp => {
+            let d = if mark == Mark::ChevronDown { 1.0 } else { -1.0 };
+            p.add(path(pts(&[(-4.5, -2.5 * d), (0.0, 2.5 * d), (4.5, -2.5 * d)])));
+        }
+        Mark::Info => {
+            p.circle_stroke(m, 6.0 * k, line);
+            seg((0.0, -0.5), (0.0, 3.5));
+            dot(0.0, -3.0, 0.9);
+        }
+        Mark::Bell => {
+            let mut v = arc(0.0, -1.0, 4.5, PI, 2.0 * PI);
+            v.extend(pts(&[(4.5, 3.0), (6.0, 4.5), (-6.0, 4.5), (-4.5, 3.0)]));
+            v.push(at(-4.5, -1.0));
+            p.add(path(v));
+            p.add(path(arc(0.0, 5.5, 1.5, 0.0, PI)));
+            seg((0.0, -6.0), (0.0, -5.5));
+        }
+        Mark::Bold => {
+            let heavy = Stroke::new(2.0 * k, colour);
+            p.line_segment([at(-3.0, -5.5), at(-3.0, 5.5)], heavy);
+            p.add(Shape::line(pts(&[(-3.0, -5.0), (1.5, -5.0), (3.5, -3.5), (3.5, -2.2), (1.5, -0.5), (-3.0, -0.5)]), heavy));
+            p.add(Shape::line(pts(&[(-3.0, -0.5), (2.0, -0.5), (4.5, 1.5), (4.5, 3.2), (2.0, 5.0), (-3.0, 5.0)]), heavy));
+        }
+        Mark::Italic => {
+            seg((-1.0, -5.0), (4.0, -5.0));
+            seg((-4.0, 5.0), (1.0, 5.0));
+            seg((2.5, -5.0), (-1.5, 5.0));
+        }
+    }
+}
+
+/// The fill, edge, mark and words of an [`IconButton`] of `tone`, hot (under the pointer or with the keys) or not.
+pub(crate) fn tone_look(c: &ito_theme::Colors, tone: Tone, hot: bool) -> (Color32, Color32, Color32, Color32) {
+    match tone {
+        Tone::Plain if hot => (c.hover(), c.border_strong(), c.fg, c.fg),
+        Tone::Plain => (c.raised(), c.border, c.dim, c.fg),
+        Tone::Primary => {
+            let f = if hot { mix(c.run, c.fg, 0.15) } else { c.run };
+            (f, f, c.on_accent(), c.on_accent())
+        }
+        // An outline tinted with the error colour, not a solid fill.
+        Tone::Danger if hot => (mix(c.raised(), c.err, 0.2), c.err, c.err, c.err),
+        Tone::Danger => (mix(c.raised(), c.err, 0.07), mix(c.border, c.err, 0.6), c.err, c.err),
+    }
+}
+
+/// A quiet outlined button with a [`Mark`] and words, and optionally a [`Tone`], the key that does the same (a small chip at
+/// the right), the full width of the column, or the mark after the words (a Send button).
+#[derive(Clone, Copy, Debug)]
+pub struct IconButton<'a> {
+    mark: Mark,
+    words: &'a str,
+    said: &'a str,
+    tone: Tone,
+    key: Option<&'a str>,
+    wide: bool,
+    mark_last: bool,
+}
+
+impl<'a> IconButton<'a> {
+    pub fn new(mark: Mark, words: &'a str) -> Self {
+        IconButton { mark, words, said: words, tone: Tone::Plain, key: None, wide: false, mark_last: false }
+    }
+
+    /// The spoken name, and the tip when it differs from the words.
+    pub fn said(mut self, said: &'a str) -> Self {
+        self.said = said;
+        self
+    }
+
+    /// `Tone::Primary` for the one main action, `Tone::Danger` for the one that throws something away.
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    /// The shortcut, as the app's keymap spells it (so a rebound key shows the new one).
+    pub fn key(mut self, key: &'a str) -> Self {
+        self.key = Some(key);
+        self
+    }
+
+    /// As wide as the column; the key chip goes to the right edge.
+    pub fn wide(mut self) -> Self {
+        self.wide = true;
+        self
+    }
+
+    /// The mark after the words rather than before.
+    pub fn mark_last(mut self) -> Self {
+        self.mark_last = true;
+        self
+    }
+
+    pub fn show(self, ui: &mut Ui) -> Response {
+        let c = ito_theme::colors();
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(self.words.to_owned(), font, Color32::PLACEHOLDER);
+        let chip =
+            self.key.map(|k| ui.painter().layout_no_wrap(k.to_owned(), egui::FontId::proportional(z(ui, 10.5)), Color32::PLACEHOLDER));
+        let (glyph, pad, gap) = (z(ui, 14.0), z(ui, 10.0), z(ui, 6.0));
+        let chip_w = chip.as_ref().map_or(0.0, |g| (g.size().x + z(ui, 10.0)).max(z(ui, 18.0)));
+        let mut w = pad + glyph + gap + galley.size().x + pad;
+        if chip.is_some() {
+            w += gap + chip_w;
+        }
+        if self.wide {
+            let room = ui.available_width();
+            if room.is_finite() {
+                w = w.max(room);
+            }
+        }
+        let size = Vec2::new(w, ui.spacing().interact_size.y.max(z(ui, 26.0)));
+        let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+        let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let r = if self.said != self.words { r.on_hover_text(self.said) } else { r };
+        ito_a11y::say(&r, Said::Button, self.said);
+        take_keys(ui, &r);
+        if ui.is_rect_visible(rect) {
+            let hot = r.hovered() || r.has_focus();
+            let (fill, edge, mark_ink, text_ink) = tone_look(&c, self.tone, hot);
+            let p = ui.painter();
+            p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+            let cy = rect.center().y;
+            let glyph_at = |x: f32| Rect::from_center_size(Pos2::new(x + glyph / 2.0, cy), Vec2::splat(glyph));
+            let mut x = rect.left() + pad;
+            let text_w = galley.size().x;
+            let text_pos = |x: f32| Pos2::new(x, cy - galley.size().y / 2.0);
+            if self.mark_last {
+                p.galley(text_pos(x), galley.clone(), text_ink);
+                mark(p, glyph_at(x + text_w + gap), self.mark, mark_ink);
+                x += text_w + gap + glyph;
+            } else {
+                mark(p, glyph_at(x), self.mark, mark_ink);
+                p.galley(text_pos(x + glyph + gap), galley.clone(), text_ink);
+                x += glyph + gap + text_w;
+            }
+            if let Some(g) = chip {
+                let cx = if self.wide { rect.right() - pad - chip_w } else { x + gap };
+                let cr = Rect::from_min_size(Pos2::new(cx, cy - z(ui, 8.0)), Vec2::new(chip_w, z(ui, 16.0)));
+                p.rect_stroke(cr, 4.0, Stroke::new(1.0, mix(fill, text_ink, 0.35)), StrokeKind::Inside);
+                p.galley(cr.center() - g.size() / 2.0, g, mix(fill, text_ink, 0.8));
+            }
+        }
+        focus_ring(ui, &r);
+        r
     }
 }
 
 /// A quiet outlined button with `mark` before `words`: the `raised` fill and a thin `border`, `hover` and `border_strong` under
 /// the pointer or with the keys, the mark in `dim` (`fg` when hot), the words in the body size of `ui`. `said` is its spoken
-/// name, and its tip when it differs from the words.
+/// name, and its tip when it differs from the words. For a tone, a key or the full width, build an [`IconButton`].
 pub fn icon_button(ui: &mut Ui, m: Mark, words: &str, said: &str) -> Response {
-    let c = ito_theme::colors();
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let galley = ui.painter().layout_no_wrap(words.to_owned(), font, c.fg);
-    let (glyph, pad, gap) = (z(ui, 14.0), z(ui, 10.0), z(ui, 6.0));
-    let size = Vec2::new(pad + glyph + gap + galley.size().x + pad, ui.spacing().interact_size.y.max(z(ui, 26.0)));
-    let (rect, r) = ui.allocate_exact_size(size, Sense::click());
-    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let r = if said != words { r.on_hover_text(said) } else { r };
-    ito_a11y::say(&r, Said::Button, said);
-    take_keys(ui, &r);
-    if ui.is_rect_visible(rect) {
-        let hot = r.hovered() || r.has_focus();
-        let (fill, edge) = if hot { (c.hover(), c.border_strong()) } else { (c.raised(), c.border) };
-        let p = ui.painter();
-        p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
-        let box_ = Rect::from_center_size(Pos2::new(rect.left() + pad + glyph / 2.0, rect.center().y), Vec2::splat(glyph));
-        mark(p, box_, m, if hot { c.fg } else { c.dim });
-        p.galley(Pos2::new(rect.left() + pad + glyph + gap, rect.center().y - galley.size().y / 2.0), galley, c.fg);
+    IconButton::new(m, words).said(said).show(ui)
+}
+
+/// Paint the square button face of a [`mark_button`] in `rect`, for a `r` the caller made.
+pub(crate) fn paint_square(ui: &Ui, rect: Rect, r: &Response, m: Mark) {
+    if !ui.is_rect_visible(rect) {
+        return;
     }
-    focus_ring(ui, &r);
-    r
+    let c = ito_theme::colors();
+    let (fill, edge, ink, _) = tone_look(&c, Tone::Plain, r.hovered() || r.has_focus());
+    let p = ui.painter();
+    p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+    mark(p, rect.shrink(rect.width() * 0.25), m, ink);
 }
 
 /// The same button with the mark alone, a square `side` points on a side (before the letters' zoom): a fold mark, a close
 /// cross. `said` is its tip and what a reader says.
 pub fn mark_button(ui: &mut Ui, m: Mark, said: &str, side: f32) -> Response {
-    let c = ito_theme::colors();
     let side = z(ui, side);
     let (rect, r) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
     let r = r.on_hover_text(said).on_hover_cursor(egui::CursorIcon::PointingHand);
     ito_a11y::say(&r, Said::Button, said);
     take_keys(ui, &r);
-    if ui.is_rect_visible(rect) {
-        let hot = r.hovered() || r.has_focus();
-        let (fill, edge, ink) = if hot { (c.hover(), c.border_strong(), c.fg) } else { (c.raised(), c.border, c.dim) };
-        let p = ui.painter();
-        p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
-        mark(p, rect.shrink(side * 0.25), m, ink);
-    }
+    paint_square(ui, rect, &r, m);
     focus_ring(ui, &r);
     r
 }
@@ -180,6 +514,13 @@ mod tests {
     }
 
     #[test]
+    fn the_marks_are_all_listed_once() {
+        for (i, a) in Mark::ALL.iter().enumerate() {
+            assert!(!Mark::ALL[..i].contains(a), "{a:?} twice");
+        }
+    }
+
+    #[test]
     fn the_buttons_draw_and_the_words_widen_the_button() {
         let (mut short, mut long, mut square) = (0.0, 0.0, 0.0);
         run(|ui| {
@@ -189,5 +530,25 @@ mod tests {
         });
         assert!(long > short, "{long} {short}");
         assert!((square - 22.0).abs() < 0.5, "{square}");
+    }
+
+    #[test]
+    fn a_key_widens_a_tone_does_not_and_wide_fills_the_column() {
+        let (mut plain, mut keyed, mut danger, mut wide, mut room) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        let mut heights = [0.0; 3];
+        run(|ui| {
+            room = ui.available_width();
+            let a = IconButton::new(Mark::Reply, "Reply").show(ui);
+            let b = IconButton::new(Mark::Reply, "Reply").tone(Tone::Primary).key("R").show(ui);
+            let d = IconButton::new(Mark::Trash, "Reply").tone(Tone::Danger).show(ui);
+            let w = IconButton::new(Mark::Plus, "New mail").key("C").wide().show(ui);
+            let s = IconButton::new(Mark::Send, "Send").mark_last().show(ui);
+            (plain, keyed, danger, wide) = (a.rect.width(), b.rect.width(), d.rect.width(), w.rect.width());
+            heights = [a.rect.height(), b.rect.height(), s.rect.height()];
+        });
+        assert!(keyed > plain, "{keyed} {plain}");
+        assert!((danger - plain).abs() < 0.5, "{danger} {plain}");
+        assert!((wide - room).abs() < 1.0, "{wide} {room}");
+        assert!(heights.iter().all(|h| (h - heights[0]).abs() < 0.01), "{heights:?}");
     }
 }

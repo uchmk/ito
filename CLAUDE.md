@@ -15,7 +15,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`。過去の時刻の `short`・`stamp` も）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、状態のフォルダーのファイルの読み書き（`kept`: `read`・最新を残す別スレッドの `Writer`・`copy_old`）、他のアプリの exe の探し方（`apps`: `[apps]`・自己登録・PATH）、他のアカウントが書けるか（`access`: `others_can_write`）、時間の長さ（`text`: 設定の文字を読む `parse_duration`・`duration_text`、言語に合わせた `duration_words`）、窓の場所の保存と戻し方（`window`、古い形も読む `load`、追跡の `Tracker`、アプリの手順を束ねる `Saved`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
 | `ito-fonts` | 同梱の等幅フォント（JetBrains Mono、SIL OFL）と egui への登録（機能 `egui`）。`common.toml` の `mono_font`（`bundled` が既定、`system`）で選ぶ | kura、tsumugi、michi |
 | `ito-theme` | 組み込みの 20 のテーマ、テーマのファイルの読み方、色の混ぜ方 | tsumugi、yagura |
-| `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ。印の付いた枠のボタン `icon_button`・`mark_button`・印だけの `mark`（`Mark`） | tsumugi、yagura |
+| `ito-prefs` | 設定の画面の枠と部品、Language・CLOCK・Theme の共通のページ。印の付いた枠のボタン `icon_button`・`mark_button`・印だけの `mark`（`Mark` は 39。`IconButton` は Tone・キーの札・`wide`・`mark_last`）、`nav_row` の印の列と件数のピル、`avatar`・`notice`・`attachment`・`pill` | tsumugi、yagura |
 | `ito-openin` | 別のプログラムで開く（コマンドラインのひな形 `{path} {line} {left} {right} {base} {merged}`、窓を出さない起動、他のアプリを呼ぶ `app::open/launch`、エディターの行の渡し方の表と `[line_args]`、diff / merge ツールの表と見つけ方、`[open]`・`[line_args]`・`[diff_tools.<名>]` の読み書きと設定画面の `Edit`）。設定画面のカードは `ito-prefs` の `open_card` | kura、michi |
 | `ito-notify` | 人に知らせる 3 つの手段（システムの通知・音・webhook（ntfy / Slack / Discord / JSON））。アプリ自前の短い音を頼まれた瞬間に鳴らす `player`（Windows・macOS のみ、Linux は `Err`） | yagura、fude（tsumugi も載せ替える） |
 | `ito-export` | SVG の文字列のページを PNG・複数ページの PDF（文字は文字のまま）・印刷にする（resvg・svg2pdf、純 Rust。止まるのでワーカースレッドから） | fude（kura・michi も） |

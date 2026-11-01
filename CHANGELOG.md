@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.167.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: メール アプリ向けの印と部品（uchmk/ito#113、#108、#109 をまとめて。fumi の依頼）。
+  - `Mark` に 28 を足した（`Mark::ALL` は 39）: Inbox・Star・StarFilled・Flag・Clock・Important・Send・Calendar・Pencil・Mail・Archive・Warning・Trash・Label・Reply・ReplyAll・Forward・Paperclip・Link・More・Sort・Check・ChevronDown・ChevronUp・Info・Bell・Bold・Italic。どれも 14 の箱・1.5 の線。
+  - `IconButton::new(Mark, words)`: `.said(..)`・`.tone(Tone)`（Primary は `run` の塗り、Danger は `err` の縁と薄い地の輪郭、Plain）・`.key("R")`（右の小さなキーの札。文字はアプリが keymap から渡す）・`.wide()`（列の幅いっぱい。札は右端）・`.mark_last()`（文字のあとに印。送信ボタン）・`.show(ui)`。`icon_button` は `IconButton` の薄い包み。
+  - `NavRow` に `mark: Option<Mark>`（固定幅の印の列。印の有る行も無い行も名前の x がそろう）と `dot: Option<Color32>`（ラベルの色の点）。今の行の件数は `run` のピルになる。
+  - `avatar(ui, look, name, seed, size)`: 頭文字の円。色は `seed`（アドレス）の安定したハッシュ（`tag_hue`）。
+  - `notice(ui, look, Mark, text, action) -> Option<Response>`: お知らせの帯。右に 1 つのボタン。
+  - `attachment(ui, look, name, size_text) -> AttachmentResponse { open, download }`: 添付のカード。拡張子の札・名前（長ければ「…」）・サイズ・Download の印のボタン。カード全体も押せる。
+  - `pill(ui, look, words, Option<Mark>) -> Response`: 完全に丸い静かなボタン。末尾の印は ChevronDown など。
+
+### 使う側がやること
+
+- `NavRow { icon, text, count, strong, current }` と全部の欄を書いている所は、`..Default::default()`（か `Row::new(text)`）を足す（欄が 2 つ増えた）。
+
 ## [0.166.0] - 2026-11-01
 
 ### 追加
