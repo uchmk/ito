@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.203.0] - 2026-11-01
+
+### 変更
+
+- `ito-http` の tailnet の口を、tailscaled に届かなくても `Server::start` が失敗しないようにした（koyomi から）。本体の口（loopback・LAN の TLS）は先に開き、
+  tailnet の口は開けるまで裏で間をおいて（2 秒から倍々で最大 1 分）試し続ける。最初の 1 回は `start` の中で試すので、Tailscale が動いていれば今までどおり
+  `start` の直後に `Server::tailnet_port()` が `Some` になる。開くまでは `None`。
+- 追加: `Server::tailnet_error() -> Option<String>`（開けない理由。開けたら `None`）。
+- 設定の誤り（ログインもタグも無い・空の名前・tailnet でないアドレス）は今までどおり `start` が `Err`。
+  使う側がやること: `tailnet_port()` が `None` のままでも起動を成功として扱い、`tailnet_error()` を画面に出す。
+
 ## [0.202.0] - 2026-11-01
 
 ### 追加

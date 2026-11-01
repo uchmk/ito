@@ -36,8 +36,8 @@ use std::io::{self, Read, Write};
 use std::net::IpAddr;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -239,6 +239,15 @@ pub struct LogLine {
     pub millis: u64,
 }
 
+/// The tailnet listener's state, read by [`Server::tailnet_port`] and [`Server::tailnet_error`].
+#[derive(Default)]
+struct TailState {
+    /// 0 until the listener is open.
+    port: AtomicU32,
+    /// Why it is not open yet.
+    error: Mutex<Option<String>>,
+}
+
 type Handler = dyn Fn(Request) -> Response + Send + Sync;
 type Log = dyn Fn(&LogLine) + Send + Sync;
 
@@ -250,7 +259,9 @@ struct Shared {
     /// Signed-in browsers: the random id in the cookie → who and until when.
     sessions: Mutex<HashMap<String, (String, Instant)>>,
     /// What the `Host` header may be on the tailnet listener: this PC's addresses and names.
-    hosts: Vec<String>,
+    hosts: RwLock<Vec<String>>,
+    /// How the tailnet listener is doing (it opens in the background when Tailscale is not up yet).
+    tail: TailState,
     /// Set for a LAN bind: every connection is TLS.
     #[cfg(feature = "tls")]
     tls: Option<Arc<rustls::ServerConfig>>,
@@ -259,7 +270,7 @@ struct Shared {
 /// A running listener. Dropping it (or [`Server::stop`]) stops accepting; requests already being served finish.
 pub struct Server {
     port: u16,
-    tailnet_port: Option<u16>,
+    shared: Arc<Shared>,
     #[cfg(feature = "tls")]
     fingerprint: Option<tls::Fingerprint>,
     stop: Arc<AtomicBool>,
@@ -303,9 +314,6 @@ impl Server {
                 identity = Some(id);
             }
         }
-        let mut tail_listeners = Vec::new();
-        let mut tailnet_port = None;
-        let mut hosts = Vec::new();
         if let Some(t) = &cfg.tailnet {
             if t.logins.is_empty() && t.tags.is_empty() {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "the tailnet listener has no login or tag to let in"));
@@ -313,20 +321,9 @@ impl Server {
             if t.logins.iter().chain(&t.tags).any(|(k, w)| k.is_empty() || w.is_empty()) {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "a tailnet login or tag has an empty name"));
             }
-            let status = t.whois.status();
-            let addrs = tailnet::bind_addrs(t, &status)?;
-            hosts = t.hosts.clone();
-            hosts.extend(addrs.iter().map(|a| a.to_string()));
-            if let Ok(st) = &status {
-                hosts.extend(st.names.iter().cloned());
+            if let Some(bad) = t.addrs.iter().find(|a| !tailnet::is_tailnet_ip(**a)) {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{bad} is not a tailnet address")));
             }
-            let mut tport = t.port;
-            for a in addrs {
-                let l = TcpListener::bind((a, tport))?;
-                tport = l.local_addr()?.port();
-                tail_listeners.push(l);
-            }
-            tailnet_port = Some(tport);
         }
         #[cfg(feature = "tls")]
         let (fingerprint, tls_config) = match &identity {
@@ -339,20 +336,32 @@ impl Server {
             log: Box::new(log),
             active: AtomicUsize::new(0),
             sessions: Mutex::new(HashMap::new()),
-            hosts,
+            hosts: RwLock::new(Vec::new()),
+            tail: TailState::default(),
             #[cfg(feature = "tls")]
             tls: tls_config,
         });
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
-        for (l, kind) in listeners.into_iter().map(|l| (l, Kind::Main)).chain(tail_listeners.into_iter().map(|l| (l, Kind::Tailnet))) {
+        for l in listeners {
             l.set_nonblocking(true)?;
             let (shared, stop) = (shared.clone(), stop.clone());
-            threads.push(std::thread::spawn(move || accept_loop(l, shared, stop, kind)));
+            threads.push(std::thread::spawn(move || accept_loop(l, shared, stop, Kind::Main)));
+        }
+        if shared.cfg.tailnet.is_some() {
+            // The first try is made here so a ready Tailscale gives `tailnet_port()` at once; otherwise a thread keeps trying.
+            let first = open_tailnet(&shared);
+            if let Err(e) = &first {
+                if let Ok(mut slot) = shared.tail.error.lock() {
+                    *slot = Some(e.to_string());
+                }
+            }
+            let (shared, stop) = (shared.clone(), stop.clone());
+            threads.push(std::thread::spawn(move || tailnet_thread(first, shared, stop)));
         }
         Ok(Server {
             port,
-            tailnet_port,
+            shared,
             #[cfg(feature = "tls")]
             fingerprint,
             stop,
@@ -365,9 +374,17 @@ impl Server {
         self.port
     }
 
-    /// The tailnet listener's port, when [`Config::tailnet`] is set.
+    /// The tailnet listener's port once it is open. `None` without [`Config::tailnet`], and while Tailscale cannot be
+    /// reached: the main listener is up regardless, and the tailnet one is retried in the background (see
+    /// [`Server::tailnet_error`]).
     pub fn tailnet_port(&self) -> Option<u16> {
-        self.tailnet_port
+        Some(self.shared.tail.port.load(Ordering::Relaxed) as u16).filter(|p| *p != 0)
+    }
+
+    /// Why the tailnet listener is not open yet (`tailscaled` not running, no tailnet address, the port taken), or `None`
+    /// when it is open or [`Config::tailnet`] is not set. It is cleared once the listener opens.
+    pub fn tailnet_error(&self) -> Option<String> {
+        self.shared.tail.error.lock().ok().and_then(|e| e.clone())
     }
 
     /// The certificate's fingerprint, to show the person (`tls::format`), for a LAN bind; `None` on loopback.
@@ -393,6 +410,70 @@ impl Drop for Server {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// How long to wait between tries at the tailnet listener: 2 s, doubling to a minute.
+fn tail_wait(tries: u32) -> Duration {
+    Duration::from_secs((2u64 << tries.min(5)).min(60))
+}
+
+/// Open the tailnet listeners (all of this PC's tailnet addresses on one port); records the hosts the `Host` header may
+/// carry. Nothing is left open on `Err`.
+fn open_tailnet(shared: &Shared) -> io::Result<Vec<TcpListener>> {
+    let Some(t) = &shared.cfg.tailnet else { return Ok(Vec::new()) };
+    let status = t.whois.status();
+    let addrs = tailnet::bind_addrs(t, &status)?;
+    let mut hosts = t.hosts.clone();
+    hosts.extend(addrs.iter().map(|a| a.to_string()));
+    if let Ok(st) = &status {
+        hosts.extend(st.names.iter().cloned());
+    }
+    let (mut listeners, mut port) = (Vec::new(), t.port);
+    for a in addrs {
+        let l = TcpListener::bind((a, port))?;
+        port = l.local_addr()?.port();
+        l.set_nonblocking(true)?;
+        listeners.push(l);
+    }
+    if let Ok(mut h) = shared.hosts.write() {
+        *h = hosts;
+    }
+    shared.tail.port.store(u32::from(port), Ordering::Relaxed);
+    Ok(listeners)
+}
+
+/// Opens the tailnet listener (trying again until it works), then serves it until `stop`.
+fn tailnet_thread(first: io::Result<Vec<TcpListener>>, shared: Arc<Shared>, stop: Arc<AtomicBool>) {
+    let mut next = first;
+    let mut tries = 0u32;
+    let listeners = loop {
+        match next {
+            Ok(l) => break l,
+            Err(e) => {
+                if let Ok(mut slot) = shared.tail.error.lock() {
+                    *slot = Some(e.to_string());
+                }
+            }
+        }
+        let until = Instant::now() + tail_wait(tries);
+        tries += 1;
+        while Instant::now() < until {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        next = open_tailnet(&shared);
+    };
+    if let Ok(mut slot) = shared.tail.error.lock() {
+        *slot = None;
+    }
+    std::thread::scope(|s| {
+        for l in listeners {
+            let (shared, stop) = (shared.clone(), stop.clone());
+            s.spawn(move || accept_loop(l, shared, stop, Kind::Tailnet));
+        }
+    });
 }
 
 /// Which listener a connection came in on.
@@ -703,7 +784,7 @@ fn read_request(s: &mut Wire, shared: &Shared, kind: Kind, peer: SocketAddr) -> 
             if let Some(name) = found {
                 // The peer's address says who it is, so any page the person has open could make it call: the same
                 // two guards as a cookie, and the Host must be this PC's (a rebound name would carry another).
-                if !header("host").is_some_and(|h| tailnet::host_allowed(h, &shared.hosts)) {
+                if !header("host").is_some_and(|h| shared.hosts.read().is_ok_and(|hs| tailnet::host_allowed(h, &hs))) {
                     return Err(named(403, "host not allowed"));
                 }
                 if !matches!(method, "GET" | "HEAD" | "OPTIONS") && header("x-ito-csrf") != Some("1") {
@@ -1209,6 +1290,48 @@ mod tests {
         assert_eq!(tcall(ip, tp, &format!("GET /x HTTP/1.1\r\nHost: {ip}\r\n\r\n")), 200);
         // The main (loopback) listener never asks Tailscale: no token, no entry.
         assert_eq!(call(lp, "GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n").0, 401);
+        srv.stop();
+    }
+
+    /// A Tailscale that is not up until `up` is set.
+    struct Late(Arc<AtomicBool>, IpAddr);
+    impl tailnet::Whois for Late {
+        fn whois(&self, _: SocketAddr) -> io::Result<Option<tailnet::Identity>> {
+            Ok(Some(alice()))
+        }
+        fn status(&self) -> io::Result<tailnet::Status> {
+            if self.0.load(Ordering::Relaxed) {
+                Ok(tailnet::Status { addrs: vec![self.1], names: Vec::new() })
+            } else {
+                Err(io::Error::new(io::ErrorKind::NotFound, "tailscaled is not running"))
+            }
+        }
+    }
+
+    #[test]
+    fn the_main_listener_opens_while_tailscale_is_down_and_the_tailnet_one_follows() {
+        let Some(ip) = tailnet::LocalApi::default().status().ok().and_then(|s| s.addrs.into_iter().find(|a| a.is_ipv4())) else {
+            return;
+        };
+        let up = Arc::new(AtomicBool::new(false));
+        let mut t = Tailnet::new(0).login("alice@example.com", "owner");
+        t.whois = Arc::new(Late(up.clone(), ip));
+        let mut cfg = Config::new(0, TOKEN);
+        cfg.tailnet = Some(t);
+        let srv = Server::start(cfg, |_| Response::ok(serde_json::Value::Null), |_| {}).unwrap();
+        assert!(srv.port() != 0);
+        assert_eq!(srv.tailnet_port(), None);
+        assert!(srv.tailnet_error().unwrap().contains("tailscaled is not running"));
+        // The main listener answers meanwhile.
+        assert_eq!(call(srv.port(), &req("GET", "/x", Some(TOKEN), "")).0, 200);
+        up.store(true, Ordering::Relaxed);
+        let end = Instant::now() + Duration::from_secs(10);
+        while srv.tailnet_port().is_none() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let port = srv.tailnet_port().expect("the tailnet listener opens once Tailscale is up");
+        assert_eq!(srv.tailnet_error(), None);
+        assert_eq!(tcall(ip, port, &format!("GET /x HTTP/1.1\r\nHost: {ip}:{port}\r\n\r\n")), 200);
         srv.stop();
     }
 
