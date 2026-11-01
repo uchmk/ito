@@ -7,12 +7,21 @@ use ito_theme::mix;
 use crate::mark::{paint_square, tone_look};
 use crate::{button_with, focus_ring, mark, tag_hue, take_keys, z, Look, Mark, Tone};
 
-/// The one or two letters that stand for `name`: the first letters of its first two words, or its first two characters.
+/// Han, kana (with the prolonged-sound mark) or Hangul: a script where one character already stands for a word.
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32,
+        0x3040..=0x30FF | 0x31F0..=0x31FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+        | 0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0xFF66..=0xFF9F | 0x20000..=0x2FA1F)
+}
+
+/// The letters that stand for `name`: one character if its first word is CJK ("佐藤 花子" is "佐"), else the first letters of
+/// its first two words, or its first two characters.
 fn monogram(name: &str) -> String {
     let words: Vec<&str> = name.split(|c: char| c.is_whitespace() || c == '@' || c == '.').filter(|w| !w.is_empty()).collect();
     let up = |s: &str| s.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
     match words.as_slice() {
         [] => "?".to_owned(),
+        [first, ..] if first.chars().next().is_some_and(is_cjk) => up(first),
         [one] => one.chars().take(2).flat_map(char::to_uppercase).collect(),
         [a, b, ..] => up(a) + &up(b),
     }
@@ -84,8 +93,9 @@ fn badge_text(name: &str) -> String {
 }
 
 /// A card for one attached file: a badge of its type from the extension, the name (cut with "…"), `size_text`, and a download
-/// mark. The whole card is clickable (`open`); the mark is its own button (`download`).
-pub fn attachment(ui: &mut Ui, l: Look, name: &str, size_text: &str) -> AttachmentResponse {
+/// mark. The whole card is clickable (`open`); the mark is its own button (`download`), and `download_words` is its tooltip
+/// and accessible name ("Download", "保存").
+pub fn attachment(ui: &mut Ui, l: Look, name: &str, size_text: &str, download_words: &str) -> AttachmentResponse {
     let c = l.c;
     let size = Vec2::new(ui.available_width().min(z(ui, 260.0)), z(ui, 48.0));
     let (rect, open) = ui.allocate_exact_size(size, Sense::click());
@@ -97,8 +107,8 @@ pub fn attachment(ui: &mut Ui, l: Look, name: &str, size_text: &str) -> Attachme
     let square = Rect::from_min_size(Pos2::new(rect.right() - pad - side, rect.center().y - side / 2.0), Vec2::splat(side));
     // Registered after the card, so it is on top of it.
     let download = ui.interact(square, ui.id().with(("attachment-download", name)), Sense::click());
-    let download = download.on_hover_text("Download").on_hover_cursor(egui::CursorIcon::PointingHand);
-    ito_a11y::say(&download, Said::Button, "Download");
+    let download = download.on_hover_text(download_words).on_hover_cursor(egui::CursorIcon::PointingHand);
+    ito_a11y::say(&download, Said::Button, download_words);
     if ui.is_rect_visible(rect) {
         let hot = open.hovered() || open.has_focus();
         let (fill, edge, _, _) = tone_look(&c, Tone::Plain, hot);
@@ -155,7 +165,9 @@ mod tests {
 
     #[test]
     fn monograms() {
-        assert_eq!(monogram("田中 太郎"), "田太");
+        assert_eq!(monogram("田中 太郎"), "田");
+        assert_eq!(monogram("佐藤 花子"), "佐");
+        assert_eq!(monogram("ada 佐藤"), "A佐");
         assert_eq!(monogram("ada lovelace"), "AL");
         assert_eq!(monogram("zed"), "ZE");
         assert_eq!(monogram(""), "?");
@@ -173,7 +185,7 @@ mod tests {
             assert!((a.rect.width() - 28.0).abs() < 0.5);
             assert!(notice(ui, l, Mark::Info, "Offline", Some("Retry")).is_some());
             assert!(notice(ui, l, Mark::Info, "Sent", None).is_none());
-            let at = attachment(ui, l, "a-very-long-file-name-that-has-to-be-cut-somewhere.pdf", "1.2 MB");
+            let at = attachment(ui, l, "a-very-long-file-name-that-has-to-be-cut-somewhere.pdf", "1.2 MB", "保存");
             assert!(at.download.rect.width() > 0.0 && at.open.rect.contains(at.download.rect.center()));
             let short = pill(ui, l, "All", None).rect.width();
             let long = pill(ui, l, "All", Some(Mark::ChevronDown)).rect.width();

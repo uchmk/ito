@@ -90,6 +90,11 @@ impl Panels {
                 self.size.insert(name.to_owned(), now.round());
                 self.unsaved = true;
             }
+        } else if self.size(name).is_none() {
+            // No size chosen yet: forget what egui remembered, so `default` is read again
+            // next frame. The first frame has no window size (egui uses 10000x10000), and
+            // a default worked out from that would otherwise stick.
+            ui.ctx().data_mut(|d| d.remove::<egui::containers::panel::PanelState>(id));
         } else if self.unsaved && !ui.ctx().input(|i| i.pointer.any_down()) {
             self.unsaved = false;
             if let Some(w) = &self.writer {
@@ -125,6 +130,29 @@ mod tests {
         });
         out.textures_delta.clear();
         width
+    }
+
+    /// The first frame has no window size; a default worked out from it must not stick.
+    #[test]
+    fn a_default_from_the_sizeless_first_frame_does_not_stick() {
+        let (ctx, mut panels) = (egui::Context::default(), Panels::load(None));
+        let share = |ui: &egui::Ui| ui.available_width() * 0.55;
+        let mut show = |ctx: &egui::Context, rect: Option<egui::Rect>| {
+            let mut width = 0.0;
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: rect, ..Default::default() }, |ui| {
+                let d = share(ui);
+                width = panels.show(ui, Side::Right, "reader", d, |p| p, |ui| ui.label("x")).response.rect.width();
+            });
+            out.textures_delta.clear();
+            width
+        };
+        show(&ctx, None);
+        let real = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 600.0)));
+        let mut w = 0.0;
+        for _ in 0..3 {
+            w = show(&ctx, real);
+        }
+        assert!((w - 550.0).abs() < 1.0, "got {w}");
     }
 
     fn button(at: egui::Pos2, pressed: bool) -> egui::Event {

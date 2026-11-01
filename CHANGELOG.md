@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.168.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `attachment` に引数 `download_words`（ダウンロードの印のホバーと読み上げの名前。"Download"・"保存"）。uchmk/ito#115。
+- `ito-prefs`: `avatar` の頭文字。最初の語が CJK（漢字・かな・ハングル）なら 1 文字（"佐藤 花子" は "佐"）。英字の名前は今まで通り（"AL"）。
+
+### 修正
+
+- `ito-layout`: `Panels::show` は、まだ大きさが保存されていないパネルの egui の `PanelState` を毎フレーム忘れ、`default` を読み直す（uchmk/ito#114）。
+  最初のフレームは窓の大きさが無く egui が 10000×10000 として扱うため、そこで出した default（`available_width() * 0.55` など）が居座っていた。
+  端をドラッグして大きさが決まってからは今まで通り。
+
+### 使う側がやること
+
+- `attachment(ui, look, name, size_text)` の呼び出しに 5 つ目の引数 `download_words` を足す。
+
 ## [0.167.1] - 2026-11-01
 
 ### 追加
