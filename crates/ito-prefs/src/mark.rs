@@ -351,6 +351,11 @@ pub(crate) fn tone_look(c: &ito_theme::Colors, tone: Tone, hot: bool) -> (Color3
             let f = if hot { mix(c.run, c.fg, 0.15) } else { c.run };
             (f, f, c.on_accent(), c.on_accent())
         }
+        Tone::Warn => {
+            let f = if hot { mix(c.wait, c.fg, 0.15) } else { c.wait };
+            let ink = crate::ink_on(f);
+            (f, f, ink, ink)
+        }
         // An outline tinted with the error colour, not a solid fill.
         Tone::Danger if hot => (mix(c.raised(), c.err, 0.2), c.err, c.err, c.err),
         Tone::Danger => (mix(c.raised(), c.err, 0.07), mix(c.border, c.err, 0.6), c.err, c.err),

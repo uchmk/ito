@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.167.1] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `Tone::Warn`（uchmk/ito#111、koyomi の依頼）。テーマの警告の色（`wait`）で塗り、文字は地の明るさで暗い色か白を選ぶ。`button_with` と `IconButton` の両方で使える。
+
+### 使う側がやること
+
+- `Tone` を `match` している所は `Warn` の腕を足す（koyomi は「スケジュールを戻す」を `Tone::Primary` から `Tone::Warn` に）。
+
 ## [0.167.0] - 2026-11-01
 
 ### 追加

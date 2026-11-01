@@ -1027,6 +1027,8 @@ pub enum Tone {
     Primary,
     /// Filled with the theme's error colour: the action that throws something away.
     Danger,
+    /// Filled with the theme's warn colour (`wait`): undoing a paused or held state, not the main action nor a destructive one.
+    Warn,
 }
 
 /// The design's plain button: an outline, words in the text colour.
@@ -1056,6 +1058,17 @@ fn tone_colors(c: &Colors, tone: Tone) -> (Color32, egui::Stroke, Color32) {
         Tone::Plain => (Color32::TRANSPARENT, egui::Stroke::new(1.0, c.border_strong()), c.fg),
         Tone::Primary => (c.run, egui::Stroke::NONE, c.on_accent()),
         Tone::Danger => (c.err, egui::Stroke::NONE, c.on_accent()),
+        Tone::Warn => (c.wait, egui::Stroke::NONE, ink_on(c.wait)),
+    }
+}
+
+/// Dark or white words, whichever reads better on `fill`.
+fn ink_on(fill: Color32) -> Color32 {
+    let luma = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
+    if luma > 140.0 {
+        Color32::from_rgb(0x1a, 0x1a, 0x1a)
+    } else {
+        Color32::WHITE
     }
 }
 
@@ -1459,6 +1472,7 @@ mod tests {
         assert_eq!(tone_colors(&c, Tone::Primary).0, c.run);
         assert_eq!(tone_colors(&c, Tone::Danger).0, c.err);
         assert_eq!(tone_colors(&c, Tone::Danger).2, c.on_accent());
+        assert_eq!(tone_colors(&c, Tone::Warn).0, c.wait);
         assert_eq!(tone_colors(&c, Tone::Plain).0, Color32::TRANSPARENT);
     }
 
