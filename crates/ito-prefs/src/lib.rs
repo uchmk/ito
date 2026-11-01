@@ -399,6 +399,9 @@ pub struct Extras<'a> {
     /// once, and the pages that have none are dimmed in the nav; Esc then
     /// clears the search before it closes the screen.
     pub results: Option<Results<'a>>,
+    /// The app's own settings files (`["koyomi.toml"]`), as buttons stacked above the common file's, in this order.
+    /// A click is [`Out::open_file`]` = Some(1 + i)`. Tab reaches them before the common file.
+    pub files: &'a [&'a str],
 }
 
 /// The words of the search's results page ([`Extras::results`]).
@@ -416,7 +419,9 @@ pub struct Results<'a> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Out {
     pub close: bool,
-    pub open_file: bool,
+    /// The file button that was clicked: `Some(0)` for the common file ([`Nav::file`]), `Some(1 + i)` for
+    /// [`Extras::files`]`[i]`.
+    pub open_file: Option<usize>,
 }
 
 /// The colours and the search's words, for every row.
@@ -439,6 +444,9 @@ pub fn show(ui: &mut egui::Ui, c: Colors, state: &mut State, nav: &Nav, keys: Ke
     show_with(ui, c, state, nav, keys, Extras::default(), body)
 }
 
+/// The height one file button takes at the foot of the nav: the button and the gap above it.
+const FILE_STEP: f32 = 40.0;
+
 /// [`show`] with the [`Extras`].
 ///
 /// With [`Extras::results`] a search calls `body` for every page that has a
@@ -454,7 +462,7 @@ pub fn show_with(
     extras: Extras,
     mut body: impl FnMut(&mut egui::Ui, usize, Look),
 ) -> Out {
-    let mut out = Out { close: keys.close, open_file: false };
+    let mut out = Out { close: keys.close, open_file: None };
     // Esc in the search clears what it holds first, and the keys stay in the
     // field. egui let go of the focus on this Esc already, so the search is
     // known by `search_held` (what had the keys at the end of the last frame).
@@ -534,7 +542,7 @@ pub fn show_with(
         nav_ui.label(RichText::new(nav.words.nothing).size(z(ui, 12.5)).color(c.dim));
     }
     // The pages scroll when the window is too short for them, above the file's button.
-    let list_room = (side.bottom() - 56.0 - nav_ui.cursor().top()).max(60.0);
+    let list_room = (side.bottom() - 56.0 - FILE_STEP * extras.files.len() as f32 - nav_ui.cursor().top()).max(60.0);
     egui::ScrollArea::vertical().id_salt("prefs-nav").max_height(list_room).auto_shrink([false, true]).show(&mut nav_ui, |nav_ui| {
         let mut group = None;
         for p in shown {
@@ -652,19 +660,26 @@ pub fn show_with(
     });
     // No row lit took the keys: they stay where the search left them.
     ui.data_mut(|d| d.remove::<bool>(egui::Id::new(JUMP)));
-    // The file last, so Tab comes to it after the page.
-    let foot = egui::Rect::from_min_max(
-        egui::pos2(side.left() + 10.0, side.bottom() - 48.0),
-        egui::pos2(side.right() - 10.0, side.bottom() - 16.0),
-    );
-    let words = format!("{} {}", nav.words.open, nav.file);
-    let file = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(c.dim))
-        .fill(Color32::TRANSPARENT)
-        .stroke(egui::Stroke::new(1.0, c.border_strong()))
-        .corner_radius(6.0);
-    let file = nav_ui.put(foot, file);
-    focus_ring(&nav_ui, &file);
-    out.open_file = file.clicked();
+    // The files last, so Tab comes to them after the page: the app's own, then the common one at the foot.
+    let n = extras.files.len();
+    let mut file = None;
+    for j in 0..=n {
+        let name = if j < n { extras.files[j] } else { nav.file };
+        let top = side.bottom() - 48.0 - FILE_STEP * (n - j) as f32;
+        let foot = egui::Rect::from_min_max(egui::pos2(side.left() + 10.0, top), egui::pos2(side.right() - 10.0, top + 32.0));
+        let words = format!("{} {}", nav.words.open, name);
+        let button = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(c.dim))
+            .fill(Color32::TRANSPARENT)
+            .stroke(egui::Stroke::new(1.0, c.border_strong()))
+            .corner_radius(6.0);
+        let button = nav_ui.put(foot, button);
+        focus_ring(&nav_ui, &button);
+        if button.clicked() {
+            out.open_file = Some(if j < n { j + 1 } else { 0 });
+        }
+        file = Some(button);
+    }
+    let file = file.expect("the common file's button is always drawn");
     // Tab off the file, the last stop, leaves egui with nothing to hand the
     // keys to until the next frame comes round to the search: hand them
     // over now, so no frame has nothing (tsumugi #61, #106). The file is
@@ -1645,6 +1660,7 @@ mod tests {
             shared_tag: "Common page",
             back: "Back",
             results: Some(Results { head: "Settings with \"{q}\"", lead: "All pages.", none: "None." }),
+            files: &[],
         };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0))),
@@ -1685,13 +1701,47 @@ mod tests {
         (out, texts)
     }
 
+    /// The app's own files stack above the common one, and the click says which (common 0, the app's 1..).
+    #[test]
+    fn the_files_stack_above_the_common_one_and_a_click_names_it() {
+        let nav = Nav { pages: &[("General", "One")], index: &[(0, "Language")], words: &EN, file: "common.toml" };
+        let files = ["app.toml", "other.toml"];
+        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "", results: None, files: &files };
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut out = Out::default();
+            let mut run = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+                out = show_with(ui, ito_theme::colors(), &mut state, &nav, Keys::default(), extras, |_, _, _| {});
+            });
+            run.textures_delta.clear();
+            out
+        };
+        assert_eq!(frame(vec![]).open_file, None);
+        // The buttons sit 40 points apart, the common one lowest (48..16 above the bottom of the nav).
+        let click = |y: f32| {
+            let pos = egui::pos2(100.0, y);
+            let b =
+                |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+            [egui::Event::PointerMoved(pos), b(true), b(false)].to_vec()
+        };
+        let bottom = screen.bottom();
+        let mut got = Vec::new();
+        for y in [bottom - 32.0 - 80.0, bottom - 32.0 - 40.0, bottom - 32.0] {
+            let seen = (0..3).map(|_| frame(click(y)).open_file).find(Option::is_some).flatten();
+            got.push(seen);
+        }
+        assert_eq!(got, vec![Some(1), Some(2), Some(0)], "buttons by height");
+    }
+
     /// On the root ui under a top panel (a title bar), the screen leaves the bar alone (uchmk/ito#63).
     #[test]
     fn the_screen_stays_below_a_top_panel() {
         let ctx = egui::Context::default();
         let mut state = State::default();
         let nav = Nav { pages: &[("General", "One")], index: &[(0, "Language")], words: &EN, file: "config.toml" };
-        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "Back", results: None };
+        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "Back", results: None, files: &[] };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
             ..Default::default()

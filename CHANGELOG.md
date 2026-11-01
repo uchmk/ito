@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.194.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: 設定画面の左下に、アプリ固有の設定ファイルのボタンを `common.toml` の上へ積めるようにした。`Extras::files: &[&str]`（例 `["koyomi.toml"]`）に並べると、同じ見た目のボタン（「開く: koyomi.toml」）が上から順に並び、一番下に共通のファイルが来る。左の一覧の高さはボタンの数だけ低くなる。Tab で回る順は、アプリ固有のファイル、common.toml の順。
+
+### 変更（壊れる）
+
+- `Out::open_file` を `bool` から `Option<usize>` にした。押されたボタンの番号で、共通のファイル（`Nav::file`）は `Some(0)`、`Extras::files[i]` は `Some(1 + i)`。押されていなければ `None`。
+
+### 使う側がやること
+
+- `Extras { … }` を欄ごとに書いているなら `files: &[]` を足す（`..Default::default()` なら不要）。
+- `if out.open_file { open(common) }` を `match out.open_file { Some(0) => …, Some(i) => open(files[i - 1]), None => {} }` に替える。
+- koyomi: `Extras { files: &["koyomi.toml"], .. }` で、`common.toml` の上に `koyomi.toml` を置ける。
+
 ## [0.193.0] - 2026-11-01
 
 ### 追加
