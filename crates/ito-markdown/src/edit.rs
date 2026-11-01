@@ -6,7 +6,7 @@ use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
 use egui::{pos2, Align2, FontId, Id, Key, Modifiers, Rect, Ui, UiBuilder};
 
-use crate::{layout, tool, Tool};
+use crate::{continue_list, layout, tool, Tool};
 
 /// What the box asks of the app after a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +99,18 @@ impl Writing {
             self.text = text;
             st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a), CCursor::new(b))));
             st.store(&ctx, self.id);
+        }
+        if !self.preview && ctx.memory(|m| m.has_focus(self.id)) {
+            // Plain Enter on a list item goes on with the list; elsewhere (and with Shift) the field's own newline.
+            let mut st = TextEditState::load(&ctx, self.id).unwrap_or_default();
+            let at = st.cursor.char_range().filter(|r| r.primary == r.secondary).map(|r| -> usize { r.primary.index.into() });
+            if let Some((text, cur)) = at.and_then(|at| continue_list(&self.text, at)) {
+                if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+                    self.text = text;
+                    st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(cur))));
+                    st.store(&ctx, self.id);
+                }
+            }
         }
         if self.preview {
             self.draw_preview(ui, field, empty, size);

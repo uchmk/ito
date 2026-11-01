@@ -644,19 +644,24 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             }
         }
         Mark::Numbers => {
+            // The digits 1 2 3 by the lines, so the list reads as numbered at a glance.
             for y in [-4.5, 0.0, 4.5] {
-                seg((-6.0, y), (-4.0, y));
-                seg((-1.5, y), (6.5, y));
+                seg((-1.0, y), (6.5, y));
             }
+            let (y1, y2, y3) = (-4.5, 0.0, 4.5);
+            p.add(path(pts(&[(-5.6, y1 - 1.0), (-4.5, y1 - 1.8), (-4.5, y1 + 1.8)])));
+            p.add(path(pts(&[(-5.9, y2 - 1.2), (-4.9, y2 - 1.9), (-3.7, y2 - 1.2), (-3.9, y2 + 0.0), (-5.9, y2 + 1.9), (-3.5, y2 + 1.9)])));
+            p.add(path(pts(&[(-5.9, y3 - 1.9), (-3.7, y3 - 1.9), (-4.7, y3 - 0.3), (-3.6, y3 + 0.7), (-4.6, y3 + 1.9), (-5.9, y3 + 1.4)])));
         }
         Mark::Tasks => {
-            p.rect_stroke(Rect::from_min_max(at(-6.5, -6.0), at(-2.5, -2.0)), 1.0 * k, line, StrokeKind::Middle);
-            p.add(path(pts(&[(-5.7, -4.0), (-4.7, -3.0), (-3.4, -5.0)])));
-            seg((0.0, -4.0), (6.5, -4.0));
-            seg((-6.0, 0.5), (-3.0, 0.5));
-            seg((0.0, 0.5), (6.5, 0.5));
-            seg((-6.0, 5.0), (-3.0, 5.0));
-            seg((0.0, 5.0), (6.5, 5.0));
+            // Three boxes by the lines; the first is ticked.
+            for (i, y) in [-4.5, 0.0, 4.5].into_iter().enumerate() {
+                p.rect_stroke(Rect::from_min_max(at(-6.3, y - 2.0), at(-2.5, y + 2.0)), 0.8 * k, line, StrokeKind::Middle);
+                seg((-1.0, y), (6.5, y));
+                if i == 0 {
+                    p.add(path(pts(&[(-5.5, y), (-4.7, y + 1.0), (-3.4, y - 1.2)])));
+                }
+            }
         }
         Mark::Desktop => {
             p.rect_stroke(Rect::from_min_max(at(-6.5, -6.0), at(6.5, 2.5)), 1.5 * k, line, StrokeKind::Middle);

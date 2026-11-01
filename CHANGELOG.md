@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.204.0] - 2026-11-01
+
+### 追加
+
+- `ito-markdown`: 書く欄（`Writing`）で、リストの行の Enter が次の項目を作る。`- `・`* `・`- [ ] `（チェックは外した状態で続く）・`N. `（次は `N+1. `）。
+  中身が空の項目で Enter を押すと印が消えてリストが終わる。字下げは引き継ぐ。印の途中にカーソルがあるとき・リストでない行・Shift/Ctrl+Enter は今までどおり。
+  純粋な関数 `continue_list(text, cursor) -> Option<(String, usize)>`（文字の位置）も公開。使う側がやることは無い。
+
+### 変更
+
+- `ito-prefs`: `Mark::Numbers` は線の横に数字の 1 2 3 を描き、`Mark::Tasks` は 3 つの箱（先頭にチェック）にした。ツールバーで一目で見分けがつく。
+
 ## [0.203.0] - 2026-11-01
 
 ### 変更

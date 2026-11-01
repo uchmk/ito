@@ -97,6 +97,48 @@ pub fn tool(text: &str, a: usize, b: usize, t: Tool) -> (String, usize, usize) {
     }
 }
 
+/// Enter pressed with the cursor at char `at` in a list item (`- `, `* `, `- [ ] `, `1. `): the text and cursor
+/// after the line breaks and the next item's marker (a number goes up by one, a task starts unticked) is put
+/// there. Enter on an item with nothing in it takes the marker away instead, which ends the list. `None`: the
+/// line is not an item, or the cursor is inside its marker, so the field does its plain newline.
+pub fn continue_list(text: &str, at: usize) -> Option<(String, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    let at = at.min(chars.len());
+    let start = chars[..at].iter().rposition(|&c| c == '\n').map_or(0, |i| i + 1);
+    let end = chars[at..].iter().position(|&c| c == '\n').map_or(chars.len(), |i| at + i);
+    let line: String = chars[start..end].iter().collect();
+    let indent_len = line.chars().take_while(|&c| c == ' ' || c == '\t').count();
+    let indent: String = line.chars().take(indent_len).collect();
+    let rest: String = line.chars().skip(indent_len).collect();
+    let (marker, next) = if let Some(m) = ["- [ ] ", "- [x] ", "- [X] "].iter().find(|m| rest.starts_with(**m)) {
+        (m.to_string(), "- [ ] ".to_string())
+    } else if rest.starts_with("- ") || rest.starts_with("* ") {
+        (rest[..2].to_string(), rest[..2].to_string())
+    } else {
+        let digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 || digits > 9 || !rest[digits..].starts_with(". ") {
+            return None;
+        }
+        let n: u64 = rest[..digits].parse().ok()?;
+        (rest[..digits + 2].to_string(), format!("{}. ", n + 1))
+    };
+    let body_from = start + indent_len + marker.chars().count();
+    if at < body_from {
+        return None;
+    }
+    if chars[body_from..end].iter().all(|c| c.is_whitespace()) {
+        // An empty item: the marker goes, the line is left blank.
+        let mut out: String = chars[..start].iter().collect();
+        out.extend(&chars[end..]);
+        return Some((out, start));
+    }
+    let mut out: String = chars[..at].iter().collect();
+    let ins = format!("\n{indent}{next}");
+    out.push_str(&ins);
+    out.extend(&chars[at..]);
+    Some((out, at + ins.chars().count()))
+}
+
 /// `mark(k)` put at the start of each line the selection touches (the k-th
 /// of them); the selection moves to keep the same text.
 fn lines(text: &str, a: usize, b: usize, mark: impl Fn(usize) -> String) -> (String, usize, usize) {
@@ -720,6 +762,26 @@ fn heading(t: &str) -> Option<Block> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enter_goes_on_with_the_list() {
+        let c = |t: &str| continue_list(t, t.chars().count());
+        assert_eq!(c("- a"), Some(("- a\n- ".into(), 6)));
+        assert_eq!(c("* a"), Some(("* a\n* ".into(), 6)));
+        assert_eq!(c("- [ ] a"), Some(("- [ ] a\n- [ ] ".into(), 14)));
+        assert_eq!(c("- [x] a"), Some(("- [x] a\n- [ ] ".into(), 14)));
+        assert_eq!(c("1. a\n2. b"), Some(("1. a\n2. b\n3. ".into(), 13)));
+        assert_eq!(c("9. a").unwrap().0, "9. a\n10. ");
+        assert_eq!(c("  - a").unwrap().0, "  - a\n  - ");
+        assert_eq!(c("plain"), None);
+        assert_eq!(c("1.5 x"), None);
+        // An empty item ends the list.
+        assert_eq!(c("- a\n- "), Some(("- a\n".into(), 4)));
+        assert_eq!(c("1. a\n2. "), Some(("1. a\n".into(), 5)));
+        // Inside the marker: the plain newline. In the middle of the text: the rest moves down.
+        assert_eq!(continue_list("- a", 1), None);
+        assert_eq!(continue_list("- ab", 3), Some(("- a\n- b".into(), 6)));
+    }
 
     #[test]
     fn wrap_keeps_the_selection_on_the_same_characters() {
