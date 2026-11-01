@@ -508,6 +508,8 @@ struct Input<'a> {
     width: f32,
     valid: bool,
     clearable: bool,
+    /// The spoken name of the text field; empty says the hint.
+    name: &'a str,
 }
 
 struct Shown {
@@ -547,7 +549,7 @@ fn input(ui: &mut Ui, l: Look, i: &Input, text: &mut String) -> Shown {
             .margin(Vec2::new(8.0, 4.0))
             .vertical_align(Align::Center),
     );
-    ito_a11y::say(&r, Said::Label, i.words.hint);
+    ito_a11y::say(&r, Said::Label, if i.name.is_empty() { i.words.hint } else { i.name });
     let mut cleared = false;
     if has_clear {
         let x = ui.interact(clear_rect, i.id.with("clear"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -582,6 +584,7 @@ pub struct DateField<'a> {
     multi: bool,
     width: Option<f32>,
     look: Option<DayLooker<'a>>,
+    names: (&'a str, &'a str),
 }
 
 impl std::fmt::Debug for DateField<'_> {
@@ -604,6 +607,7 @@ impl<'a> DateField<'a> {
             multi: false,
             width: None,
             look: None,
+            names: ("", ""),
         }
     }
 
@@ -643,6 +647,12 @@ impl<'a> DateField<'a> {
         self
     }
 
+    /// The name a screen reader says for the text field (else the hint, `YYYY-MM-DD`).
+    pub fn name(mut self, name: &'a str) -> Self {
+        self.names.0 = name;
+        self
+    }
+
     /// Tints days (a holiday red) and gives them a tip.
     pub fn day_look(mut self, f: DayLooker<'a>) -> Self {
         self.look = Some(f);
@@ -655,7 +665,8 @@ impl<'a> DateField<'a> {
         let mut st = Pop::load(&ctx, self.id, today);
         let valid = text_ok(text, self.empty_ok, (self.min, self.max), self.multi);
         let width = self.width.unwrap_or_else(|| ui.available_width().min(z(ui, 190.0)));
-        let shown = input(ui, l, &Input { id: self.id, words: &self.words, width, valid, clearable: self.empty_ok }, text);
+        let shown =
+            input(ui, l, &Input { id: self.id, words: &self.words, width, valid, clearable: self.empty_ok, name: self.names.0 }, text);
         let mut changed = shown.changed;
         if shown.cleared {
             text.clear();
@@ -743,6 +754,12 @@ impl<'a> RangeField<'a> {
         self
     }
 
+    /// The names a screen reader says for the start and the end field ("開始日", "終了日"); else the hint.
+    pub fn names(mut self, from: &'a str, to: &'a str) -> Self {
+        self.inner.names = (from, to);
+        self
+    }
+
     pub fn day_look(mut self, f: DayLooker<'a>) -> Self {
         self.inner = self.inner.day_look(f);
         self
@@ -767,7 +784,14 @@ impl<'a> RangeField<'a> {
             let a = input(
                 ui,
                 l,
-                &Input { id: d.id.with("from"), words: &d.words, width, valid: ok(from) && ordered, clearable: d.empty_ok },
+                &Input {
+                    id: d.id.with("from"),
+                    words: &d.words,
+                    width,
+                    valid: ok(from) && ordered,
+                    clearable: d.empty_ok,
+                    name: d.names.0,
+                },
                 from,
             );
             first = Some(a.text.clone());
@@ -779,8 +803,12 @@ impl<'a> RangeField<'a> {
                 changed = true;
             }
             ui.label(egui::RichText::new("〜").color(l.c.dim));
-            let b =
-                input(ui, l, &Input { id: d.id.with("to"), words: &d.words, width, valid: ok(to) && ordered, clearable: d.empty_ok }, to);
+            let b = input(
+                ui,
+                l,
+                &Input { id: d.id.with("to"), words: &d.words, width, valid: ok(to) && ordered, clearable: d.empty_ok, name: d.names.1 },
+                to,
+            );
             outer = outer.union(b.outer);
             changed |= b.changed;
             button |= b.button;

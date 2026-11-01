@@ -131,11 +131,13 @@ pub enum Mark {
     Folder,
     /// A globe.
     Globe,
+    CalendarOff,
+    CalendarCheck,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 61] = [
+    pub const ALL: [Mark; 63] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -197,6 +199,8 @@ impl Mark {
         Mark::Person,
         Mark::Folder,
         Mark::Globe,
+        Mark::CalendarOff,
+        Mark::CalendarCheck,
     ];
 }
 
@@ -525,6 +529,18 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
         }
         Mark::Folder => {
             p.add(closed(pts(&[(-6.5, -4.5), (-2.0, -4.5), (-0.5, -2.5), (6.5, -2.5), (6.5, 5.5), (-6.5, 5.5)])));
+        }
+        Mark::CalendarOff | Mark::CalendarCheck => {
+            p.rect_stroke(Rect::from_min_max(at(-6.0, -4.5), at(6.0, 6.0)), 1.5 * k, line, StrokeKind::Middle);
+            seg((-6.0, -1.0), (6.0, -1.0));
+            seg((-3.0, -6.5), (-3.0, -3.0));
+            seg((3.0, -6.5), (3.0, -3.0));
+            if mark == Mark::CalendarOff {
+                seg((-2.0, 1.0), (2.0, 5.0));
+                seg((2.0, 1.0), (-2.0, 5.0));
+            } else {
+                p.add(path(vec![at(-2.5, 3.0), at(-0.8, 4.8), at(2.6, 1.0)]));
+            }
         }
         Mark::Globe => {
             p.circle_stroke(m, 6.0 * k, line);

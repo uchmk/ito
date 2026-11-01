@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.172.0] - 2026-11-01
+
+### 追加
+
+- `ito-prefs`: `Mark` に `CalendarOff`（予定の面に小さな ×）・`CalendarCheck`（同じ面に小さな ✓）（計 63。koyomi の #119）。
+- `ito-prefs`: 日付欄の読み上げの名前。`DateField::name("開始日")`、`RangeField::names("開始日", "終了日")`。付けなければこれまで通りヒント（`YYYY-MM-DD`）を読む（koyomi の依頼）。
+
+### 使う側がやること
+
+- `match` で `Mark` を網羅している所があれば、2 個足す。
+
 ## [0.171.0] - 2026-11-01
 
 ### 追加
