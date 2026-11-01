@@ -92,7 +92,9 @@ impl Panels {
             }
         } else if self.size(name).is_none() && {
             let screen = ui.ctx().content_rect();
-            screen.width() >= 9000.0 || screen.height() >= 9000.0
+            // Points shrink as the zoom grows (10000 / 1.2 = 8333), so measure in unzoomed points.
+            let zoom = ui.ctx().zoom_factor();
+            screen.width() * zoom >= 9000.0 || screen.height() * zoom >= 9000.0
         } {
             // The first frame has no window size (egui uses 10000x10000), and a default worked
             // out from that would stick. Forget it for that frame only: later on a panel with
@@ -138,7 +140,17 @@ mod tests {
     /// The first frame has no window size; a default worked out from it must not stick.
     #[test]
     fn a_default_from_the_sizeless_first_frame_does_not_stick() {
+        sizeless_first_frame(1.0);
+    }
+
+    #[test]
+    fn a_default_from_the_sizeless_first_frame_does_not_stick_when_zoomed() {
+        sizeless_first_frame(1.2);
+    }
+
+    fn sizeless_first_frame(zoom: f32) {
         let (ctx, mut panels) = (egui::Context::default(), Panels::load(None));
+        ctx.set_zoom_factor(zoom);
         let share = |ui: &egui::Ui| ui.available_width() * 0.55;
         let mut show = |ctx: &egui::Context, rect: Option<egui::Rect>| {
             let mut width = 0.0;
