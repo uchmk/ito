@@ -16,6 +16,7 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{vec2, Align2, Color32, Context, CursorIcon, FontId, Id, Order, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
+use ito_prefs::Mark;
 use std::sync::Arc;
 
 /// The colours of the box.
@@ -88,6 +89,9 @@ pub struct Question<'a> {
     pub buttons: &'a [String],
     /// The key caps of the buttons, one each; a missing or empty one shows none.
     pub keys: &'a [String],
+    /// The marks of the buttons, one each, drawn before the words in the text colour (as `ito_prefs::IconButton`);
+    /// a missing or `None` one shows none.
+    pub marks: &'a [Option<Mark>],
     /// The keys that answer, shown dim under the buttons; empty for none.
     pub hint: &'a str,
     /// The button the keyboard is on (the app moves it with Tab / Shift+Tab and
@@ -116,6 +120,9 @@ pub const DANGER_BG: Color32 = Color32::from_rgb(0xd1, 0x24, 0x2f);
 pub const DANGER_TEXT: Color32 = Color32::from_rgb(0xf2, 0x55, 0x5e);
 /// Green as text and outline on the dark panel.
 pub const OK_TEXT: Color32 = Color32::from_rgb(0x56, 0xd3, 0x64);
+
+/// The room a button's mark takes before its words: a 14 box and a gap.
+const MARK_ROOM: f32 = 20.0;
 
 /// How round the buttons' corners are, in points.
 const BUTTON_RADIUS: f32 = 6.0;
@@ -205,13 +212,26 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                             (true, false) => (PRIMARY_TEXT, PRIMARY_BG),
                             _ => (style.button_text, if n > 0 { Color32::TRANSPARENT } else { style.button_bg }),
                         };
-                        let mut b = egui::Button::new(with_key(label, key, fg, primary)).fill(bg).corner_radius(BUTTON_RADIUS);
+                        let mark = q.marks.get(j).copied().flatten();
+                        let mut job = with_key(label, key, fg, primary);
+                        if mark.is_some() {
+                            // Room for the mark: the button's own padding, then a 14 box and a gap.
+                            if let Some(first) = job.sections.first_mut() {
+                                first.leading_space = MARK_ROOM;
+                            }
+                        }
+                        let mut b = egui::Button::new(job).fill(bg).corner_radius(BUTTON_RADIUS);
                         if q.focus == Some(i) {
                             b = b.stroke(Stroke::new(2.0, style.accent.unwrap_or(style.text)));
                         } else if n > 0 && !primary {
                             b = b.stroke(Stroke::new(1.0, style.border));
                         }
-                        if ui.add(b).clicked() {
+                        let r = ui.add(b);
+                        if let Some(m) = mark {
+                            let at = egui::pos2(r.rect.left() + ui.spacing().button_padding.x + 7.0, r.rect.center().y);
+                            ito_prefs::mark(ui.painter(), egui::Rect::from_center_size(at, vec2(14.0, 14.0)), m, fg);
+                        }
+                        if r.clicked() {
                             clicked = Some(i);
                         }
                     }
@@ -501,6 +521,17 @@ mod tests {
         // So does a primary one, in range or not, narrow or wide.
         assert_eq!(run(&Question { primary: Some(1), focus: Some(1), ..q }, 120.0), None);
         assert_eq!(run(&Question { primary: Some(9), ..q }, 800.0), None);
+    }
+
+    /// Marks draw before the words; a short list, a `None` and a click all work.
+    #[test]
+    fn buttons_take_marks() {
+        let buttons = vec!["Trash".to_owned(), "Cancel".to_owned()];
+        let marks = [Some(Mark::Trash), None];
+        let q = Question { title: "T", buttons: &buttons, marks: &marks, primary: Some(0), danger: true, ..Default::default() };
+        assert_eq!(run(&q, 800.0), None);
+        let short = [Some(Mark::Close)];
+        assert_eq!(run(&Question { marks: &short, ..q }, 120.0), None);
     }
 
     #[test]

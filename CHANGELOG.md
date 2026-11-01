@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.179.0] - 2026-11-01
+
+### 追加
+
+- `ito-confirm`: `Question::marks: &[Option<Mark>]`。ボタンごとの印（`ito_prefs::Mark`）を、言葉の前に文字の色で描く（`IconButton` と同じ。足りない・`None` は印なし）。`primary`・`danger` の塗りはそのまま（koyomi の #121）。`ito-confirm` は `ito-prefs` に依るようになった。
+
+### 使う側がやること
+
+- `Question { … }` を `..Default::default()` なしで書いているなら、`marks: &[]` を足す。
+
 ## [0.178.1] - 2026-11-01
 
 ### 追加
