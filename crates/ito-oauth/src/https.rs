@@ -13,7 +13,7 @@ use crate::Error;
 /// The largest answer body read (32 MiB: Gmail sends a message with its attachments as base64 in JSON).
 const MAX_BODY: usize = 32 << 20;
 /// How much of an error body is kept in [`Error::Status`].
-const MAX_ERROR_BODY: usize = 2000;
+const MAX_ERROR_BODY: usize = 8000;
 
 /// A 2xx answer.
 #[derive(Clone, PartialEq, Eq)]

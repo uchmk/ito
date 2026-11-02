@@ -56,14 +56,36 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether the same call may work later: a timeout, a lost connection, 429 and 5xx.
+    /// Whether the same call may work later: a timeout, a lost connection, 429, 5xx, and Google's quota 403
+    /// (see [`Error::rate_limited`]).
     pub fn retryable(&self) -> bool {
         match self {
             Error::Network(_) | Error::Timeout => true,
-            Error::Status { code, .. } => *code == 429 || *code >= 500,
+            Error::Status { code, .. } => *code == 429 || *code >= 500 || self.rate_limited().is_some(),
             _ => false,
         }
     }
+
+    /// `Some(wait)` when the server said "too many requests": 429, or a 403 whose JSON body carries Google's
+    /// `rateLimitExceeded` / `userRateLimitExceeded` / `RATE_LIMIT_EXCEEDED` (Gmail answers a per-user quota with 403).
+    /// `wait` is the `Retry-After` when there was one, otherwise 60 s (the quotas are per minute).
+    pub fn rate_limited(&self) -> Option<Duration> {
+        let Error::Status { code, retry_after, body } = self else { return None };
+        if *code == 429 || (*code == 403 && google_rate_limit(body)) {
+            Some(retry_after.unwrap_or(Duration::from_secs(60)))
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether a Google error body names a rate-limit reason (`error.errors[].reason` or `error.details[].reason`).
+fn google_rate_limit(body: &str) -> bool {
+    const REASONS: [&str; 3] = ["rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED"];
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return false };
+    ["errors", "details"]
+        .iter()
+        .any(|k| v["error"][k].as_array().is_some_and(|a| a.iter().any(|e| e["reason"].as_str().is_some_and(|r| REASONS.contains(&r)))))
 }
 
 impl fmt::Display for Error {
@@ -84,3 +106,30 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(code: u16, retry_after: Option<u64>, body: &str) -> Error {
+        Error::Status { code, retry_after: retry_after.map(Duration::from_secs), body: body.to_owned() }
+    }
+
+    #[test]
+    fn rate_limited_reads_the_google_reason() {
+        let errors = r#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#;
+        let details = r#"{"error":{"details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}"#;
+        assert_eq!(status(403, None, errors).rate_limited(), Some(Duration::from_secs(60)));
+        assert_eq!(status(403, Some(5), details).rate_limited(), Some(Duration::from_secs(5)));
+        assert_eq!(status(429, None, "").rate_limited(), Some(Duration::from_secs(60)));
+        assert!(status(403, None, errors).retryable());
+    }
+
+    #[test]
+    fn other_403s_are_not_rate_limits() {
+        assert_eq!(status(403, None, r#"{"error":{"errors":[{"reason":"forbidden"}]}}"#).rate_limited(), None);
+        assert_eq!(status(403, None, "rateLimitExceeded").rate_limited(), None);
+        assert_eq!(status(500, None, r#"{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}"#).rate_limited(), None);
+        assert!(!status(403, None, "").retryable());
+    }
+}

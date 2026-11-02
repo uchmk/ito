@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.207.0] - 2026-11-02
+
+### 追加
+
+- `ito-oauth`: `Error::rate_limited() -> Option<Duration>`。429、または Google の JSON の本文（`error.errors[]` / `error.details[]` の `reason`）が
+  `rateLimitExceeded`・`userRateLimitExceeded`・`RATE_LIMIT_EXCEEDED` の 403（Gmail は利用者ごとの枠を 403 で返す）のとき、待つ長さを返す（`Retry-After` が無ければ 60 秒）。
+  `retryable()` もその 403 で true になる。文字の検索ではなく JSON を読む。エラーの本文の保持を 2000 から 8000 文字に増やした（JSON が途中で切れないように）。
+
 ## [0.206.0] - 2026-11-02
 
 ### 追加
