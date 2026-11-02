@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.221.2] - 2026-11-02
+
+### 修正
+- `ito-tray`（Windows）: 右クリックのメニューが OS のダークモードに従わず、明るいまま出ていた（#148）。メニューを出す前に 1 回、uxtheme の `SetPreferredAppMode(AllowDark)` と `FlushMenuThemes` を序数で読んで呼ぶ（無い版の Windows では何もしない）。API の変更はない。
+
+### 文書
+- `CLAUDE.md`: デザインで迷ったら Google Stitch（`mcp__stitch__*`）で案を出して比べる、の一行を足した。
+
 ## [0.221.1] - 2026-11-02
 
 ### 修正

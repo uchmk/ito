@@ -5,6 +5,8 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 
 **画面を作るときは、先に [docs/design-guide.md](docs/design-guide.md)（「こういうときはこのクレート」の早見表。ボタン・印・空の一覧・確認・Markdown の欄など）を見る。**
 
+デザイン（レイアウト・見た目の案）で迷ったら、Google Stitch（MCP の `mcp__stitch__*`。`generate_screen_from_text`・`generate_variants`・`edit_screens`）で案を出して比べてから決める。決めた形は、まず上の早見表の ito のクレートで組めるか確かめ、足りない部品は `crate-request` で頼む。
+
 | クレート | 中身 | 主に使う側 |
 |---|---|---|
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |

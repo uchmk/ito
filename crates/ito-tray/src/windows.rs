@@ -6,10 +6,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use windows::core::{w, PCWSTR};
+use windows::core::{w, PCSTR, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject, HGDIOBJ};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu, DispatchMessageW,
@@ -230,12 +230,33 @@ fn send(ctx: &Ctx, e: Event) {
     (ctx.wake)();
 }
 
+/// Let the popup menu follow the system's dark mode (uxtheme's unnamed `SetPreferredAppMode` and `FlushMenuThemes`,
+/// ordinals 135 and 136; `AllowDark` = 1 follows the setting). Loaded by ordinal, once, and skipped when absent.
+fn follow_dark_mode() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: the two ordinals have these signatures on Windows 10 1903 and later; a missing one is skipped.
+        unsafe {
+            let Ok(lib) = LoadLibraryW(w!("uxtheme.dll")) else { return };
+            let set = GetProcAddress(lib, PCSTR(135usize as *const u8));
+            let flush = GetProcAddress(lib, PCSTR(136usize as *const u8));
+            if let (Some(set), Some(flush)) = (set, flush) {
+                let set: extern "system" fn(i32) -> i32 = std::mem::transmute(set);
+                let flush: extern "system" fn() = std::mem::transmute(flush);
+                set(1);
+                flush();
+            }
+        }
+    });
+}
+
 /// Show the menu at the cursor and return the id of the entry chosen.
 unsafe fn pick(hwnd: HWND, ctx: &Ctx) -> Option<String> {
     let items = ctx.shared.lock().unwrap().menu.clone();
     if items.is_empty() {
         return None;
     }
+    follow_dark_mode();
     let menu: HMENU = CreatePopupMenu().ok()?;
     let mut ids = Vec::new();
     for item in &items {
