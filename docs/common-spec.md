@@ -408,6 +408,13 @@ scale: 100%           # 書くなら倍率を % で
   知らない値は警告して既定に戻す（送り先は `Place::problems`）。
   メールは `[[notify.mails]]`（`name`・`host`・`port`（既定 587、465 は最初から TLS）・`user`・`password`（`secret:<名前>` の参照だけ。ファイルに直に書くと警告して送らない）・`from`・`to`・`states`。`ito_notify::mail`）。
 
+## Google などの OAuth クライアント（`ito-oauth`）
+
+- 使う人に Google Cloud でクライアントを作らせない。uchmk のクライアントを 1 つ作り、ビルドのときにアプリへ入れる。デスクトップのクライアントのシークレットは秘密として扱われず、安全は PKCE とループバックで守る。
+- 入れ方: ビルドの環境変数 `UCHMK_GOOGLE_CLIENT_ID`・`UCHMK_GOOGLE_CLIENT_SECRET` を、アプリの crate で `ito_oauth::built_in_client!("UCHMK_GOOGLE")`（`Option<Client>`）が読む。無い・空なら `None`（ローカルの `cargo run`・fork の PR）。
+- 選ぶ順番: **使う人が取り込んだ自分のクライアント > 組み込み > なし（取り込みを促す）**。`Client::choose(own, built_in)`。JSON の取り込み（`Client::from_google_json`）は「自分のクライアントを使う」上級者向けに残す。
+- secret の置き場所: GitHub の（組織の）Actions secret `UCHMK_GOOGLE_CLIENT_ID`・`UCHMK_GOOGLE_CLIENT_SECRET`。登録は持ち主が GitHub の設定でする。`build.yml`・`release.yml` の雛形が release のビルドの手順の `env` に渡す（GitHub がログで伏せる。fork の PR には渡らず、空になる）。
+
 ## 時計
 
 - ステータスバーの右端に、等幅の字体と一番強い文字の色で出す。ポインタを載せると日付を全部出す（`Clock::full`）。

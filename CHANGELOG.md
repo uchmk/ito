@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.223.0] - 2026-11-02
+
+### 追加
+- `ito-oauth`: ビルドのときに入れる組み込みのクライアント（fumi の依頼）。`built_in_client!("UCHMK_GOOGLE")` が `UCHMK_GOOGLE_CLIENT_ID`・`UCHMK_GOOGLE_CLIENT_SECRET` を `option_env!` で読んで `Option<Client>` を返す（無い・空なら `None`）。`Client::from_build`・`Client::choose(own, built_in)`（取り込んだ自分のもの > 組み込み > なし）。
+- ワークフローの雛形 `build.yml`・`release.yml`: release のビルドの手順の `env` に Actions secret `UCHMK_GOOGLE_CLIENT_ID`・`UCHMK_GOOGLE_CLIENT_SECRET` を渡す。fork の PR では空になり、組み込みなしでビルドが通る。
+- `docs/common-spec.md` に「OAuth クライアント」の節（選ぶ順番・secret の置き場所）。
+- 使う側がやること: アプリの crate で `built_in_client!` を呼び、`lanes.sh sync` でワークフローを写す。secret の登録は持ち主が GitHub の設定でする。
+
 ## [0.222.0] - 2026-11-02
 
 ### 追加

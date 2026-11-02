@@ -31,6 +31,27 @@ use std::time::Duration;
 
 pub use oauth::{sign_in, Client, Options, Page, Provider, Session, Tokens, GOOGLE};
 
+/// The client built into the app: reads `<PREFIX>_CLIENT_ID` and `<PREFIX>_CLIENT_SECRET` from the environment **of the
+/// crate being compiled** (`option_env!`, so cargo rebuilds it when they change) and gives an `Option<Client>`. Without
+/// them, or with blank ones (a local build, a fork's pull request), it is `None`.
+///
+/// Order of choice: the client the person imported > this one > none (ask them to import one): `Client::choose`.
+///
+/// ```
+/// let built_in: Option<ito_oauth::Client> = ito_oauth::built_in_client!("UCHMK_GOOGLE");
+/// let client = ito_oauth::Client::choose(None, built_in);
+/// # let _ = client;
+/// ```
+#[macro_export]
+macro_rules! built_in_client {
+    ($prefix:literal) => {
+        $crate::Client::from_build(
+            ::core::option_env!(::core::concat!($prefix, "_CLIENT_ID")),
+            ::core::option_env!(::core::concat!($prefix, "_CLIENT_SECRET")),
+        )
+    };
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The address is not `https://host[:port]/path` (or `http://` to the loopback).

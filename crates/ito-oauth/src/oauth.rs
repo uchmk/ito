@@ -58,6 +58,21 @@ impl Client {
     }
 }
 
+impl Client {
+    /// A client from what `option_env!` saw at build time. `None` when the id is missing or blank (the usual case in a
+    /// local build and in a fork's pull request, where the secrets come empty); a blank secret is `None`.
+    pub fn from_build(id: Option<&str>, secret: Option<&str>) -> Option<Client> {
+        let text = |x: Option<&str>| x.map(str::trim).filter(|x| !x.is_empty()).map(str::to_owned);
+        Some(Client { id: text(id)?, secret: text(secret) })
+    }
+
+    /// Which client to sign in with: the one the person imported (their own) first, then the one built into the app,
+    /// else `None` (the app asks the person to import one).
+    pub fn choose(own: Option<Client>, built_in: Option<Client>) -> Option<Client> {
+        own.or(built_in)
+    }
+}
+
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").field("id", &self.id).field("secret", &self.secret.as_ref().map(|_| "…")).finish()
@@ -394,6 +409,19 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn built_in_and_choice() {
+        use super::Client;
+        assert_eq!(Client::from_build(None, Some("s")), None);
+        assert_eq!(Client::from_build(Some(" "), Some("s")), None);
+        let c = Client::from_build(Some(" id "), Some("")).unwrap();
+        assert_eq!((c.id.as_str(), c.secret), ("id", None));
+        let own = Client::from_build(Some("own"), None);
+        let built = Client::from_build(Some("built"), None);
+        assert_eq!(Client::choose(own.clone(), built.clone()), own);
+        assert_eq!(Client::choose(None, built.clone()), built);
+        assert_eq!(Client::choose(None, None), None);
+    }
 
     #[test]
     fn google_json_installed_and_web() {

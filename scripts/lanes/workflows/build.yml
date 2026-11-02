@@ -68,6 +68,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
+        # The app's built-in Google OAuth client (ito_oauth::built_in_client!). GitHub masks secrets in the log;
+        # a fork's pull request gets them empty and the build then has no built-in client.
+        env:
+          UCHMK_GOOGLE_CLIENT_ID: ${{ secrets.UCHMK_GOOGLE_CLIENT_ID }}
+          UCHMK_GOOGLE_CLIENT_SECRET: ${{ secrets.UCHMK_GOOGLE_CLIENT_SECRET }}
         run: cargo build --release --locked -p {{crate}} --target ${{ matrix.target }}
 
       # The console front a release ships beside {{bin}}.exe, as release.yml
