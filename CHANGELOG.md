@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.206.0] - 2026-11-02
+
+### 追加
+
+- `ito-notify::mail::send_message(&Mail, to, message, timeout)`: 組み済みのメッセージ（`ito_mail::compose` の出力、添付つき）を、`Mail` のサーバーとログインで `to` に送る（uchmk/ito#138）。
+  呼ぶスレッドで curl が終わるまで待つ（ワーカースレッドから）。やり直しは呼ぶ側。差出人は `mail.from`、宛先は `mail.to` ではなく引数。
+  失敗の文は curl の言葉か終了コードで、パスワードは出ない。宛先なし・アドレスでない宛先・空のメッセージは curl を呼ぶ前に断る。
+  添付の個数・大きさの上限は呼ぶ側が決める（`send_composed` は作らない）。
+
 ## [0.205.0] - 2026-11-02
 
 ### 修正

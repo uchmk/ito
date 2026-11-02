@@ -183,14 +183,19 @@ pub fn send(mail: Mail, level: Level, title: String, message: String) {
 /// The `curl` arguments for one mail, before `--upload-file`: the address (TLS from the start on 465, else STARTTLS
 /// required), the envelope, and the login read from standard input (`--config -`).
 pub fn args(mail: &Mail) -> Vec<String> {
+    args_to(mail, &mail.to, 60)
+}
+
+/// [`args`] for the recipients `to` and a limit of `secs` seconds for the whole of it.
+fn args_to(mail: &Mail, to: &[String], secs: u64) -> Vec<String> {
     let url =
         if mail.port == 465 { format!("smtps://{}:465", mail.host.trim()) } else { format!("smtp://{}:{}", mail.host.trim(), mail.port) };
-    let mut out: Vec<String> = ["-sS", "-m", "60"].iter().map(|s| (*s).to_owned()).collect();
+    let mut out: Vec<String> = ["-sS".to_owned(), "-m".to_owned(), secs.to_string()].to_vec();
     if mail.port != 465 {
         out.push("--ssl-reqd".into());
     }
     out.extend(["--url".into(), url, "--mail-from".into(), address(&mail.from).unwrap_or_default().to_owned()]);
-    for t in &mail.to {
+    for t in to {
         out.extend(["--mail-rcpt".into(), address(t).unwrap_or_default().to_owned()]);
     }
     if !mail.user.trim().is_empty() {
@@ -206,14 +211,39 @@ fn login(mail: &Mail) -> String {
 }
 
 fn post(mail: &Mail, level: Level, title: &str, message: &str) -> Result<(), String> {
+    upload(mail, &mail.to, body(mail, level, title, message, now()).as_bytes(), 60)
+}
+
+/// Send one message that is already composed (RFC 5322 bytes with CRLF lines, such as `ito_mail::compose` makes,
+/// attachments and all) through `mail`'s server and login, to `to` (not `mail.to`); the sender is `mail.from`.
+/// Waits on the calling thread until `curl` ends, at most `timeout` (a second at least), and tries once: whether to
+/// try again is for the caller. The error is a line for a log: `curl`'s own words or its exit code, never the password.
+/// Run it on a worker thread, it blocks.
+pub fn send_message(mail: &Mail, to: &[String], message: &[u8], timeout: std::time::Duration) -> Result<(), String> {
+    if address(&mail.from).is_none() {
+        return Err(format!("the sender \"{}\" is not an address", mail.from));
+    }
+    if to.is_empty() {
+        return Err("no recipient".into());
+    }
+    if let Some(bad) = to.iter().find(|t| address(t).is_none()) {
+        return Err(format!("the recipient \"{bad}\" is not an address"));
+    }
+    if message.is_empty() {
+        return Err("the message is empty".into());
+    }
+    upload(mail, to, message, timeout.as_secs().max(1))
+}
+
+fn upload(mail: &Mail, to: &[String], message: &[u8], secs: u64) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let dir = std::env::temp_dir();
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let file = dir.join(format!("ito-mail-{}-{}.eml", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-    std::fs::write(&file, body(mail, level, title, message, now())).map_err(|e| format!("cannot write the message: {e}"))?;
+    std::fs::write(&file, message).map_err(|e| format!("cannot write the message: {e}"))?;
     let mut cmd = Command::new("curl");
-    cmd.args(args(mail)).arg("--upload-file").arg(&file).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(args_to(mail, to, secs)).arg("--upload-file").arg(&file).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -231,10 +261,17 @@ fn post(mail: &Mail, level: Level, title: &str, message: &str) -> Result<(), Str
     let _ = std::fs::remove_file(&file);
     let out = out?;
     if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+        return Ok(());
     }
+    let mut said = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+    if let Some(secret) = mail.secret.as_deref().filter(|p| !p.is_empty()) {
+        said = said.replace(secret, "***");
+    }
+    Err(match (said.is_empty(), out.status.code()) {
+        (false, _) => said,
+        (true, Some(c)) => format!("curl exited with {c}"),
+        (true, None) => "curl was stopped".into(),
+    })
 }
 
 /// Seconds since 1970 (UTC).
@@ -419,5 +456,25 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn send_message_uses_its_own_recipients_and_limit() {
+        let a = args_to(&ops(), &["x@example.org".to_owned()], 90);
+        assert!(a.windows(2).any(|w| w == ["-m", "90"]));
+        assert!(a.contains(&"x@example.org".to_owned()) && !a.contains(&"ops@example.com".to_owned()));
+        assert_eq!(args(&ops()), args_to(&ops(), &ops().to, 60));
+    }
+
+    #[test]
+    fn send_message_refuses_what_cannot_go_before_curl_runs() {
+        let t = std::time::Duration::from_secs(5);
+        let to = vec!["x@example.org".to_owned()];
+        assert!(send_message(&ops(), &[], b"m", t).unwrap_err().contains("no recipient"));
+        assert!(send_message(&ops(), &["nobody".to_owned()], b"m", t).unwrap_err().contains("not an address"));
+        assert!(send_message(&ops(), &to, b"", t).unwrap_err().contains("empty"));
+        let mut m = ops();
+        m.from = "nobody".into();
+        assert!(send_message(&m, &to, b"m", t).unwrap_err().contains("sender"));
     }
 }
