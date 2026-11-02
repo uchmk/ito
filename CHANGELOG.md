@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.220.0] - 2026-11-02
+
+### 追加
+- `ito-mdview`: Markdown の整形レイアウトを kura のプレビューから切り出した（#151、`Doc` を作る部分）。`render(text, cols, &Palette)` が段落の折り返し（日本語の禁則つき）・
+  リストの印・引用の線・Alert・揃えた表・色分けしたコード（`ito-syntax`）を、セルの格子に並べた `Doc` にする。窓にも egui にも依らない。
+  各行 `DocLine` が元の文章のバイトの範囲 `bytes` と行 `src` を持ち、`Doc::line_at_byte`（元のバイト → 描いた行）・`byte_at_line`（描いた行 → 元のバイト）・
+  `src_for_line`・`line_for_src`・見出しの一覧 `headings`・検索の一致 `marks` で、エディターのスクロールの連動とクリックでのキャレットの移動ができる。
+  数式・図（mermaid など）は `LineKind::Placeholder` の 1 行で場所を取る。色は `Palette`（機能 `theme` で `from_theme()` が `ito_theme::colors()` から作る）。
+  egui の描画は別（この版にはない）。使う側がやること: kura は `preview/markdown.rs` を `ito_mdview::render` に替える。
+
 ## [0.219.0] - 2026-11-02
 
 ### 追加

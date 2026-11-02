@@ -1,0 +1,21 @@
+[package]
+name = "ito-mdview"
+description = "Markdown laid out for reading on a cell grid: wrapped paragraphs, list markers, quote bars, aligned tables, highlighted code, with the source byte range of every line (original byte <-> rendered line)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# `Palette::from_theme`: the colours of the page from `ito_theme::colors()`.
+theme = ["dep:ito-theme"]
+
+[dependencies]
+ito-syntax = { path = "../ito-syntax" }
+ito-outline = { path = "../ito-outline" }
+ito-match = { path = "../ito-match" }
+ito-theme = { path = "../ito-theme", optional = true }
+unicode-width = "0.2"
+# Pure Rust.
+pulldown-cmark = { version = "0.13", default-features = false }
