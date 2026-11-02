@@ -3,6 +3,27 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.209.0] - 2026-11-02
+
+### 追加
+
+- 新しいクレート `ito-cloud`（#140）。S3 互換のオブジェクト ストレージ（Amazon S3・MinIO・Cloudflare R2 など）にファイルを送る・取る・一覧・消す、ブロッキングの API（ワーカースレッドから呼ぶ）。
+  - `put(&Target, local, key, &Options, &cancel, progress)`: `Options::part_size`（既定 16 MiB、下限 5 MiB、1 万パートに収まるよう自動で上げる）以下は 1 リクエスト、それより大きいと
+    マルチパート。パートは 5xx・429・408・通信の失敗で最大 3 回やり直す。失敗・停止・時間切れでは中途半端なアップロードを Abort する。`key` が空か `/` で終わるとファイル名を足す。
+  - `get(&Target, key, local, …)`: `<名前>.part` に書いて、全部届いてから名前替え。失敗すれば `.part` も消す。
+  - `list(&Target, pattern, &Options, &cancel)`: `*` `?` のパターン（`*` は `/` にも一致）。最初のワイルドカードまでを prefix にして、全ページを辿る。
+  - `delete(&Target, key, …)`: 無いキーを消してもエラーにしない。
+  - SigV4（本文の SHA-256 も署名）。`Target::S3 { bucket, region, endpoint, path_style, key_id, secret, session_token }`。`Debug` は秘密を隠す。秘密は呼ぶ側が `ito-secret` から読んで渡す。
+  - `Error::{NotFound, Auth, Status, Network, Tls, Cancelled, Timeout, Io}` と `retryable()`。全体の時間切れ（`Options::timeout`）と 1 リクエストの時間切れ（`request_timeout`）、止める旗。
+  - 機能 `test-util`: `fake::FakeS3`（127.0.0.1 の小さな S3。署名と本文のハッシュを確かめ、失敗の注入・遅延・ページ分けができる）。
+  - HTTP は `ureq`（rustls + ring）。Linux・macOS 向けのビルドは C が要る（`ito-sftp` と同じ）。
+  - 使う側がやること: 依存に `ito-cloud` を足す。Amazon 以外は `endpoint` を `https://host[:port]` で渡し、MinIO は `path_style: true`。
+
+### 変更
+
+- `ito-match`: `glob_match`・`has_wildcard`（`*` `?` のファイル名の規則）を `ito-sftp` から移した。
+- `ito-sftp`: 上の 2 つは `ito_match` の再エクスポート（`ito_sftp::glob_match` はそのまま使える）。
+
 ## [0.208.0] - 2026-11-02
 
 ### 追加

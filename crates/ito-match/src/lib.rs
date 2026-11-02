@@ -10,8 +10,10 @@
 //! which is what a view draws highlighted.
 
 pub mod fuzzy;
+mod glob;
 mod matcher;
 mod subst;
 
+pub use glob::{glob_match, has_wildcard};
 pub use matcher::Matcher;
 pub use subst::Subst;

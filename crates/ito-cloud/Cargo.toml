@@ -1,0 +1,22 @@
+[package]
+name = "ito-cloud"
+description = "Send, fetch, list and delete files in S3-compatible object storage with a plain blocking API: SigV4, multipart, wildcards, .part then rename, timeouts and a stop flag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# A fake S3 server on 127.0.0.1 (`fake::FakeS3`) for the tests of programs that use this crate.
+test-util = []
+
+[dependencies]
+ito-match = { path = "../ito-match" }
+# `ring` (not aws-lc-rs); no gzip: object bodies are stored bytes and must come back as they are.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+sha2 = "0.11"
+hmac = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

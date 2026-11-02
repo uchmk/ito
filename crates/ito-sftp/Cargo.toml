@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ito-match = { path = "../ito-match" }
 # `ring` (not the default aws-lc-rs) needs a C compiler on Linux and macOS targets only; Windows MSVC builds as is.
 russh = { version = "0.65", default-features = false, features = ["ring"] }
 russh-sftp = "3"
