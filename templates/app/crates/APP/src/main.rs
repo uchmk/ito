@@ -294,7 +294,7 @@ impl eframe::App for App {
         // The ghost for an empty list (nothing yet): replace this with the app's list, and show this only when it is empty.
         // Pass `Some(self.table.tr("app.add"))` as the last argument to offer an add button where the user may add.
         let look = ito_prefs::Look { c: ito_theme::colors(), q: "" };
-        let _ = ito_prefs::empty_state(ui, look, ito_prefs::Mark::Info, &self.table.tr("app.hello"), &self.table.tr("app.bug"), None);
+        let _ = ito_prefs::empty_state(ui, look, ito_prefs::Mark::Info, self.table.tr("app.hello"), self.table.tr("app.bug"), None);
         let note = self.scale_note.clone();
         ui.label(note.unwrap_or_else(|| ito_common::scale_text(self.common.scale_or_one(), &self.lang)));
         // Last, so the edges of the frameless window win over what is under them.

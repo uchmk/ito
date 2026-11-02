@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.221.1] - 2026-11-02
+
+### 修正
+- `templates/app`: 空の一覧の `ito_prefs::empty_state` に `&` を付けた `String` を渡していて、Rust 1.99 の clippy（`needless_borrow`）で新しいアプリの `verify.sh` が落ちた（#154）。`&` を外した。
+- `scripts/lanes/ito-first.py`: `cargo metadata` の出力を UTF-8 で読む。Windows（cp932）で `UnicodeDecodeError` になり、`new-app.ps1` が途中で止まって `chmod +x` の段が飛んでいた（#155）。
+  使う側がやること: `scripts/lanes.sh sync` で写しを更新する。
+
 ## [0.221.0] - 2026-11-02
 
 ### 追加
