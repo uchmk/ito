@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.221.0] - 2026-11-02
+
+### 追加
+- `ito-mdedit`: Markdown の構造の命令（Markdown エディター weft 向け、#3）。どれも文章とキャレットのバイトを渡すと `Change`（置き換える範囲・新しい文字・キャレットの行き先）を返す純関数で、
+  窓もバッファも知らない（効かないときは `None`）。ブロックと節: `move_block`（見出しなら節ごと。見出しと front matter は越えない）・`move_section`（同じ段の兄弟と入れ替え）・
+  `promote_section`/`demote_section`（下の見出しごと `#` を増減。下線の見出しと範囲外は `None`）。リスト: `indent_item`/`outdent_item`（入れ子ごと）・`toggle_task`（普通の項目はタスクにする）・`renumber`。
+  表: `format_table`（全角は 2 桁で桁をそろえ、`:--:` の寄せを書き直す。`\|` とコードの中の `|` では割らない）・`next_cell`（`Step::Next`/`Prev`。Tab で隣のセルへ、最後のセルの先では行を足す）。
+  `ito-outline` の見出しの節の範囲の上に作った。
+
+### 変更
+- `ito-syntax`: `Stream` が `Clone` になった（#4）。大きいファイルでは N 行ごとに複製を取っておき、編集した行の手前の複製から読み直せる（その行より後の複製は捨てる）。
+
 ## [0.220.0] - 2026-11-02
 
 ### 追加

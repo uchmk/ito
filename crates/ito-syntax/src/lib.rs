@@ -131,6 +131,11 @@ pub fn knows(path: &str) -> bool {
 }
 
 /// A reader of the lines of one file (or one side of a hunk), in order.
+///
+/// `Clone` keeps a checkpoint: a large file stores a clone every N lines, and after an edit
+/// at line L restarts from the last clone before L instead of from the top (drop the
+/// clones from L on, since they no longer hold).
+#[derive(Clone)]
 pub struct Stream {
     syntax: &'static SyntaxReference,
     state: ParseState,
@@ -280,6 +285,18 @@ pub fn classify(scope: &str) -> Option<Tok> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_clone_resumes_where_it_was_taken() {
+        let lines = ["/* open", "still comment", "close */ let x = 1;", "fn f() {}"];
+        let mut s = Stream::new("a.rs").unwrap();
+        s.line(lines[0]);
+        let mut saved = s.clone();
+        let rest: Vec<Ink> = lines[1..].iter().map(|l| s.line(l)).collect();
+        let again: Vec<Ink> = lines[1..].iter().map(|l| saved.line(l)).collect();
+        assert_eq!(rest, again);
+        assert!(!rest[0].is_empty(), "the second line is still inside the comment");
+    }
+
     use super::*;
 
     fn word<'a>(text: &'a str, ink: &Ink, tok: Tok) -> Vec<&'a str> {

@@ -1,0 +1,14 @@
+[package]
+name = "ito-mdedit"
+description = "Structure commands for Markdown text: move a block or a section, promote / demote a section, indent a list item, toggle a task, renumber, format a table. Text and a byte in, a Change out"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-outline = { path = "../ito-outline" }
+unicode-width = "0.2"
+# Pure Rust.
+pulldown-cmark = { version = "0.13", default-features = false }
