@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.222.0] - 2026-11-02
+
+### 追加
+- 新しいクレート `ito-textbuf`: エディターが自分で持つ文書（`egui::TextEdit` を使わない）の土台（#156）。窓なし。
+  - `Buffer`: 読んだままの文章（1 本の `String` なので `text()` は `ito-mdedit` にそのまま渡せる）、編集ごとに上がる `version()`、BOM と改行（`Eol`: `None`/`Lf`/`Crlf`/`Mixed`）を覚えて `saved()` で書き戻す。
+  - `pos`: バイト・`char`・書記素・行と列の変換（CRLF・全角・絵文字）。
+  - `Selection`: キャレットと anchor。
+  - `Doc`: バッファ + 選択 + 履歴。`Transaction`（`Edit` の並び + 前後の選択 + `Effect`）が undo の 1 手。`Transaction::from_change` で `ito_mdedit::Change` をそのまま 1 手にできる。`typed(text, now_ms)` は間が `pause_ms` 以内で続きの場所なら 1 手にまとめる（改行・キャレットの移動・`seal()` で切れる）。`commit` は IME の確定を単独の 1 手にする。
+  - `Effect`（`undo`/`redo`）: 画像の貼り付けで書いたファイルなど、文字以外の副作用。undo は逆順・redo は順に、文字に触る前に呼ぶ。失敗したら文書は元のまま。
+  - 使う側がやること: `ito-textbuf = { git = …, rev = … }` を足す。マルチカーソル・矩形選択は無い。ロープではなく 1 本の `String`（8 MiB の途中への挿入は memmove 1 回）。
+
 ## [0.221.2] - 2026-11-02
 
 ### 修正

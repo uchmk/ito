@@ -1,0 +1,13 @@
+[package]
+name = "ito-textbuf"
+description = "A multi-line text buffer for an editor: version number, line endings and BOM remembered, byte / char / grapheme / line-column positions, one selection, undo and redo by transaction with typing coalesced and app-defined side effects. No UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-mdedit = { path = "../ito-mdedit" }
+# Pure Rust.
+unicode-segmentation = "1"

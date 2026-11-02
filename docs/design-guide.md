@@ -62,6 +62,7 @@
 | **ミニマップ**(右端の細い帯・見えている範囲の枠・ホバーで周りの数行) | `ito-minimap`(`rows`・`show`。色は `ito-syntax` の出力から) |
 | **整形した Markdown**(折り返し・リスト・表・色分けのコード。元の文章と描いた行の対応) | `ito-mdview`(`render`・`Doc::line_at_byte`/`byte_at_line`・`headings`。数式・図は `Placeholder`) |
 | **Markdown の構造の編集**(ブロック・節の移動、リストの字下げ、タスク、表の整形。キーは持たず `Change` を返す) | `ito-mdedit`(`move_block`・`demote_section`・`indent_item`・`toggle_task`・`format_table`/`next_cell`) |
+| **文書の編集の土台**(自分で持つバッファ、選択、undo/redo、BOM と改行を保つ。`egui::TextEdit` を使わないとき) | `ito-textbuf`(`Doc`・`Transaction`・`typed`/`commit`・`pos`) |
 | コードの色分け | `ito-syntax` |
 | 日本語の変換中の下線・候補窓の位置 | `ito-ime` |
 | 描いた文字をマウスで範囲選択してコピー | `ito-select` |
