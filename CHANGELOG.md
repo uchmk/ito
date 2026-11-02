@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.208.0] - 2026-11-02
+
+### 追加
+
+- 新しいクレート `ito-sql`（#139）。SQL Server・PostgreSQL・SQLite で SQL のスクリプトを走らせる、ブロッキングの API（ワーカースレッドから呼ぶ）。
+  - `run(&Target, script, out: Option<&Path>, &cancel, timeout) -> Result<Outcome, Error>`。バッチごとに実行し、変えた行数（`rows_affected`）と
+    最後の結果セットを CSV（`ito-table`: BOM・CRLF・`=` `+` `@` の保護）で返す。止める旗と時間切れで、接続を捨ててサーバに取り消させる。
+  - `Target::{SqlServer, Postgres, Sqlite}`、`SqlAuth::{Windows, Login}`（Windows 認証は Windows のみ）、`Tls::{Disable, Require, Verify}`。`Debug` はパスワードを隠す。
+  - `split_batches(script, Dialect)`: SQL Server は `GO` だけの行、PostgreSQL・SQLite は引用符・コメント・`$tag$`・`CREATE TRIGGER … END` の外の `;`。空のバッチは捨てる。
+  - 機能 `sqlserver`（tiberius）・`postgres`（tokio-postgres + rustls）・`sqlite`（rusqlite、bundled）。非同期は `run` の中の専用ランタイムに閉じる。
+  - SQL Server と PostgreSQL の実機での確認は koyomi に頼む（テストは SQLite と分割まで）。
+  - 使う側がやること: 依存に `ito-sql` を足す。SQL Server で `out` を渡すと、`SELECT`／`EXEC` を含むバッチは流して読むので、その分の行数は `rows_affected` に入らない。
+
 ## [0.207.0] - 2026-11-02
 
 ### 追加
