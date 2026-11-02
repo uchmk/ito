@@ -5,7 +5,7 @@ use crate::fake::FakeS3;
 use crate::*;
 
 fn opts() -> Options {
-    Options { timeout: Duration::from_secs(60), request_timeout: Duration::from_secs(20), part_size: 0 }
+    Options { timeout: Duration::from_secs(60), request_timeout: Duration::from_secs(20), part_size: 0, checksum: true }
 }
 
 fn never() -> AtomicBool {
@@ -28,7 +28,9 @@ fn small_file_goes_in_one_request_and_comes_back() {
     std::fs::write(&src, bytes(300_000)).unwrap();
     let mut seen = Vec::new();
     let sent = put(&f.target(), &src, "dir/a b.bin", &opts(), &never(), &mut |d, t| seen.push((d, t))).unwrap();
-    assert_eq!(sent, 300_000);
+    assert_eq!((sent.bytes, sent.verified), (300_000, true));
+    assert_eq!(sent.sha256, crate::sign::sha256_hex(&bytes(300_000)));
+    assert!(f.checksum("dir/a b.bin").is_some());
     assert_eq!(seen, [(300_000, 300_000)]);
     assert_eq!(f.object("dir/a b.bin").unwrap(), bytes(300_000));
     assert_eq!(f.requests().len(), 1);
@@ -36,7 +38,8 @@ fn small_file_goes_in_one_request_and_comes_back() {
     let out = dir.path().join("sub").join("b.bin");
     let mut last = (0, 0);
     let got = get(&f.target(), "dir/a b.bin", &out, &opts(), &never(), &mut |d, t| last = (d, t)).unwrap();
-    assert_eq!((got, last), (300_000, (300_000, 300_000)));
+    assert_eq!((got.bytes, last), (300_000, (300_000, 300_000)));
+    assert_eq!((got.sha256, got.verified), (sent.sha256, true));
     assert_eq!(std::fs::read(&out).unwrap(), bytes(300_000));
     assert!(!dir.path().join("sub").join("b.bin.part").exists());
 }
@@ -248,4 +251,78 @@ fn an_unreachable_store_is_a_network_error() {
     };
     let e = list(&t, "*", &opts(), &never()).unwrap_err();
     assert!(e.retryable(), "{e:?}");
+}
+
+#[test]
+fn a_multipart_upload_carries_part_checksums_and_the_whole_hash() {
+    let f = FakeS3::start();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("big.bin");
+    let data = bytes(11 * 1024 * 1024);
+    std::fs::write(&src, &data).unwrap();
+    let o = Options { part_size: MIN_PART, ..opts() };
+    let m = put(&f.target(), &src, "big.bin", &o, &never(), &mut |_, _| {}).unwrap();
+    assert_eq!((m.bytes, m.verified), (data.len() as u64, true));
+    assert_eq!(m.sha256, crate::sign::sha256_hex(&data));
+    assert!(f.checksum("big.bin").unwrap().ends_with("-3"));
+    // A multipart object's checksum is a checksum of checksums: the download cannot compare it, but still hashes.
+    let out = dir.path().join("back.bin");
+    let g = get(&f.target(), "big.bin", &out, &o, &never(), &mut |_, _| {}).unwrap();
+    assert_eq!((g.sha256, g.verified), (m.sha256, false));
+}
+
+#[test]
+fn damage_on_the_way_up_is_a_mismatch_and_makes_no_object() {
+    let f = FakeS3::start();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    std::fs::write(&src, bytes(1000)).unwrap();
+    f.damage_in_transit(true);
+    let e = put(&f.target(), &src, "a.bin", &opts(), &never(), &mut |_, _| {}).unwrap_err();
+    assert!(matches!(e, Error::Mismatch(_)), "{e:?}");
+    assert!(!e.retryable());
+    assert!(f.keys().is_empty());
+    // Without the checksum the same damage goes unseen: that is what the option is for.
+    let o = Options { checksum: false, ..opts() };
+    let m = put(&f.target(), &src, "a.bin", &o, &never(), &mut |_, _| {}).unwrap();
+    assert!(!m.verified);
+}
+
+#[test]
+fn damage_on_the_way_up_aborts_a_multipart_upload() {
+    let f = FakeS3::start();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("big.bin");
+    std::fs::write(&src, bytes(11 * 1024 * 1024)).unwrap();
+    f.damage_in_transit(true);
+    let e = put(&f.target(), &src, "big.bin", &opts(), &never(), &mut |_, _| {}).unwrap_err();
+    assert!(matches!(e, Error::Mismatch(_)), "{e:?}");
+    assert_eq!(f.open_uploads(), 0);
+}
+
+#[test]
+fn a_damaged_download_is_a_mismatch_and_leaves_no_file() {
+    let f = FakeS3::start();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    std::fs::write(&src, bytes(5000)).unwrap();
+    put(&f.target(), &src, "a.bin", &opts(), &never(), &mut |_, _| {}).unwrap();
+    f.corrupt_object("a.bin");
+    let out = dir.path().join("out.bin");
+    let e = get(&f.target(), "a.bin", &out, &opts(), &never(), &mut |_, _| {}).unwrap_err();
+    assert!(matches!(e, Error::Mismatch(_)), "{e:?}");
+    assert!(!out.exists() && !dir.path().join("out.bin.part").exists());
+    let o = Options { checksum: false, ..opts() };
+    let m = get(&f.target(), "a.bin", &out, &o, &never(), &mut |_, _| {}).unwrap();
+    assert!(!m.verified);
+}
+
+#[test]
+fn an_object_stored_without_a_checksum_downloads_unverified() {
+    let f = FakeS3::start();
+    f.put_object("old.bin", b"hello");
+    let dir = tempfile::tempdir().unwrap();
+    let m = get(&f.target(), "old.bin", &dir.path().join("o"), &opts(), &never(), &mut |_, _| {}).unwrap();
+    assert_eq!((m.bytes, m.verified), (5, false));
+    assert_eq!(m.sha256, crate::sign::sha256_hex(b"hello"));
 }

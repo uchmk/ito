@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::sign::{authorization, iso_date, sha256_hex, Keys};
+use crate::sign::{authorization, base64, iso_date, sha256_hex, sha256_raw, Keys};
 use crate::{xml, Target};
 
 pub const BUCKET: &str = "bucket";
@@ -23,6 +23,10 @@ struct State {
     /// upload id → (key, parts by number)
     uploads: HashMap<String, (String, BTreeMap<u64, Vec<u8>>)>,
     next_upload: u64,
+    /// key → `x-amz-checksum-sha256` the object was stored with (`…-N` for a multipart one)
+    sums: BTreeMap<String, String>,
+    /// flip one byte of every body after its hash was checked, as a bad link would
+    damage: bool,
     log: Vec<String>,
     /// (text the request line must contain, status, times left)
     failures: Vec<(String, u16, usize)>,
@@ -88,6 +92,26 @@ impl FakeS3 {
     /// Multipart uploads begun and neither completed nor aborted.
     pub fn open_uploads(&self) -> usize {
         self.lock().uploads.len()
+    }
+
+    /// Flip a byte of the stored object `key` but keep its checksum, as a bad disk would.
+    pub fn corrupt_object(&self, key: &str) {
+        if let Some(d) = self.lock().objects.get_mut(key) {
+            if let Some(b) = d.first_mut() {
+                *b ^= 0xff;
+            }
+        }
+    }
+
+    /// Flip one byte of every body that arrives, after its `x-amz-content-sha256` was checked (what a bad link does that
+    /// the hash of the request cannot see). A request with `x-amz-checksum-sha256` then fails with `BadDigest`.
+    pub fn damage_in_transit(&self, on: bool) {
+        self.lock().damage = on;
+    }
+
+    /// The `x-amz-checksum-sha256` an object was stored with.
+    pub fn checksum(&self, key: &str) -> Option<String> {
+        self.lock().sums.get(key).cloned()
     }
 
     /// Every request so far as `METHOD /bucket/key?query`.
@@ -247,6 +271,18 @@ fn serve(stream: TcpStream, state: &Mutex<State>) {
         return error(&stream, 400, "XAmzContentSHA256Mismatch", "the body does not match its hash");
     }
     let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut req = req;
+    if s.damage {
+        if let Some(b) = req.body.first_mut() {
+            *b ^= 0xff;
+        }
+    }
+    if let Some(sum) = req.headers.get("x-amz-checksum-sha256") {
+        if *sum != base64(&sha256_raw(&req.body)) {
+            drop(s);
+            return error(&stream, 400, "BadDigest", "the SHA-256 you specified did not match the calculated checksum");
+        }
+    }
     handle(&stream, &req, &mut s);
 }
 
@@ -272,6 +308,10 @@ fn handle(stream: &TcpStream, req: &Request, s: &mut State) {
         ("PUT", false) => {
             let etag = format!("\"{}\"", &sha256_hex(&req.body)[..32]);
             s.objects.insert(key.to_owned(), req.body.clone());
+            match req.headers.get("x-amz-checksum-sha256") {
+                Some(sum) => s.sums.insert(key.to_owned(), sum.clone()),
+                None => s.sums.remove(key),
+            };
             reply(stream, 200, &[("ETag", etag)], b"");
         }
         ("POST", false) if has("uploads") => {
@@ -286,6 +326,8 @@ fn handle(stream: &TcpStream, req: &Request, s: &mut State) {
             let Some((_, parts)) = s.uploads.get(&id) else { return error(stream, 404, "NoSuchUpload", "no such upload") };
             let text = String::from_utf8_lossy(&req.body).into_owned();
             let mut whole = Vec::new();
+            let mut raw = Vec::new();
+            let mut with_sums = true;
             for p in xml::blocks(&text, "Part") {
                 let n = xml::first(p, "PartNumber").and_then(|n| n.parse::<u64>().ok()).unwrap_or(0);
                 let Some(data) = parts.get(&n) else { return error(stream, 400, "InvalidPart", "a part is missing") };
@@ -293,10 +335,23 @@ fn handle(stream: &TcpStream, req: &Request, s: &mut State) {
                 if xml::first(p, "ETag").as_deref() != Some(etag.as_str()) {
                     return error(stream, 400, "InvalidPart", "a part's ETag does not match");
                 }
+                let digest = sha256_raw(data);
+                match xml::first(p, "ChecksumSHA256") {
+                    Some(c) if c != base64(&digest) => return error(stream, 400, "InvalidPart", "a part's checksum does not match"),
+                    Some(_) => {}
+                    None => with_sums = false,
+                }
+                raw.extend_from_slice(&digest);
                 whole.extend_from_slice(data);
             }
+            let count = xml::blocks(&text, "Part").len();
             s.uploads.remove(&id);
             s.objects.insert(key.to_owned(), whole);
+            if with_sums {
+                s.sums.insert(key.to_owned(), format!("{}-{count}", base64(&sha256_raw(&raw))));
+            } else {
+                s.sums.remove(key);
+            }
             let body = format!("<CompleteMultipartUploadResult><Key>{}</Key></CompleteMultipartUploadResult>", xml::escape(key));
             reply(stream, 200, &[], body.as_bytes());
         }
@@ -312,7 +367,13 @@ fn handle(stream: &TcpStream, req: &Request, s: &mut State) {
             reply(stream, 204, &[], b"");
         }
         ("GET", false) => match s.objects.get(key) {
-            Some(data) => reply(stream, 200, &[("ETag", format!("\"{}\"", &sha256_hex(data)[..32]))], data),
+            Some(data) => {
+                let mut h = vec![("ETag", format!("\"{}\"", &sha256_hex(data)[..32]))];
+                if let (Some(sum), true) = (s.sums.get(key), req.headers.get("x-amz-checksum-mode").is_some_and(|m| m == "ENABLED")) {
+                    h.push(("x-amz-checksum-sha256", sum.clone()));
+                }
+                reply(stream, 200, &h, data)
+            }
             None => error(stream, 404, "NoSuchKey", "the key does not exist"),
         },
         _ => error(stream, 400, "InvalidRequest", "not supported by the fake"),

@@ -3,6 +3,28 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.210.0] - 2026-11-02
+
+### 追加
+
+- 送る・取るの途中を確かめてから名前を替える（koyomi の依頼 #147）。違えば `.part` を消し、本来の名前には何も置かない（上書きのときは元のファイルが残る）。
+  - `ito-sftp`: `Options::verify`（`Verify::None`（既定）・`Exec`・`Readback`）。
+    - `Exec`: 相手に `sha256sum` を走らせる。Windows のサーバーは PowerShell の `Get-FileHash` に切り替える。
+    - `Readback`: SFTP で読み戻して計算する。コマンドを走らせられない相手（`ForceCommand internal-sftp`）でも使える。読み戻しの分は進みに数えない。
+    - 送るとき、`.part` を書き終えてから比べ、合ってから名前替え。取るとき、`Exec` は先に相手のハッシュを取り（食い違いならダウンロードもしない）、`Readback` は受け取った後に読み戻す。
+    - `Error::Mismatch { name, ours, theirs }`（中身が違う）と `Error::VerifyUnavailable(理由)`（`Exec` で相手のハッシュを取れない。`Readback` を勧める目印）。
+  - `ito-cloud`: S3 のチェックサム（`x-amz-checksum-sha256`）。`Options::checksum`（既定 true）。
+    - 送る: 1 リクエストなら本文の SHA-256 を付け、マルチパートは Create に `x-amz-checksum-algorithm: SHA256`、各パートと Complete にパートごとのチェックサムを付ける。ストアが `BadDigest` などで断れば `Error::Mismatch`（マルチパートは Abort）。
+    - 取る: `x-amz-checksum-mode: ENABLED` を付け、相手が返した全体の SHA-256 を受けながら計算した値と比べる。違えば `Error::Mismatch` で `.part` を消す。マルチパートで作られた物（`-N` つき）やチェックサムの無い物は比べられず、`verified: false`。
+  - `ito-cloud::fake::FakeS3`: `corrupt_object`・`damage_in_transit`・`checksum(key)`（試験用）。
+- `ito-sftp` の試験用の SSH サーバーが `sha256sum` に答える・断る・書き込みや読み出しで壊す。
+
+### 変更（使う側がやること）
+
+- `ito-sftp`: `Options { overwrite }` に `verify` が増えた。`Options { overwrite: true, ..Default::default() }` に直す。`Moved` に `sha256: Option<String>` が増えた（`Moved { … }` を自分で作っていれば足す）。`Error` に `Mismatch`・`VerifyUnavailable` が増えた（`match` を網羅しているなら足す）。
+- `ito-cloud`: `Options` に `checksum: bool` が増えた（`..Default::default()` を使っていれば何もしない）。`put`・`get` は `u64` でなく `Moved { bytes, sha256, verified }` を返す（`.bytes` を使う）。`Error` に `Mismatch(String)` が増えた。
+  `verified` が `false` のときは、相手が検査しなかった（取る側でチェックサムの無い物）か、`checksum: false` にした。
+
 ## [0.209.0] - 2026-11-02
 
 ### 追加

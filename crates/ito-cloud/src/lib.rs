@@ -33,7 +33,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use sign::{authorization, canonical_query, encode, sha256_hex, Keys};
+use sha2::{Digest, Sha256};
+use sign::{authorization, base64, canonical_query, encode, hex, sha256_hex, sha256_raw, Keys};
 
 /// The smallest part S3 accepts (except the last).
 pub const MIN_PART: u64 = 5 * 1024 * 1024;
@@ -87,11 +88,19 @@ pub struct Options {
     /// The size of a part, and the size above which a file goes as parts. Raised to [`MIN_PART`] at least, and as far
     /// as the file needs to fit in [`MAX_PARTS`]. One part is held in memory.
     pub part_size: u64,
+    /// Send `x-amz-checksum-sha256` with every upload and ask for it on a download, so the store checks the bytes.
+    /// Turn it off for an old S3-compatible store that refuses the header.
+    pub checksum: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { timeout: Duration::from_secs(3600), request_timeout: Duration::from_secs(600), part_size: 16 * 1024 * 1024 }
+        Options {
+            timeout: Duration::from_secs(3600),
+            request_timeout: Duration::from_secs(600),
+            part_size: 16 * 1024 * 1024,
+            checksum: true,
+        }
     }
 }
 
@@ -103,6 +112,18 @@ pub struct Entry {
     pub modified: Option<SystemTime>,
 }
 
+/// What a [`put`] or [`get`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    pub bytes: u64,
+    /// SHA-256 of the whole file as lower-case hex, taken while it streamed (not read back).
+    pub sha256: String,
+    /// The store checked (or was checked against) the bytes: an upload with the checksum accepted, or a download whose
+    /// `x-amz-checksum-sha256` was a whole-object one and matched. False for [`Options::checksum`] off, a multipart
+    /// object's checksum (a checksum of checksums) or an object stored without one.
+    pub verified: bool,
+}
+
 /// `fn(bytes done, bytes total)`, called after each chunk of a download and each part of an upload.
 pub type Progress<'a> = &'a mut dyn FnMut(u64, u64);
 
@@ -110,6 +131,9 @@ pub type Progress<'a> = &'a mut dyn FnMut(u64, u64);
 pub enum Error {
     /// The key (or the bucket) is not there.
     NotFound,
+    /// The bytes that arrived are not the bytes that were sent (the store's `BadDigest`, or a download whose checksum
+    /// does not match). Nothing is kept: no object was made, and a download's `.part` is deleted.
+    Mismatch(String),
     /// The store refused the credentials or the action (401, 403). The text is the store's own.
     Auth(String),
     /// Any other answer that is not a success.
@@ -141,6 +165,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::NotFound => f.write_str("not found"),
+            Error::Mismatch(s) => write!(f, "the bytes do not match: {s}"),
             Error::Auth(s) => write!(f, "refused: {s}"),
             Error::Status { code, body } if body.is_empty() => write!(f, "the store answered {code}"),
             Error::Status { code, body } => write!(f, "the store answered {code}: {body}"),
@@ -159,9 +184,10 @@ fn io_err(e: std::io::Error) -> Error {
     Error::Io(e.to_string())
 }
 
-/// Send `local` to `key`; returns the bytes sent. A `key` that is empty or ends with `/` gets the file's name added
+/// Send `local` to `key`; returns what was sent. With [`Options::checksum`] the store checks the SHA-256 of every request
+/// (a mismatch is [`Error::Mismatch`] and no object is made). A `key` that is empty or ends with `/` gets the file's name added
 /// (`backup/` + `a.zip` = `backup/a.zip`). Keys have no leading `/`.
-pub fn put(target: &Target, local: &Path, key: &str, opts: &Options, cancel: &AtomicBool, progress: Progress) -> Result<u64, Error> {
+pub fn put(target: &Target, local: &Path, key: &str, opts: &Options, cancel: &AtomicBool, progress: Progress) -> Result<Moved, Error> {
     let key = full_key(key, local)?;
     let size = fs::metadata(local).map_err(io_err)?.len();
     let ctx = Ctx::new(target, opts, cancel)?;
@@ -171,14 +197,16 @@ pub fn put(target: &Target, local: &Path, key: &str, opts: &Options, cancel: &At
         let mut data = Vec::with_capacity(size as usize);
         File::open(local).map_err(io_err)?.read_to_end(&mut data).map_err(io_err)?;
         let hash = sha256_hex(&data);
-        ctx.retry(|| ctx.call("PUT", &key, &[], &data, &hash, &[]).and_then(|r| ctx.ok(r)).map(drop))?;
+        let extra: Vec<(&str, String)> =
+            if opts.checksum { vec![("x-amz-checksum-sha256", base64(&sha256_raw(&data)))] } else { Vec::new() };
+        ctx.retry(|| ctx.call("PUT", &key, &[], &data, &hash, &extra).and_then(|r| ctx.ok(r)).map(drop))?;
         progress(size, size);
-        return Ok(size);
+        return Ok(Moved { bytes: size, sha256: hash, verified: opts.checksum });
     }
-    let upload = ctx.create_upload(&key)?;
-    let sent = send_parts(&ctx, &key, &upload, local, size, part, progress);
+    let upload = ctx.create_upload(&key, opts.checksum)?;
+    let sent = send_parts(&ctx, &key, &upload, local, size, part, opts.checksum, progress);
     match sent {
-        Ok(()) => Ok(size),
+        Ok(sha256) => Ok(Moved { bytes: size, sha256, verified: opts.checksum }),
         Err(e) => {
             // Even when stopped or timed out: leave no half-made upload behind.
             let never = AtomicBool::new(false);
@@ -190,19 +218,37 @@ pub fn put(target: &Target, local: &Path, key: &str, opts: &Options, cancel: &At
     }
 }
 
-fn send_parts(ctx: &Ctx, key: &str, upload: &str, local: &Path, size: u64, part: u64, progress: Progress) -> Result<(), Error> {
+#[allow(clippy::too_many_arguments)]
+fn send_parts(
+    ctx: &Ctx,
+    key: &str,
+    upload: &str,
+    local: &Path,
+    size: u64,
+    part: u64,
+    checksum: bool,
+    progress: Progress,
+) -> Result<String, Error> {
     let mut file = File::open(local).map_err(io_err)?;
     let count = size.div_ceil(part);
     let mut etags = Vec::with_capacity(count as usize);
+    let mut sums: Vec<String> = Vec::new();
+    let mut whole = Sha256::new();
     let mut buf = Vec::new();
     for n in 1..=count {
         ctx.check()?;
         buf.clear();
         (&mut file).take(part).read_to_end(&mut buf).map_err(io_err)?;
+        whole.update(&buf);
         let hash = sha256_hex(&buf);
+        let sum = base64(&sha256_raw(&buf));
+        let extra: Vec<(&str, String)> = if checksum { vec![("x-amz-checksum-sha256", sum.clone())] } else { Vec::new() };
+        if checksum {
+            sums.push(sum);
+        }
         let query = [("partNumber", n.to_string()), ("uploadId", upload.to_owned())];
         let etag = ctx.retry(|| {
-            let r = ctx.call("PUT", key, &query, &buf, &hash, &[]).and_then(|r| ctx.ok(r))?;
+            let r = ctx.call("PUT", key, &query, &buf, &hash, &extra).and_then(|r| ctx.ok(r))?;
             match r.headers().get("etag").and_then(|v| v.to_str().ok()) {
                 Some(e) => Ok(e.to_owned()),
                 None => Err(Error::Network("the store sent no ETag for a part".into())),
@@ -213,7 +259,8 @@ fn send_parts(ctx: &Ctx, key: &str, upload: &str, local: &Path, size: u64, part:
     }
     let mut body = String::from("<CompleteMultipartUpload>");
     for (i, e) in etags.iter().enumerate() {
-        body.push_str(&format!("<Part><PartNumber>{}</PartNumber><ETag>{}</ETag></Part>", i + 1, xml::escape(e)));
+        let sum = sums.get(i).map(|s| format!("<ChecksumSHA256>{s}</ChecksumSHA256>")).unwrap_or_default();
+        body.push_str(&format!("<Part><PartNumber>{}</PartNumber><ETag>{}</ETag>{sum}</Part>", i + 1, xml::escape(e)));
     }
     body.push_str("</CompleteMultipartUpload>");
     let bytes = body.into_bytes();
@@ -224,11 +271,13 @@ fn send_parts(ctx: &Ctx, key: &str, upload: &str, local: &Path, size: u64, part:
     if text.contains("<Error>") {
         return Err(Error::Status { code: 500, body: xml_error(&text) });
     }
-    Ok(())
+    Ok(hex(&whole.finalize()))
 }
 
-/// Fetch `key` into `local`; returns the bytes written. The file is made whole or not at all (`.part`, then rename).
-pub fn get(target: &Target, key: &str, local: &Path, opts: &Options, cancel: &AtomicBool, progress: Progress) -> Result<u64, Error> {
+/// Fetch `key` into `local`; returns what was written. The file is made whole or not at all (`.part`, then rename).
+/// With [`Options::checksum`] a whole-object `x-amz-checksum-sha256` from the store is compared with the bytes
+/// that arrived; a difference is [`Error::Mismatch`] and no file is left.
+pub fn get(target: &Target, key: &str, local: &Path, opts: &Options, cancel: &AtomicBool, progress: Progress) -> Result<Moved, Error> {
     let ctx = Ctx::new(target, opts, cancel)?;
     ctx.check()?;
     if let Some(dir) = local.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -237,7 +286,7 @@ pub fn get(target: &Target, key: &str, local: &Path, opts: &Options, cancel: &At
     let mut part_name = local.file_name().ok_or_else(|| Error::Io("no file name".into()))?.to_os_string();
     part_name.push(".part");
     let part: PathBuf = local.with_file_name(part_name);
-    let done = fetch(&ctx, key, &part, progress);
+    let done = fetch(&ctx, key, &part, opts.checksum, progress);
     match done {
         Ok(n) => {
             if let Err(e) = fs::rename(&part, local) {
@@ -253,13 +302,22 @@ pub fn get(target: &Target, key: &str, local: &Path, opts: &Options, cancel: &At
     }
 }
 
-fn fetch(ctx: &Ctx, key: &str, part: &Path, progress: Progress) -> Result<u64, Error> {
-    let mut resp = ctx.call("GET", key, &[], &[], EMPTY_SHA, &[]).and_then(|r| ctx.ok(r))?;
+fn fetch(ctx: &Ctx, key: &str, part: &Path, checksum: bool, progress: Progress) -> Result<Moved, Error> {
+    let extra: Vec<(&str, String)> = if checksum { vec![("x-amz-checksum-mode", "ENABLED".to_owned())] } else { Vec::new() };
+    let mut resp = ctx.call("GET", key, &[], &[], EMPTY_SHA, &extra).and_then(|r| ctx.ok(r))?;
+    // A multipart object's checksum ends in `-<parts>` and is a checksum of checksums: it cannot be compared.
+    let promised = resp
+        .headers()
+        .get("x-amz-checksum-sha256")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| checksum && !v.contains('-'))
+        .map(str::to_owned);
     let total = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
     let mut out = File::create(part).map_err(io_err)?;
     let mut reader = resp.body_mut().as_reader();
     let mut buf = vec![0u8; CHUNK];
     let mut got = 0u64;
+    let mut sha = Sha256::new();
     loop {
         ctx.check()?;
         let n = match reader.read(&mut buf) {
@@ -268,6 +326,7 @@ fn fetch(ctx: &Ctx, key: &str, part: &Path, progress: Progress) -> Result<u64, E
             Err(e) => return Err(read_error(e)),
         };
         out.write_all(&buf[..n]).map_err(io_err)?;
+        sha.update(&buf[..n]);
         got += n as u64;
         progress(got, total.unwrap_or(got));
     }
@@ -277,7 +336,13 @@ fn fetch(ctx: &Ctx, key: &str, part: &Path, progress: Progress) -> Result<u64, E
             return Err(Error::Network(format!("the body ended after {got} of {t} bytes")));
         }
     }
-    Ok(got)
+    let digest = sha.finalize();
+    if let Some(p) = &promised {
+        if *p != base64(&digest) {
+            return Err(Error::Mismatch(format!("the store's SHA-256 is {p} but {got} bytes arrived with {}", base64(&digest))));
+        }
+    }
+    Ok(Moved { bytes: got, sha256: hex(&digest), verified: promised.is_some() })
 }
 
 /// The objects whose keys match `pattern` (`*` and `?`; no wildcard means that one key). Nothing matching is an empty list.
@@ -455,6 +520,7 @@ impl<'a> Ctx<'a> {
         if let Some(t) = self.token {
             headers.push(("x-amz-security-token", t.to_owned()));
         }
+        headers.extend(extra.iter().map(|(k, v)| (*k, v.clone())));
         let auth = authorization(
             &Keys { key_id: self.key_id, secret: self.secret, region: self.region },
             method,
@@ -470,7 +536,7 @@ impl<'a> Ctx<'a> {
             url.push_str(&canonical_query(query));
         }
         let mut req = ureq::http::Request::builder().method(method).uri(url);
-        for (k, v) in headers.iter().chain(extra.iter()).filter(|(k, _)| *k != "host") {
+        for (k, v) in headers.iter().filter(|(k, _)| *k != "host") {
             req = req.header(*k, v.as_str());
         }
         let req = req.header("authorization", auth).body(body).map_err(|e| Error::Io(e.to_string()))?;
@@ -490,13 +556,18 @@ impl<'a> Ctx<'a> {
         let msg = xml_error(&text);
         Err(match code {
             404 => Error::NotFound,
+            400 if msg.starts_with("BadDigest") || msg.starts_with("XAmzContentSHA256Mismatch") || msg.starts_with("InvalidDigest") => {
+                Error::Mismatch(msg)
+            }
             401 | 403 => Error::Auth(msg),
             _ => Error::Status { code, body: msg },
         })
     }
 
-    fn create_upload(&self, key: &str) -> Result<String, Error> {
-        let mut r = self.retry(|| self.call("POST", key, &[("uploads", String::new())], &[], EMPTY_SHA, &[]).and_then(|r| self.ok(r)))?;
+    fn create_upload(&self, key: &str, checksum: bool) -> Result<String, Error> {
+        let extra: Vec<(&str, String)> = if checksum { vec![("x-amz-checksum-algorithm", "SHA256".to_owned())] } else { Vec::new() };
+        let mut r =
+            self.retry(|| self.call("POST", key, &[("uploads", String::new())], &[], EMPTY_SHA, &extra).and_then(|r| self.ok(r)))?;
         let text = r.body_mut().read_to_string().map_err(net)?;
         xml::first(&text, "UploadId").filter(|s| !s.is_empty()).ok_or_else(|| Error::Network("the store sent no UploadId".into()))
     }

@@ -8,11 +8,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ito_sftp::{fingerprint, Auth, Error, Options, Session, Target};
+use ito_sftp::{fingerprint, Auth, Error, Options, Session, Target, Verify};
 use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
 use russh::server::{Auth as SrvAuth, ChannelOpenHandle, Msg, Server as _, Session as SrvSession, VerifiedPublicKey};
 use russh::{Channel, ChannelId};
 use russh_sftp::protocol::{Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode};
+use sha2::{Digest, Sha256};
 
 const USER: &str = "ito";
 const PASSWORD: &str = "open-sesame";
@@ -30,6 +31,11 @@ impl From<russh::Error> for SrvError {
 struct Srv {
     root: PathBuf,
     allowed: Option<PublicKey>,
+    /// Answer `sha256sum -- '<path>'` (a `ForceCommand internal-sftp` user gets a refusal instead).
+    exec: bool,
+    /// Flip the first byte of every file as it is written / read, as a broken link or disk would.
+    damage_writes: bool,
+    damage_reads: bool,
 }
 
 impl russh::server::Server for Srv {
@@ -67,13 +73,46 @@ impl russh::server::Handler for Ssh {
         Ok(())
     }
 
+    async fn exec_request(&mut self, id: ChannelId, data: &[u8], session: &mut SrvSession) -> Result<(), SrvError> {
+        let command = String::from_utf8_lossy(data).into_owned();
+        let path = command.strip_prefix("sha256sum -- '").and_then(|c| c.strip_suffix('\''));
+        match path {
+            Some(p) if self.srv.exec => {
+                session.channel_success(id)?;
+                match std::fs::read(self.srv.root.join(p.trim_start_matches('/'))) {
+                    Ok(body) => {
+                        let hash: String = Sha256::digest(&body).iter().map(|b| format!("{b:02x}")).collect();
+                        session.data(id, format!("{hash}  {p}\n").into_bytes())?;
+                        session.exit_status_request(id, 0)?;
+                    }
+                    Err(_) => {
+                        session.extended_data(id, 1, format!("sha256sum: {p}: No such file or directory\n").into_bytes())?;
+                        session.exit_status_request(id, 1)?;
+                    }
+                }
+                session.eof(id)?;
+                session.close(id)?;
+            }
+            // Not a POSIX shell with sha256sum, or no exec for this user: PowerShell is refused as well.
+            _ => session.channel_failure(id)?,
+        }
+        Ok(())
+    }
+
     async fn subsystem_request(&mut self, id: ChannelId, name: &str, session: &mut SrvSession) -> Result<(), SrvError> {
         if name == "sftp" {
             let channel = self.channels.remove(&id).expect("channel opened first");
             session.channel_success(id)?;
             russh_sftp::server::run(
                 channel.into_stream(),
-                Fs { root: self.srv.root.clone(), files: HashMap::new(), dirs: HashMap::new(), next: 0 },
+                Fs {
+                    root: self.srv.root.clone(),
+                    files: HashMap::new(),
+                    dirs: HashMap::new(),
+                    next: 0,
+                    damage_writes: self.srv.damage_writes,
+                    damage_reads: self.srv.damage_reads,
+                },
             )
             .await;
         } else {
@@ -88,6 +127,8 @@ struct Fs {
     files: HashMap<String, std::fs::File>,
     dirs: HashMap<String, Option<Vec<File>>>,
     next: u32,
+    damage_writes: bool,
+    damage_reads: bool,
 }
 
 fn code(e: std::io::Error) -> StatusCode {
@@ -157,10 +198,16 @@ impl russh_sftp::server::Handler for Fs {
             return Err(StatusCode::Eof);
         }
         data.truncate(n);
+        if self.damage_reads && offset == 0 {
+            data[0] ^= 0xff;
+        }
         Ok(Data { id, data })
     }
 
-    async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, StatusCode> {
+    async fn write(&mut self, id: u32, handle: String, offset: u64, mut data: Vec<u8>) -> Result<Status, StatusCode> {
+        if self.damage_writes && offset == 0 && !data.is_empty() {
+            data[0] ^= 0xff;
+        }
         let f = self.files.get_mut(&handle).ok_or(StatusCode::Failure)?;
         f.seek(SeekFrom::Start(offset)).map_err(code)?;
         f.write_all(&data).map_err(code)?;
@@ -226,6 +273,10 @@ struct Server {
 }
 
 fn start() -> Server {
+    start_with(true, false, false)
+}
+
+fn start_with(exec: bool, damage_writes: bool, damage_reads: bool) -> Server {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("up")).unwrap();
     let keys = tempfile::tempdir().unwrap();
@@ -234,7 +285,7 @@ fn start() -> Server {
     let key_file = keys.path().join("id_ed25519");
     std::fs::write(&key_file, user.to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap().as_bytes()).unwrap();
     let fingerprint = host.public_key().fingerprint(HashAlg::Sha256).to_string();
-    let mut srv = Srv { root: root.path().to_path_buf(), allowed: Some(user.public_key().clone()) };
+    let mut srv = Srv { root: root.path().to_path_buf(), allowed: Some(user.public_key().clone()), exec, damage_writes, damage_reads };
     let config = russh::server::Config {
         auth_rejection_time: Duration::from_millis(10),
         auth_rejection_time_initial: Some(Duration::ZERO),
@@ -321,7 +372,7 @@ fn an_existing_target_needs_overwrite() {
     assert_eq!(std::fs::read(s.up("n.txt")).unwrap(), b"first");
     assert!(!s.up("n.txt.part").exists());
 
-    ses.put(&f, "/up/n.txt", Options { overwrite: true }, &stop, &mut |_, _, _| {}).unwrap();
+    ses.put(&f, "/up/n.txt", Options { overwrite: true, ..Default::default() }, &stop, &mut |_, _, _| {}).unwrap();
     assert_eq!(std::fs::read(s.up("n.txt")).unwrap(), b"second, longer");
 
     let out = tempfile::tempdir().unwrap();
@@ -330,8 +381,105 @@ fn an_existing_target_needs_overwrite() {
     let e = ses.get("/up/n.txt", &dest, Options::default(), &stop, &mut |_, _, _| {}).unwrap_err();
     assert!(matches!(e, Error::Exists(_)), "{e:?}");
     assert_eq!(std::fs::read(&dest).unwrap(), b"mine");
-    ses.get("/up/n.txt", &dest, Options { overwrite: true }, &stop, &mut |_, _, _| {}).unwrap();
+    ses.get("/up/n.txt", &dest, Options { overwrite: true, ..Default::default() }, &stop, &mut |_, _, _| {}).unwrap();
     assert_eq!(std::fs::read(&dest).unwrap(), b"second, longer");
+}
+
+fn sha(body: &[u8]) -> String {
+    Sha256::digest(body).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn with(verify: Verify) -> Options {
+    Options { verify, ..Default::default() }
+}
+
+#[test]
+fn a_verified_transfer_in_both_modes_reports_the_hash_both_ways() {
+    let s = start();
+    let local = tempfile::tempdir().unwrap();
+    let body = vec![7u8; 300_000];
+    let f = write(local.path(), "v.bin", &body);
+    let ses = s.session();
+    let stop = no_stop();
+    for (i, how) in [Verify::Exec, Verify::Readback].into_iter().enumerate() {
+        let to = format!("/up/v{i}.bin");
+        let sent = ses.put(&f, &to, with(how), &stop, &mut |_, _, _| {}).unwrap();
+        assert_eq!(sent[0].sha256.as_deref(), Some(sha(&body).as_str()), "{how:?}");
+        let dest = local.path().join(format!("back{i}.bin"));
+        let got = ses.get(&to, &dest, with(how), &stop, &mut |_, _, _| {}).unwrap();
+        assert_eq!(got[0].sha256.as_deref(), Some(sha(&body).as_str()), "{how:?}");
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+    }
+    // Without verify there is no hash to report.
+    let plain = ses.put(&f, "/up/plain.bin", Options::default(), &stop, &mut |_, _, _| {}).unwrap();
+    assert_eq!(plain[0].sha256, None);
+}
+
+#[test]
+fn damage_on_the_way_up_is_a_mismatch_that_leaves_no_file_and_no_part() {
+    for how in [Verify::Exec, Verify::Readback] {
+        let s = start_with(true, true, false);
+        let local = tempfile::tempdir().unwrap();
+        let f = write(local.path(), "d.txt", b"precious bytes");
+        let ses = s.session();
+        let e = ses.put(&f, "/up/d.txt", with(how), &no_stop(), &mut |_, _, _| {}).unwrap_err();
+        match &e {
+            Error::Mismatch { name, ours, theirs } => {
+                assert_eq!(name, "d.txt");
+                assert_eq!(ours, &sha(b"precious bytes"));
+                assert_ne!(ours, theirs);
+            }
+            other => panic!("{how:?}: {other:?}"),
+        }
+        assert!(!s.up("d.txt").exists() && !s.up("d.txt.part").exists(), "{how:?}");
+    }
+}
+
+#[test]
+fn a_mismatch_does_not_replace_an_existing_target() {
+    let s = start_with(true, true, false);
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(s.up("keep.txt"), b"old and good").unwrap();
+    let f = write(local.path(), "keep.txt", b"new but damaged");
+    let o = Options { overwrite: true, verify: Verify::Exec };
+    let e = s.session().put(&f, "/up/keep.txt", o, &no_stop(), &mut |_, _, _| {}).unwrap_err();
+    assert!(matches!(e, Error::Mismatch { .. }), "{e:?}");
+    assert_eq!(std::fs::read(s.up("keep.txt")).unwrap(), b"old and good");
+    assert!(!s.up("keep.txt.part").exists());
+}
+
+#[test]
+fn damage_on_the_way_down_is_a_mismatch_and_leaves_no_file() {
+    let s = start_with(true, false, true);
+    std::fs::write(s.up("r.txt"), b"remote truth").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("r.txt");
+    let e = s.session().get("/up/r.txt", &dest, with(Verify::Exec), &no_stop(), &mut |_, _, _| {}).unwrap_err();
+    match e {
+        Error::Mismatch { theirs, ours, .. } => {
+            assert_eq!(theirs, sha(b"remote truth"));
+            assert_ne!(ours, theirs);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 0, "neither the file nor its .part");
+}
+
+#[test]
+fn a_server_that_refuses_exec_says_so_and_readback_still_works() {
+    let s = start_with(false, false, false);
+    let local = tempfile::tempdir().unwrap();
+    let f = write(local.path(), "n.txt", b"hello");
+    let ses = s.session();
+    let e = ses.put(&f, "/up/n.txt", with(Verify::Exec), &no_stop(), &mut |_, _, _| {}).unwrap_err();
+    assert!(matches!(e, Error::VerifyUnavailable(_)), "{e:?}");
+    assert!(!s.up("n.txt").exists() && !s.up("n.txt.part").exists());
+    let e = ses.get("/up/n.txt", &local.path().join("x"), with(Verify::Exec), &no_stop(), &mut |_, _, _| {}).unwrap_err();
+    assert!(matches!(e, Error::VerifyUnavailable(_)), "{e:?}");
+
+    let sent = ses.put(&f, "/up/n.txt", with(Verify::Readback), &no_stop(), &mut |_, _, _| {}).unwrap();
+    assert_eq!(sent[0].sha256.as_deref(), Some(sha(b"hello").as_str()));
+    assert_eq!(std::fs::read(s.up("n.txt")).unwrap(), b"hello");
 }
 
 #[test]

@@ -21,6 +21,7 @@ use russh::client;
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{OpenFlags, StatusCode};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Why a call failed. `Display` is a short Japanese sentence fit for a log line.
@@ -50,6 +51,17 @@ pub enum Error {
     Stopped,
     /// A local file could not be read or written.
     Local(String),
+    /// [`Options::verify`] found the far side's bytes are not the ones that streamed. The `.part` is deleted.
+    Mismatch {
+        name: String,
+        /// SHA-256 (lower-case hex) of what this side sent or received.
+        ours: String,
+        /// SHA-256 of what the other side holds.
+        theirs: String,
+    },
+    /// [`Verify::Exec`] could not get a hash out of the server (no exec for this user, or neither `sha256sum` nor
+    /// PowerShell answered). Nothing was renamed; [`Verify::Readback`] works on any SFTP server.
+    VerifyUnavailable(String),
     Other(String),
 }
 
@@ -69,6 +81,8 @@ impl fmt::Display for Error {
             Error::Timeout => f.write_str("時間内に終わりませんでした"),
             Error::Stopped => f.write_str("止められました"),
             Error::Local(m) => write!(f, "手元のファイルを扱えません: {m}"),
+            Error::Mismatch { name, ours, theirs } => write!(f, "届いた中身が違います: {name}（こちら {ours}、相手 {theirs}）"),
+            Error::VerifyUnavailable(m) => write!(f, "相手でハッシュを取れません（読み戻しなら取れます）: {m}"),
             Error::Other(m) => f.write_str(m),
         }
     }
@@ -159,10 +173,25 @@ impl Target {
     }
 }
 
-/// How a transfer treats a target that exists.
+/// How a transfer is checked before its `.part` takes the final name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Verify {
+    /// Not at all (the default).
+    #[default]
+    None,
+    /// Ask the server for the SHA-256 of the file on its side: `sha256sum`, or PowerShell's `Get-FileHash` on a Windows
+    /// server. Needs a user who may run commands; otherwise [`Error::VerifyUnavailable`].
+    Exec,
+    /// Read the file back over SFTP and hash it. Works on any SFTP server; costs the traffic again. The second read
+    /// is not counted in the progress.
+    Readback,
+}
+
+/// How a transfer treats a target that exists, and whether it is checked.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     pub overwrite: bool,
+    pub verify: Verify,
 }
 
 /// One file sent or fetched.
@@ -170,6 +199,8 @@ pub struct Options {
 pub struct Moved {
     pub name: String,
     pub bytes: u64,
+    /// SHA-256 as lower-case hex of the bytes that streamed. `Some` only when [`Options::verify`] was on and agreed.
+    pub sha256: Option<String>,
 }
 
 /// One line of a remote listing.
@@ -589,11 +620,14 @@ impl Session {
         }
         let part = format!("{to}.part");
         let finished = match self.send_part(&mut src, from, &part, &name, total, stop, progress).await {
-            Ok(()) => self.swap_in(&part, to, exists, stop).await,
+            Ok(ours) => match self.verify(opts.verify, &part, &name, &ours, stop).await {
+                Ok(()) => self.swap_in(&part, to, exists, stop).await.map(|()| ours),
+                Err(e) => Err(e),
+            },
             Err(e) => Err(e),
         };
         match finished {
-            Ok(()) => Ok(Moved { name, bytes: total }),
+            Ok(ours) => Ok(Moved { name, bytes: total, sha256: (opts.verify != Verify::None).then_some(ours) }),
             Err(e) => {
                 // Best effort, and never blocked by the stop flag that may be why we are here.
                 let _ = tokio::time::timeout(self.io_timeout, self.sftp.remove_file(&part)).await;
@@ -619,10 +653,11 @@ impl Session {
         total: u64,
         stop: &AtomicBool,
         progress: Progress<'_>,
-    ) -> Result<(), Error> {
+    ) -> Result<String, Error> {
         let flags = OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE;
         let mut dst = step(self.io_timeout, stop, self.sftp.open_with_flags(part, flags)).await?;
         let (mut buf, mut done) = (vec![0u8; CHUNK], 0u64);
+        let mut sha = Sha256::new();
         progress(name, 0, total);
         loop {
             let n = src.read(&mut buf).map_err(|e| local_err(from, e))?;
@@ -630,10 +665,71 @@ impl Session {
                 break;
             }
             step_io(self.io_timeout, stop, part, dst.write_all(&buf[..n])).await?;
+            sha.update(&buf[..n]);
             done += n as u64;
             progress(name, done, total);
         }
-        step_io(self.io_timeout, stop, part, dst.shutdown()).await
+        step_io(self.io_timeout, stop, part, dst.shutdown()).await?;
+        Ok(hex(&sha.finalize()))
+    }
+
+    /// Compare `ours` with the SHA-256 of `remote` as the server holds it. `Verify::None` is a yes.
+    async fn verify(&self, how: Verify, remote: &str, name: &str, ours: &str, stop: &AtomicBool) -> Result<(), Error> {
+        let theirs = match how {
+            Verify::None => return Ok(()),
+            Verify::Exec => self.remote_hash_exec(remote, stop).await?,
+            Verify::Readback => self.remote_hash_readback(remote, stop).await?,
+        };
+        Self::same(name, ours.to_string(), theirs).map(|_| ())
+    }
+
+    fn same(name: &str, ours: String, theirs: String) -> Result<String, Error> {
+        if ours == theirs {
+            Ok(ours)
+        } else {
+            Err(Error::Mismatch { name: name.to_string(), ours, theirs })
+        }
+    }
+
+    async fn remote_hash_readback(&self, remote: &str, stop: &AtomicBool) -> Result<String, Error> {
+        let mut f = step(self.io_timeout, stop, self.sftp.open(remote)).await?;
+        let (mut buf, mut sha) = (vec![0u8; CHUNK], Sha256::new());
+        loop {
+            let n = step_io(self.io_timeout, stop, remote, f.read(&mut buf)).await?;
+            if n == 0 {
+                return Ok(hex(&sha.finalize()));
+            }
+            sha.update(&buf[..n]);
+        }
+    }
+
+    async fn remote_hash_exec(&self, remote: &str, stop: &AtomicBool) -> Result<String, Error> {
+        let mut why = String::new();
+        for command in hash_commands(remote) {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let opts = ExecOptions { timeout: Some(Duration::from_secs(600)), ..Default::default() };
+            let r = run_command(&self._ssh, self.connect_timeout, &command, &opts, stop, &mut |s, d| match s {
+                Stream::Stdout => out.extend_from_slice(d),
+                Stream::Stderr => err.extend_from_slice(d),
+            })
+            .await;
+            match r {
+                Ok(exit) if exit.success() => {
+                    if let Some(h) = parse_hash(&String::from_utf8_lossy(&out)) {
+                        return Ok(h);
+                    }
+                    why = "出力が SHA-256 ではありません".into();
+                }
+                Ok(exit) => {
+                    let text = String::from_utf8_lossy(&err);
+                    why = format!("終了コード {:?} {}", exit.status, text.trim().chars().take(200).collect::<String>());
+                }
+                // The server refusing to run a command is the case this error is for; a broken link or a stop is not.
+                Err(Error::Other(m)) => why = m,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(Error::VerifyUnavailable(why))
     }
 
     /// Fetch `remote` into `local`. If the last part of `remote` has `*` or `?`, every matching file in its
@@ -687,15 +783,31 @@ impl Session {
         if to.exists() && !opts.overwrite {
             return Err(Error::Exists(to.display().to_string()));
         }
+        // Ask the server first: a hash that disagrees then costs no download.
+        let theirs = match opts.verify {
+            Verify::Exec => self.remote_hash_exec(from, stop).await?,
+            _ => String::new(),
+        };
         let mut src = step(self.io_timeout, stop, self.sftp.open(from)).await?;
         let total = step(self.io_timeout, stop, self.sftp.metadata(from)).await.map(|m| m.len()).unwrap_or(0);
         let mut part = to.as_os_str().to_owned();
         part.push(".part");
         let part = PathBuf::from(part);
         let got = self.fetch_part(&mut src, from, &part, &name, total, stop, progress).await;
-        let finished = got.and_then(|n| std::fs::rename(&part, to).map(|_| n).map_err(|e| local_err(to, e)));
+        let checked = match got {
+            Ok((n, ours)) => match opts.verify {
+                Verify::None => Ok((n, ours)),
+                Verify::Readback => match self.remote_hash_readback(from, stop).await {
+                    Ok(t) => Self::same(&name, ours, t).map(|o| (n, o)),
+                    Err(e) => Err(e),
+                },
+                Verify::Exec => Self::same(&name, ours, theirs).map(|o| (n, o)),
+            },
+            Err(e) => Err(e),
+        };
+        let finished = checked.and_then(|(n, ours)| std::fs::rename(&part, to).map(|_| (n, ours)).map_err(|e| local_err(to, e)));
         match finished {
-            Ok(bytes) => Ok(Moved { name, bytes }),
+            Ok((bytes, ours)) => Ok(Moved { name, bytes, sha256: (opts.verify != Verify::None).then_some(ours) }),
             Err(e) => {
                 let _ = std::fs::remove_file(&part);
                 Err(e)
@@ -713,9 +825,10 @@ impl Session {
         total: u64,
         stop: &AtomicBool,
         progress: Progress<'_>,
-    ) -> Result<u64, Error> {
+    ) -> Result<(u64, String), Error> {
         let mut dst = std::fs::File::create(part).map_err(|e| local_err(part, e))?;
         let (mut buf, mut done) = (vec![0u8; CHUNK], 0u64);
+        let mut sha = Sha256::new();
         progress(name, 0, total);
         loop {
             let n = step_io(self.io_timeout, stop, from, src.read(&mut buf)).await?;
@@ -723,11 +836,12 @@ impl Session {
                 break;
             }
             dst.write_all(&buf[..n]).map_err(|e| local_err(part, e))?;
+            sha.update(&buf[..n]);
             done += n as u64;
             progress(name, done, total.max(done));
         }
         dst.flush().map_err(|e| local_err(part, e))?;
-        Ok(done)
+        Ok((done, hex(&sha.finalize())))
     }
 }
 
@@ -762,6 +876,33 @@ async fn step<T, E: Into<Error>>(timeout: Duration, stop: &AtomicBool, f: impl F
 /// [`step`] for the `io::Error` of a remote file's reader or writer.
 async fn step_io<T>(timeout: Duration, stop: &AtomicBool, path: &str, f: impl Future<Output = std::io::Result<T>>) -> Result<T, Error> {
     step(timeout, stop, async { f.await.map_err(|e| remote_io(path, e)) }).await
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The commands that print the SHA-256 of a remote file, in the order to try: POSIX first, then PowerShell for a
+/// Windows server (which has no `sha256sum`, so the first fails at once). A path PowerShell could misread
+/// inside its double quotes gets no PowerShell command.
+fn hash_commands(path: &str) -> Vec<String> {
+    let mut v = vec![format!("sha256sum -- '{}'", path.replace('\'', "'\\''"))];
+    if !path.contains(['"', '`', '$', '%', '\n', '\r']) {
+        // Windows' OpenSSH names a drive as `/C:/dir/file`.
+        let b = path.as_bytes();
+        let p = if b.len() > 2 && b[0] == b'/' && b[2] == b':' && b[1].is_ascii_alphabetic() { &path[1..] } else { path };
+        v.push(format!(
+            "powershell -NoProfile -Command \"(Get-FileHash -Algorithm SHA256 -LiteralPath '{}').Hash\"",
+            p.replace('\'', "''")
+        ));
+    }
+    v
+}
+
+/// The first 64 hex digits of a command's output, lower-cased.
+fn parse_hash(out: &str) -> Option<String> {
+    let t = out.split_whitespace().next()?;
+    (t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit())).then(|| t.to_ascii_lowercase())
 }
 
 fn join(dir: &str, name: &str) -> String {
@@ -834,6 +975,36 @@ mod tests {
         let stop = AtomicBool::new(false);
         let r = exec(&t, "true", &ExecOptions::default(), &stop, &mut |_, _| {});
         assert!(matches!(r, Err(Error::Connect(_))), "{r:?}");
+    }
+
+    #[test]
+    fn hash_commands_quote_the_path() {
+        let c = hash_commands("/up/it's.part");
+        assert_eq!(c[0], "sha256sum -- '/up/it'\\''s.part'");
+        assert!(c[1].contains("-LiteralPath '/up/it''s.part'"), "{}", c[1]);
+        let w = hash_commands("/C:/Users/a/x.part");
+        assert!(w[1].contains("-LiteralPath 'C:/Users/a/x.part'"), "{}", w[1]);
+        // A path PowerShell might expand inside its double quotes is left to sha256sum alone.
+        assert_eq!(hash_commands("/up/$x.part").len(), 1);
+        assert_eq!(hash_commands("/up/a\"b").len(), 1);
+    }
+
+    #[test]
+    fn hashes_are_read_from_either_tool() {
+        let h = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855";
+        let low = h.to_ascii_lowercase();
+        assert_eq!(parse_hash(&format!("{low}  /up/a.part\n")).as_deref(), Some(low.as_str()));
+        assert_eq!(parse_hash(&format!("{h}\r\n")).as_deref(), Some(low.as_str()));
+        assert_eq!(parse_hash("sha256sum: x: No such file"), None);
+        assert_eq!(parse_hash(""), None);
+        assert_eq!(parse_hash("abc"), None);
+    }
+
+    #[test]
+    fn mismatch_and_unavailable_read_in_japanese() {
+        let m = Error::Mismatch { name: "a".into(), ours: "1".into(), theirs: "2".into() };
+        assert!(m.to_string().contains("違います"));
+        assert!(Error::VerifyUnavailable("x".into()).to_string().contains("読み戻し"));
     }
 
     #[test]

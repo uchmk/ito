@@ -13,6 +13,24 @@ pub(crate) fn sha256_hex(data: &[u8]) -> String {
     hex(&Sha256::digest(data))
 }
 
+pub(crate) fn sha256_raw(data: &[u8]) -> Vec<u8> {
+    Sha256::digest(data).to_vec()
+}
+
+/// Standard base64 with padding (the form of `x-amz-checksum-sha256`).
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 fn hmac(key: &[u8], data: &str) -> Vec<u8> {
     let mut m = <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC takes any key length");
     m.update(data.as_bytes());
@@ -169,6 +187,15 @@ mod tests {
         ];
         let a = authorization(&KEYS, "PUT", &path, &[], &headers, &hash, "20130524T000000Z");
         assert!(a.ends_with("Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd"), "{a}");
+    }
+
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 
     #[test]
