@@ -1,0 +1,17 @@
+[package]
+name = "ito-minimap"
+description = "The minimap of a text pane: lines squashed to 6-byte rows, one scale for bands and the viewport box, the hover card's geometry, and (feature egui) the strip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The strip itself: bands, the framed viewport, click and drag to jump, the hover card.
+egui = ["dep:egui", "dep:ito-theme"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }
+unicode-width = "0.2"

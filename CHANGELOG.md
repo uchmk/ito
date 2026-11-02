@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.219.0] - 2026-11-02
+
+### 追加
+- `ito-minimap`: kura のプレビューのミニマップを切り出した（#149）。`Row`・`row`/`rows`（`(text, color)` の並びから。kura の `Span` に依らない）、
+  縮尺 `at_line`/`line_at_y`、`hover_card`/`hover_window`（`Area` で窓なしにテスト）。機能 `egui`: `show(ui, rect, body, rows, offset, on_screen, &Look, line)` が
+  帯・枠・クリックとドラッグ・ホバーのカードを描き、`Shown::scroll_to`（行の真ん中に来る上の行）を返す。kura のテストを移した。
+  使う側がやること: `MapRow` を `ito_minimap::Row` に、`minimap(lines)` を `rows(...)` に替え、`Look { row_h, font }` を渡す。
+
 ## [0.218.0] - 2026-11-02
 
 ### 追加
