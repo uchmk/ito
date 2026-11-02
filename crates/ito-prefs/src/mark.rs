@@ -163,11 +163,13 @@ pub enum Mark {
     Tasks,
     /// A screen on a stand: a PC (a Windows machine you reach, as against the rack of `Server`).
     Desktop,
+    /// A stack of discs: a database.
+    Database,
 }
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 78] = [
+    pub const ALL: [Mark; 79] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -246,6 +248,7 @@ impl Mark {
         Mark::Numbers,
         Mark::Tasks,
         Mark::Desktop,
+        Mark::Database,
     ];
 }
 
@@ -667,6 +670,17 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
             p.rect_stroke(Rect::from_min_max(at(-6.5, -6.0), at(6.5, 2.5)), 1.5 * k, line, StrokeKind::Middle);
             seg((0.0, 2.5), (0.0, 5.5));
             seg((-3.5, 6.0), (3.5, 6.0));
+        }
+        Mark::Database => {
+            // A can: an ellipse on top, the sides, and two curved bands under the lid.
+            let ellipse = |cy: f32, from: f32, to: f32| -> Vec<Pos2> {
+                (0..=16).map(|i| from + (to - from) * i as f32 / 16.0).map(|a| at(5.5 * a.cos(), cy + 2.2 * a.sin())).collect()
+            };
+            p.add(Shape::closed_line(ellipse(-4.0, 0.0, 2.0 * PI), line));
+            seg((-5.5, -4.0), (-5.5, 4.0));
+            seg((5.5, -4.0), (5.5, 4.0));
+            p.add(path(ellipse(4.0, 0.0, PI)));
+            p.add(path(ellipse(0.0, 0.0, PI)));
         }
         Mark::Lock => {
             p.rect_stroke(Rect::from_min_max(at(-5.0, -0.5), at(5.0, 6.5)), 1.5 * k, line, StrokeKind::Middle);
