@@ -3,6 +3,8 @@
 uchmk のアプリが使う共有のクレートを集めたリポジトリ。糸（ito）のように、アプリをつなぐ。Rust、Windows 優先。
 使う側は tsumugi（紬、ターミナル）、kura（蔵、ファイラー。旧 filer）、yagura（櫓、システムモニター。旧 mimamori）。michi（道、Git のクライアント）も使う。fuda（札、TODO）と fude（筆、エディター）も使う予定。
 
+**画面を作るときは、先に [docs/design-guide.md](docs/design-guide.md)（「こういうときはこのクレート」の早見表。ボタン・印・空の一覧・確認・Markdown の欄など）を見る。**
+
 | クレート | 中身 | 主に使う側 |
 |---|---|---|
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |

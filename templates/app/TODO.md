@@ -6,6 +6,9 @@
 （足りない所は ito に頼む。`scripts/ito-first.py` が見ている）。
 
 - [ ] `--keys` の台本: `ito-keyscript`（`Dialect`・`Runner`・`Press`）。手本は michi の `main.rs`。`lanes.conf` の `keys_env` と合わせる。
+  状態・木・アナウンスも台本で確かめられる（`<Enabled:>`・`<Disabled:>`・`<Focused:>`・`<Checked:>`・`<Unchecked:>`・`<Tree:名前>`・`<Announced:>`）。
+  アナウンスは `ito_a11y::announce` を使い、`ito-a11y` の `egui` の機能を入れる。通知は `Cargo.toml` の機能 `test-hooks`（`ito-notify/test-sink`）を入れたビルドで
+  `ITO_NOTIFY_SINK=<file>` に記録できる。トレイを持つなら `ito-tray/test-hook` も同じ機能にまとめる。出荷するビルドには入れない。
 - [ ] `keymap.toml` と設定の「キー」ページ: `ito-keys`・`ito-keymap`・`ito-prefs` の `keys_page`。既定のキーは `defaults/keymap.toml`
   （`<C-,>` 設定・`<F1>` ヘルプ・`<C-q>` 終了）。手本は minato の `keymap.rs`・`prefs.rs`。
 - [ ] `?` と F1 のヘルプ: `ito-help`（`ito-keymap` の一覧を描く）。手本は michi の `app.rs`・`ui.rs`。

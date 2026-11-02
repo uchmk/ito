@@ -15,6 +15,10 @@
 - 全部の ito のクレートは 1 つの `rev` にそろえる。上げたら `scripts/lanes.sh sync`。
   `.github/workflows/` の build・arm64・checklists・release・release-sums は ito の雛形から `sync` が書く（`lanes.conf` の `workflows=`）。直すなら ito で。
 
+## 画面は早見表から
+
+画面の部品（ボタン・アイコン・空の一覧・確認・パレット・Markdown の欄など）を作る前に、ito の `docs/design-guide.md`（`C:\dev\ito\docs\design-guide.md`）で、使えるクレートを探す。
+
 ## 状態のファイルは TOML
 
 アプリが機械的に書いて読み戻すもの（窓の場所・履歴・最近開いたもの・セッション）は `ito_common::state_dir("{{app}}")` に **TOML** で置く

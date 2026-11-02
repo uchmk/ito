@@ -56,6 +56,10 @@ eframe = { version = "0.36", default-features = false, features = ["accesskit", 
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita-notitle"] }
 egui = "0.36"
 
+[features]
+# Test builds only: notifications go to a file (ITO_NOTIFY_SINK) instead of the screen. Add `ito-tray/test-hook` here if the app has a tray.
+test-hooks = ["ito-notify/test-sink"]
+
 [dev-dependencies]
 # TESTING.md -> the lanes' check tables (examples/make-testcheck.rs).
 ito-testcheck = { git = "https://github.com/uchmk/ito", rev = "{{rev}}" }

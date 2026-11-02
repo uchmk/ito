@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.216.0] - 2026-11-02
+
+### 変更
+
+- 新しい文書 `docs/design-guide.md`: 「こういうときはこのクレート」の早見表(ボタン・アイコン・空の一覧・確認・パレット・Markdown の欄など)。`CLAUDE.md` と `templates/app/CLAUDE.md` からリンクした。
+- `templates/app`: 新しい `--keys` の手順(`<Enabled:>`・`<Tree:>`・`<Announced:>` など)と、テスト用の口(`ito-notify/test-sink`、トレイは `ito-tray/test-hook`)を TODO に書いた。`Cargo.toml` に機能 `test-hooks`(`ito-notify/test-sink`)を足した。
+
+### 使う側がやること
+
+- 既存のアプリは何もしなくてよい。テストで通知を記録したいアプリは、同じ `test-hooks` の機能を足す。
+
 ## [0.215.0] - 2026-11-02
 
 ### 追加
