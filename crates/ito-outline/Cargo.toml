@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# The outline column: drawn, with the entry being read marked and a click that jumps.
+egui = ["dep:egui", "dep:ito-theme"]
+
 [dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }
+unicode-width = "0.2"
 # Pure Rust. The same options kura reads Markdown with.
 pulldown-cmark = { version = "0.13", default-features = false }

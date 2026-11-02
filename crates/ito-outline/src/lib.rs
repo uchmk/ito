@@ -6,6 +6,8 @@
 
 use std::ops::Range;
 
+pub mod column;
+
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// The options Markdown is read with everywhere in uchmk: tables, footnotes, strike-through, task lists, GFM and

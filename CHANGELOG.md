@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.218.0] - 2026-11-02
+
+### 追加
+
+- `ito-outline` の機能 `egui`(#150 の描画の部分): 右の目次の列。`column::items(&headings, |h| h.line)` で行を作り、`column::show(ui, rect, &items, cols, top, cursor, overlay, &Look)` で描く。読んでいる見出し(`top` 以前で最後のもの)の強調、キーで動かすときのカーソル(`cursor`)、クリックで飛ぶ(押した行の番号を返す)、`overlay`。色は `ito_theme::colors()`。
+- 幅の計算は egui なしでも使える: `cells`(全角は 2)・`column_cols`・`cols_for`・`current`・`first_row`。
+
+### 使う側がやること
+
+- 目次を出すアプリ(kura・Markdown エディター)は、`Look { cell, row_h, font, bold, title }` を渡す。`title`(「目次」)は呼ぶ側の言語で。kura は #150 の乗せ替えのとき、自前の `TocEntry`・`outline_cols` と描画を消す。
+
 ## [0.217.0] - 2026-11-02
 
 ### 追加

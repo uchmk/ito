@@ -58,6 +58,7 @@
 | **Markdown を書く欄**（Ctrl+B/I/K/U、選択に印を付ける） | `ito-markdown` の `Writing`（機能 `egui`） |
 | **Markdown の整形プレビュー**（見出し・リスト・表・コード） | `ito-markdown` の `layout`・`Md` |
 | Markdown を HTML・プレーンに書き出す | `ito-markdown::to_html`・`to_plain` |
+| **Markdown の目次**(見出し一覧・節の範囲・右の列) | `ito-outline`(`headings`・`section`、機能 `egui` の `column::show`) |
 | コードの色分け | `ito-syntax` |
 | 日本語の変換中の下線・候補窓の位置 | `ito-ime` |
 | 描いた文字をマウスで範囲選択してコピー | `ito-select` |
