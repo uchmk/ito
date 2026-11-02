@@ -1,0 +1,12 @@
+[package]
+name = "ito-outline"
+description = "The headings of a Markdown text with the byte range and line of each, and the section each one owns (for an outline, moving a section, folding)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Pure Rust. The same options kura reads Markdown with.
+pulldown-cmark = { version = "0.13", default-features = false }

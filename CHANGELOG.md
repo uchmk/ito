@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.217.0] - 2026-11-02
+
+### 追加
+
+- 新しいクレート `ito-outline`(#150 の論理の部分): Markdown の見出しの一覧。`headings(text, max_level)` は見出しごとに `level`・`title`(記号なしの文字、空白は 1 つに)・`range`(見出し自身のバイト範囲)・`line`(0 始まり)・`section`(次の同じかそれより上の見出しまでの範囲)を返す。`at_byte` は位置を持つ一番深い節を引く。`options()` は kura と同じ読み方(表・脚注・取り消し線・タスク・GFM・YAML/TOML の前付け)。純 Rust(`pulldown-cmark`)。
+- egui の描画(右の列・クリックで飛ぶ)は機能 `egui` として次の版で足す。
+
+### 使う側がやること
+
+- なし(新しいクレートを足しただけ)。
+
 ## [0.216.0] - 2026-11-02
 
 ### 変更
