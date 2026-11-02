@@ -14,6 +14,14 @@ pub fn watch_session(_: Callback) -> Result<Window, WhyNot> {
     Err(WhyNot::Unsupported)
 }
 
+pub fn session_user(_: u32) -> Option<String> {
+    None
+}
+
+pub fn session_remote(_: u32) -> bool {
+    false
+}
+
 pub fn user_idle_for() -> Option<Duration> {
     None
 }

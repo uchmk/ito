@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.224.0] - 2026-11-02
+
+### 追加
+- `ito-power`: `on_session_with(f: Fn(SessionEvent, &SessionInfo))`（#157）。`SessionInfo { id, user, remote }` で、どのセッションの出来事かを渡す。`user` は `DOMAIN\name`（ローカルのアカウントは `PC\name`）。サインアウトでは、システムが名前を忘れていることがあるので、そのセッションの前の出来事で覚えた名前を返す。`remote` はリモート デスクトップのセッションか。`on_session` は今のまま（`on_session_with` の上に載る）。ユーザー プロセスでも `ito-service` のサービスでも同じ。
+- `ito-power::same_user(a, b)`: `PC\taro`・`.\taro`・`taro` を大文字小文字を区別せず同じ人として比べる（ドメインが違えば別）。
+- 使う側がやること: なし（足しただけ）。
+
 ## [0.223.0] - 2026-11-02
 
 ### 追加

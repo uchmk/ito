@@ -36,7 +36,68 @@ impl SessionEvent {
     }
 }
 
-pub(crate) type Callback = Arc<dyn Fn(SessionEvent) + Send + Sync>;
+/// Whose session an event is about.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionInfo {
+    /// The Windows session id (1, 2, ...). 0, the services' own, is never passed.
+    pub id: u32,
+    /// `DOMAIN\name` (`PC\name` for a local account) of the person signed in to it. For a sign-out, the name
+    /// remembered from the session's earlier events (the system may have forgotten it by then); `None` when it was
+    /// never known.
+    pub user: Option<String>,
+    /// True for a Remote Desktop session, false for the PC's own screen.
+    pub remote: bool,
+}
+
+/// Whether two user names are the same person the way Windows reads them: `PC\taro`, `.\taro` and `taro` match
+/// (a missing domain or `.` matches any domain), case-insensitively. Two different domains do not match.
+pub fn same_user(a: &str, b: &str) -> bool {
+    fn split(s: &str) -> (Option<String>, String) {
+        match s.trim().rsplit_once('\\') {
+            Some((d, n)) => ((!d.is_empty() && d != ".").then(|| d.to_lowercase()), n.to_lowercase()),
+            None => (None, s.trim().to_lowercase()),
+        }
+    }
+    let ((da, na), (db, nb)) = (split(a), split(b));
+    na == nb && !na.is_empty() && (da.is_none() || db.is_none() || da == db)
+}
+
+pub(crate) type Callback = Arc<dyn Fn(SessionEvent, &SessionInfo) + Send + Sync>;
+
+static USERS: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
+
+/// Build the [`SessionInfo`] for an event from what the system says now (`looked`) and what was remembered.
+fn describe(event: SessionEvent, id: u32, looked: Option<String>, remote: bool) -> SessionInfo {
+    let mut known = USERS.lock().unwrap_or_else(|e| e.into_inner());
+    let at = known.iter().position(|(i, _)| *i == id);
+    let user = if event == SessionEvent::SignOut {
+        // By now the system may have forgotten the name: the remembered one comes first, and the session is forgotten.
+        let remembered = at.map(|i| known.remove(i).1);
+        remembered.or(looked)
+    } else {
+        match (looked, at) {
+            (Some(u), Some(i)) => {
+                known[i].1 = u.clone();
+                Some(u)
+            }
+            (Some(u), None) => {
+                known.push((id, u.clone()));
+                Some(u)
+            }
+            (None, Some(i)) => Some(known[i].1.clone()),
+            (None, None) => None,
+        }
+    };
+    SessionInfo { id, user, remote }
+}
+
+/// Tell `cb` about an event of session `id`.
+pub(crate) fn emit(cb: &Callback, event: SessionEvent, id: u32) {
+    if id == 0 {
+        return;
+    }
+    cb(event, &describe(event, id, sys::session_user(id), sys::session_remote(id)));
+}
 
 static SERVICE: AtomicBool = AtomicBool::new(false);
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -63,7 +124,7 @@ pub fn service_session_change(code: u32, session: u32) {
     }
     let all: Vec<Callback> = listeners().iter().map(|(_, f)| f.clone()).collect();
     for f in all {
-        f(event);
+        emit(&f, event, session);
     }
 }
 
@@ -99,6 +160,13 @@ impl Drop for SessionWatch {
 ///
 /// `Err(WhyNot::Unsupported)` on macOS and Linux; `Err(WhyNot::Failed(_))` when the window cannot be made.
 pub fn on_session(f: impl Fn(SessionEvent) + Send + Sync + 'static) -> Result<SessionWatch, WhyNot> {
+    on_session_with(move |e, _| f(e))
+}
+
+/// Like [`on_session`], and says whose session it was ([`SessionInfo`]: the id, `DOMAIN\name`, remote or not).
+/// The name of a sign-out is the one remembered from the session's earlier events, since the system may already have
+/// forgotten it. [`same_user`] compares names.
+pub fn on_session_with(f: impl Fn(SessionEvent, &SessionInfo) + Send + Sync + 'static) -> Result<SessionWatch, WhyNot> {
     let cb: Callback = Arc::new(f);
     if SERVICE.load(Ordering::SeqCst) {
         let id = NEXT.fetch_add(1, Ordering::SeqCst);
@@ -139,8 +207,9 @@ mod tests {
         set_service_mode();
         let seen = Arc::new(AtomicUsize::new(0));
         let s = seen.clone();
-        let w = on_session(move |e| {
+        let w = on_session_with(move |e, info| {
             assert_eq!(e, SessionEvent::Lock);
+            assert_eq!(info.id, 2);
             s.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
@@ -151,6 +220,28 @@ mod tests {
         drop(w);
         service_session_change(7, 2);
         assert_eq!(seen.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_sign_out_gets_the_name_remembered_for_its_session() {
+        let a = |e, looked: Option<&str>| describe(e, 71, looked.map(str::to_owned), false);
+        assert_eq!(a(SessionEvent::SignIn, Some("PC\\taro")).user.as_deref(), Some("PC\\taro"));
+        assert_eq!(a(SessionEvent::Lock, None).user.as_deref(), Some("PC\\taro"), "kept when the system says nothing");
+        let out = a(SessionEvent::SignOut, None);
+        assert_eq!((out.id, out.user.as_deref()), (71, Some("PC\\taro")));
+        assert_eq!(a(SessionEvent::SignOut, None).user, None, "forgotten after the sign-out");
+        let b = describe(SessionEvent::SignOut, 72, Some("PC\\hanako".into()), false);
+        assert_eq!(b.user.as_deref(), Some("PC\\hanako"), "never seen: the lookup");
+    }
+
+    #[test]
+    fn user_names_compare_the_way_windows_reads_them() {
+        assert!(same_user("PC\\taro", ".\\taro"));
+        assert!(same_user("PC\\Taro", "taro"));
+        assert!(same_user("taro", "TARO"));
+        assert!(!same_user("PC\\taro", "OTHER\\taro"));
+        assert!(!same_user("PC\\taro", "PC\\hanako"));
+        assert!(!same_user("", ""));
     }
 
     #[test]

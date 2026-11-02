@@ -18,13 +18,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_DESTROY, WNDCLASSW,
 };
 
-use crate::session::{Callback, SessionEvent};
+use crate::session::{emit, Callback, SessionEvent};
 use crate::WhyNot;
 
 const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 const NOTIFY_FOR_THIS_SESSION: u32 = 0;
 /// `WTSSessionInfoEx`.
 const SESSION_INFO_EX: WTS_INFO_CLASS = WTS_INFO_CLASS(25);
+/// `WTSUserName`, `WTSDomainName`, `WTSClientProtocolType`.
+const WTS_USER_NAME: WTS_INFO_CLASS = WTS_INFO_CLASS(5);
+const WTS_DOMAIN_NAME: WTS_INFO_CLASS = WTS_INFO_CLASS(7);
+const WTS_CLIENT_PROTOCOL: WTS_INFO_CLASS = WTS_INFO_CLASS(16);
 /// `WTSActive`.
 const WTS_ACTIVE: i32 = 0;
 
@@ -52,7 +56,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             // SAFETY: the pointer was set by `run` to a leaked Box<Callback> that lives until WM_DESTROY.
             let p = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Callback;
             if let (false, Some(event)) = (p.is_null(), SessionEvent::from_code(wparam.0 as u32)) {
-                unsafe { (*p)(event) };
+                // `lParam` is the session id.
+                unsafe { emit(&*p, event, lparam.0 as u32) };
             }
             LRESULT(0)
         }
@@ -164,5 +169,42 @@ pub fn user_idle_for() -> Option<Duration> {
         };
         WTSFreeMemory(buf.0.cast());
         idle
+    }
+}
+
+/// One string of a session (`WTSUserName` ...); `None` when the system does not say or it is empty.
+fn session_string(session: u32, class: WTS_INFO_CLASS) -> Option<String> {
+    // SAFETY: the buffer WTS returns is a NUL-terminated UTF-16 string, read once and freed with WTSFreeMemory.
+    unsafe {
+        let mut buf = PWSTR::null();
+        let mut bytes = 0u32;
+        WTSQuerySessionInformationW(None, session, class, &mut buf, &mut bytes).ok()?;
+        let out = if buf.is_null() { None } else { buf.to_string().ok() };
+        WTSFreeMemory(buf.0.cast());
+        out.filter(|s| !s.is_empty())
+    }
+}
+
+/// `DOMAIN\name` of the person signed in to `session` (`PC\name` for a local account).
+pub fn session_user(session: u32) -> Option<String> {
+    let name = session_string(session, WTS_USER_NAME)?;
+    Some(match session_string(session, WTS_DOMAIN_NAME) {
+        Some(domain) => format!("{domain}\\{name}"),
+        None => name,
+    })
+}
+
+/// Whether `session` is a Remote Desktop (or other remote) session rather than the PC's own screen.
+pub fn session_remote(session: u32) -> bool {
+    // SAFETY: the buffer is a USHORT, read within `bytes` and freed with WTSFreeMemory.
+    unsafe {
+        let mut buf = PWSTR::null();
+        let mut bytes = 0u32;
+        if WTSQuerySessionInformationW(None, session, WTS_CLIENT_PROTOCOL, &mut buf, &mut bytes).is_err() {
+            return false;
+        }
+        let remote = !buf.is_null() && bytes as usize >= 2 && *(buf.0 as *const u16) != 0;
+        WTSFreeMemory(buf.0.cast());
+        remote
     }
 }
