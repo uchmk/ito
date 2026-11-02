@@ -19,6 +19,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINF
 
 use crate::WhyNot;
 
+pub use crate::win_session::{user_idle_for, watch_session, Window};
+
 /// Power plan: Sleep subgroup, "Sleep after".
 const SUB_SLEEP: GUID = GUID::from_u128(0x238c9fa8_0aad_41ed_83f4_97be242c8f20);
 const STANDBYIDLE: GUID = GUID::from_u128(0x29f6c1db_86da_48c5_9fdb_f2b67b1f44da);

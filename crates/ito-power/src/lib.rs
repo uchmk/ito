@@ -4,6 +4,8 @@
 //! - [`wake_at`]: wake the PC for a time, or say [`WhyNot`] it cannot (a handle; drop it to cancel).
 //! - [`sleep_after`]: how long the PC idles before it sleeps, on the current power source.
 //! - [`on_ac`], [`network_up`], [`idle_for`]: probes for "run only when ..." conditions; `None` when the system cannot say.
+//! - [`on_session`]: sign-in, sign-out, lock and unlock ([`SessionEvent`]), from a process in the person's session or from a
+//!   Windows service run by `ito-service`. [`user_idle_for`]: the idle time of the person at the screen, readable from a service.
 //!
 //! Windows uses power requests, a resume timer and the active power plan. macOS holds with `caffeinate`
 //! and Linux with `systemd-inhibit` (both a child process killed on drop); neither can wake the PC, so
@@ -12,6 +14,13 @@
 
 use std::fmt;
 use std::time::{Duration, SystemTime};
+
+mod session;
+pub use session::{on_session, user_idle_for, SessionEvent, SessionWatch};
+#[doc(hidden)]
+pub use session::{service_session_change, set_service_mode};
+#[cfg(windows)]
+mod win_session;
 
 #[cfg(windows)]
 #[path = "windows.rs"]

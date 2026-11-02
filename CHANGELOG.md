@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.211.0] - 2026-11-02
+
+### 追加
+
+- サインイン・サインアウト・ロック・ロックの解除を知る（koyomi の依頼 #141）。
+  - `ito-power`: `SessionEvent { SignIn, SignOut, Lock, Unlock }` と `on_session(f) -> Result<SessionWatch, WhyNot>`（戻り値を drop すると止まる。`f` は別スレッドから呼ばれる）。
+    - 本人のセッションで動くプロセス: 隠したメッセージ専用の窓で `WTSRegisterSessionNotification`。そのセッションの出来事。
+    - `ito-service` のサービス（session 0）: SCM の `SERVICE_CONTROL_SESSIONCHANGE`（`SERVICE_ACCEPT_SESSIONCHANGE`）を `ito-service` が渡す。session 0 以外のすべてのセッションの出来事。どちらでも同じ呼び方。
+    - macOS・Linux は `Err(WhyNot::Unsupported)`。
+  - `ito-power::user_idle_for()`: コンソールのセッションの人の空いている時間を `WTSQuerySessionInformation`（`WTSSessionInfoEx`）から読む。サービスからでも読める。
+    **この PC では `LastInputTime` が 0 で `None` だった**（Windows が持つのはリモート デスクトップなど一部のセッションだけ）。`None` は「分からない」。分かるのが要るなら、本人のセッションのプロセスが `idle_for` を知らせる形（別の依頼）になる。
+- `ito-service`: `SERVICE_ACCEPT_SESSIONCHANGE` を受け付け、`run` が `ito-power` をサービスの形にする（`#[doc(hidden)]` の `set_service_mode`・`service_session_change`）。`ito-service` は `ito-power` に依る。
+
+### 変更（使う側がやること）
+
+- 何もない（足しただけ）。`ito-service` を使うアプリは、同じ `rev` の `ito-power` も読み込まれる（同じ `rev` にそろえる）。
+
 ## [0.210.0] - 2026-11-02
 
 ### 追加

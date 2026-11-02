@@ -3,7 +3,20 @@
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime};
 
+use crate::session::Callback;
 use crate::WhyNot;
+
+/// There are no session events to watch here.
+#[derive(Debug)]
+pub struct Window;
+
+pub fn watch_session(_: Callback) -> Result<Window, WhyNot> {
+    Err(WhyNot::Unsupported)
+}
+
+pub fn user_idle_for() -> Option<Duration> {
+    None
+}
 
 #[derive(Debug)]
 pub struct Hold(Option<Child>);

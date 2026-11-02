@@ -112,10 +112,18 @@ fn report(state: SERVICE_STATUS_CURRENT_STATE, accepted: u32, win32: u32, specif
     }
 }
 
-const ACCEPTED: u32 = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_PRESHUTDOWN;
+const ACCEPTED: u32 = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_PRESHUTDOWN | SERVICE_ACCEPT_SESSIONCHANGE;
 
-unsafe extern "system" fn handler(control: u32, _event: u32, _data: *mut c_void, _ctx: *mut c_void) -> u32 {
+unsafe extern "system" fn handler(control: u32, event: u32, data: *mut c_void, _ctx: *mut c_void) -> u32 {
     match control {
+        SERVICE_CONTROL_SESSIONCHANGE => {
+            // SAFETY: for this control `data` points at a WTSSESSION_NOTIFICATION { cbSize: u32, dwSessionId: u32 }.
+            if !data.is_null() {
+                let session = unsafe { *(data as *const u32).add(1) };
+                ito_power::service_session_change(event, session);
+            }
+            0
+        }
         SERVICE_CONTROL_STOP | SERVICE_CONTROL_SHUTDOWN | SERVICE_CONTROL_PRESHUTDOWN => {
             report(SERVICE_STOP_PENDING, ACCEPTED, 0, 0, 30_000);
             if let Some(s) = STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -158,6 +166,8 @@ unsafe extern "system" fn service_main(_argc: u32, argv: *mut PWSTR) {
 
 pub fn run(name: &str, main: Main) -> Result<(), Error> {
     *MAIN.lock().unwrap_or_else(|e| e.into_inner()) = Some(main);
+    // `ito_power::on_session` in this process is fed by the SCM from now on (a service has no window that works).
+    ito_power::set_service_mode();
     let mut n = wide(name);
     let table = [
         SERVICE_TABLE_ENTRYW { lpServiceName: PWSTR(n.as_mut_ptr()), lpServiceProc: Some(service_main) },
