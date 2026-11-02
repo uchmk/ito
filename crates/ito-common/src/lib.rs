@@ -23,6 +23,8 @@ pub mod dirwatch;
 pub mod filename;
 pub mod fonts;
 pub mod kept;
+#[cfg(feature = "clock")]
+pub mod now;
 mod os_theme;
 pub mod report;
 pub mod runinfo;

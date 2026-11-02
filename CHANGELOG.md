@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.213.0] - 2026-11-02
+
+### 追加
+
+- `ito-common::now`(機能 `clock`): 「いま」を 1 か所に寄せる(koyomi の依頼 #143)。`now()`(UTC)・`now_local()`・`fake_notice()`。
+  - 通常のビルドは `Utc::now()` / `Local::now()` と同じ。
+  - 機能 `fake-clock` のビルドだけ、環境変数 `UCHMK_FAKE_CLOCK=<file>` の TOML(`now = "2026-12-31T23:59:50+09:00"`)を読む。その時刻から実時間で進み、ファイルは 1 秒に 1 回まで読み直して、`now` が変わったらその時刻に飛ぶ(進める・戻す)。OS の時計を動かさずに「1 時間戻す」「日をまたぐ」を回せる。
+  - `fake-clock` を入れないビルドは変数を読まない(出荷版の時刻はずらせない)。`Instant` には触らない。`fake_notice()` は偽の時計のときだけ「fake clock: …」の 1 行を返す(ログの先頭用)。
+  - 使う側がやること: `Utc::now()` / `Local::now()` を `ito_common::now::now()` / `now_local()` に寄せ、試験用のビルドだけ `ito-common` の機能 `fake-clock` を付ける。`UCHMK_FAKE_TZ` は後回し。
+
 ## [0.212.0] - 2026-11-02
 
 ### 追加
