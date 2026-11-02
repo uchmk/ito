@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.225.0] - 2026-11-03
+
+### 追加
+- `ito-openin`: 桁を渡せるようにした（#158）。
+  - `Col { chars, bytes }`（1 から。`Col::in_line(行の文字, 文字の桁)` でバイトの桁を計算、`Col::new`）と `Pos { line, col }`（`Pos::line`・`Pos::new`）。エディターごとに数え方が違う（Vim の `cursor()` と Kakoune はバイト、VS Code・nano などは文字）ので、アプリは両方を渡し、ito が選ぶ。
+  - `file_argv_at(template, path, Option<Pos>, custom)`・`open_file_at`・`Config::open_file_at(path, Option<Pos>)` は `(line_passed, col_passed)`。`file_argv`・`open_file`・`Config::open_file` は今のまま（行だけ）。
+  - テンプレート（`[open]` の editor と `[line_args]`）に `{col}`（文字の桁）と `{bcol}`（バイトの桁）。桁を渡していないときは 1。
+  - 組み込みの表: code 系 `-g f:L:C`、hx・zed・subl `f:L:C`、nvim・vim・gvim `+call cursor(L,C)`（バイト）、nano `+L,C`、emacs・emacsclient・micro `+L:C`、kak `+L:C`（バイト）、hidemaru `/jL,C`、sakura `-Y=L -X=C`、emeditor `/l L /cl C`、notepad++ `-nL -cC`。`vi` は昔の vi だと `:call` を知らないので行だけ。
+  - `How::args(line, col)`・`How::token(line, col, path)`・`How::takes_col()`。`How` に `Cursor`・`Joined`・`Pair` を足した。
+- `Built` に `col_passed`（桁を頼んだのにエディターが行しか取らないときだけ false）。`Vars` に `col`・`col_bytes`。
+- 使う側がやること: `Built { … }` や `Vars { … }` を欄をすべて書いて作っているなら `col_passed`・`col`・`col_bytes` を足す（`..Default::default()` なら不要）。`How::Flag("+")` を nvim などの結果として比べているなら、`How::Cursor` などに変わった。実機で確かめたのは、これまで確かめていた sakura の `-Y=` だけ。ほかは各エディターの文書による。
+
 ## [0.224.1] - 2026-11-03
 
 ### 変更

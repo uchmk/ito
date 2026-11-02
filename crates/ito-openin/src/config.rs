@@ -162,7 +162,7 @@ pub fn tool_name_ok(name: &str) -> bool {
 /// Every placeholder set, so a template is checked for its shape alone.
 fn probe() -> Vars {
     let s = |x: &str| Some(x.to_owned());
-    Vars { path: s("x"), line: Some(1), left: s("l"), right: s("r"), base: s("b"), merged: s("m") }
+    Vars { path: s("x"), line: Some(1), col: Some(1), col_bytes: Some(1), left: s("l"), right: s("r"), base: s("b"), merged: s("m") }
 }
 
 fn command_ok(line: &str) -> Result<(), String> {
@@ -286,6 +286,11 @@ impl Config {
     /// Opens the file `path` in the editor, at `line` when it takes one; whether the line was passed.
     pub fn open_file(&self, path: &Path, line: Option<usize>) -> Result<bool, String> {
         crate::open_file(&self.command(Tool::Editor, &[]), path, line, &self.line_args)
+    }
+
+    /// [`Config::open_file`] with a column too: `(line_passed, col_passed)`.
+    pub fn open_file_at(&self, path: &Path, at: Option<crate::Pos>) -> Result<(bool, bool), String> {
+        crate::open_file_at(&self.command(Tool::Editor, &[]), path, at, &self.line_args)
     }
 
     /// Whether `edit` can be made: its command lines read, its names are usable.

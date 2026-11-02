@@ -2,7 +2,7 @@
 //! change: a folder in a terminal or the file manager, a file in an editor
 //! (at a line, when the editor can take one), two or three files in a diff
 //! or merge tool. The line is a template of words (quotes group them) with
-//! `{path}`, `{line}`, `{left}`, `{right}`, `{base}` and `{merged}` in it; no
+//! `{path}`, `{line}`, `{col}`, `{bcol}`, `{left}`, `{right}`, `{base}` and `{merged}` in it; no
 //! shell is involved, and the program is started, not waited for.
 //!
 //! The pieces:
@@ -27,7 +27,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 pub use config::{Config, Edit, OpenCfg, UserTool, SYSTEM_EXTENSIONS};
-pub use lines::LineArgs;
+pub use lines::{Col, LineArgs, Pos};
 
 /// Which program something is opened in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,6 +74,10 @@ pub fn default_command(tool: Tool) -> &'static str {
 pub struct Vars {
     pub path: Option<String>,
     pub line: Option<usize>,
+    /// `{col}`: the column from 1, in characters.
+    pub col: Option<usize>,
+    /// `{bcol}`: the same column in UTF-8 bytes.
+    pub col_bytes: Option<usize>,
     pub left: Option<String>,
     pub right: Option<String>,
     pub base: Option<String>,
@@ -96,6 +100,8 @@ impl Vars {
         Some(match name {
             "path" => self.path.clone(),
             "line" => self.line.map(|n| n.to_string()),
+            "col" => self.col.map(|n| n.to_string()),
+            "bcol" => self.col_bytes.map(|n| n.to_string()),
             "left" => self.left.clone(),
             "right" => self.right.clone(),
             "base" => self.base.clone(),
@@ -180,30 +186,40 @@ pub fn argv(template: &str, vars: &Vars) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// An editor's command line for a file, and whether a line asked for was
+/// An editor's command line for a file, and whether a line and a column asked for were
 /// passed (false when the editor takes none).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Built {
     pub argv: Vec<String>,
     pub line_passed: bool,
+    /// False only when a column was asked for and the editor takes the line but not the column.
+    pub col_passed: bool,
 }
 
 /// [`Built`] for opening the file `path` with `template`, at `line` when one is
 /// asked for and the editor takes it. A template that spells `{line}` itself is
 /// taken as it is.
 pub fn file_argv(template: &str, path: &Path, line: Option<usize>, custom: &LineArgs) -> Result<Built, String> {
+    file_argv_at(template, path, line.map(Pos::line), custom)
+}
+
+/// [`file_argv`] with a column too. A template that spells `{line}`, `{col}` or `{bcol}` is taken as it is (a
+/// `{col}` with no column given is 1); otherwise the editor's own form from [`lines`] is used, and an editor that
+/// takes only a line gets the line, with `col_passed` false.
+pub fn file_argv_at(template: &str, path: &Path, at: Option<Pos>, custom: &LineArgs) -> Result<Built, String> {
     let ws = words(template)?;
-    let vars = Vars { line, ..Vars::path(path) };
-    let Some(n) = line else { return Ok(Built { argv: argv(template, &vars)?, line_passed: true }) };
-    if mentions(&ws, "line") {
-        return Ok(Built { argv: argv(template, &vars)?, line_passed: true });
+    let col = at.map(|p| p.col.unwrap_or(Col { chars: 1, bytes: 1 }));
+    let vars = Vars { line: at.map(|p| p.line), col: col.map(|c| c.chars), col_bytes: col.map(|c| c.bytes), ..Vars::path(path) };
+    let Some(at) = at else { return Ok(Built { argv: argv(template, &vars)?, line_passed: true, col_passed: true }) };
+    if ["line", "col", "bcol"].iter().any(|n| mentions(&ws, n)) {
+        return Ok(Built { argv: argv(template, &vars)?, line_passed: true, col_passed: true });
     }
     let Some(how) = lines::line_arg(&ws[0], custom) else {
-        return Ok(Built { argv: argv(template, &Vars::path(path))?, line_passed: false });
+        return Ok(Built { argv: argv(template, &Vars::path(path))?, line_passed: false, col_passed: at.col.is_none() });
     };
-    let token = how.path_token(n, &path.to_string_lossy());
+    let token = how.token(at.line, at.col, &path.to_string_lossy());
     let mut out = vec![ws[0].clone()];
-    out.extend(how.before(n).split_whitespace().map(str::to_owned));
+    out.extend(how.args(at.line, at.col));
     let mut put = false;
     for w in &ws[1..] {
         if w.contains("{path}") {
@@ -214,7 +230,7 @@ pub fn file_argv(template: &str, path: &Path, line: Option<usize>, custom: &Line
     if !put {
         out.push(token);
     }
-    Ok(Built { argv: out, line_passed: true })
+    Ok(Built { argv: out, line_passed: true, col_passed: at.col.is_none() || how.takes_col() })
 }
 
 /// Starts `argv` (in `cwd`); does not wait for it, and no window flashes. A
@@ -283,6 +299,13 @@ pub fn open_file(template: &str, path: &Path, line: Option<usize>, custom: &Line
     let b = file_argv(template, path, line, custom)?;
     spawn(&b.argv, path.parent())?;
     Ok(b.line_passed)
+}
+
+/// [`open_file`] with a column too: `(line_passed, col_passed)`.
+pub fn open_file_at(template: &str, path: &Path, at: Option<Pos>, custom: &LineArgs) -> Result<(bool, bool), String> {
+    let b = file_argv_at(template, path, at, custom)?;
+    spawn(&b.argv, path.parent())?;
+    Ok((b.line_passed, b.col_passed))
 }
 
 /// Opens `left` and `right` side by side with `template`.
@@ -387,7 +410,7 @@ mod tests {
     fn a_line_goes_where_the_editor_wants_it() {
         let none = LineArgs::new();
         let b = file_argv("nvim {path}", Path::new("/a/b.rs"), Some(12), &none).unwrap();
-        assert_eq!(b, Built { argv: ["nvim", "+12", "/a/b.rs"].map(String::from).to_vec(), line_passed: true });
+        assert_eq!(b, Built { argv: ["nvim", "+12", "/a/b.rs"].map(String::from).to_vec(), line_passed: true, col_passed: true });
         let b = file_argv("code.cmd", Path::new("/a/b.rs"), Some(12), &none).unwrap();
         assert_eq!(b.argv, ["code.cmd", "-g", "/a/b.rs:12"]);
         let b = file_argv("\"C:\\Program Files\\EmEditor\\EmEditor.exe\" {path}", Path::new("f"), Some(3), &none).unwrap();
@@ -400,8 +423,53 @@ mod tests {
     fn an_editor_that_takes_no_line_gets_the_path_and_says_so() {
         let none = LineArgs::new();
         let b = file_argv("notepad {path}", Path::new("f"), Some(12), &none).unwrap();
-        assert_eq!(b, Built { argv: ["notepad", "f"].map(String::from).to_vec(), line_passed: false });
+        assert_eq!(b, Built { argv: ["notepad", "f"].map(String::from).to_vec(), line_passed: false, col_passed: true });
         assert!(file_argv("notepad", Path::new("f"), None, &none).unwrap().line_passed);
+        let b = file_argv_at("notepad", Path::new("f"), Some(Pos::new(12, Col::new(3, 3))), &none).unwrap();
+        assert!(!b.line_passed && !b.col_passed, "a column asked for is not passed either");
+    }
+
+    #[test]
+    fn a_column_goes_where_the_editor_wants_it() {
+        let none = LineArgs::new();
+        let at = Some(Pos::new(12, Col::in_line("あいう", 3)));
+        let b = file_argv_at("nvim {path}", Path::new("/a/b.rs"), at, &none).unwrap();
+        assert_eq!(b.argv, ["nvim", "+call cursor(12,7)", "/a/b.rs"]);
+        assert!(b.line_passed && b.col_passed);
+        let b = file_argv_at("code.cmd", Path::new("/a/b.rs"), at, &none).unwrap();
+        assert_eq!(b.argv, ["code.cmd", "-g", "/a/b.rs:12:3"]);
+        let b = file_argv_at("sakura", Path::new("f"), at, &none).unwrap();
+        assert_eq!(b.argv, ["sakura", "-Y=12", "-X=3", "f"]);
+        // An editor that takes only the line gets the line, and says the column was dropped.
+        let b = file_argv_at("vi", Path::new("f"), at, &none).unwrap();
+        assert_eq!(b.argv, ["vi", "+12", "f"]);
+        assert!(b.line_passed && !b.col_passed);
+        // No column asked: the same command as before.
+        let b = file_argv_at("nvim", Path::new("f"), Some(Pos::line(12)), &none).unwrap();
+        assert_eq!(b.argv, ["nvim", "+12", "f"]);
+        assert!(b.col_passed);
+    }
+
+    #[test]
+    fn a_template_that_spells_col_is_taken_as_it_is() {
+        let none = LineArgs::new();
+        let at = Some(Pos::new(7, Col::in_line("あいう", 2)));
+        let b = file_argv_at("myed --at {line}:{col}/{bcol} {path}", Path::new("f"), at, &none).unwrap();
+        assert_eq!(b.argv, ["myed", "--at", "7:2/4", "f"]);
+        // Spelled, but no column given: the start of the line.
+        let b = file_argv_at("myed {line}:{col} {path}", Path::new("f"), Some(Pos::line(7)), &none).unwrap();
+        assert_eq!(b.argv, ["myed", "7:1", "f"]);
+        // Only a column spelled, no line: the template is still taken as it is.
+        let b = file_argv_at("myed {col} {path}", Path::new("f"), at, &none).unwrap();
+        assert_eq!(b.argv, ["myed", "2", "f"]);
+        // The app's own [line_args] can take a column.
+        let mut custom = LineArgs::new();
+        custom.insert("myed".into(), "--goto={line}:{col} {path}".into());
+        let b = file_argv_at("myed", Path::new("f"), at, &custom).unwrap();
+        assert_eq!(b.argv, ["myed", "--goto=7:2", "f"]);
+        assert!(b.col_passed);
+        custom.insert("myed".into(), "--goto={line} {path}".into());
+        assert!(!file_argv_at("myed", Path::new("f"), at, &custom).unwrap().col_passed);
     }
 
     #[test]
