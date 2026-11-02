@@ -122,6 +122,11 @@ impl Fake {
     pub fn new(tip: &str, wake: Box<dyn Fn() + Send>) -> Fake {
         let file = std::env::var_os(STATE_ENV).map(PathBuf::from);
         let script = std::env::var_os(KEYS_ENV).map(PathBuf::from);
+        Fake::with(file, script, tip, wake)
+    }
+
+    /// As [`Fake::new`], with the files given rather than read from the environment.
+    pub fn with(file: Option<PathBuf>, script: Option<PathBuf>, tip: &str, wake: Box<dyn Fn() + Send>) -> Fake {
         let shadow = Arc::new(Mutex::new(Shadow { state: None, tip: tip.to_owned(), menu: Vec::new() }));
         let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
@@ -230,19 +235,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let (state, script) = (d.path().join("tray.toml"), d.path().join("keys.txt"));
         std::fs::write(&script, "<TrayClick> <Wait:20> <TrayMenu:quit>").unwrap();
-        // The variables are process-wide: this is the only test that sets them.
-        std::env::set_var(STATE_ENV, &state);
-        std::env::set_var(KEYS_ENV, &script);
         let woke = Arc::new(AtomicUsize::new(0));
         let w = woke.clone();
-        let fake = Fake::new(
+        let fake = Fake::with(
+            Some(state.clone()),
+            Some(script.clone()),
             "hello",
             Box::new(move || {
                 w.fetch_add(1, Ordering::SeqCst);
             }),
         );
-        std::env::remove_var(STATE_ENV);
-        std::env::remove_var(KEYS_ENV);
         fake.set_state(Some(State::Waiting));
         fake.set_menu(vec![Item::entry("quit", "Quit")]);
         assert_eq!(fake.events().recv_timeout(Duration::from_secs(5)).unwrap(), Event::Click);

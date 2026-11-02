@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.215.0] - 2026-11-02
+
+### 追加
+
+画面を見ずに、スクリーンリーダーに渡る情報（状態・木・アナウンス）を `--keys` で確かめる(koyomi の依頼 #145)。
+
+- `ito-keyscript`: 新しい手順。egui の AccessKit の木を読む。`<Assert:>` と同じく数秒待ってから落ちる。
+  - `<Enabled:文字>`・`<Disabled:文字>`・`<Focused:文字>`・`<Checked:文字>`・`<Unchecked:文字>`: `<Click:文字>` と同じ見つけ方で 1 つに決め、その状態を確かめる。違えば「何であるか」（`unchecked`・`disabled`・`not a check box or switch` など）を添えて落ちる。
+  - `<Tree:名前>`: 完了ファイルの横の `名前.txt` に木を書く。名前のあるノードを 1 行ずつ、親の下に字下げして `button "Go"`・`checkbox "Dark" checked`・`text value="hi" focused`・`button "Stop" disabled`。最後に `announced: …` の行。
+  - `<Announced:文字>`: `ito_a11y::announce` された文言に含まれる。
+  - 公開: `Step::{Is, Tree, Announced}`・`Press::{Is, Tree, Announced}`・`Prop`・`check_is`・`check_announced`・`tree_text`。`Item` に `focused`・`toggled` の欄。
+- `ito-a11y`: `record_announcements(bool)`・`announced()`。`announce` の文言を覚える（既定は覚えない。`Runner` が `<Tree:>`・`<Announced:>` のある台本のときだけ入れる）。
+
+### 使う側がやること
+
+- `Step`・`Press` を `match` で全部書いているアプリは、新しい 3 つの腕を足す（`_ =>` で受けているなら不要）。`Item { … }` を自分で組んでいるなら `focused`・`toggled` を足す。
+- 自前のフレームのループのアプリは、`Press::Is`・`Press::Tree`・`Press::Announced` に `check_is(ctx, prop, text)`・`tree_text(ctx)` を書き出す・`check_announced(text)` を当てる（`Runner` を使うアプリは何もしない）。
+- アナウンスを確かめるアプリは、`ito-a11y` の `egui` の機能を入れて `announce` を使う。
+
 ## [0.214.0] - 2026-11-02
 
 ### 追加

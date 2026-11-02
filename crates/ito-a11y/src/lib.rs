@@ -139,11 +139,37 @@ pub fn say(resp: &egui::Response, role: Role, label: &str) {
     resp.widget_info(|| WidgetInfo::labeled(kind, enabled, label));
 }
 
+static RECORD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HEARD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Keep the messages given to `announce` (a `--keys` run turns this on, for `<Announced:text>`). Off by default, so a
+/// shipped app keeps nothing.
+pub fn record_announcements(on: bool) {
+    RECORD.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The messages `announce`d since [`record_announcements`] was turned on, oldest first (the last 200).
+pub fn announced() -> Vec<String> {
+    HEARD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+#[cfg(feature = "egui")]
+fn heard(message: &str) {
+    if RECORD.load(std::sync::atomic::Ordering::SeqCst) {
+        let mut v = HEARD.lock().unwrap_or_else(|e| e.into_inner());
+        if v.len() >= 200 {
+            v.remove(0);
+        }
+        v.push(message.to_owned());
+    }
+}
+
 /// Tell the screen reader about a change that has no widget (a toast, a job
 /// finished): a hidden label for one frame, read as a live message. The
 /// reader speaks it when it appears; call it once per message.
 #[cfg(feature = "egui")]
 pub fn announce(ui: &mut egui::Ui, message: &str) {
+    heard(message);
     let resp = ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
     say(&resp, Role::Label, message);
 }

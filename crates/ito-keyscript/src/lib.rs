@@ -164,6 +164,41 @@ pub enum Step {
     Clipboard(String),
     /// `<ClipboardHas:text>`: the last text the app copied contains this (a path or a state inside a longer line).
     ClipboardHas(String),
+    /// `<Enabled:text>`, `<Disabled:text>`, `<Focused:text>`, `<Checked:text>`, `<Unchecked:text>`: the one thing with that
+    /// text (as `<Click:text>` finds it) is in that state. Waits a few seconds, like `<Assert:>`.
+    Is {
+        prop: Prop,
+        text: String,
+    },
+    /// `<Tree:name>`: write the window's tree to `name.txt` beside the done file (see [`tree_text`]).
+    Tree(String),
+    /// `<Announced:text>`: a message `ito_a11y::announce`d since the run began contains the text. Waits like `<Assert:>`.
+    Announced(String),
+}
+
+/// What `<Enabled:>` and its kin ask about a thing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Prop {
+    Enabled,
+    Disabled,
+    Focused,
+    Checked,
+    Unchecked,
+}
+
+impl Prop {
+    const ALL: [Prop; 5] = [Prop::Enabled, Prop::Disabled, Prop::Focused, Prop::Checked, Prop::Unchecked];
+
+    /// The word in the token: `Enabled` in `<Enabled:text>`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Prop::Enabled => "Enabled",
+            Prop::Disabled => "Disabled",
+            Prop::Focused => "Focused",
+            Prop::Checked => "Checked",
+            Prop::Unchecked => "Unchecked",
+        }
+    }
 }
 
 /// `Step::Wheel`'s modifiers: these bits.
@@ -229,6 +264,12 @@ pub enum Press {
     },
     Clipboard(String),
     ClipboardHas(String),
+    Is {
+        prop: Prop,
+        text: String,
+    },
+    Tree(String),
+    Announced(String),
 }
 
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
@@ -259,6 +300,9 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Assert { text, present } => Some(Press::Assert { text: text.clone(), present: *present }),
         Step::Clipboard(text) => Some(Press::Clipboard(text.clone())),
         Step::ClipboardHas(text) => Some(Press::ClipboardHas(text.clone())),
+        Step::Is { prop, text } => Some(Press::Is { prop: *prop, text: text.clone() }),
+        Step::Tree(name) => Some(Press::Tree(name.clone())),
+        Step::Announced(text) => Some(Press::Announced(text.clone())),
         Step::Wait(d) => Some(Press::Wait(*d)),
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
@@ -304,6 +348,9 @@ pub fn label(step: &Step) -> String {
         }
         Step::Clipboard(text) => format!("<Clipboard:{}>", paste_text_escape(text)),
         Step::ClipboardHas(text) => format!("<ClipboardHas:{}>", paste_text_escape(text)),
+        Step::Is { prop, text } => format!("<{}:{}>", prop.name(), paste_text_escape(text)),
+        Step::Tree(name) => format!("<Tree:{name}>"),
+        Step::Announced(text) => format!("<Announced:{}>", paste_text_escape(text)),
     }
 }
 
@@ -469,6 +516,10 @@ pub struct Item {
     /// Where it is, in points.
     pub rect: egui::Rect,
     pub disabled: bool,
+    /// The node holds the keyboard focus.
+    pub focused: bool,
+    /// A check box, switch or toggle button: whether it is on.
+    pub toggled: Option<bool>,
 }
 
 /// What [`observe`] collects after each pass.
@@ -476,6 +527,8 @@ pub struct Item {
 struct Tap {
     items: Vec<Item>,
     copied: Option<String>,
+    /// The tree, one line per named node, indented by depth (see [`tree_text`]).
+    tree: Vec<String>,
 }
 
 impl egui::Plugin for Tap {
@@ -492,11 +545,19 @@ impl egui::Plugin for Tap {
         // egui writes the whole tree each pass, so the last one is the window as it is.
         let Some(update) = &output.platform_output.accesskit_update else { return };
         let mut items: Vec<Item> = Vec::new();
-        for (_, node) in &update.nodes {
+        let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
+        let mut tree = Vec::new();
+        if let Some(root) = update.tree.as_ref().map(|t| t.root) {
+            dump(&nodes, root, update.focus, 0, &mut tree);
+        }
+        self.tree = tree;
+        for (id, node) in &update.nodes {
+            let focused = *id == update.focus && update.focus != update.tree.as_ref().map_or(update.focus, |t| t.root);
+            let toggled = toggled(node);
             let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
             let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
             for text in [node.label(), node.value()].into_iter().flatten().filter(|t| !t.is_empty()) {
-                let item = Item { text: text.to_owned(), rect, disabled: node.is_disabled() };
+                let item = Item { text: text.to_owned(), rect, disabled: node.is_disabled(), focused, toggled };
                 if !items.contains(&item) {
                     items.push(item);
                 }
@@ -517,6 +578,129 @@ pub fn observe(ctx: &egui::Context) {
 /// The labelled things as of the last frame; empty before [`observe`] has seen one.
 pub fn items(ctx: &egui::Context) -> Vec<Item> {
     ctx.with_plugin::<Tap, _>(|t| t.items.clone()).unwrap_or_default()
+}
+
+fn toggled(node: &egui::accesskit::Node) -> Option<bool> {
+    use egui::accesskit::Toggled;
+    node.toggled().map(|t| t == Toggled::True)
+}
+
+/// The role as a word, in the vocabulary of the tree file and of `ito-a11y` (`button`, `switch`, `text`, ...).
+fn role_name(role: egui::accesskit::Role) -> String {
+    use egui::accesskit::Role;
+    match role {
+        Role::Button => "button".into(),
+        Role::CheckBox => "checkbox".into(),
+        Role::Switch => "switch".into(),
+        Role::RadioButton => "radio".into(),
+        Role::TextInput | Role::MultilineTextInput | Role::SearchInput => "text".into(),
+        Role::Label | Role::TextRun => "label".into(),
+        Role::Heading => "heading".into(),
+        Role::ListItem => "row".into(),
+        other => format!("{other:?}").to_lowercase(),
+    }
+}
+
+fn dump(
+    nodes: &std::collections::HashMap<egui::accesskit::NodeId, &egui::accesskit::Node>,
+    id: egui::accesskit::NodeId,
+    focus: egui::accesskit::NodeId,
+    depth: usize,
+    out: &mut Vec<String>,
+) {
+    let Some(node) = nodes.get(&id) else { return };
+    if node.is_hidden() {
+        return;
+    }
+    let label = node.label().filter(|t| !t.is_empty());
+    let value = node.value().filter(|t| !t.is_empty());
+    let toggle = toggled(node);
+    let named = label.is_some() || value.is_some() || toggle.is_some();
+    let mut child_depth = depth;
+    if named {
+        let mut line = format!("{}{}", "  ".repeat(depth), role_name(node.role()));
+        if let Some(l) = label {
+            line.push_str(&format!(" \"{}\"", paste_text_escape(l)));
+        }
+        if let Some(v) = value {
+            line.push_str(&format!(" value=\"{}\"", paste_text_escape(v)));
+        }
+        if id == focus {
+            line.push_str(" focused");
+        }
+        if node.is_disabled() {
+            line.push_str(" disabled");
+        }
+        match toggle {
+            Some(true) => line.push_str(" checked"),
+            Some(false) => line.push_str(" unchecked"),
+            None => {}
+        }
+        out.push(line);
+        child_depth += 1;
+    }
+    for child in node.children() {
+        dump(nodes, *child, focus, child_depth, out);
+    }
+}
+
+/// `<Tree:name>`'s file: the window as the AccessKit tree has it, one line per named node, indented under its parent:
+/// `button "確かめた" focused`, `switch "…" checked`, `text "Name" value="…"`. Then the messages `announce`d, as
+/// `announced: …` lines.
+pub fn tree_text(ctx: &egui::Context) -> String {
+    let mut s = ctx.with_plugin::<Tap, _>(|t| t.tree.join("\n")).unwrap_or_default();
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    for m in ito_a11y::announced() {
+        s.push_str(&format!("announced: {}\n", paste_text_escape(&m)));
+    }
+    s
+}
+
+/// `<Enabled:text>` and its kin.
+pub fn check_is(ctx: &egui::Context, prop: Prop, text: &str) -> Result<(), String> {
+    let all = items(ctx);
+    let exact: Vec<&Item> = all.iter().filter(|i| i.text == text).collect();
+    let found: Vec<&Item> = if exact.is_empty() { all.iter().filter(|i| i.text.contains(text)).collect() } else { exact };
+    let item = match found.as_slice() {
+        [one] => *one,
+        [] => return Err(format!("no `{text}` in the window; it has: {}", listed(&all.iter().collect::<Vec<_>>()))),
+        // A text field and the text run inside it both say `hi`: the outer one holds the state.
+        many if many.iter().any(|o| many.iter().all(|i| o.rect.contains_rect(i.rect))) => {
+            many.iter().find(|o| many.iter().all(|i| o.rect.contains_rect(i.rect))).copied().unwrap_or_else(|| unreachable!())
+        }
+        many => return Err(format!("`{text}` is more than one thing: {}", listed(many))),
+    };
+    let ok = match prop {
+        Prop::Enabled => !item.disabled,
+        Prop::Disabled => item.disabled,
+        Prop::Focused => item.focused,
+        Prop::Checked => item.toggled == Some(true),
+        Prop::Unchecked => item.toggled == Some(false),
+    };
+    if ok {
+        return Ok(());
+    }
+    let is = match (prop, item.toggled, item.disabled, item.focused) {
+        (Prop::Checked | Prop::Unchecked, Some(true), ..) => "checked",
+        (Prop::Checked | Prop::Unchecked, Some(false), ..) => "unchecked",
+        (Prop::Checked | Prop::Unchecked, None, ..) => "not a check box or switch",
+        (_, _, true, _) => "disabled",
+        (_, _, false, true) => "enabled and focused",
+        _ => "enabled and not focused",
+    };
+    Err(format!("`{}` is not {}: it is {is}", item.text, prop.name().to_lowercase()))
+}
+
+/// `<Announced:text>`.
+pub fn check_announced(text: &str) -> Result<(), String> {
+    let heard = ito_a11y::announced();
+    if heard.iter().any(|m| m.contains(text)) {
+        return Ok(());
+    }
+    let tail: Vec<String> = heard.iter().rev().take(8).map(|m| format!("`{m}`")).collect();
+    Err(format!("`{text}` was not announced; announced: {}", if tail.is_empty() { "nothing".into() } else { tail.join(", ") }))
 }
 
 fn listed(found: &[&Item]) -> String {
@@ -676,7 +860,8 @@ fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
 fn paste_text(token: &str, what: &str) -> Result<String, String> {
     let noun = match what {
         "Paste" => "a paste",
-        "Click" | "RClick" | "DClick" | "Assert" | "Clipboard" | "ClipboardHas" => "a text to look for",
+        "Click" | "RClick" | "DClick" | "Assert" | "Clipboard" | "ClipboardHas" | "Enabled" | "Disabled" | "Focused" | "Checked"
+        | "Unchecked" | "Announced" => "a text to look for",
         _ => "an input method step",
     };
     let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
@@ -824,6 +1009,13 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             }
             None if token.starts_with("<Clipboard:") => Step::Clipboard(paste_text(token, "Clipboard")?),
             None if token.starts_with("<ClipboardHas:") => Step::ClipboardHas(paste_text(token, "ClipboardHas")?),
+            None if token.starts_with("<Tree:") => Step::Tree(named(token, "Tree", "tree name")?),
+            None if token.starts_with("<Announced:") => Step::Announced(paste_text(token, "Announced")?),
+            None if Prop::ALL.iter().any(|p| token.starts_with(&format!("<{}:", p.name()))) => {
+                let prop =
+                    Prop::ALL.iter().copied().find(|p| token.starts_with(&format!("<{}:", p.name()))).unwrap_or_else(|| unreachable!());
+                Step::Is { prop, text: paste_text(token, prop.name())? }
+            }
             None if read.is_some() => {
                 let (tag, noun) = read.copied().unwrap_or_else(|| unreachable!());
                 Step::Read { tag: tag.to_owned(), name: named(token, tag, noun)? }
@@ -1085,7 +1277,11 @@ impl Runner {
         // before the panes exist.
         let reads_window = steps.iter().any(|s| {
             matches!(s, Step::ClickText { .. } | Step::DClickText(_) | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_))
+                || matches!(s, Step::Is { .. } | Step::Tree(_) | Step::Announced(_))
         });
+        if steps.iter().any(|s| matches!(s, Step::Announced(_) | Step::Tree(_))) {
+            ito_a11y::record_announcements(true);
+        }
         Self {
             reads_window,
             deadline: None,
@@ -1234,6 +1430,21 @@ impl Runner {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
+            Press::Is { prop, text } => match check_is(ctx, prop, &text) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::Announced(text) => match check_announced(&text) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::Tree(name) => {
+                let path = self.dir.join(format!("{name}.txt"));
+                if let Err(e) = std::fs::write(&path, tree_text(ctx)) {
+                    self.finished = true;
+                    return Some(Do::Failed { step: label(step), why: format!("cannot write {}: {e}", path.display()) });
+                }
+            }
             Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
             Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
             p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
@@ -1765,6 +1976,76 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(failed_report("<Assert:x>", "a\nb", 2).starts_with("keys: failed\nstep: <Assert:x>\nwhy: a / b\n"));
+    }
+
+    /// #145: states, the tree file and announcements are checked from the AccessKit tree.
+    #[test]
+    fn the_runner_checks_states_the_tree_and_announcements() {
+        let steps = parse("<Enabled:Go><Disabled:Stop><Checked:Dark><Unchecked:Beep><Focused:hi><Tree:t1><Announced:Saved now>").unwrap();
+        for s in &steps {
+            assert_eq!(parse(&label(s)).unwrap(), vec![s.clone()]);
+        }
+        assert!(parse("<Tree:a b>").is_err());
+        let dir = std::env::temp_dir().join(format!("ito-keyscript-tree-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut text = String::from("hi");
+        let (mut dark, mut beep) = (true, false);
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(steps, Some(dir.join("done")));
+        let mut out = None;
+        for i in 0..400 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                out = Some(d);
+                break;
+            }
+            ctx.run_ui(raw, |ui| {
+                let _ = ui.button("Go");
+                ui.add_enabled(false, egui::Button::new("Stop"));
+                ui.checkbox(&mut dark, "Dark");
+                ui.checkbox(&mut beep, "Beep");
+                let name = ui.add(egui::TextEdit::singleline(&mut text).id(egui::Id::new("name")));
+                if i == 0 {
+                    name.request_focus();
+                }
+                if i == 3 {
+                    ito_a11y::announce(ui, "Saved now");
+                }
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(out, Some(Do::Done));
+        let tree = std::fs::read_to_string(dir.join("t1.txt")).unwrap();
+        assert!(tree.contains("button \"Go\""), "{tree}");
+        assert!(tree.contains("checkbox \"Dark\" checked") || tree.contains("\"Dark\" checked"), "{tree}");
+        assert!(tree.contains("\"Stop\" disabled"), "{tree}");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A wrong state fails with what the thing is.
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Checked:Beep>").unwrap(), None);
+        let mut out = None;
+        for _ in 0..4 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                out = Some(d);
+                break;
+            }
+            ctx.run_ui(raw, |ui| {
+                ui.checkbox(&mut false, "Beep");
+            })
+            .drop_without_applying_deltas();
+            r.deadline = Some(Instant::now());
+        }
+        match out {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "<Checked:Beep>");
+                assert!(why.contains("unchecked"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// #168 for the runner: a run nothing has moved for longer than the stall
