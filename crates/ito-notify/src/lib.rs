@@ -13,6 +13,8 @@
 pub mod mail;
 pub mod notifier;
 pub mod player;
+#[cfg(feature = "test-sink")]
+pub mod sink;
 pub mod sound;
 pub mod toast;
 pub mod webhook;

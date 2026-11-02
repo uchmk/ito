@@ -80,12 +80,45 @@ impl Notifier {
     /// of a picture to show beside the name (Windows).
     pub fn new(app: App<'static>, logo: Option<fn() -> Option<PathBuf>>, click: Click) -> Self {
         let (tx, rx) = mpsc::channel::<Toast>();
+        #[cfg(feature = "test-sink")]
+        if let Some(file) = crate::sink::path() {
+            let _ = std::thread::Builder::new().name("notifier-sink".into()).spawn(move || sink_run(app, file, click, rx));
+            return Self { tx };
+        }
         let _ = std::thread::Builder::new().name("notifier".into()).spawn(move || os::run(app, logo, click, rx));
         Self { tx }
     }
 
     pub fn show(&self, toast: Toast) {
         let _ = self.tx.send(toast);
+    }
+}
+
+/// The `test-sink` notifier: toasts go to the file, and a click written beside it is called back as a real one.
+#[cfg(feature = "test-sink")]
+fn sink_run(app: App<'static>, file: PathBuf, click: Click, rx: mpsc::Receiver<Toast>) {
+    let mut shown: Vec<(u64, Toast)> = Vec::new();
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(t) => {
+                let actions: Vec<String> = t.actions.iter().map(|a| format!("{}={}", a.label, a.arg)).collect();
+                let n = crate::sink::toast(&file, app.id, &t.title, &t.body, &t.tag, &t.launch, &actions);
+                shown.push((n, t));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+        for (n, arg) in crate::sink::take_clicks(&file) {
+            let Some((_, t)) = shown.iter().find(|(i, _)| *i == n) else { continue };
+            let arg = if arg.is_empty() {
+                Some(t.launch.clone())
+            } else {
+                t.actions.iter().find(|a| !a.dismiss && a.arg == arg).map(|a| a.arg.clone())
+            };
+            if let Some(arg) = arg {
+                click(&t.tag, &arg);
+            }
+        }
     }
 }
 
@@ -298,5 +331,41 @@ mod tests {
         );
         assert_eq!(arg_of(&t, "allow").as_deref(), Some("allow"));
         assert_eq!((arg_of(&t, ""), arg_of(&t, "dismiss")), (None, None));
+    }
+}
+
+#[cfg(all(test, feature = "test-sink"))]
+mod sink_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn a_sunk_toast_is_written_and_a_click_file_calls_back() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("sink.toml");
+        // The variable is process-wide: this is the only test that sets it.
+        std::env::set_var(crate::sink::ENV, &file);
+        let got: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let g = got.clone();
+        let n =
+            Notifier::new(App { id: "uchmk.test", name: "test" }, None, Arc::new(move |t, a| g.lock().unwrap().push((t.into(), a.into()))));
+        n.show(Toast::open("run-7", "Done", "job 7", "Open"));
+        let wait = |ok: &dyn Fn() -> bool| {
+            for _ in 0..100 {
+                if ok() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            panic!("timed out");
+        };
+        wait(&|| std::fs::read_to_string(&file).is_ok_and(|t| t.contains("tag = \"run-7\"")));
+        // The numbers count for the whole process, so read this toast's own.
+        let text = std::fs::read_to_string(&file).unwrap();
+        let n: u64 = text.lines().find_map(|l| l.strip_prefix("n = ")).unwrap().parse().unwrap();
+        std::fs::write(d.path().join("sink.toml.click"), format!("{n}\n{n}:open\n999\n{n}:nope\n")).unwrap();
+        wait(&|| got.lock().unwrap().len() >= 2);
+        assert_eq!(*got.lock().unwrap(), vec![("run-7".to_owned(), "open".to_owned()); 2]);
+        std::env::remove_var(crate::sink::ENV);
     }
 }

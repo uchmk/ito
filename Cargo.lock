@@ -2161,14 +2161,14 @@ dependencies = [
 
 [[package]]
 name = "ito-a11y"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-agent"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2178,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "ito-browser"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2189,14 +2189,14 @@ dependencies = [
 
 [[package]]
 name = "ito-bugreport"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-cloud"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "hmac",
  "ito-match",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "ito-common"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "chrono",
  "egui",
@@ -2225,7 +2225,7 @@ dependencies = [
 
 [[package]]
 name = "ito-confirm"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-diff",
@@ -2234,35 +2234,35 @@ dependencies = [
 
 [[package]]
 name = "ito-console"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-dialog"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "rfd",
 ]
 
 [[package]]
 name = "ito-diff"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "similar",
 ]
 
 [[package]]
 name = "ito-eventlog"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-export"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "pdf-writer",
  "resvg 0.48.1",
@@ -2272,7 +2272,7 @@ dependencies = [
 
 [[package]]
 name = "ito-fonts"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-common",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "ito-glossary"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2288,25 +2288,25 @@ dependencies = [
 
 [[package]]
 name = "ito-gpu"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui-wgpu",
 ]
 
 [[package]]
 name = "ito-graph"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-guard"
-version = "0.213.0"
+version = "0.214.0"
 
 [[package]]
 name = "ito-guide"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "ito-help"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-keymap",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "ito-http"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "getrandom 0.4.3",
  "ito-secret",
@@ -2335,7 +2335,7 @@ dependencies = [
 
 [[package]]
 name = "ito-i18n"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-common",
  "toml",
@@ -2344,14 +2344,14 @@ dependencies = [
 
 [[package]]
 name = "ito-ime"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-ipc"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "postcard",
  "serde",
@@ -2360,7 +2360,7 @@ dependencies = [
 
 [[package]]
 name = "ito-keymap"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-common",
  "ito-keys",
@@ -2370,14 +2370,14 @@ dependencies = [
 
 [[package]]
 name = "ito-keys"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-keyscript"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-common",
@@ -2387,7 +2387,7 @@ dependencies = [
 
 [[package]]
 name = "ito-layout"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-common",
@@ -2396,7 +2396,7 @@ dependencies = [
 
 [[package]]
 name = "ito-mail"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "chrono",
  "encoding_rs",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "ito-markdown"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2415,21 +2415,21 @@ dependencies = [
 
 [[package]]
 name = "ito-match"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "fancy-regex 0.19.2",
 ]
 
 [[package]]
 name = "ito-mcp"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ito-notices"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2437,16 +2437,17 @@ dependencies = [
 
 [[package]]
 name = "ito-notify"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-secret",
  "png 0.18.1",
+ "tempfile",
  "windows",
 ]
 
 [[package]]
 name = "ito-oauth"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "getrandom 0.4.3",
  "ito-secret",
@@ -2459,7 +2460,7 @@ dependencies = [
 
 [[package]]
 name = "ito-openin"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-common",
  "serde",
@@ -2468,7 +2469,7 @@ dependencies = [
 
 [[package]]
 name = "ito-palette"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2476,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "ito-pane"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "alacritty_terminal",
  "crossbeam-channel",
@@ -2498,14 +2499,14 @@ dependencies = [
 
 [[package]]
 name = "ito-power"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "ito-prefs"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "chrono",
  "egui",
@@ -2524,14 +2525,14 @@ dependencies = [
 
 [[package]]
 name = "ito-proc"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "ito-secret"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "security-framework",
  "windows",
@@ -2539,14 +2540,14 @@ dependencies = [
 
 [[package]]
 name = "ito-select"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "ito-service"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-power",
  "windows",
@@ -2554,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "ito-sftp"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-match",
  "rand 0.10.3",
@@ -2567,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "ito-sql"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2584,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "ito-statusbar"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "chrono",
  "egui",
@@ -2594,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "ito-store"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-common",
  "rusqlite",
@@ -2602,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "ito-syntax"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "syntect",
  "two-face",
@@ -2610,21 +2611,21 @@ dependencies = [
 
 [[package]]
 name = "ito-table"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "rust_xlsxwriter",
 ]
 
 [[package]]
 name = "ito-tail"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "encoding_rs",
 ]
 
 [[package]]
 name = "ito-testcheck"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "serde",
  "toml",
@@ -2632,7 +2633,7 @@ dependencies = [
 
 [[package]]
 name = "ito-theme"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-pane",
@@ -2642,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "ito-titlebar"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "egui",
  "ito-theme",
@@ -2650,29 +2651,30 @@ dependencies = [
 
 [[package]]
 name = "ito-tray"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "ito-a11y",
+ "tempfile",
  "windows",
 ]
 
 [[package]]
 name = "ito-watch"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "notify",
 ]
 
 [[package]]
 name = "ito-winres"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "png 0.18.1",
 ]
 
 [[package]]
 name = "ito-winrm"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
@@ -2687,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "ito-zip"
-version = "0.213.0"
+version = "0.214.0"
 dependencies = [
  "zip",
 ]

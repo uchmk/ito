@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# `sink`: with `ITO_NOTIFY_SINK=<file>` nothing is shown or played; it is written to the file, and clicks are read
+# from `<file>.click`. For tests only; a build without it never reads the variable.
+test-sink = []
+
 [dependencies]
 png = "0.18"
 ito-secret = { path = "../ito-secret" }
@@ -27,3 +32,6 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+tempfile = "3"

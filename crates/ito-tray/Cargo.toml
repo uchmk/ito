@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# `test-hook`: with `ITO_TRAY_STATE` / `ITO_TRAY_KEYS` set, no icon is made; the state goes to a file and a script
+# clicks. For tests only; a build without it never reads the variables.
+test-hook = []
+
 [dependencies]
 ito-a11y = { path = "../ito-a11y" }
 
@@ -18,3 +23,6 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+tempfile = "3"

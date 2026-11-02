@@ -16,6 +16,9 @@ use std::sync::mpsc::Receiver;
 
 pub use ito_a11y::State;
 
+#[cfg(feature = "test-hook")]
+pub mod hook;
+
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod sys;
@@ -69,7 +72,23 @@ pub enum Event {
 
 /// The icon in the tray. Dropping it removes the icon.
 pub struct Tray {
-    inner: sys::Tray,
+    inner: Inner,
+}
+
+enum Inner {
+    Real(sys::Tray),
+    #[cfg(feature = "test-hook")]
+    Fake(hook::Fake),
+}
+
+macro_rules! on {
+    ($self:ident, $t:ident => $e:expr) => {
+        match &$self.inner {
+            Inner::Real($t) => $e,
+            #[cfg(feature = "test-hook")]
+            Inner::Fake($t) => $e,
+        }
+    };
 }
 
 impl Tray {
@@ -80,27 +99,31 @@ impl Tray {
 
     /// [`Tray::new`], and `wake` is called (on the tray's thread) each time an [`Event`] is queued.
     pub fn new_with(icon: Icon, tip: &str, wake: impl Fn() + Send + 'static) -> io::Result<Tray> {
-        Ok(Tray { inner: sys::Tray::new(icon, tip, Box::new(wake))? })
+        #[cfg(feature = "test-hook")]
+        if hook::wanted() {
+            return Ok(Tray { inner: Inner::Fake(hook::Fake::new(tip, Box::new(wake))) });
+        }
+        Ok(Tray { inner: Inner::Real(sys::Tray::new(icon, tip, Box::new(wake))?) })
     }
 
     /// The badge on the icon and the mark before the tip. `None` shows the plain icon.
     pub fn set_state(&self, state: Option<State>) {
-        self.inner.set_state(state);
+        on!(self, t => t.set_state(state));
     }
 
     /// The hover text (the system cuts it at 127 characters).
     pub fn set_tip(&self, tip: &str) {
-        self.inner.set_tip(tip);
+        on!(self, t => t.set_tip(tip));
     }
 
     /// The right-click menu. Empty: no menu.
     pub fn set_menu(&self, items: Vec<Item>) {
-        self.inner.set_menu(items);
+        on!(self, t => t.set_menu(items));
     }
 
     /// What the user did, oldest first. Use `try_recv` from the UI loop.
     pub fn events(&self) -> &Receiver<Event> {
-        self.inner.events()
+        on!(self, t => t.events())
     }
 }
 

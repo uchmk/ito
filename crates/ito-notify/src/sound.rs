@@ -7,6 +7,11 @@
 
 /// Play the sound named `name`.
 pub fn play(name: &str) {
+    #[cfg(feature = "test-sink")]
+    if let Some(file) = crate::sink::path() {
+        crate::sink::sound(&file, name);
+        return;
+    }
     let name = name.to_owned();
     let _ = std::thread::Builder::new().name("sound".into()).spawn(move || os::play(&name));
 }

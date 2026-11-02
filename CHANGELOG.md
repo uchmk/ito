@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.214.0] - 2026-11-02
+
+### 追加
+
+トレイと通知を、画面なしで試すための口(koyomi の依頼 #144)。どちらも機能のスイッチを入れたビルドだけが環境変数を読む。出荷するビルドは読まない。
+
+- `ito-tray`(機能 `test-hook`): `ITO_TRAY_STATE` か `ITO_TRAY_KEYS` があるとき、`Tray::new`・`new_with` はアイコンを作らず、偽のトレイを返す。
+  - `ITO_TRAY_STATE=<file>`: 変わるたびに TOML を書き直す(`state`・`tip`・`[[menu]]` の `id`・`label`・`enabled`・`checked`、区切りは `separator = true`)。`state` は `State` の名前(`Waiting` など)、無ければ空。
+  - `ITO_TRAY_KEYS=<script>`: `<TrayClick>`・`<TrayMenu:id>`・`<Wait:ms>` を空白で区切る。本物と同じく `Tray::events()` に `Event::Click`・`Event::Menu(id)` で届き、`wake` も呼ぶ。終わりに `<script>.done`(`ok`、読めない・書き間違いなら `error: …`)を書く。
+  - `ito_tray::hook::{parse, render}` も公開。
+- `ito-notify`(機能 `test-sink`): `ITO_NOTIFY_SINK=<file>` があるとき、通知を出さず音も鳴らさず、ファイルに足していく。
+  - `toast::show`・`Notifier::show` は `[[toast]]`(`n`(1 から)・`app`・`title`・`body`・`tag`・`launch`・`actions = ["ラベル=arg"]`)、`sound::play` は `[[sound]]`(`name`)。
+  - クリックは `<file>.click` に 1 行ずつ書く: `n`(通知そのもの)か `n:arg`(ボタン)。`Notifier::new` に渡した `click(tag, arg)` が、本物のクリックと同じに呼ばれる(`n` は `launch`)。読んだら空にする。0.2 秒ごとに見る。
+
+### 使う側がやること
+
+- テスト用のビルドにだけ、`ito-tray = { …, features = ["test-hook"] }`・`ito-notify = { …, features = ["test-sink"] }` を足す(`[features]` でアプリの機能 1 つにまとめるとよい)。通常のビルドは何も変わらない。
+- `Notifier::new` を通さず `toast::show` だけ使う通知は、記録されるがクリックは呼ばれない(呼ぶ先が無い)。
+
 ## [0.213.0] - 2026-11-02
 
 ### 追加

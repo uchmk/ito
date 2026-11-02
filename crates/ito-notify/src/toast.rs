@@ -33,6 +33,11 @@ pub fn show_with_icon(app: App, icon: Icon, title: &str, body: &str) {
 }
 
 fn send(app: App, icon: Option<Icon>, title: &str, body: &str) {
+    #[cfg(feature = "test-sink")]
+    if let Some(file) = crate::sink::path() {
+        crate::sink::toast(&file, app.id, title, body, "", "", &[]);
+        return;
+    }
     let (id, name, title, body) = (app.id.to_owned(), app.name.to_owned(), title.to_owned(), body.to_owned());
     let _ = std::thread::Builder::new().name("toast".into()).spawn(move || {
         let logo = icon.and_then(|f| icon_file(&id, f));
