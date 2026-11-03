@@ -2641,6 +2641,7 @@ dependencies = [
  "ito-notify",
  "ito-openin",
  "ito-secret",
+ "ito-tabs",
  "ito-theme",
  "serde",
  "toml",

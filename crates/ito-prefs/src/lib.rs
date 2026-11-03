@@ -40,6 +40,8 @@ mod notify_cfg;
 mod openin;
 mod secret;
 mod shell;
+#[cfg(feature = "tabs")]
+mod tabs;
 mod tag;
 mod updates;
 pub use apps::{add_edit, apps_card, note as apps_note, AppsForm, AppsWords};
@@ -58,6 +60,8 @@ pub use notify_cfg::{notify_window, take_clicks, test as test_notify, test_mail,
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
 pub use secret::{secret_field, taken as secret_taken, SecretWords};
 pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
+#[cfg(feature = "tabs")]
+pub use tabs::{tabs_index, tabs_rows, tabs_rows_in, TabsWords, TABS_EN, TABS_JA, TABS_KEYS};
 pub use tag::{
     fit as fit_tag, paint_tag, parse_hex, settle_tag_colors, tag, tag_colors, tag_hue, tag_picker, tag_slot, tag_width, Tag, TAG_PALETTE,
 };

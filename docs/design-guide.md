@@ -15,7 +15,7 @@
 | 窓の下の帯（左にアプリの項目、右端に時計、倍率） | `ito-statusbar` |
 | 幅を変えられるパネル（ドラッグした幅を覚える） | `ito-layout` の `Panels::show` |
 | 窓の位置・大きさを覚える | `ito-common::window`（`Saved`・`Tracker`） |
-| 設定の画面（言語・時計・テーマ・キー・通知） | `ito-prefs`（`show_with`、`theme_page`、`keys_page`、`notify_page`） |
+| 設定の画面（言語・時計・テーマ・キー・通知） | `ito-prefs`（`show_with`、`theme_page`、`keys_page`、`notify_page`、タブの設定は機能 `tabs` の `tabs_rows`） |
 
 ## ボタン・印・アイコン（`ito-prefs`）
 
