@@ -46,6 +46,8 @@ pub fn headings(text: &str, max_level: u8) -> Vec<Heading> {
     let max_level = max_level.clamp(1, 6);
     let mut all: Vec<Heading> = Vec::new();
     let mut open: Option<(u8, String, usize)> = None;
+    // Lines are counted from the previous heading's start, so the whole pass reads the text once.
+    let (mut line, mut counted) = (0usize, 0usize);
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         match event {
             Event::Start(Tag::Heading { level, .. }) => open = Some((level as u8, String::new(), range.start)),
@@ -64,11 +66,13 @@ pub fn headings(text: &str, max_level: u8) -> Vec<Heading> {
                     let end = range.end;
                     let end = start + text[start..end].trim_end_matches(['\r', '\n']).len();
                     let title: String = title.split_whitespace().collect::<Vec<_>>().join(" ");
+                    line += text.as_bytes()[counted..start].iter().filter(|&&b| b == b'\n').count();
+                    counted = start;
                     all.push(Heading {
                         level,
                         title: title.chars().take(MAX_TITLE).collect(),
                         range: start..end,
-                        line: text[..start].bytes().filter(|&b| b == b'\n').count(),
+                        line,
                         section: start..text.len(),
                     });
                 }
@@ -76,11 +80,17 @@ pub fn headings(text: &str, max_level: u8) -> Vec<Heading> {
             _ => {}
         }
     }
+    // A section ends at the next heading of the same or a higher level: close the open ones with a stack.
+    let mut open_levels: Vec<usize> = Vec::new();
     for i in 0..all.len() {
-        let level = all[i].level;
-        if let Some(next) = all[i + 1..].iter().find(|h| h.level <= level) {
-            all[i].section.end = next.section.start;
+        while let Some(&top) = open_levels.last() {
+            if all[top].level < all[i].level {
+                break;
+            }
+            all[top].section.end = all[i].section.start;
+            open_levels.pop();
         }
+        open_levels.push(i);
     }
     all.retain(|h| h.level <= max_level);
     all
@@ -177,5 +187,63 @@ body
 ";
         assert_eq!(at_byte(&headings(none, 6), none.len()), None);
         assert_eq!(at_byte(&headings("", 6), 0), None);
+    }
+
+    /// The pre-fix algorithm, kept as the reference: lines from the start, section by scanning ahead.
+    fn slow(text: &str, max_level: u8) -> Vec<Heading> {
+        let mut all = headings(text, 6);
+        for h in &mut all {
+            h.line = text[..h.range.start].bytes().filter(|&b| b == b'\n').count();
+        }
+        for i in 0..all.len() {
+            let level = all[i].level;
+            all[i].section.end = all[i + 1..].iter().find(|h| h.level <= level).map_or(text.len(), |n| n.range.start);
+        }
+        all.retain(|h| h.level <= max_level.clamp(1, 6));
+        all
+    }
+
+    #[test]
+    fn matches_the_quadratic_reference() {
+        let mut texts: Vec<String> = vec![
+            DOC.into(),
+            "# A\r\n\r\ntext\r\n## B\r\n### C\r\n# D".into(),
+            "no heading at all".into(),
+            "".into(),
+            "# あ\n\n日本語 🎉\n\n## い\n本文\n###### 六\n# う".into(),
+            "Title\n=====\n\n```\n# code\n```\n\nSub\n---\n\n#### Deep\n##### Deeper\n## Back\n".into(),
+            "### deep first\n# top\n## mid\n### low\n## mid2\n# top2\n".into(),
+        ];
+        let mut dense = String::new();
+        for i in 0..300 {
+            dense.push_str(&format!("{} h{i}\n", "#".repeat(i * 7 % 6 + 1)));
+            if i % 3 == 0 {
+                dense.push_str("body\r\n\n");
+            }
+        }
+        texts.push(dense);
+        for t in &texts {
+            for max in [1, 2, 4, 6] {
+                assert_eq!(headings(t, max), slow(t, max), "{t:?} max {max}");
+            }
+        }
+    }
+
+    #[test]
+    fn dense_headings_are_linear() {
+        let mut text = String::new();
+        let mut i = 0;
+        while text.len() < 2_000_000 {
+            text.push_str(&format!("{} h{i}\n", "#".repeat(i % 6 + 1)));
+            i += 1;
+        }
+        let start = std::time::Instant::now();
+        let h = headings(&text, 6);
+        let took = start.elapsed();
+        assert_eq!(h.len(), i);
+        assert_eq!(h[i - 1].line, i - 1);
+        eprintln!("2 MB dense: {took:?}");
+        // The quadratic version took seconds in release; this has a wide margin even for a debug build.
+        assert!(took.as_secs() < 10, "took {took:?}");
     }
 }
