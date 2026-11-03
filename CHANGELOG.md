@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.229.0] - 2026-11-03
+
+### 追加
+- `ito-common::text::grouped(n: u64)`: 3 桁ごとにカンマを入れた数の文字（`12345` → `12,345`、`0` → `0`）。言語によらず同じ。負の数は `format!("-{}", grouped(n.unsigned_abs()))`。(#168)
+- `ito-textbuf::pos::count_chars(text, range)`: 範囲の中の「人が見る文字」（書記素クラスタ。キャレットの動く単位）の数。改行（`
+`・`
+`・単独の ``）は数えない。範囲の端は char の境界に引き戻し、テキストの外は切り詰める。(#169)
+- 使う側がやること: 任意。minato の `thousands` と kura の `grouped` を `ito_common::text::grouped` に、weft の `count.rs` のループを `pos::count_chars` に置き換えられる。破壊的変更はなく、`rev` を上げるだけで使える。
+
 ## [0.228.0] - 2026-11-03
 
 ### 追加
