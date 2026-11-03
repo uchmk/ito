@@ -2431,6 +2431,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ito-mdlint"
+version = "0.227.0"
+dependencies = [
+ "ito-mdedit",
+]
+
+[[package]]
 name = "ito-mdview"
 version = "0.227.0"
 dependencies = [
