@@ -86,6 +86,10 @@ fn underline(text: &str, h: &Heading) -> (usize, usize) {
 /// Take the heading that holds `caret` (the one whose section the caret is in) away without breaking the outline:
 /// see [`HeadingDelete`]. `None` before the first heading. The caret stays on the same text, or goes to where the
 /// deleted part was.
+///
+/// A heading that does not start its line (after a `> ` quote marker, a `- ` list marker or spaces) is found by its
+/// line, so a caret anywhere on the line, before the marker too, is on that heading. One rule for the prefix: it goes
+/// away with the line in `LineOnly`, `Section` and `LiftChildren`; `ToParagraph` keeps it, since the line stays.
 pub fn delete_heading(text: &str, caret: usize, how: HeadingDelete) -> Option<Change> {
     let caret = caret.min(text.len());
     let hs = ito_outline::headings(text, 6);
@@ -198,6 +202,42 @@ mod tests {
         assert_eq!(run(t, "# Top", HeadingDelete::LiftChildren), "Sub\n===\n\nx\n\n# Next\n");
         // Without children it is the same as deleting the line.
         assert_eq!(run("# A\n\nx\n", "# A", HeadingDelete::LiftChildren), "x\n");
+    }
+
+    #[test]
+    fn a_caret_at_the_start_of_a_prefixed_heading_line_acts_on_that_heading() {
+        for nl in ["\n", "\r\n"] {
+            let w = |s: &str| s.replace('\n', nl);
+            for line in ["> ## Q", "- ## L", " ## C"] {
+                let t = w(&format!("# P\n\nbody\n\n{line}\n\nx\n"));
+                let at = t.find(line).unwrap();
+                let go = |how| delete_heading(&t, at, how).unwrap().apply(&t);
+                assert_eq!(go(HeadingDelete::LineOnly), w("# P\n\nbody\n\nx\n"), "{line}");
+                assert_eq!(go(HeadingDelete::Section), w("# P\n\nbody\n"), "{line}");
+                assert_eq!(go(HeadingDelete::LiftChildren), w("# P\n\nbody\n\nx\n"), "{line}");
+                let kept = w(&format!("# P\n\nbody\n\n{}\n\nx\n", line.replace("## ", "")));
+                assert_eq!(go(HeadingDelete::ToParagraph), kept, "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_prefix_goes_with_the_deleted_line_or_section() {
+        for nl in ["\n", "\r\n"] {
+            let w = |s: &str| s.replace('\n', nl);
+            for (t, caret) in [(" ## A\n\nbody\n", 8), ("> # Q\n\nq\n", 3), ("- # L\n\nl\n", 3)] {
+                let t = w(t);
+                assert_eq!(delete_heading(&t, caret, HeadingDelete::Section).unwrap().apply(&t), "");
+            }
+            let t = w("> # Q\n\nq\n");
+            assert_eq!(delete_heading(&t, 3, HeadingDelete::LineOnly).unwrap().apply(&t), w("q\n"));
+            assert_eq!(delete_heading(&t, 3, HeadingDelete::LiftChildren).unwrap().apply(&t), w("q\n"));
+            // An indented first heading is found from column 0.
+            let t = w(" ## A\n\nbody\n");
+            for how in [HeadingDelete::LineOnly, HeadingDelete::Section, HeadingDelete::ToParagraph, HeadingDelete::LiftChildren] {
+                assert!(delete_heading(&t, 0, how).is_some());
+            }
+        }
     }
 
     #[test]

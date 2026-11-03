@@ -33,7 +33,9 @@ pub struct Heading {
     pub range: Range<usize>,
     /// 0-based line the heading starts on.
     pub line: usize,
-    /// The heading and everything below it, up to the next heading of the same or a higher level (or the end).
+    /// The heading and everything below it, up to the next heading of the same or a higher level (or the end). It
+    /// starts at the start of the heading's *line*, so a quote marker, a list marker or leading spaces before the `#`
+    /// belong to the section: a caret anywhere on the line is in it, and cutting the section takes the prefix too.
     pub section: Range<usize>,
 }
 
@@ -73,7 +75,7 @@ pub fn headings(text: &str, max_level: u8) -> Vec<Heading> {
                         title: title.chars().take(MAX_TITLE).collect(),
                         range: start..end,
                         line,
-                        section: start..text.len(),
+                        section: text[..start].rfind('\n').map_or(0, |i| i + 1)..text.len(),
                     });
                 }
             }

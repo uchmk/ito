@@ -137,6 +137,15 @@ fn titles(text: &str, h: &Heading, anchor: usize) -> bool {
     h.range.end <= anchor && text[h.range.end..anchor].trim().is_empty()
 }
 
+/// The line break of the line holding `pos` (the last one before it when that line has none): a text with mixed
+/// breaks gets no foreign one. `\n` when the text has no line break at all.
+fn eol_at(text: &str, pos: usize) -> &'static str {
+    match text[pos..].find('\n').map(|i| pos + i).or_else(|| text[..pos].rfind('\n')) {
+        Some(i) if i > 0 && text.as_bytes()[i - 1] == b'\r' => "\r\n",
+        _ => "\n",
+    }
+}
+
 /// Make a table of contents: a list of links to the headings (GitHub anchors, indented by heading level), between
 /// `<!-- toc -->` and `<!-- /toc -->`.
 ///
@@ -147,11 +156,10 @@ fn titles(text: &str, h: &Heading, anchor: usize) -> bool {
 /// or when a `<!-- toc -->` has no `<!-- /toc -->`.
 pub fn insert_toc(text: &str, caret: usize) -> Option<Change> {
     let caret = caret.min(text.len());
-    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let hs = ito_outline::headings(text, 6);
     match find(text).ok()? {
         Some(region) => {
-            let (new, _) = build(&hs, &|h| titles(text, h, region.start), eol);
+            let (new, _) = build(&hs, &|h| titles(text, h, region.start), eol_at(text, region.start));
             if text[region.clone()] == new {
                 return None;
             }
@@ -159,8 +167,9 @@ pub fn insert_toc(text: &str, caret: usize) -> Option<Change> {
         }
         None => {
             let blocks = top_blocks(text);
-            let at = blocks.iter().rposition(|(r, _)| r.start <= caret).map(|i| blocks[i].0.end);
+            let at = blocks.iter().rposition(|(r, _)| text[..r.start].rfind('\n').map_or(0, |i| i + 1) <= caret).map(|i| blocks[i].0.end);
             let anchor = at.unwrap_or(0);
+            let eol = eol_at(text, anchor);
             let (toc, n) = build(&hs, &|h| at.is_some() && titles(text, h, anchor), eol);
             if n == 0 {
                 return None;
@@ -252,5 +261,20 @@ mod tests {
         let t = "Top\n===\n\n### Deep [x]\n";
         let out = insert_toc(t, 0).unwrap().apply(t);
         assert_eq!(out, "Top\n===\n\n<!-- toc -->\n- [Deep \\[x\\]](#deep-x)\n<!-- /toc -->\n\n### Deep [x]\n");
+    }
+
+    #[test]
+    fn toc_uses_the_newline_of_its_line_and_finds_an_indented_first_heading() {
+        let t = "# A\r\n\r\ntext\n\n## B\n";
+        let out = insert_toc(t, t.find("text").unwrap()).unwrap().apply(t);
+        assert!(out.contains("<!-- toc -->\n- [A](#a)"), "{out:?}");
+        assert_eq!(out.matches("\r\n").count(), 2);
+        let t = "# A\n\ntext\r\n\r\n## B\r\n";
+        let out = insert_toc(t, t.find("text").unwrap()).unwrap().apply(t);
+        assert!(out.contains("<!-- toc -->\r\n- [A](#a)"), "{out:?}");
+        // An indented first heading at column 0 is the toc's own title, so the toc goes below it.
+        let t = " ## A\n\nbody\n\n## B\n";
+        let out = insert_toc(t, 0).unwrap().apply(t);
+        assert!(out.starts_with(" ## A\n\n<!-- toc -->"), "{out}");
     }
 }

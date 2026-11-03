@@ -149,4 +149,14 @@ mod tests {
         assert_eq!(next(t, t.len(), Target::Heading, Dir::Up), Some(t.find("Sub").unwrap()));
         assert_eq!(next(t, 0, Target::Code, Dir::Down), Some(t.find("```").unwrap()));
     }
+
+    #[test]
+    fn a_caret_at_column_0_of_a_prefixed_heading_is_on_that_heading() {
+        let t = "# P\n\nbody\n\n> ## Q\n\nq\n\n### R\n";
+        let q = t.find("> ##").unwrap();
+        assert_eq!(next(t, q, Target::Parent, Dir::Up), Some(0));
+        assert_eq!(next(t, q, Target::Child, Dir::Down), Some(t.find("### R").unwrap()));
+        let t = " ## A\n\nbody\n";
+        assert_eq!(next(t, 0, Target::Parent, Dir::Up), None);
+    }
 }
