@@ -4,6 +4,8 @@
 //! - [`Buffer`]: the text as read, a version that goes up on each edit, and the line endings and BOM it came with
 //!   (so saving writes them back). One contiguous `String`, so [`Buffer::text`] is a free `&str` for `ito-mdedit`;
 //!   inserting in the middle of an 8 MiB text is one memmove.
+//!   It also keeps a line-start index, updated by each edit, so `line_of` / `line_range` / `line_col` / `byte_at` on
+//!   the buffer are a binary search (the [`pos`] functions give the same answers by scanning, for a plain `&str`).
 //! - [`pos`]: byte <-> char <-> grapheme <-> line / column, the only place that converts.
 //! - [`Selection`]: a caret and its anchor.
 //! - [`Doc`]: buffer + selection + history. [`Transaction`] is a list of [`Edit`]s with the selection before and
