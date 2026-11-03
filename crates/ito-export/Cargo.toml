@@ -13,7 +13,7 @@ resvg = { version = "0.49", default-features = false, features = ["text", "syste
 # SVG to PDF (text stays text, the fonts are subset and embedded), and the
 # page tree around it (the same pdf-writer as svg2pdf's). Pure Rust, like resvg.
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
-pdf-writer = "0.15"
+pdf-writer = "0.12"
 
 [target."cfg(windows)".dependencies]
 # The shell's "print" verb.

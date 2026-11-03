@@ -774,7 +774,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2256,7 +2256,7 @@ dependencies = [
 name = "ito-export"
 version = "0.225.0"
 dependencies = [
- "pdf-writer 0.15.0",
+ "pdf-writer",
  "resvg 0.49.0",
  "svg2pdf",
  "windows",
@@ -3617,18 +3617,6 @@ name = "pdf-writer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5df03c7d216de06f93f398ef06f1385a60f2c597bb96f8195c8d98e08a26b1d5"
-dependencies = [
- "bitflags 2.13.2",
- "itoa",
- "memchr",
- "ryu",
-]
-
-[[package]]
-name = "pdf-writer"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
 dependencies = [
  "bitflags 2.13.2",
  "itoa",
@@ -5212,7 +5200,7 @@ dependencies = [
  "log",
  "miniz_oxide 0.8.9",
  "once_cell",
- "pdf-writer 0.12.1",
+ "pdf-writer",
  "resvg 0.45.1",
  "siphasher",
  "subsetter",
