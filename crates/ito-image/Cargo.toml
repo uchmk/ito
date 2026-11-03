@@ -1,0 +1,28 @@
+[package]
+name = "ito-image"
+description = "Images for apps: read a picture from the OS clipboard as straight RGBA8 (Windows PNG / CF_DIBV5 / CF_DIB), encode RGBA as lossy WebP that keeps transparency (pure Rust)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Lossy WebP, pure Rust. Two encoders because each has one weak spot:
+# oxideav-webp is the closest to libwebp on opaque pictures but its alpha path is
+# very slow (minutes) and can panic; webp-rust (a port of libwebp's config) is
+# solid with transparency but a little bigger on opaque pictures.
+oxideav-webp = { version = "0.3", default-features = false }
+webp-rust = "0.3"
+# The clipboard's "PNG" format (Windows) and the fake clipboard's file.
+png = "0.18"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory"] }
+
+[target.'cfg(not(windows))'.dependencies]
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+
+[dev-dependencies]
+# Decodes the WebP the tests encode.
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }

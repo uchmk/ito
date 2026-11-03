@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.227.0] - 2026-11-03
+
+### 追加
+- 新しいクレート `ito-image`（#162）。窓なし（egui に依らない）。
+  - `clipboard_image() -> Result<Option<Rgba>, Error>`: OS のクリップボードの画像を素の RGBA8 で読む。画像が無ければ `Ok(None)`。Windows は `PNG`（アルファを保つ）→ `CF_DIBV5` → `CF_DIB` の順に Win32 で直に読む（Win+Shift+S のスクリーンショット）。macOS・Linux は `arboard`。
+  - `dib::decode`: 16/24/32 ビット・パレット（1/4/8）・`BI_RGB`・`BI_BITFIELDS`・`BI_ALPHABITFIELDS`・上下どちらの向きの DIB を RGBA8 に。アルファの無い 32 ビットは不透明にする。RLE・JPEG・PNG 圧縮は `Unsupported`。
+  - `Rgba { width, height, pixels }`（`content_hash`: FNV-1a 64・`is_opaque`・`unpremultiply`）。
+  - `encode_webp(&Rgba, quality: f32) -> Result<Vec<u8>, Error>`: 透明を保つ非可逆 WebP（`quality` は 0〜100）。純 Rust（不透明は `oxideav-webp`、それが失敗か panic すれば・透明があれば `webp-rust`）。辺は 16383 まで。
+  - `fake`: `--keys` の試験用の偽のクリップボード。`fake::set`・`set_png_file`・`clear`、または環境変数 `ITO_CLIPBOARD_IMAGE` に PNG のパス（読めなければ `Error`）。`<Paste>` は文字だけで egui に画像の貼り付けの事象が無いため、`--keys` の語は足さず、アプリの `Dialect` から `fake::set` を呼ぶ。
+- 使う側がやること: weft は `ito-image = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、自前のクリップボードの画像の読みと WebP への変換をこれに置き換える。画像を読む・符号化するのは止まるので、ワーカースレッドから呼ぶ。
+
 ## [0.226.0] - 2026-11-03
 
 ### 追加
