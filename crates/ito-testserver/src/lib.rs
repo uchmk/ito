@@ -12,12 +12,17 @@
 //! - [`http::HttpServer`]: a scripted HTTP server. A route is a method and a path; the answer is a status, headers, a
 //!   body and a delay; anything else is 404. Every request is recorded.
 //!
+//! - [`ssh::SshServer`]: an SSH server (russh): password and public-key login (or none), scripted `exec` (stdout / stderr
+//!   chunks of any bytes, exit code or `exit-signal`, delay, hang until signalled), `env` requests accepted or refused,
+//!   an SFTP subsystem over a temp folder (with unwritable paths), and a silent mode. Made for `ito-sftp`.
+//!
 //! Every server listens on `127.0.0.1` only, on a port the system picks (`port()`), records what it received, and
 //! stops (and removes its temp folder) when it is dropped. This crate is for `[dev-dependencies]` only.
 
 pub mod http;
 pub mod imap;
 pub mod smtp;
+pub mod ssh;
 mod stream;
 pub mod tls;
 pub mod winrm;
