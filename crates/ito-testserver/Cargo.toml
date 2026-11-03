@@ -1,6 +1,6 @@
 [package]
 name = "ito-testserver"
-description = "Fake servers for cargo tests of the apps: an SMTP server (plaintext, STARTTLS, implicit TLS, AUTH, .eml capture, 550, cut mid-DATA), an IMAP server (plain or implicit TLS, LOGIN / AUTHENTICATE PLAIN, UID FETCH, UIDVALIDITY), a WinRM cmd-shell server (HTTP or HTTPS, Basic, scripted commands) and a scripted HTTP server. In-process, loopback only, every request recorded, stopped on Drop. A dev-dependency, never a dependency"
+description = "Fake servers for cargo tests of the apps: an SMTP server (plaintext, STARTTLS, implicit TLS, AUTH, .eml capture, 550, cut mid-DATA), an IMAP server (plain or implicit TLS, LOGIN / AUTHENTICATE PLAIN, UID FETCH, UIDVALIDITY), a WinRM cmd-shell server (HTTP or HTTPS, Basic, scripted commands) a scripted HTTP server and an SSH server (password / public-key login, scripted exec and env, SFTP over a temp folder, silent mode). In-process, loopback only, every request recorded, stopped on Drop. A dev-dependency, never a dependency"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,14 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 sha2 = "0.11"
 getrandom = "0.4"
+# The SSH server: the same stack and versions as ito-sftp (`ring`: a C compiler is needed on Linux and macOS targets only).
+russh = { version = "0.65", default-features = false, features = ["ring"] }
+russh-sftp = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+rand = "0.10"
 
 [dev-dependencies]
 ito-mail = { path = "../ito-mail" }
 ito-winrm = { path = "../ito-winrm" }
+ito-sftp = { path = "../ito-sftp" }
+tempfile = "3"
