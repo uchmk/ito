@@ -2769,6 +2769,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ito-testserver"
+version = "0.234.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "ito-mail",
+ "rcgen",
+ "rustls",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "ito-textbuf"
 version = "0.234.0"
 dependencies = [

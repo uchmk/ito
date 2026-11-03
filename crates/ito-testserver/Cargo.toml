@@ -1,0 +1,18 @@
+[package]
+name = "ito-testserver"
+description = "Fake servers for cargo tests of the apps: an SMTP server (plaintext, STARTTLS, implicit TLS, AUTH, .eml capture, 550, cut mid-DATA) and a scripted HTTP server. In-process, loopback only, every request recorded, stopped on Drop. A dev-dependency, never a dependency"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The same TLS stack as ito-http and ito-mail (`ring`, which needs a C compiler on Linux and macOS targets only).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+sha2 = "0.11"
+getrandom = "0.4"
+
+[dev-dependencies]
+ito-mail = { path = "../ito-mail" }
