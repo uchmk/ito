@@ -78,6 +78,21 @@ pub fn bytes_iec(b: u64) -> String {
     }
 }
 
+/// A count with a comma every three digits: `0`, `999`, `12,345`, `1,234,567`.
+/// The same in every language the apps carry; for a signed number, write the
+/// sign in front of `grouped(n.unsigned_abs())`.
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Bytes in the file manager's short form: `999 B`, `1.0 K`, `20 M` (units of
 /// 1024, one letter, a decimal only under 10).
 pub fn bytes_short(bytes: u64) -> String {
@@ -206,6 +221,20 @@ pub fn uptime(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_count_is_grouped_by_three_digits() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(7), "7");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(1000), "1,000");
+        assert_eq!(grouped(12_345), "12,345");
+        assert_eq!(grouped(123_456), "123,456");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+        assert_eq!(grouped(u64::MAX), "18,446,744,073,709,551,615");
+        assert_eq!(format!("-{}", grouped(i64::MIN.unsigned_abs())), "-9,223,372,036,854,775,808");
+        assert_eq!(format!("-{}", grouped((-12_345i64).unsigned_abs())), "-12,345");
+    }
 
     #[test]
     fn a_written_length_of_time_is_read_and_refused() {
