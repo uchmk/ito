@@ -14,7 +14,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する | tsumugi、yagura |
 | `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd） | yagura |
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
-| `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
+| `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ。`single`: 窓は 1 つだけ（`acquire(app, env, proto, &msg, wake)` が先のプロセスを `Owner`（`try_iter`）にし、後のは `msg` を渡して `Forwarded`。同時起動でも 1 つ・死んだソケットは取り替え・5 秒で諦める・1 MiB まで）。`OpenRequest::parse`（`+LINE:COL FILE` の argv → `FileArg`） | tsumugi、kura、fude（weft） |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし）。窓との扉は `ito-ipc::door`。`destructive`・`needs_confirm` の印、エージェントが開いたものの `Opened`、`Phase` と上限つきの `wait` | tsumugi、kura、michi |
 | `ito-common` | 設定のフォルダー、`common.toml`（言語・テーマ・時計）の読み書きと見張り、TOML の 1 キーの書き換え、時計の文字（機能 `clock`。過去の時刻の `short`・`stamp` も）、`env` の文面（`report`）、`shell-hook` の行（`shellhook`）、状態のフォルダーのファイルの読み書き（`kept`: `read`・最新を残す別スレッドの `Writer`・`copy_old`）、他のアプリの exe の探し方（`apps`: `[apps]`・自己登録・PATH）、他のアカウントが書けるか（`access`: `others_can_write`）、一時フォルダーの中か（`in_temp`・`startup::refuse_temp`・`startup::apply`（設定の起動スイッチを 1 回で。`ito-prefs::startup_card_with` が理由を出す）。断りたいアプリが登録の前に呼ぶ。`set`・`install` は自分では断らない）、他人が決めた名前を安全な 1 つのファイル名にする（`safe_file_name`）、ネットから来た印（`mark_from_web`）と動く種類の判定（`runs_code`）、時間の長さ（`text`: 設定の文字を読む `parse_duration`・`duration_text`、言語に合わせた `duration_words`）、窓の場所の保存と戻し方（`window`、古い形も読む `load`、追跡の `Tracker`、アプリの手順を束ねる `Saved`。egui から読むのは機能 `egui`） | tsumugi、yagura、kura |
 | `ito-fonts` | 同梱の等幅フォント（JetBrains Mono、SIL OFL）と egui への登録（機能 `egui`）。`common.toml` の `mono_font`（`bundled` が既定、`system`）で選ぶ | kura、tsumugi、michi |

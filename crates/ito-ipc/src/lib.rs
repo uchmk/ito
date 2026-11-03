@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 pub mod door;
 pub mod frame;
+pub mod single;
 
 #[cfg(unix)]
 mod unix;
