@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.226.1] - 2026-11-03
+
+### 変更
+- 依存の更新（Dependabot の cargo グループ、#153）を取り込んだ: serde_json・wry・notify・libc・resvg 0.49・encoding_rs・fancy-regex 0.20・unicode-width・harfrust・skrifa・tokio・base64 0.23。
+- `pdf-writer` だけは 0.12 のまま（`ito-export` が使う svg2pdf 0.13 が 0.12 の型を使うため、0.15 だと型が食い違う）。svg2pdf が 0.15 に載ったら上げる。
+- 使う側がやること: 無し（`Cargo.lock` の更新だけ）。
+
 ## [0.226.0] - 2026-11-03
 
 ### 追加
