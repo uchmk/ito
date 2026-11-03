@@ -3,7 +3,7 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
-## [0.227.0] - 2026-11-03
+## [0.228.0] - 2026-11-03
 
 ### 追加
 - 新しいクレート `ito-image`（#162）。窓なし（egui に依らない）。
@@ -13,6 +13,26 @@
   - `encode_webp(&Rgba, quality: f32) -> Result<Vec<u8>, Error>`: 透明を保つ非可逆 WebP（`quality` は 0〜100）。純 Rust（不透明は `oxideav-webp`、それが失敗か panic すれば・透明があれば `webp-rust`）。辺は 16383 まで。
   - `fake`: `--keys` の試験用の偽のクリップボード。`fake::set`・`set_png_file`・`clear`、または環境変数 `ITO_CLIPBOARD_IMAGE` に PNG のパス（読めなければ `Error`）。`<Paste>` は文字だけで egui に画像の貼り付けの事象が無いため、`--keys` の語は足さず、アプリの `Dialect` から `fake::set` を呼ぶ。
 - 使う側がやること: weft は `ito-image = { git = "https://github.com/uchmk/ito", rev = "…" }` を足し、自前のクリップボードの画像の読みと WebP への変換をこれに置き換える。画像を読む・符号化するのは止まるので、ワーカースレッドから呼ぶ。
+
+## [0.227.0] - 2026-11-03
+
+### 追加
+- `ito-ime`: IME がオンかオフかと入力モードを読む `Ime::status(ctx) -> Option<Status>`（`Status { open, mode }`、`Mode` は `Hiragana`・`FullKatakana`・`HalfKatakana`・`FullAlnum`・`HalfAlnum`・`Other`）を足した（#166）。Windows はキーボードの焦点がある窓の `ImmGetOpenStatus` と `ImmGetConversionStatus` を読む。ほかの OS・窓なし・IME なしは `None`。
+- `Ime::fake_status(ctx, Some(Some(status)))` で `status` の答えを差し替えられる（状態欄のテスト用。`None` で元に戻る）。`mode_of(conversion)` は変換状態のビットから `Mode` を出す純関数。
+- 使う側がやること: 状態欄に `Ime::status` の結果を出す。モードの言葉はアプリの `lang/*.toml` に置く。`--keys` から差し替える語（`<Ime:…>`）はまだ無い。
+
+## [0.226.2] - 2026-11-03
+
+### 追加
+- `ito-openin`: 組み込みの行指定の表に `weft`（`+行:列`、列は文字数。micro と同じ形）を足した（#165）。`BUILTIN_EDITORS` は 21 個になった。
+- 使う側がやること: 無し（kura は `rev` を上げるだけで、weft を行つきで開ける）。
+
+## [0.226.1] - 2026-11-03
+
+### 変更
+- 依存の更新（Dependabot の cargo グループ、#153）を取り込んだ: serde_json・wry・notify・libc・resvg 0.49・encoding_rs・fancy-regex 0.20・unicode-width・harfrust・skrifa・tokio・base64 0.23。
+- `pdf-writer` だけは 0.12 のまま（`ito-export` が使う svg2pdf 0.13 が 0.12 の型を使うため、0.15 だと型が食い違う）。svg2pdf が 0.15 に載ったら上げる。
+- 使う側がやること: 無し（`Cargo.lock` の更新だけ）。
 
 ## [0.226.0] - 2026-11-03
 
