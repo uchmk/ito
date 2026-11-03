@@ -73,6 +73,8 @@ pub struct Doc {
     /// The next typing starts a new step.
     sealed: bool,
     last_ms: u64,
+    /// How many undo steps the text on disk is the result of; `None` when that point is no longer in the history.
+    saved_at: Option<usize>,
     /// Typing joins the step before it when the keys come within this many milliseconds. Default 1000.
     pub pause_ms: u64,
 }
@@ -86,6 +88,7 @@ impl Doc {
             redo: Vec::new(),
             sealed: true,
             last_ms: 0,
+            saved_at: Some(0),
             pause_ms: 1000,
         }
     }
@@ -109,6 +112,22 @@ impl Doc {
         !self.redo.is_empty()
     }
 
+    /// The text was written to the file: it is clean from here until an edit, and clean again when undo / redo gets
+    /// back to this point in the history. It ends the typing step in progress, so a key typed after the save can
+    /// never join a step that was saved.
+    pub fn mark_saved(&mut self) {
+        self.saved_at = Some(self.undo.len());
+        self.sealed = true;
+    }
+
+    /// Whether the text differs from what [`Doc::mark_saved`] was last called on (from what [`Doc::new`] was given,
+    /// before any save). It follows the history position, not the version: save, edit, undo is clean; undo past the
+    /// saved point is dirty; redo back is clean. A new edit after undoing past the saved point loses that point,
+    /// so the text stays dirty until the next save.
+    pub fn is_dirty(&self) -> bool {
+        self.saved_at != Some(self.undo.len())
+    }
+
     /// Move the caret or selection (a click, an arrow key). It ends the typing step in progress.
     pub fn set_selection(&mut self, sel: Selection) {
         let len = self.buffer.len();
@@ -127,19 +146,28 @@ impl Doc {
         self.sealed = true;
     }
 
-    /// Forget the history (after the file is reloaded, say). The text stays.
+    /// Forget the history (after the file is reloaded, say). The text stays, and so does whether it is dirty.
     pub fn clear_history(&mut self) {
+        self.saved_at = (!self.is_dirty()).then_some(0);
         self.undo.clear();
         self.redo.clear();
         self.sealed = true;
+    }
+
+    /// A new step is coming: the undone steps are dropped, and a saved point among them goes with them.
+    fn drop_redo(&mut self) {
+        self.redo.clear();
+        if self.saved_at.is_some_and(|s| s > self.undo.len()) {
+            self.saved_at = None;
+        }
     }
 
     /// Apply one user action as one undo step. `Err` when an edit does not fit the text; nothing is changed then.
     pub fn apply(&mut self, tx: Transaction) -> Result<(), Error> {
         let inverse = run(&mut self.buffer, &tx.edits)?;
         self.sel = tx.after;
+        self.drop_redo();
         self.undo.push(Entry { forward: tx.edits, inverse, before: tx.before, after: tx.after, effects: tx.effects, typing_end: None });
-        self.redo.clear();
         self.sealed = true;
         Ok(())
     }
@@ -165,6 +193,7 @@ impl Doc {
             e.after = after;
             e.typing_end = typing_end;
         } else {
+            self.drop_redo();
             self.undo.push(Entry { forward: vec![edit], inverse: vec![inv], before, after, effects: Vec::new(), typing_end });
         }
         self.sel = after;
@@ -330,6 +359,74 @@ mod tests {
         d.redo().unwrap();
         assert_eq!(d.text(), "xy## A\n\ntext\n");
         assert_eq!(d.selection(), Selection::caret(2));
+    }
+
+    #[test]
+    fn dirty_follows_the_history_position() {
+        let mut d = Doc::new("abc");
+        assert!(!d.is_dirty());
+        d.typed("x", 0).unwrap();
+        assert!(d.is_dirty());
+        d.undo().unwrap();
+        assert!(!d.is_dirty(), "back at the text that was read");
+        d.redo().unwrap();
+        d.mark_saved();
+        assert!(!d.is_dirty());
+        d.typed("y", 10).unwrap();
+        assert!(d.is_dirty(), "typing after a save is a step of its own");
+        d.undo().unwrap();
+        assert!(!d.is_dirty());
+        assert_eq!(d.text(), "xabc");
+        d.undo().unwrap();
+        assert!(d.is_dirty(), "undone past the saved point");
+        d.redo().unwrap();
+        assert!(!d.is_dirty());
+    }
+
+    #[test]
+    fn saving_twice_moves_the_saved_point() {
+        let mut d = Doc::new("");
+        d.typed("a", 0).unwrap();
+        d.mark_saved();
+        d.set_selection(Selection::caret(0));
+        d.typed("b", 5).unwrap();
+        d.mark_saved();
+        assert!(!d.is_dirty());
+        d.undo().unwrap();
+        assert!(d.is_dirty(), "the first save no longer counts");
+        d.redo().unwrap();
+        assert!(!d.is_dirty());
+    }
+
+    #[test]
+    fn a_new_edit_after_undoing_past_the_saved_point_loses_it() {
+        let mut d = Doc::new("");
+        d.typed("a", 0).unwrap();
+        d.mark_saved();
+        d.undo().unwrap();
+        assert!(d.is_dirty());
+        d.typed("b", 10).unwrap();
+        d.undo().unwrap();
+        d.redo().unwrap();
+        d.undo().unwrap();
+        d.undo().unwrap_or(false);
+        assert!(d.is_dirty(), "the saved text is gone from the history");
+        // An edit that leaves the saved point on the undo side keeps it.
+        let mut d = Doc::new("");
+        d.typed("a", 0).unwrap();
+        d.mark_saved();
+        d.typed("b", 5).unwrap();
+        d.undo().unwrap();
+        d.typed("c", 9000).unwrap();
+        d.undo().unwrap();
+        assert!(!d.is_dirty());
+        // Clearing the history keeps the verdict.
+        d.typed("z", 20000).unwrap();
+        d.clear_history();
+        assert!(d.is_dirty());
+        d.mark_saved();
+        d.clear_history();
+        assert!(!d.is_dirty());
     }
 
     #[test]
