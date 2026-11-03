@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.234.0] - 2026-11-03
+
+### 追加
+- `ito-prefs`: 機能 `tabs` の設定の行 `tabs_rows(ui, look, &mut ito_tabs::Settings) -> bool`（#177）。変えたら `true`。
+  - 3 行（タブの帯を出す・外から開いたファイル・起動時）。どれも分節のボタンで、`--keys` の `<Click:文字>` で押せる。ja / en。
+  - 言語を渡すなら `tabs_rows_in(ui, look, TabsWords::of(lang), settings)`。`tabs_rows` は OS の言語で選ぶ。`TABS_KEYS` と `tabs_index` は設定の検索用。
+  - 既定では `ito-tabs` を引かない。保存はアプリ（値はアプリごと、common.toml には入れない）。
+
+### 使う側がやること
+- weft: `ito-prefs` に `features = ["tabs"]` を足し、設定の画面で `tabs_rows_in` を呼ぶ。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.233.0] - 2026-11-03
 
 ### 追加
