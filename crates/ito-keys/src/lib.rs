@@ -479,6 +479,68 @@ pub fn from_clipboard_for(events: &[egui::Event], at: usize, now: &egui::Modifie
     Some(key)
 }
 
+/// One thing the person did in a frame, in order: see [`read`].
+#[cfg(feature = "egui")]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Input {
+    /// A chord or a named key (from [`from_egui`], or [`from_clipboard`] for Cut / Copy / Paste).
+    Key(Key),
+    /// Typed text the app should insert.
+    Text(String),
+}
+
+/// A frame's events as keys and text, in the order they came, for an app
+/// that has a keymap and a text area.
+///
+/// Windows sends a chord *and* the character it would have typed: Alt+X is
+/// `Key { X, alt }` and then `Text("x")` (egui-winit drops the text only for
+/// Ctrl / Command chords). The text is dropped here when `took(&key)` says the
+/// keymap runs that key, or when the key is an Alt chord without Ctrl. It is
+/// kept for AltGr (Ctrl+Alt, which types `@` on a German keyboard) unless the
+/// keymap took it, and for Alt+numpad codes (their text arrives after Alt is
+/// let go). Typing `a`, `b`, Alt+X, `c` gives `Text("a")`, `Text("b")`,
+/// `Key(<A-x>)`, `Text("c")`.
+///
+/// Ctrl+X / C / V (Cmd on a Mac), Shift held or not, arrive as `Cut` / `Copy`
+/// / `Paste` with no key press; they come out as `Key` through
+/// [`from_clipboard`]. `now` is the modifiers at the end of the frame.
+///
+/// Note that egui's default `Options::quit_shortcuts` is Command+Q (which
+/// ignores Shift, so Ctrl+Shift+Q on Windows and Linux) and turns it into
+/// `ViewportCommand::Close` before the app sees it. An app whose keymap uses
+/// that chord sets `quit_shortcuts` to an empty list.
+#[cfg(feature = "egui")]
+pub fn read(events: &[egui::Event], now: &egui::Modifiers, mut took: impl FnMut(&Key) -> bool) -> Vec<Input> {
+    let mut out = Vec::new();
+    let mut skip_text = false;
+    for (i, ev) in events.iter().enumerate() {
+        match ev {
+            egui::Event::Key { key, pressed: true, modifiers, .. } => match from_egui(*key, modifiers) {
+                Some(k) => {
+                    let taken = took(&k);
+                    skip_text = taken || (modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.mac_cmd);
+                    out.push(Input::Key(k));
+                }
+                None => skip_text = false,
+            },
+            // Letting go of Alt ends an Alt+numpad code: its text follows.
+            egui::Event::Key { pressed: false, modifiers, .. } if !modifiers.alt => skip_text = false,
+            egui::Event::Cut | egui::Event::Copy | egui::Event::Paste(_) => {
+                if let Some(k) = from_clipboard(events, i, now) {
+                    took(&k);
+                    out.push(Input::Key(k));
+                }
+            }
+            egui::Event::Text(t) => {
+                let dropped = std::mem::take(&mut skip_text);
+                out.extend((!dropped && !t.is_empty()).then(|| Input::Text(t.clone())));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The character a key types without Shift (letters lowercase), for keys
 /// with one.
 #[cfg(feature = "egui")]
@@ -547,6 +609,78 @@ pub fn printable(key: egui::Key) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "egui")]
+    fn press(key: egui::Key, mods: egui::Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: mods }
+    }
+
+    #[cfg(feature = "egui")]
+    fn alt() -> egui::Modifiers {
+        egui::Modifiers { alt: true, ..Default::default() }
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_drops_the_text_of_an_alt_chord() {
+        let ev = [press(egui::Key::X, alt()), egui::Event::Text("x".into())];
+        assert_eq!(read(&ev, &alt(), |_| false), vec![Input::Key(Key::parse("<A-x>").unwrap())]);
+        let shifted = egui::Modifiers { alt: true, shift: true, ..Default::default() };
+        let ev = [press(egui::Key::Num5, shifted), egui::Event::Text("%".into())];
+        assert_eq!(read(&ev, &shifted, |_| false).len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_keeps_altgr_text_unless_the_keymap_took_it() {
+        let altgr = egui::Modifiers { alt: true, ctrl: true, ..Default::default() };
+        let ev = [press(egui::Key::Q, altgr), egui::Event::Text("@".into())];
+        let got = read(&ev, &altgr, |_| false);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1], Input::Text("@".into()));
+        assert_eq!(read(&ev, &altgr, |_| true).len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_keeps_a_plain_key_and_its_text_and_the_order() {
+        let none = egui::Modifiers::default();
+        let ev = [
+            egui::Event::Text("a".into()),
+            egui::Event::Text("b".into()),
+            press(egui::Key::X, alt()),
+            egui::Event::Text("x".into()),
+            egui::Event::Text("c".into()),
+        ];
+        let got = read(&ev, &none, |_| false);
+        assert_eq!(
+            got,
+            vec![Input::Text("a".into()), Input::Text("b".into()), Input::Key(Key::parse("<A-x>").unwrap()), Input::Text("c".into()),]
+        );
+        // A key the keymap took drops its text even without Alt.
+        let ev = [press(egui::Key::F5, none), egui::Event::Text("x".into())];
+        assert_eq!(read(&ev, &none, |_| true).len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_turns_cut_with_shift_into_its_chord() {
+        let cs = egui::Modifiers { ctrl: true, command: true, shift: true, ..Default::default() };
+        let got = read(&[egui::Event::Cut], &cs, |_| false);
+        assert_eq!(got, vec![Input::Key(Key::parse("<C-S-x>").unwrap())]);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_keeps_alt_numpad_text_after_alt_is_let_go() {
+        let none = egui::Modifiers::default();
+        let ev = [
+            press(egui::Key::Num6, alt()),
+            egui::Event::Key { key: egui::Key::Num6, physical_key: None, pressed: false, repeat: false, modifiers: none },
+            egui::Event::Text("A".into()),
+        ];
+        assert_eq!(read(&ev, &none, |_| false).last(), Some(&Input::Text("A".into())));
+    }
 
     /// `<A-G>` as written in a keymap is what Alt+Shift+G arrives as: the
     /// letter lowercased with Shift carried beside it (Q76's preview end).

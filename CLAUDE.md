@@ -12,7 +12,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |
 | `ito-layout` | 矩形をペインに分ける木と、egui の仕切り。`panels` の機能で、幅を変えられる egui のパネル（`Panels::show`: 中身が少なくても縮まない・ドラッグした大きさを `state_dir` の `panels.toml` に覚える） | tsumugi、kura、yagura、fumi |
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する | tsumugi、yagura |
-| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd） | yagura |
+| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd）。機能 `egui`: `from_egui`・`from_clipboard`、1 フレームのイベントをキーと文字の順に読む `read(events, now, took)`（Alt+文字の文字を落とす・AltGr と Alt+テンキーは残す・Cut/Copy/Paste を和音に戻す。`quit_shortcuts` の注意つき） | yagura |
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ | tsumugi、kura |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし）。窓との扉は `ito-ipc::door`。`destructive`・`needs_confirm` の印、エージェントが開いたものの `Opened`、`Phase` と上限つきの `wait` | tsumugi、kura、michi |
