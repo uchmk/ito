@@ -410,6 +410,12 @@ fn logo() -> Option<std::path::PathBuf> {
     ito_notify::toast::icon_file(app.id, *icon)
 }
 
+/// The viewport commands that bring the window back for a clicked notification:
+/// `Focus` alone does not restore a minimized (or tray-hidden) window.
+fn restore_commands() -> [egui::ViewportCommand; 3] {
+    [egui::ViewportCommand::Visible(true), egui::ViewportCommand::Minimized(false), egui::ViewportCommand::Focus]
+}
+
 fn notifier(app: App<'static>, icon: Icon) -> &'static ito_notify::notifier::Notifier {
     NOTIFIER.get_or_init(|| {
         let _ = WHO.set((app, icon));
@@ -419,7 +425,9 @@ fn notifier(app: App<'static>, icon: Icon) -> &'static ito_notify::notifier::Not
             }
             CLICKED.lock().unwrap_or_else(|e| e.into_inner()).push(tag.to_owned());
             if let Some(ctx) = WINDOW.get() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                for cmd in restore_commands() {
+                    ctx.send_viewport_cmd(cmd);
+                }
                 ctx.request_repaint();
             }
         });
@@ -473,6 +481,14 @@ pub fn test_mail(app: &str, m: &Mail, level: Level, title: &str, body: &str) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn click_restores_minimized_window_before_focus() {
+        let cmds = super::restore_commands();
+        assert!(matches!(cmds[0], egui::ViewportCommand::Visible(true)));
+        assert!(matches!(cmds[1], egui::ViewportCommand::Minimized(false)));
+        assert!(matches!(cmds[2], egui::ViewportCommand::Focus));
+    }
+
     use super::*;
 
     fn read(text: &str) -> (NotifyCfg, Vec<String>) {
