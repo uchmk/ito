@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.238.0] - 2026-11-03
+
+### 追加
+- `ito-testserver`（#146 の第 2 段、dev-dependency だけ）:
+  - `imap::ImapServer`: 偽の IMAP サーバー（`Mode::{Plain, ImplicitTls}`・LOGIN／AUTHENTICATE PLAIN・EXAMINE／SELECT・NOOP・FETCH／UID FETCH（`BODY.PEEK` も）。`add_message`・`add_mail`・`remove_message`・`set_uid_validity`・`renumber`、`drop_connections`、`commands`・`log`（パスワードは出さない））。実物の `ito-mail` で、新着・`From::After` での再開・UIDVALIDITY の変化・切断からの復帰・パスワード違い・フォルダー無しを試した。
+  - `winrm::WinrmServer`: 偽の WinRM（`Mode::{Http, Https}`・Basic 認証・Create／Command／Receive／Signal／Delete）。`on_command(部分文字列, Output::new().stdout().stderr().exit().delay().hang())` で答えを決め、`requests`・`actions`・`commands`・`signalled`・`shells_open` で見る。実物の `ito-winrm` で、出力と終了コード・環境変数・パスワード違い・指紋違い・時間切れと停止を試した。
+  - 足りないもの: WinRM の NTLM（Basic だけ）、IMAP の STARTTLS・IDLE・書き込み系。SSH／SFTP は第 3 段。
+- `ito-mail`: `Stream` を公開し、`Inbox::open_with(connect, &Account, password, From)` を追加（`Inbox::open` は公開の CA に対する暗黙の TLS だけで、自己署名の偽サーバーに届かないため）。
+
+### 使う側がやること
+- 無し（既存の API は変わらない）。koyomi は `ito-testserver` の `imap`・`winrm` を dev-dependency で使える。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.237.0] - 2026-11-03
 
 ### 修正
