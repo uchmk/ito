@@ -88,6 +88,7 @@ impl Writing {
         let key_tool = [(bold, Tool::Bold), (italic, Tool::Italic), (link, Tool::Link), (under, Tool::Underline)]
             .into_iter()
             .find_map(|(on, t)| on.then_some(t));
+        let from_bar = key_tool.is_none() && self.pending.is_some();
         if let Some(t) = key_tool.or(self.pending.take()) {
             let mut st = TextEditState::load(&ctx, self.id).unwrap_or_default();
             let end = self.text.chars().count();
@@ -135,7 +136,8 @@ impl Writing {
                 .show(&mut child, |ui| ui.add(edit));
             // Only when it has lost it: asking again ends an IME composition.
             ctx.memory_mut(|m| {
-                if self.grab && !m.has_focus(self.id) {
+                // A mark from `apply` (a button in the app's bar) took the focus with the click: give it back.
+                if (self.grab || from_bar) && !m.has_focus(self.id) {
                     m.request_focus(self.id)
                 }
             });
@@ -218,5 +220,26 @@ mod tests {
         w.apply(Tool::Bold);
         frame(&mut w, vec![]);
         assert_eq!(w.text, "****");
+    }
+
+    #[test]
+    fn a_bar_mark_gives_the_focus_back_even_without_grab() {
+        let mut w = Writing::new("t4");
+        w.grab = false;
+        let ctx = egui::Context::default();
+        let run = |w: &mut Writing| {
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 300.0))), ..Default::default() };
+            ctx.run_ui(input, |ui| {
+                w.show(ui, Rect::from_min_max(pos2(10.0, 10.0), pos2(390.0, 200.0)), "empty", 13.5);
+            })
+            .drop_without_applying_deltas();
+        };
+        run(&mut w);
+        assert!(!ctx.memory(|m| m.has_focus(w.id)));
+        w.apply(Tool::Bold);
+        run(&mut w);
+        run(&mut w);
+        assert_eq!(w.text, "****");
+        assert!(ctx.memory(|m| m.has_focus(w.id)));
     }
 }

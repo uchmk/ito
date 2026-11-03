@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.237.0] - 2026-11-03
+
+### 修正
+- `ito-markdown`（`egui`）: `Writing::apply(tool)` で押した道具の帯のボタンにフォーカスが移ったままだった。`show()` が保留の印を当てたら、`grab` の有無によらず書く欄へフォーカスを戻す（選び範囲は今のまま）。キーで当てた印は、もとから欄にフォーカスがあるので変わらない。
+
+### 使う側がやること
+- fumi: 押したフレームに印を残して `show()` の後で `pen.focus(ctx)` を呼ぶ回避（mail.rs の `pen_bar`・`pen_body`）を外せる。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.236.0] - 2026-11-03
 
 ### 追加
