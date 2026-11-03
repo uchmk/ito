@@ -372,7 +372,17 @@ pub fn exec(target: &Target, command: &str, opts: &ExecOptions, stop: &AtomicBoo
     let rt = runtime()?;
     let r = rt.block_on(async {
         let ssh = login(target, stop).await?;
-        run_command(&ssh, target.connect_timeout, command, opts, stop, output).await
+        let r = run_command(&ssh, target.connect_timeout, command, opts, stop, output).await;
+        // TERM and the channel close are only queued; disconnecting and waiting for the connection to end lets
+        // them reach the wire before the runtime is dropped.
+        let _ = ssh.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while !ssh.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        r
     });
     rt.shutdown_background();
     r
