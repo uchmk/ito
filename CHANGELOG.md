@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.225.1] - 2026-11-03
+
+### 修正
+- `ito-outline`: `at_byte` が、文章の終わり（`byte == text.len()`）のキャレットを見つけられなかったのを直した（#161）。終わりまで続く節のうち一番深い見出しを返す。範囲の外は今まで通り `None`。使う側がやることは無い（「1 つ手前のバイトで聞く」回避策は外してよい）。
+
 ## [0.225.0] - 2026-11-03
 
 ### 追加
