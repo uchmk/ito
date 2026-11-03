@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.239.0] - 2026-11-03
+
+### 変更（壊れる）
+- `ito-keys`（`egui`、#180）:
+  - `Input` に `Ime(egui::ImeEvent)` を追加（`#[non_exhaustive]` ではないので `match` が壊れる）。`read` は IME の Preedit・Commit・Enabled・Disabled を、キーと文字と同じイベントの順に返す。
+  - `from_egui` は数字キーの Shift を残す: Alt+Shift+5 は `<A-S-5>` で、`<A-5>` とは別。Ctrl+Shift+数字は `<C-N>` に当たらなくなる。
+### 追加
+- `ito-keys::read_for(events, now, took, mac)`（`read` は `cfg!(target_os = "macos")` で呼ぶ）。macOS では Option の文字（å・€・JIS の `\`）を、`took` が真を返したキー以外は捨てない。
+- `read` は同じフレームの Alt+テンキーの数字（Alt を押したまま数字、Alt を離して Text）をキーにせず `took` にも渡さず、文字（`¥` など）を残す。フレームをまたぐ入力は見分けない。
+### 修正
+- `ito-outline`／`ito-mdedit`（#181）: 見出しの `section` の始まりを `#` でなく行頭にした。`> ## Q`・`- ## L`・先頭に空白の ` ## C` でも、行のどこにキャレットがあってもその見出しに効く（`delete_heading`・`insert_toc`・`next`・`promote_section`・`move_section` など）。
+- `delete_heading` は `LineOnly`・`Section`・`LiftChildren` で引用／リストの印と空白も行ごと消す（`ToParagraph` は行が残るので残す）。
+- `insert_toc` は挿入する行の改行を使う（改行が混ざった文章に別の改行を入れない）。
+
+### 使う側がやること
+- weft: `Input::Ime(e)` を `match` に足し、IME の確定をその順で入れる（IME を別に適用している処理を外す）。Alt+Shift+数字や Ctrl+Shift+数字のキー割り当ては `<A-S-N>`・`<C-S-N>` に書き直す。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.238.0] - 2026-11-03
 
 ### 追加
