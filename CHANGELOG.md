@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.235.0] - 2026-11-03
+
+### 追加
+- `ito-testserver`（新、フェーズ 1。#146）: テスト用の偽のサーバー。cargo test の中で立てる（CLI は後）。127.0.0.1 の空きポートだけで待ち、受けたものを記録し、Drop で止まる。使う側は dev-dependency にだけ入れる。
+  - `smtp::SmtpServer`: `Plain`・`StartTls`・`ImplicitTls`。AUTH PLAIN／LOGIN（合わなければ 535、未認証の MAIL は 530）。自己署名の証明書の指紋（`fingerprint`・`fingerprint_text`・`certificate_der`）。受けたメールは `.eml` と `messages()`／`wait_for_messages`。`reject_recipient`（550）・`cut_during_data`・`log()`（認証の中身は載せない）。
+  - `http::HttpServer`: `route(method, path, Reply)`（状態コード・ヘッダー・本文・`delay`）、`requests()`／`wait_for_requests`。合わない道は 404。chunked と `Expect: 100-continue` に対応。TLS・keep-alive は無し。
+  - `tls`: `Cert::generate`・`Fingerprint`・`pinned_client_config(fp)`（その指紋だけを信じる rustls の設定）。
+- まだ無い: IMAP・WinRM（フェーズ 2）、SSH／SFTP（フェーズ 3）、CLI。
+
+### 使う側がやること
+- koyomi: SMTP と HTTP のテストに使う。`ito-notify::mail::send_message` は curl が証明書を検証するので、自己署名の偽サーバーには向かない（組み済みのメールは `ito-mail::compose` で作れる）。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.234.0] - 2026-11-03
 
 ### 追加
