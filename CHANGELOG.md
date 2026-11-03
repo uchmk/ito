@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.227.0] - 2026-11-03
+
+### 追加
+- `ito-ime`: IME がオンかオフかと入力モードを読む `Ime::status(ctx) -> Option<Status>`（`Status { open, mode }`、`Mode` は `Hiragana`・`FullKatakana`・`HalfKatakana`・`FullAlnum`・`HalfAlnum`・`Other`）を足した（#166）。Windows はキーボードの焦点がある窓の `ImmGetOpenStatus` と `ImmGetConversionStatus` を読む。ほかの OS・窓なし・IME なしは `None`。
+- `Ime::fake_status(ctx, Some(Some(status)))` で `status` の答えを差し替えられる（状態欄のテスト用。`None` で元に戻る）。`mode_of(conversion)` は変換状態のビットから `Mode` を出す純関数。
+- 使う側がやること: 状態欄に `Ime::status` の結果を出す。モードの言葉はアプリの `lang/*.toml` に置く。`--keys` から差し替える語（`<Ime:…>`）はまだ無い。
+
 ## [0.226.2] - 2026-11-03
 
 ### 追加

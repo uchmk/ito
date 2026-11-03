@@ -62,6 +62,45 @@ pub struct Ime {
     orientation: Orientation,
 }
 
+#[derive(Clone, Copy)]
+struct Fake(Option<Status>);
+
+#[cfg(windows)]
+fn platform_status() -> Option<Status> {
+    use windows::Win32::UI::Input::Ime::{
+        ImmGetContext, ImmGetConversionStatus, ImmGetOpenStatus, ImmReleaseContext, IME_CONVERSION_MODE, IME_SENTENCE_MODE,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    // SAFETY: plain Win32 calls on the window of this thread; the context is released.
+    unsafe {
+        let mut hwnd = GetFocus();
+        if hwnd.0.is_null() {
+            hwnd = GetForegroundWindow();
+        }
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let himc = ImmGetContext(hwnd);
+        if himc.0.is_null() {
+            return None;
+        }
+        let open = ImmGetOpenStatus(himc).as_bool();
+        let (mut conv, mut sentence) = (IME_CONVERSION_MODE(0), IME_SENTENCE_MODE(0));
+        let got = ImmGetConversionStatus(himc, Some(&mut conv), Some(&mut sentence)).as_bool();
+        let _ = ImmReleaseContext(hwnd, himc);
+        if !open {
+            return Some(Status { open: false, mode: Mode::HalfAlnum });
+        }
+        Some(Status { open: true, mode: if got { mode_of(conv.0) } else { Mode::Other } })
+    }
+}
+
+#[cfg(not(windows))]
+fn platform_status() -> Option<Status> {
+    None
+}
+
 #[derive(Clone, Debug, Default)]
 struct State {
     /// The composition, or the commit being held.
@@ -92,6 +131,32 @@ impl Ime {
     pub fn composing(&self, ctx: &Context) -> bool {
         let s = ctx.data(|d| d.get_temp::<State>(self.id)).unwrap_or_default();
         !s.text.is_empty() && s.held.is_none()
+    }
+
+    /// Whether the input method is on and its input mode, read from the window
+    /// that has the keyboard focus. `None` where the platform cannot tell
+    /// (not Windows, no window focused, no input method). Cheap enough to call
+    /// every frame. A fake set by [`Ime::fake_status`] answers first, so a
+    /// status bar can be tested without a hand on the input method.
+    pub fn status(&self, ctx: &Context) -> Option<Status> {
+        if let Some(fake) = ctx.data(|d| d.get_temp::<Fake>(Id::new("ito-ime-fake"))) {
+            return fake.0;
+        }
+        platform_status()
+    }
+
+    /// Make [`Ime::status`] answer `status` (`Some(None)` for "cannot tell")
+    /// instead of asking the system; `None` goes back to the system.
+    pub fn fake_status(ctx: &Context, status: Option<Option<Status>>) {
+        let id = Id::new("ito-ime-fake");
+        ctx.data_mut(|d| match status {
+            Some(s) => {
+                d.insert_temp(id, Fake(s));
+            }
+            None => {
+                d.remove::<Fake>(id);
+            }
+        });
     }
 
     /// Take Enter, Backspace, Delete, the arrows, Tab and Escape out of this
@@ -137,6 +202,51 @@ impl Ime {
         let composing = !preedit.is_empty() && state.held.is_none();
         ui.ctx().data_mut(|d| d.insert_temp(self.id, state));
         Frame { commits, preedit, composing }
+    }
+}
+
+/// The input mode of an input method that is switched on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// ひらがな.
+    Hiragana,
+    /// 全角カナ.
+    FullKatakana,
+    /// 半角カナ.
+    HalfKatakana,
+    /// 全角英数.
+    FullAlnum,
+    /// 半角英数 (direct input).
+    HalfAlnum,
+    /// Anything else (Chinese, Korean, an unknown mode).
+    Other,
+}
+
+/// Whether the input method is on, and its mode. See [`Ime::status`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Status {
+    /// The input method is switched on (あ), not off (A).
+    pub open: bool,
+    /// The input mode. Only meaningful while `open`; when it is off this is
+    /// [`Mode::HalfAlnum`].
+    pub mode: Mode,
+}
+
+// The `IME_CMODE_*` bits of a conversion status.
+const CMODE_NATIVE: u32 = 0x1;
+const CMODE_KATAKANA: u32 = 0x2;
+const CMODE_FULLSHAPE: u32 = 0x8;
+
+/// The mode a conversion status (`IME_CMODE_*` bits) comes to.
+pub fn mode_of(conversion: u32) -> Mode {
+    let (native, kana, full) = (conversion & CMODE_NATIVE != 0, conversion & CMODE_KATAKANA != 0, conversion & CMODE_FULLSHAPE != 0);
+    match (native, kana, full) {
+        (true, false, _) => Mode::Hiragana,
+        (true, true, true) => Mode::FullKatakana,
+        (true, true, false) => Mode::HalfKatakana,
+        (false, _, true) => Mode::FullAlnum,
+        (false, false, false) => Mode::HalfAlnum,
+        _ => Mode::Other,
     }
 }
 
@@ -233,6 +343,30 @@ mod tests {
         assert_eq!(shown(&mut s, 3, 5.0 + HOLD).0, "");
         // An empty commit is not handed over.
         assert!(apply(&mut s, &[ImeEvent::Commit(String::new())], 3, 6.0).is_empty());
+    }
+
+    #[test]
+    fn conversion_bits_come_to_a_mode() {
+        assert_eq!(mode_of(0x9), Mode::Hiragana); // native | fullshape
+        assert_eq!(mode_of(0xb), Mode::FullKatakana);
+        assert_eq!(mode_of(0x3), Mode::HalfKatakana);
+        assert_eq!(mode_of(0x8), Mode::FullAlnum);
+        assert_eq!(mode_of(0x0), Mode::HalfAlnum);
+        assert_eq!(mode_of(0x2), Mode::Other);
+    }
+
+    #[test]
+    fn a_fake_answers_the_status_until_it_is_taken_away() {
+        let ctx = Context::default();
+        let ime = Ime::new(Id::new("line"));
+        let on = Status { open: true, mode: Mode::Hiragana };
+        Ime::fake_status(&ctx, Some(Some(on)));
+        assert_eq!(ime.status(&ctx), Some(on));
+        Ime::fake_status(&ctx, Some(None));
+        assert_eq!(ime.status(&ctx), None);
+        Ime::fake_status(&ctx, None);
+        // Back to the system: no window here, so on a test host it cannot say.
+        let _ = ime.status(&ctx);
     }
 
     #[test]
