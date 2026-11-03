@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.231.0] - 2026-11-03
+
+### 修正
+- ito-mdedit: 表の整形と次のセル（`format_table`・`next_cell`）が、各行の先頭（字下げと引用の `>`）と改行（CRLF）を保つようにした。リストの項目の中の表が項目から外れず、CRLF の文章に LF が混ざらない。最後のセルのあとに足す行にも同じ先頭を付ける。混ざった文章では表の最初の行の改行に合わせる（#170）。
+- ito-mdedit: リストの命令（`indent_item`・`outdent_item`・`toggle_task`・`move_item`・`renumber`）がコードブロック（フェンスと字下げ）の中の `- x` を項目と見なさず `None` を返すようにした。タブで字下げした項目も項目として扱う（字下げし直した行はスペースで書く）。`indent_item`・`outdent_item` は触れた番号つきのリストを数え直し、新しい入れ子のリストは 1 から始める（`1. a
+2. b` の `2. b` を字下げすると `   1. b` になる）（#171）。
+
+使う側がやること: 関数の形は同じなので `rev` を上げるだけでよい。`indent_item`・`outdent_item` が返す `Change` の範囲は、数え直した行の分だけ広がることがあるので、範囲を決め打ちしている所があれば `Change` の `range`・`text`・`cursor` をそのまま使う。`renumber` が返す `Change` の範囲は狭くなった（適用後の文章は同じ）。コードブロックの中では `None` が返るので、weft の Tab は空白の挿入に落ちる。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.230.0] - 2026-11-03
 
 ### 追加
