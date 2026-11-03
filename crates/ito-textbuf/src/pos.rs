@@ -79,9 +79,53 @@ pub fn byte_at(text: &str, line: usize, col: usize) -> usize {
     at
 }
 
+/// The characters a person sees in `range`: grapheme clusters (the unit the caret moves by), with line breaks
+/// (`\n`, `\r\n`, a lone `\r`) not counted. The ends are pulled back to `char` boundaries and into the text, so any
+/// range is safe; a reversed one counts 0. The range is cut out of the text, so a cluster split by an end counts
+/// as the part inside.
+pub fn count_chars(text: &str, range: Range<usize>) -> usize {
+    let start = floor(text, range.start);
+    let end = floor(text, range.end);
+    if start >= end {
+        return 0;
+    }
+    text[start..end].graphemes(true).filter(|g| !matches!(*g, "\n" | "\r\n" | "\r")).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn characters_are_counted_without_line_breaks() {
+        let all = |t: &str| count_chars(t, 0..t.len());
+        assert_eq!(all(""), 0);
+        assert_eq!(all("abc"), 3);
+        assert_eq!(all("あいう"), 3);
+        assert_eq!(all("👍🏽"), 1);
+        assert_eq!(all("👨\u{200d}👩\u{200d}👧"), 1);
+        assert_eq!(all("e\u{301}"), 1);
+        assert_eq!(all("か\u{3099}"), 1);
+        assert_eq!(all("\r\n"), 0);
+        assert_eq!(all("\n"), 0);
+        assert_eq!(all("\r"), 0);
+        assert_eq!(all("a\r\nb\nc\rd\n\n"), 4);
+        assert_eq!(all("ab\r\n日本\nc"), 5);
+    }
+
+    #[test]
+    fn a_range_is_clamped_and_sub_ranges_add_up() {
+        let t = "aあ\r\nb";
+        assert_eq!(count_chars(t, 1..4), 1);
+        assert_eq!(count_chars(t, 0..99), 3);
+        assert_eq!(count_chars(t, 50..99), 0);
+        let (a, b) = (3, 2);
+        assert_eq!(count_chars(t, a..b), 0, "reversed");
+        assert_eq!(count_chars(t, 2..2), 0);
+        assert_eq!(count_chars(t, 2..3), 0, "both ends inside one character fall back to its start");
+        assert_eq!(count_chars(t, 2..4), 1);
+        assert_eq!(count_chars(t, 0..6) + count_chars(t, 6..t.len()), 3);
+    }
 
     #[test]
     fn bytes_chars_and_graphemes() {
