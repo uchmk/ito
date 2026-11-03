@@ -1,0 +1,23 @@
+[package]
+name = "ito-tabs"
+description = "Document tabs: an ordered model with a front tab and a limit (open-or-bring-forward, next / previous, close, move), labels that tell same-named files apart, the saved list, the tab settings, and an egui tab bar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The tab bar: drawn in the theme's colours, reporting what the person asked as an `Op`.
+egui = ["dep:egui", "dep:ito-theme", "dep:ito-a11y", "ito-a11y/egui"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
+ito-theme = { path = "../ito-theme", optional = true }
+ito-a11y = { path = "../ito-a11y", optional = true }
+ito-common = { path = "../ito-common" }
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[dev-dependencies]
+tempfile = "3"

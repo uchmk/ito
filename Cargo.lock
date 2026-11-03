@@ -2740,6 +2740,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ito-tabs"
+version = "0.232.0"
+dependencies = [
+ "egui",
+ "ito-a11y",
+ "ito-common",
+ "ito-theme",
+ "serde",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "ito-tail"
 version = "0.232.0"
 dependencies = [
