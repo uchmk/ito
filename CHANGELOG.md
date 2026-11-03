@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.232.0] - 2026-11-03
+
+### 追加
+- `ito-mdedit`: 選択範囲への書式の命令 `format`（#174）。すべて窓なしの純関数で、文章と選択のバイト範囲を渡すと `SelChange`（`change`・変更後の `selection`・`unflanked`）を返す。
+  - `inline(text, sel, Inline::{Bold, Italic, Code, Strike, Link})`: 太字・斜体・コード・取り消し線・リンク。すでに付いていれば外す。コードの中は見ない。表は 1 セルずつ。複数行は行ごと。選択が空ならカーソルの単語、単語がなければ空の対（`**|**`）を入れる。CJK・CRLF でも安全。
+  - `line_type(text, sel, Line::{Heading(0..=6), Quote, Fence, Bullet, Number, Task})`: 選択した行の種類。同じ種類をもう一度で外し、別の種類なら前の印を置き換える。番号は連番（最初の番号と `.`／`)` を保つ）。
+  - `set_tasks`・`check_tasks`・`uncheck_tasks`・`toggle_tasks`: 選択内のタスクのチェック。
+
+### 修正
+- `ito-prefs`: `NotifyCfg::tell_open` の通知をクリックしたとき、最小化された窓（トレイに隠れた窓も）が戻らなかったのを直した。クリックの処理が `ViewportCommand::Focus` しか送らず、Windows ではそれだけでは最小化が解けなかった。`Visible(true)`・`Minimized(false)`・`Focus` の順に送る（#172）。
+- `ito-outline`: `headings` が、見出しごとに文章の先頭から行番号を数え、さらに節の終わりを後ろへ探していたため、文章の大きさの 2 乗の時間がかかっていた（8 MB で 4.6 秒、見出しが密な文章で 71 秒。#173）。前の見出しからの改行だけを数え足し、節の終わりはスタックで閉じるようにして、大きさに比例する時間にした（2 MB の密な見出しで 31 秒 → 45 ms）。返す `Heading` は今までと同じ（旧い方法と突き合わせるテストを足した）。
+
+使う側がやること: `rev` を上げるだけ（#172・#173 は API が変わらない）。#174 は、エディターのコマンド（ツールバー・キー）から `format` の関数を呼び、`SelChange::apply` か `change` を `ito-textbuf` の 1 手として適用し、`selection` をカーソルにする。`unflanked` が true のとき（`** a **` のように CommonMark では強調にならない）は、必要ならアプリが警告を出す。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.231.0] - 2026-11-03
 
 ### 修正
