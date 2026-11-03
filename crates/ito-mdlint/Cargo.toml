@@ -1,0 +1,11 @@
+[package]
+name = "ito-mdlint"
+description = "Lint for a Markdown text: structure (heading jumps, duplicate headings, uneven lists, broken tables, unclosed fences, missing link targets) and Japanese prose (full/half-width mixing, spacing, punctuation, tone). Findings carry the byte range, a kind and, when there is one, the fix as a Change"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-mdedit = { path = "../ito-mdedit" }
