@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::list::code_lines;
 use crate::{line_of, lines, Change};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,7 +108,9 @@ fn delimiter(cells: &[String]) -> Option<Vec<Align>> {
 fn find(text: &str, byte: usize) -> Option<(Table, usize)> {
     let ls = lines(text);
     let at = line_of(&ls, byte.min(text.len()))?;
-    let is_row = |k: usize| text[ls[k].clone()].contains('|');
+    // Table-like text in a code block (fenced or indented) is code, not a table.
+    let code = code_lines(text, &ls);
+    let is_row = |k: usize| !code[k] && text[ls[k].clone()].contains('|');
     if !is_row(at) {
         return None;
     }
@@ -346,6 +349,38 @@ mod tests {
         assert_eq!(c.apply(q), "> | a   | b   |\n> | --- | --- |\n> | c   | d   |\n> |     |     |\n");
         let c = next_cell(q, 3, Step::Next).unwrap();
         assert_eq!(c.apply(q).as_bytes()[c.cursor], b'b');
+    }
+
+    #[test]
+    fn table_like_text_in_code_is_left_alone() {
+        for eol in [
+            "
+", "
+",
+        ] {
+            let table = format!("| a | b |{eol}|---|---|{eol}| 1 | 2 |{eol}");
+            let real = format!("| x | y |{eol}|---|---|{eol}");
+            for (open, pad) in [("```", ""), ("~~~", ""), ("", "    ")] {
+                let code = if open.is_empty() {
+                    table.lines().map(|l| format!("{pad}{l}{eol}")).collect::<String>()
+                } else {
+                    format!("{open}{eol}{table}{open}{eol}")
+                };
+                let t = format!("para{eol}{eol}{code}");
+                for at in t.find("| a").unwrap()..t.len() {
+                    assert!(format_table(&t, at).is_none(), "{t:?} {at}");
+                    assert!(next_cell(&t, at, Step::Next).is_none(), "{t:?} {at}");
+                    assert!(next_cell(&t, at, Step::Prev).is_none(), "{t:?} {at}");
+                }
+                // A real table right after the code still works.
+                let sep = if open.is_empty() { format!("{eol}text{eol}{eol}") } else { String::new() };
+                let t = format!("{code}{sep}{real}");
+                let at = t.find("| x").unwrap() + 2;
+                let c = format_table(&t, at).unwrap();
+                assert!(c.apply(&t).ends_with(&format!("| x   | y   |{eol}| --- | --- |{eol}")), "{:?}", c.apply(&t));
+                assert!(next_cell(&t, at, Step::Next).is_some());
+            }
+        }
     }
 
     #[test]

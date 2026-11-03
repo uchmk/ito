@@ -64,8 +64,13 @@ fn amount(text: &str, ls: &[Range<usize>], code: &[bool], k: usize, it: &Item, t
                 return to - w;
             }
         }
-        // With no item to go under, the item moves by its marker, but from column 0 not past column 3 (4 is a code block).
-        return if w == 0 { own.min(3) } else { own };
+        // With no item to go under, the item moves by its marker, but from column 0 not past column 3 (4 is a code
+        // block). An item with nothing above it at all, indented already, stays: it would only turn into code.
+        if w == 0 {
+            return own.min(3);
+        }
+        let inside = nearest(true).and_then(item_at).is_some();
+        return if inside || w + own <= 3 { own } else { 0 };
     }
     if w == 0 {
         return 0;
@@ -182,6 +187,22 @@ impl Unit {
 ///
 /// `None` when nothing moves: blank lines only, the left edge, a caret in no line.
 pub fn shift_lines(text: &str, sel: Range<usize>, deeper: bool, unit: Unit) -> Option<SelChange> {
+    let (c, lossy) = shift_lines_in(text, sel, deeper, unit)?;
+    if deeper && !lossy {
+        // Tab must be undone by Shift+Tab over the selection it returns, byte for byte; when it could not be (a fence
+        // that turns into indented code and cannot be found again, an item that Shift+Tab would move differently),
+        // nothing moves.
+        let back = shift_lines_in(&c.apply(text), c.selection.clone(), false, unit)?.0;
+        if back.apply(&c.apply(text)) != text {
+            return None;
+        }
+    }
+    Some(c)
+}
+
+/// [`shift_lines`] without the check that Shift+Tab undoes it, and whether the change cannot be undone to the byte by
+/// design (tabs in the blanks of a line that is written with spaces).
+fn shift_lines_in(text: &str, sel: Range<usize>, deeper: bool, unit: Unit) -> Option<(SelChange, bool)> {
     let (from, to) = (sel.start.min(text.len()), sel.end.min(text.len()));
     let (lo, hi) = (from.min(to), from.max(to));
     let ls = lines(text);
@@ -207,7 +228,8 @@ pub fn shift_lines(text: &str, sel: Range<usize>, deeper: bool, unit: Unit) -> O
     if !any || (!deeper && !indented && !text.contains("```") && !text.contains("~~~")) {
         return None;
     }
-    let bl = analyze(text, &ls);
+    let mut bl = analyze(text, &ls);
+    loose_fences(text, &ls, &mut bl);
     // A fence the selection touches moves whole.
     let first = bl.fences.partition_point(|f| f.1 < a);
     let end = b;
@@ -269,10 +291,51 @@ pub fn shift_lines(text: &str, sel: Range<usize>, deeper: bool, unit: Unit) -> O
     if edits.is_empty() {
         return None;
     }
+    let lossy = matches!(unit, Unit::Spaces(_)) && edits.iter().any(|(r, _)| text[r.clone()].contains('\t'));
     let (mut change, at) = finish(text, &ls, &bl.code, edits, &moved, &[(lo, lo == hi), (hi, true)])?;
     let selection = if from <= to { at[0]..at[1] } else { at[1]..at[0] };
     change.cursor = selection.end;
-    Some(SelChange { change, selection, unflanked: false })
+    Some((SelChange { change, selection, unflanked: false }, lossy))
+}
+
+/// The fence-like lines that [`analyze`] did not take for fences, because they are indented 4 columns or more (a
+/// fence that Tab moved so far reads as indented code or text), paired the way a fence is: an opening line, and a
+/// closing line of the same mark that is at least as long, or the end of the text. They are added to `fences` and
+/// their lines count as code, so Shift+Tab finds a fence that Tab moved whole, however the lines read now.
+fn loose_fences(text: &str, ls: &[Range<usize>], bl: &mut Analysis) {
+    // (mark, run length, bare: nothing after the run) of a line that starts with a run of 3 or more of ` or ~.
+    let mark = |k: usize| -> Option<(u8, usize, bool)> {
+        let rest = text[ls[k].clone()].trim_start_matches([' ', '\t']);
+        let c = *rest.as_bytes().first().filter(|c| matches!(c, b'`' | b'~'))?;
+        let run = rest.bytes().take_while(|&b| b == c).count();
+        let after = &rest[run..];
+        (run >= 3 && (c == b'~' || !after.contains('`'))).then_some((c, run, after.trim().is_empty()))
+    };
+    let mut inside = vec![false; ls.len()];
+    for &(a, b) in &bl.fences {
+        inside[a..=b].fill(true);
+    }
+    let mut found = Vec::new();
+    let mut k = 0;
+    while k < ls.len() {
+        let open = if inside[k] || lead(&text[ls[k].clone()]).0 < 4 { None } else { mark(k) };
+        let Some((c, run, _)) = open else {
+            k += 1;
+            continue;
+        };
+        let end = (k + 1..ls.len()).find(|&j| !inside[j] && mark(j).is_some_and(|(c2, r2, bare)| c2 == c && r2 >= run && bare));
+        let end = end.unwrap_or(ls.len() - 1);
+        found.push((k, end));
+        k = end + 1;
+    }
+    if found.is_empty() {
+        return;
+    }
+    for &(a, b) in &found {
+        bl.code[a..=b].fill(true);
+    }
+    bl.fences.extend(found);
+    bl.fences.sort_unstable();
 }
 
 /// Where `pos` of the old text is after `edits` (sorted, in old bytes). A position inside an edit goes into its new
@@ -875,11 +938,129 @@ mod tests {
         let (once, sel) = sl(t, 0..t.len(), true).unwrap();
         assert_eq!(once, "  para\n  - p\n    - c\n  ```\n  code\n  ```\n");
         assert_eq!(sel, 0..once.len());
-        let (twice, sel) = sl(&once, sel, true).unwrap();
-        let (back, sel) = sl(&twice, sel, false).unwrap();
-        assert_eq!(back, once);
-        let (back, _) = sl(&back, sel, false).unwrap();
+        // A second Tab would put the first item at column 4, where it reads as code: nothing moves.
+        assert!(sl(&once, sel.clone(), true).is_none());
+        let (back, _) = sl(&once, sel, false).unwrap();
         assert_eq!(back, t);
+    }
+
+    const UNITS: [Unit; 4] = [Unit::Spaces(2), Unit::Spaces(4), Unit::Spaces(8), Unit::Tab];
+
+    /// Tab `times` over `sel`, then Shift+Tab as many times with the selection that comes back: the same bytes.
+    /// `None` when a Tab did not move.
+    fn round_trip(t: &str, sel: Range<usize>, unit: Unit, times: usize) -> Option<()> {
+        let (mut cur, mut sel) = (t.to_string(), sel);
+        for _ in 0..times {
+            let c = shift_lines(&cur, sel.clone(), true, unit)?;
+            cur = c.apply(&cur);
+            sel = c.selection;
+        }
+        for _ in 0..times {
+            let c = shift_lines(&cur, sel.clone(), false, unit).unwrap_or_else(|| panic!("no Shift+Tab {unit:?} {cur:?}"));
+            cur = c.apply(&cur);
+            sel = c.selection;
+        }
+        assert_eq!(cur, t, "{unit:?} x{times}");
+        Some(())
+    }
+
+    fn crlf(t: &str) -> String {
+        t.replace('\n', "\r\n")
+    }
+
+    #[test]
+    fn a_selection_ending_inside_a_fence_round_trips() {
+        for t in ["para\n\n```\ncode\n```\nafter\n", "para\n```\ncode\n```\nafter\n", "para\n\n~~~\ncode\n~~~\nafter\n"] {
+            for text in [t.to_string(), crlf(t)] {
+                let end = text.find("code").unwrap() + 1;
+                for unit in UNITS {
+                    for times in [1, 2] {
+                        round_trip(&text, 0..end, unit, times).unwrap();
+                        // A caret in the fence moves all of it.
+                        round_trip(&text, end..end, unit, times).unwrap();
+                    }
+                }
+            }
+        }
+        // The fence moves whole, and Shift+Tab finds it again though it reads as indented code now.
+        let t = "para\n\n```\ncode\n```\nafter\n";
+        let c = shift_lines(t, 0..11, true, Unit::Spaces(4)).unwrap();
+        assert_eq!(c.apply(t), "    para\n\n    ```\n    code\n    ```\nafter\n");
+        assert_eq!(c.selection, 0..23);
+        let n = c.apply(t);
+        assert_eq!(shift_lines(&n, c.selection, false, Unit::Spaces(4)).unwrap().apply(&n), t);
+    }
+
+    #[test]
+    fn a_paragraph_a_list_and_a_fence_round_trip() {
+        let t = "intro para line\n- parent\n  - child\n\n```\ncode\n```\nafter\n";
+        for text in [t.to_string(), crlf(t)] {
+            let sel = text.find("para").unwrap() + 1..text.find("code").unwrap() + 1;
+            for unit in UNITS {
+                round_trip(&text, sel.clone(), unit, 1).unwrap();
+                // A second Tab would put the first item at column 4, where it reads as code: nothing moves.
+                assert!(round_trip(&text, sel.clone(), unit, 2).is_none(), "{unit:?}");
+            }
+            // The fence moves like a line after an item; the paragraph before the list by the unit.
+            let c = shift_lines(&text, sel, true, Unit::Spaces(4)).unwrap();
+            let want = "    intro para line\n  - parent\n    - child\n\n  ```\n  code\n  ```\nafter\n";
+            assert_eq!(c.apply(&text), crlf_like(&text, want));
+        }
+        // Without a list the fence moves by the unit, closing line included.
+        let t = "intro para line\n\n```\ncode\n```\nafter\n";
+        for text in [t.to_string(), crlf(t)] {
+            for unit in UNITS {
+                for times in [1, 2] {
+                    round_trip(&text, 0..text.find("code").unwrap() + 1, unit, times).unwrap();
+                }
+            }
+        }
+        let c = shift_lines(t, 0..t.find("code").unwrap(), true, Unit::Spaces(2)).unwrap();
+        assert_eq!(c.apply(t), "  intro para line\n\n  ```\n  code\n  ```\nafter\n");
+    }
+
+    fn crlf_like(like: &str, t: &str) -> String {
+        if like.contains("\r\n") {
+            crlf(t)
+        } else {
+            t.to_string()
+        }
+    }
+
+    #[test]
+    fn the_first_item_of_a_list_does_not_turn_into_code() {
+        for t in ["- a\n- b\n", "1. a\n2. b\n", "* a\n+ b\n"] {
+            for text in [t.to_string(), crlf(t)] {
+                for unit in UNITS {
+                    round_trip(&text, 0..text.len(), unit, 1).unwrap();
+                    assert!(round_trip(&text, 0..text.len(), unit, 2).is_none(), "{text:?} {unit:?}");
+                }
+                let once = shift_lines(&text, 0..text.len(), true, Unit::Spaces(2)).unwrap();
+                let n = once.apply(&text);
+                assert!(shift_lines(&n, once.selection, true, Unit::Spaces(2)).is_none());
+            }
+        }
+        assert!(indent_item("  - a\n", 4).is_none());
+        assert!(indent_item("   1. a\n", 5).is_none());
+        // Under an item above, an item still goes in; a nested item goes under its parent.
+        assert!(indent_item("- a\n- b\n", 4).is_some());
+        let t = "- a\n  - b\n  - c\n";
+        assert_eq!(indent_item(t, t.find('c').unwrap()).unwrap().apply(t), "- a\n  - b\n    - c\n");
+    }
+
+    #[test]
+    fn tab_then_shift_tab_over_a_mixed_text_gives_the_text_back() {
+        let t = "para\n- a\n  - b\n- c\n\n```\nx\n```\n\n    indented\n\n~~~\ny\n~~~\n";
+        for text in [t.to_string(), crlf(t)] {
+            for unit in UNITS {
+                for sel in [0..text.len(), 0..text.find('x').unwrap(), text.find("- c").unwrap()..text.find('y').unwrap()] {
+                    for times in [1, 2] {
+                        // Whatever Tab does, Shift+Tab gives it back; a Tab that cannot be undone does not happen.
+                        let _ = round_trip(&text, sel.clone(), unit, times);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
