@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.241.0] - 2026-11-03
+
+### 追加
+- `ito-testserver`（#146 の第 3 段、dev-dependency だけ）: `ssh::SshServer`（russh）。
+  - `start()`・`start_with(Config { host_key, login, allowed_keys, reject_all, silent })`、`KeyPair::generate()`（`private_openssh`・`public_openssh`・`fingerprint()`）、サーバーの `fingerprint()`・`addr()`・`port()`・`root()`・`local(remote)`。
+  - 認証: パスワードと公開鍵、全部断る `reject_all`、つながるが黙る `silent`。
+  - exec は台本: `on_command(部分文字列, Output::new().stdout().stderr().exit().signal("KILL").delay().chunk_delay().hang())`（バイト列なので UTF-8 も CP932 も。`hang` は signal かチャンネルの close まで待つ）。台本の無い `sha256sum -- '<path>'` は SFTP のフォルダーから答える（`Verify::Exec` が試せる）。ほかは 127。
+  - `set_accept_env`、`deny_write(path)`・`allow_write()`、`set_damage(writes, reads)`（1 バイト壊して `Mismatch` を作る）。
+  - 記録: `logins()`（パスワードは持たない）・`commands()`・`envs()`・`signals()`・`channels_closed()`・`log()`、`wait_until(timeout, f)`。
+  - SFTP は一時フォルダーの上で put／get／ls／mkdir／rmdir／rename／remove。
+  - 実物の `ito-sftp` で試した（指紋の固定と違い・認証・exec の出力と終了コードとシグナル・env・時間切れと停止・`.part` から名前替え・`Options::verify` の Exec／Readback・書けない場所）。
+  - 足りないもの: `ito-testserver ssh` の CLI、本物のシェル。`ito-sftp` に mkdir／rename のクライアントが無い。
+### 使う側がやること
+- 無し（既存の API は変わらない）。koyomi は `ito-testserver` の `ssh` を dev-dependency で使える。ito のクレートは全部同じ `rev` にそろえる。
+
 ## [0.240.0] - 2026-11-03
 
 ### 修正
