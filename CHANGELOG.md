@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.233.0] - 2026-11-03
+
+### 追加
+- `ito-tabs`（新）: 文書のタブ（#175。サクラエディタ式）。窓なしのモデルと、機能 `egui` のバー。
+  - `Tabs<Id>`: `open`（あれば前へ・なければ前面のタブの隣に）・`open_evicting`（上限で落とした id を返す）・`apply(Op)`（`Next`・`Prev`（回る）・`Close`・`CloseAt`・`Goto`・`Move`。閉じた id を返す）。上限の既定は 12。
+  - `labels(paths)`: 同じ名前のファイルだけ親のフォルダーを足す（`docs/README.md`）。
+  - `state_path(app)`・`to_toml`・`from_toml`・`load`・`save(&kept::Writer)`: `tabs.toml` への保存と復元（重複・上限超え・前面の範囲を直す）。
+  - `ShowBar`（常に・2 つ以上で・出さない）・`OpenFromOutside`（新しいタブ・新しい窓）・`Reopen`（前回のタブ・渡されたファイルだけ）・`Settings`。
+  - `cmd::{NEXT, PREV, CLOSE, GOTO}` と `command(name)`: `tab.next`・`tab.prev`・`tab.close`・`tab.goto_1`〜`9`。キーは固定しない。
+  - `bar(ui, &[TabView { label, tooltip, unsaved }], front) -> Option<Op>`: 前面のタブは上に強調の線、未保存は `●`（ホバーで×）、×と中クリックで閉じる、ドラッグで並べ替え、狭くなると 96pt で止まり、ホイールか `‹ ›` で送る。バーは何も閉じない（`ito-confirm` で聞くのはアプリ）。タブの名前は ito-a11y に出る（`<Click:ラベル>`）。
+- `ito-ipc::single`: 動いている窓へ引数を渡す単一インスタンス（#175）。`acquire(app, env, proto, &msg, wake)` が `Outcome::Owner`（扉を持つ。`try_iter`・`recv_timeout`）か `Outcome::Forwarded`（持ち主に渡した。終わってよい）を返す。`forward` は持ち主がいなければ `NotFound`。同時起動でも持ち主は 1 つ。`OpenRequest::parse(args, cwd)` が `+LINE:COL FILE` を読む。
+- `ito-keys`: `read(events, now, took)` と `Input::{Key, Text}`（機能 `egui`、#176）。1 フレームのイベントをキーと文字の順に返す。Alt+文字の文字（Windows は `Key` のあとに `Text` も来る）は、キーマップが取ったキーと、Ctrl の無い Alt の和音で落とす。AltGr と Alt+テンキーは残す。Cut/Copy/Paste は `from_clipboard` で和音に戻す。egui の `quit_shortcuts`（Command+Q、Shift を見ないので Ctrl+Shift+Q）に注意と書いた。
+
+### 使う側がやること
+- weft: 文書のタブは `ito-tabs`、起動時の引き渡しは `ito_ipc::single::acquire`、Alt+文字は `ito_keys::read` を使う。ito のクレートは全部同じ `rev` にそろえる。
+- ito-pane・ito-prefs の自前の `swallow_text`／`skip_text` を `read` に載せ替えるのは、あとで（動きは今のまま）。
+
 ## [0.232.0] - 2026-11-03
 
 ### 追加
