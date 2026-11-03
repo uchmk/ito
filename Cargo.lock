@@ -2427,6 +2427,7 @@ version = "0.227.0"
 dependencies = [
  "ito-outline",
  "pulldown-cmark",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
