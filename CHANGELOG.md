@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.230.0] - 2026-11-03
+
+### 追加
+- `ito-fonts`: 日本語の面を egui の絵文字・アイコンの字体より前に置く、共通のフォントの組み立て（#167）。`find()`（システムの日本語・絵文字の面を読む。遅いのでワーカースレッドから）、`Faces`、`install(&mut FontDefinitions, &Faces, MonoFont)`（UI スレッドから）、`load_in_background(ctx, mono)`、並びだけを決める純関数 `order`。順番は、ラテンの面（アプリの面・同梱の等幅・egui の既定）→ 日本語の面 → 絵文字 → egui の `NotoEmoji`・`emoji-icon-font`。全角の括弧・数字・英字（`（Ａ１）` など）がアイコンの字体で描かれない。等幅（`mono_font = bundled`、Nerd Font なし）では日本語の面を 1.2 倍にして、全角 1 文字がちょうど 2 桁になる。`system` や Nerd Font（HackGen のような 1:2 の字体）では拡大しない。
+- `ito-mdedit`: 目次・構造選択・構造を壊さない見出しの削除・構造ナビゲーション（#163）。
+  - `insert_toc(text, caret)`: `<!-- toc -->` … `<!-- /toc -->` の目次を挿入する。すでにあれば今の見出しから作り直す（変化がなければ `None`）。アンカーは GitHub 流（重複は `-1`, `-2`）。
+  - `expand_selection` / `shrink_selection`: 単語（日本語は句読点までの連なり）→ 文 → 段落・リスト項目・表のセル／行 → 表・リスト全体 → 節 → 親の節 → 全文。
+  - `delete_heading(text, caret, HeadingDelete::{LineOnly, Section, ToParagraph, LiftChildren})`: どれも 1 つの `Change`。
+  - `next(text, caret, Target::{Heading, List, Table, Code, OpenTask, Parent, Child}, Dir)`: 移動先のバイト。
+  - 依存に `unicode-segmentation` を追加。
+- 新しいクレート `ito-mdlint`（窓なし。依存は `ito-mdedit` だけ。#164）。Markdown のリントで、構造（見出しの飛び・空の見出し・重複・リストの字下げ／記号・表の列数・行末の空白・閉じていないフェンス・リンク先なし・未定義の参照）と日本語（全角スペース・全角英数・和欧文の空白・句読点・です／である調）を調べる。`lint(text, &Rules, exists)` が返す `Finding` に範囲・種類・重大度と、あれば直し（`Change`）が入る。`fix_all`/`merge` で複数の直しを 1 つの `Change`（undo 1 回）にできる。コード・front matter・リンク先・URL は見ない。CRLF 可。
+- 使う側がやること:
+  - `rev` を上げる（同じアプリの ito のクレートは全部同じ `rev`）。既存の API は変えていない。
+  - フォント: 自前の `fonts.rs`（yagura・minato・michi・fumi・fude・weft・koyomi）を消し、`ito_fonts::load_in_background(ctx, mono)` を呼ぶ（または `find()` をスレッドで回して UI スレッドで `install`）。`install` は自分のフォントを足したあとに最後に呼ぶ。tsumugi・kura は日本語・絵文字・Nerd Font を足して先頭に置く部分だけ `Faces`（`nerd` は自分で埋める）と `install` に置き換える。
+  - weft: `insert_toc`・`delete_heading`・`expand_selection`/`shrink_selection`・`next` をつなぐ。
+  - `ito-mdlint = { git = "https://github.com/uchmk/ito", rev = "…" }` を足す。`Rules::default()` から始め、`Rules.spacing` の既定は `Any`（和欧文の空白は見ない）。`exists` には開いているファイルのフォルダーからの存在確認を渡す。
+
 ## [0.229.0] - 2026-11-03
 
 ### 追加
