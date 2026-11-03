@@ -112,7 +112,8 @@ fn io_err(e: io::Error) -> Error {
     Error::Connect(e.to_string())
 }
 
-trait Stream: Read + Write + Send {}
+/// A connection to the server, for [`Inbox::open_with`].
+pub trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
 type Connector = Box<dyn FnMut() -> Result<Box<dyn Stream>, Error> + Send>;
@@ -134,6 +135,18 @@ impl Inbox {
     pub fn open(account: &Account, password: &str, from: From) -> Result<Inbox, Error> {
         let (host, port) = (account.host.clone(), account.port);
         Self::with(Box::new(move || tls(&host, port)), account, password, from)
+    }
+
+    /// Like [`Inbox::open`], but the connection comes from `connect` (called again after a dropped connection): a
+    /// pinned certificate, a proxy, or a fake server in a test. The greeting is read from what it returns, so it must
+    /// already be secured if the line must be.
+    pub fn open_with(
+        connect: impl FnMut() -> Result<Box<dyn Stream>, Error> + Send + 'static,
+        account: &Account,
+        password: &str,
+        from: From,
+    ) -> Result<Inbox, Error> {
+        Self::with(Box::new(connect), account, password, from)
     }
 
     fn with(connect: Connector, account: &Account, password: &str, from: From) -> Result<Inbox, Error> {

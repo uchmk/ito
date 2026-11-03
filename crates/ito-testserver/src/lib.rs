@@ -3,6 +3,12 @@
 //! - [`smtp::SmtpServer`]: an SMTP server in three modes (plaintext, STARTTLS like port 587, implicit TLS like
 //!   port 465), `AUTH PLAIN` and `AUTH LOGIN`, every accepted message kept in memory and as an `.eml` file, and
 //!   switches for the failures an app must survive (a recipient refused with 550, the connection cut mid-DATA).
+//! - [`imap::ImapServer`]: an IMAP4rev1 server with one `INBOX` (plain or implicit TLS), `LOGIN` and `AUTHENTICATE PLAIN`,
+//!   `EXAMINE`, `NOOP`, `UID FETCH` of headers or whole messages as literals, a settable `UIDVALIDITY`, messages added
+//!   and removed from the test, a way to drop every connection, and a log of the commands. Made for `ito-mail`.
+//! - [`winrm::WinrmServer`]: a WinRM cmd-shell service (HTTP, or HTTPS with a pinned self-signed certificate), Basic
+//!   authentication, `Create` / `Command` / `Receive` / `Signal` / `Delete`. A command is scripted by a part of its
+//!   command line (`on_command("dir", Output::new().stdout("...").exit(0))`), with a delay or a hang. Made for `ito-winrm`.
 //! - [`http::HttpServer`]: a scripted HTTP server. A route is a method and a path; the answer is a status, headers, a
 //!   body and a delay; anything else is 404. Every request is recorded.
 //!
@@ -10,8 +16,11 @@
 //! stops (and removes its temp folder) when it is dropped. This crate is for `[dev-dependencies]` only.
 
 pub mod http;
+pub mod imap;
 pub mod smtp;
+mod stream;
 pub mod tls;
+pub mod winrm;
 
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};

@@ -1,6 +1,6 @@
 [package]
 name = "ito-testserver"
-description = "Fake servers for cargo tests of the apps: an SMTP server (plaintext, STARTTLS, implicit TLS, AUTH, .eml capture, 550, cut mid-DATA) and a scripted HTTP server. In-process, loopback only, every request recorded, stopped on Drop. A dev-dependency, never a dependency"
+description = "Fake servers for cargo tests of the apps: an SMTP server (plaintext, STARTTLS, implicit TLS, AUTH, .eml capture, 550, cut mid-DATA), an IMAP server (plain or implicit TLS, LOGIN / AUTHENTICATE PLAIN, UID FETCH, UIDVALIDITY), a WinRM cmd-shell server (HTTP or HTTPS, Basic, scripted commands) and a scripted HTTP server. In-process, loopback only, every request recorded, stopped on Drop. A dev-dependency, never a dependency"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,3 +16,4 @@ getrandom = "0.4"
 
 [dev-dependencies]
 ito-mail = { path = "../ito-mail" }
+ito-winrm = { path = "../ito-winrm" }
