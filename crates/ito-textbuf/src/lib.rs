@@ -10,6 +10,9 @@
 //! - [`Selection`]: a caret and its anchor.
 //! - [`Doc`]: buffer + selection + history. [`Transaction`] is a list of [`Edit`]s with the selection before and
 //!   after and optional [`Effect`]s (a pasted image's file) that undo and redo with the text.
+//!   Typing joins into one step (`Doc::typed`); so do consecutive Backspaces or consecutive Deletes (`Doc::deleted`),
+//!   as long as the caret does not jump, nothing is selected and the keys come within `pause_ms`.
+//!   `Doc::mark_saved` / `Doc::is_dirty` follow the history position: undo back to the saved text is clean.
 
 use std::fmt;
 use std::ops::Range;

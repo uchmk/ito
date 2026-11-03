@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{Buffer, Edit, Error, Selection};
 
 /// Something an action did besides the text, which undo and redo must also undo and redo (an image pasted into a
@@ -42,8 +44,19 @@ struct Entry {
     before: Selection,
     after: Selection,
     effects: Vec<Box<dyn Effect>>,
-    /// Where typing would go on to, when this step is typing that the next key may join.
-    typing_end: Option<usize>,
+    /// What the next key may join onto, when this step is typing or deleting.
+    run: Option<Run>,
+}
+
+/// A step that the next key can join, and where that key has to land.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Run {
+    /// Typing that ended at this byte.
+    Typing(usize),
+    /// Backspaces; the next one deletes up to this byte (where the last one started).
+    Backspace(usize),
+    /// Forward deletes; the next one starts at this byte.
+    Delete(usize),
 }
 
 /// Apply `edits` in order; the edits that undo them (in the order to apply) come back. On an error nothing is left
@@ -167,7 +180,7 @@ impl Doc {
         let inverse = run(&mut self.buffer, &tx.edits)?;
         self.sel = tx.after;
         self.drop_redo();
-        self.undo.push(Entry { forward: tx.edits, inverse, before: tx.before, after: tx.after, effects: tx.effects, typing_end: None });
+        self.undo.push(Entry { forward: tx.edits, inverse, before: tx.before, after: tx.after, effects: tx.effects, run: None });
         self.sealed = true;
         Ok(())
     }
@@ -181,23 +194,70 @@ impl Doc {
         let join = before.is_empty()
             && !self.sealed
             && now_ms.saturating_sub(self.last_ms) <= self.pause_ms
-            && self.undo.last().is_some_and(|e| e.typing_end == Some(r.start));
+            && self.undo.last().is_some_and(|e| e.run == Some(Run::Typing(r.start)));
         let inv = self.buffer.replace(r.clone(), text)?;
         let after = Selection::caret(r.start + text.len());
         let edit = Edit { range: r, text: text.to_owned() };
-        let typing_end = (!text.contains('\n')).then_some(after.head);
+        let run = (!text.contains('\n')).then_some(Run::Typing(after.head));
         if join {
             let e = self.undo.last_mut().expect("joined step exists");
             e.forward.push(edit);
             e.inverse.insert(0, inv);
             e.after = after;
-            e.typing_end = typing_end;
+            e.run = run;
         } else {
             self.drop_redo();
-            self.undo.push(Entry { forward: vec![edit], inverse: vec![inv], before, after, effects: Vec::new(), typing_end });
+            self.undo.push(Entry { forward: vec![edit], inverse: vec![inv], before, after, effects: Vec::new(), run });
         }
         self.sel = after;
         self.redo.clear();
+        self.sealed = false;
+        self.last_ms = now_ms;
+        Ok(())
+    }
+
+    /// Delete `range` as the Backspace or Delete key does (the app picks the range: a grapheme, or a word). `now_ms`
+    /// is the same clock as [`Doc::typed`]. With nothing selected, a Backspace (the range ends at the caret) joins the
+    /// Backspace step before it and a Delete (the range starts at the caret) joins the Delete step before it, while
+    /// the keys follow each other within `pause_ms` and each continues where the last one stopped. A caret that
+    /// jumped, [`Doc::seal`], typing, or a different kind of edit between them ends it; so does deleting a selection
+    /// (it is a step of its own and nothing joins it). The caret ends at the start of `range`. An empty range does
+    /// nothing.
+    pub fn deleted(&mut self, range: Range<usize>, now_ms: u64) -> Result<(), Error> {
+        if range.start == range.end {
+            return Ok(());
+        }
+        let before = self.sel;
+        let kind = if !before.is_empty() {
+            None
+        } else if range.end == before.head {
+            Some(Run::Backspace(range.start))
+        } else if range.start == before.head {
+            Some(Run::Delete(range.start))
+        } else {
+            None
+        };
+        let join = !self.sealed
+            && now_ms.saturating_sub(self.last_ms) <= self.pause_ms
+            && match (kind, self.undo.last().and_then(|e| e.run)) {
+                (Some(Run::Backspace(_)), Some(Run::Backspace(at))) => range.end == at,
+                (Some(Run::Delete(_)), Some(Run::Delete(at))) => range.start == at,
+                _ => false,
+            };
+        let inv = self.buffer.replace(range.clone(), "")?;
+        let after = Selection::caret(range.start);
+        let edit = Edit { range, text: String::new() };
+        if join {
+            let e = self.undo.last_mut().expect("joined step exists");
+            e.forward.push(edit);
+            e.inverse.insert(0, inv);
+            e.after = after;
+            e.run = kind;
+        } else {
+            self.drop_redo();
+            self.undo.push(Entry { forward: vec![edit], inverse: vec![inv], before, after, effects: Vec::new(), run: kind });
+        }
+        self.sel = after;
         self.sealed = false;
         self.last_ms = now_ms;
         Ok(())
@@ -427,6 +487,116 @@ mod tests {
         d.mark_saved();
         d.clear_history();
         assert!(!d.is_dirty());
+    }
+
+    #[test]
+    fn backspaces_and_deletes_each_join_into_one_step() {
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(4));
+        d.deleted(3..4, 0).unwrap();
+        d.deleted(2..3, 50).unwrap();
+        d.deleted(1..2, 100).unwrap();
+        assert_eq!(d.text(), "aef");
+        assert_eq!(d.selection(), Selection::caret(1));
+        d.undo().unwrap();
+        assert_eq!(d.text(), "abcdef");
+        assert_eq!(d.selection(), Selection::caret(4));
+        d.redo().unwrap();
+        assert_eq!(d.text(), "aef");
+        assert_eq!(d.selection(), Selection::caret(1));
+        assert!(d.can_undo());
+        d.undo().unwrap();
+        assert!(!d.can_undo());
+
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(1));
+        d.deleted(1..2, 0).unwrap();
+        d.deleted(1..2, 50).unwrap();
+        assert_eq!(d.text(), "adef");
+        assert_eq!(d.selection(), Selection::caret(1));
+        d.undo().unwrap();
+        assert_eq!(d.text(), "abcdef");
+        assert!(!d.can_undo());
+    }
+
+    #[test]
+    fn deleting_does_not_join_across_a_jump_a_pause_a_selection_or_another_kind() {
+        let steps = |d: &mut Doc| {
+            let mut n = 0;
+            while d.undo().unwrap() {
+                n += 1;
+            }
+            n
+        };
+        // a caret jump
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(6));
+        d.deleted(5..6, 0).unwrap();
+        d.set_selection(Selection::caret(2));
+        d.deleted(1..2, 10).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // a pause
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(6));
+        d.deleted(5..6, 0).unwrap();
+        d.deleted(4..5, 5000).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // a selection delete, after and before
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection { anchor: 3, head: 5 });
+        d.deleted(3..5, 0).unwrap();
+        d.deleted(2..3, 10).unwrap();
+        assert_eq!(d.text(), "abf");
+        assert_eq!(steps(&mut d), 2);
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(6));
+        d.deleted(5..6, 0).unwrap();
+        d.set_selection(Selection { anchor: 3, head: 4 });
+        d.deleted(3..4, 10).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // Backspace then Delete
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(3));
+        d.deleted(2..3, 0).unwrap();
+        d.deleted(2..3, 10).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // typing in between, either way round
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(3));
+        d.deleted(2..3, 0).unwrap();
+        d.typed("x", 10).unwrap();
+        d.deleted(1..2, 20).unwrap();
+        assert_eq!(steps(&mut d), 3);
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(3));
+        d.typed("x", 0).unwrap();
+        d.deleted(3..4, 10).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // a seal
+        let mut d = Doc::new("abcdef");
+        d.set_selection(Selection::caret(3));
+        d.deleted(2..3, 0).unwrap();
+        d.seal();
+        d.deleted(1..2, 10).unwrap();
+        assert_eq!(steps(&mut d), 2);
+        // an empty range is nothing, a bad one is an error
+        let mut d = Doc::new("a");
+        d.deleted(0..0, 0).unwrap();
+        assert!(!d.can_undo());
+        assert_eq!(d.deleted(0..9, 0), Err(Error::Range));
+    }
+
+    #[test]
+    fn a_saved_delete_run_is_not_extended() {
+        let mut d = Doc::new("abcd");
+        d.set_selection(Selection::caret(4));
+        d.deleted(3..4, 0).unwrap();
+        d.mark_saved();
+        d.deleted(2..3, 10).unwrap();
+        assert!(d.is_dirty());
+        d.undo().unwrap();
+        assert!(!d.is_dirty());
+        assert_eq!(d.text(), "abc");
     }
 
     #[test]

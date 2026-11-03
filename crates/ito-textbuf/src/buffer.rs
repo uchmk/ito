@@ -199,7 +199,7 @@ mod tests {
                 let ins = pieces[rng.next() % pieces.len()];
                 let inv = b.replace(a..z, ins).unwrap();
                 same_as_pos(&b);
-                if rng.next() % 3 == 0 {
+                if rng.next().is_multiple_of(3) {
                     b.replace(inv.range, &inv.text).unwrap();
                     same_as_pos(&b);
                 }
