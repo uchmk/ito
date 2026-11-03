@@ -24,9 +24,23 @@ struct Table {
     /// The line index of the first row in `lines`.
     first: usize,
     rows: Vec<Vec<String>>,
+    /// What each line starts with before its first `|`: the indent and the `>` of a quote, kept as it was.
+    prefixes: Vec<String>,
+    /// The line break the first line of the table ends with; the whole table is written with it.
+    eol: String,
     aligns: Vec<Align>,
     /// Row 1 is the delimiter row; the cells of `rows[1]` are not used.
     cols: usize,
+}
+
+/// The byte length of what a line starts with before its row: blanks and the `>` of a block quote.
+fn prefix_len(line: &str) -> usize {
+    line.len() - line.trim_start_matches([' ', '\t', '>']).len()
+}
+
+/// The cells of the row on the line `r` of `text`, without the line's prefix.
+fn row_cells(text: &str, r: &Range<usize>) -> Vec<String> {
+    split_row(&text[r.start + prefix_len(&text[r.clone()])..r.end])
 }
 
 /// Split a row into trimmed cells at the `|` that is not escaped and not inside a code span.
@@ -105,14 +119,17 @@ fn find(text: &str, byte: usize) -> Option<(Table, usize)> {
         e += 1;
     }
     // The table starts at the header whose next line is the delimiter row.
-    let start = (s..e).find(|&k| delimiter(&split_row(&text[ls[k + 1].clone()])).is_some() && text[ls[k + 1].clone()].contains('-'))?;
+    let start = (s..e).find(|&k| delimiter(&row_cells(text, &ls[k + 1])).is_some() && text[ls[k + 1].clone()].contains('-'))?;
     if at < start {
         return None;
     }
-    let aligns = delimiter(&split_row(&text[ls[start + 1].clone()]))?;
-    let rows: Vec<Vec<String>> = (start..=e).map(|k| split_row(&text[ls[k].clone()])).collect();
+    let aligns = delimiter(&row_cells(text, &ls[start + 1]))?;
+    let rows: Vec<Vec<String>> = (start..=e).map(|k| row_cells(text, &ls[k])).collect();
+    let prefixes: Vec<String> =
+        (start..=e).map(|k| text[ls[k].start..ls[k].start + prefix_len(&text[ls[k].clone()])].to_string()).collect();
+    let eol = text[ls[start].end..ls[start + 1].start].to_string();
     let cols = rows[0].len().max(aligns.len());
-    Some((Table { range: ls[start].start..ls[e].end, first: start, rows, aligns, cols }, at - start))
+    Some((Table { range: ls[start].start..ls[e].end, first: start, rows, prefixes, eol, aligns, cols }, at - start))
 }
 
 fn pad(cell: &str, width: usize, align: Align) -> String {
@@ -137,8 +154,9 @@ fn render(t: &Table) -> (String, Vec<Vec<Range<usize>>>) {
     let mut spans = Vec::new();
     for (i, row) in t.rows.iter().enumerate() {
         if i > 0 {
-            out.push('\n');
+            out.push_str(&t.eol);
         }
+        out.push_str(t.prefixes.get(i).or(t.prefixes.last()).map_or("", String::as_str));
         out.push('|');
         let mut rs = Vec::new();
         for (c, &w) in widths.iter().enumerate() {
@@ -183,8 +201,8 @@ fn cell_at(text: &str, t: &Table, row: usize, byte: usize) -> usize {
     let rel = byte.saturating_sub(ls[t.first + row].start).min(line.len());
     let mut col = 0;
     let (mut esc, mut ticks, mut run) = (false, 0usize, 0usize);
-    let lead = usize::from(line.trim_start().starts_with('|'));
-    let skip = line.len() - line.trim_start().len() + lead;
+    let p = prefix_len(line);
+    let skip = p + usize::from(line[p..].starts_with('|'));
     for (i, c) in line.char_indices() {
         if i >= rel {
             break;
@@ -235,6 +253,7 @@ pub fn next_cell(text: &str, byte: usize, step: Step) -> Option<Change> {
             }
             if r >= t.rows.len() {
                 t.rows.push(vec![String::new(); t.cols]);
+                t.prefixes.push(t.prefixes.last().cloned().unwrap_or_default());
             }
         }
         Step::Prev => {
@@ -253,8 +272,7 @@ pub fn next_cell(text: &str, byte: usize, step: Step) -> Option<Change> {
         }
     }
     let (new, spans) = render(&t);
-    let end = t.range.end;
-    let range = t.range.start..end;
+    let range = t.range.clone();
     let cursor = range.start + spans[r][c].start;
     Some(Change { range, text: new, cursor })
 }
@@ -301,5 +319,49 @@ mod tests {
         let at = t.find('1').unwrap();
         let c = next_cell(t, at, Step::Prev).unwrap();
         assert_eq!(c.apply(t).as_bytes()[c.cursor], b'b');
+    }
+
+    #[test]
+    fn a_table_keeps_its_indent_in_a_list_item_and_a_quote() {
+        let t = "- item\n  | a | b |\n  | --- | --- |\n  | c | d |\n";
+        let want = "- item\n  | a   | b   |\n  | --- | --- |\n  | c   | d   |\n";
+        let c = format_table(t, t.find('a').unwrap()).unwrap();
+        assert_eq!(c.apply(t), want);
+        let c = next_cell(t, t.find('a').unwrap(), Step::Next).unwrap();
+        assert_eq!(c.apply(t), want);
+        assert_eq!(c.apply(t).as_bytes()[c.cursor], b'b');
+        // A new row past the last cell has the same indent.
+        let c = next_cell(t, t.find('d').unwrap(), Step::Next).unwrap();
+        let n = c.apply(t);
+        assert_eq!(n, "- item\n  | a   | b   |\n  | --- | --- |\n  | c   | d   |\n  |     |     |\n");
+        assert_eq!(c.cursor, n.rfind("\n  |     |").unwrap() + 5);
+        // Going back works with the indent too.
+        let c = next_cell(t, t.find('c').unwrap(), Step::Prev).unwrap();
+        assert_eq!(c.apply(t).as_bytes()[c.cursor], b'b');
+
+        let q = "> | a | b |\n> |---|---|\n> | c | d |\n";
+        let c = format_table(q, 3).unwrap();
+        assert_eq!(c.apply(q), "> | a   | b   |\n> | --- | --- |\n> | c   | d   |\n");
+        let c = next_cell(q, q.find('d').unwrap(), Step::Next).unwrap();
+        assert_eq!(c.apply(q), "> | a   | b   |\n> | --- | --- |\n> | c   | d   |\n> |     |     |\n");
+        let c = next_cell(q, 3, Step::Next).unwrap();
+        assert_eq!(c.apply(q).as_bytes()[c.cursor], b'b');
+    }
+
+    #[test]
+    fn crlf_stays_crlf() {
+        let t = "| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n";
+        let c = next_cell(t, 2, Step::Next).unwrap();
+        assert_eq!(c.apply(t), "| a   | b   |\r\n| --- | --- |\r\n| 1   | 2   |\r\n");
+        let c = next_cell(t, t.find('2').unwrap(), Step::Next).unwrap();
+        assert_eq!(c.apply(t), "| a   | b   |\r\n| --- | --- |\r\n| 1   | 2   |\r\n|     |     |\r\n");
+        // In a mixed text the first line of the table decides.
+        let m = "| a | b |\n|---|---|\r\n| 1 | 2 |\n";
+        assert_eq!(format_table(m, 2).unwrap().apply(m), "| a   | b   |\n| --- | --- |\n| 1   | 2   |\n");
+        let m = "| a | b |\r\n|---|---|\n| 1 | 2 |\n";
+        assert_eq!(format_table(m, 2).unwrap().apply(m), "| a   | b   |\r\n| --- | --- |\r\n| 1   | 2   |\n");
+        // CRLF inside a list item.
+        let l = "- x\r\n  | a | b |\r\n  |---|---|\r\n";
+        assert_eq!(format_table(l, 8).unwrap().apply(l), "- x\r\n  | a   | b   |\r\n  | --- | --- |\r\n");
     }
 }
