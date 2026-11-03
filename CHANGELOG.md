@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.226.2] - 2026-11-03
+
+### 追加
+- `ito-openin`: 組み込みの行指定の表に `weft`（`+行:列`、列は文字数。micro と同じ形）を足した（#165）。`BUILTIN_EDITORS` は 21 個になった。
+- 使う側がやること: 無し（kura は `rev` を上げるだけで、weft を行つきで開ける）。
+
 ## [0.226.1] - 2026-11-03
 
 ### 変更

@@ -189,7 +189,7 @@ fn builtin(name: &str) -> Option<How> {
         "vi" => How::Flag("+"),
         "nvim" | "vim" | "gvim" => How::Cursor,
         "nano" => joined("+", ",", false),
-        "emacs" | "emacsclient" | "micro" => joined("+", ":", false),
+        "emacs" | "emacsclient" | "micro" | "weft" => joined("+", ":", false),
         "kak" => joined("+", ":", true),
         // Editors common on Windows. Notepad has no line switch, so it stays out.
         "hidemaru" => joined("/j", ",", false),
@@ -206,7 +206,7 @@ fn builtin(name: &str) -> Option<How> {
 }
 
 /// The editors with a built-in line argument, for a settings screen to list.
-pub const BUILTIN_EDITORS: [&str; 20] = [
+pub const BUILTIN_EDITORS: [&str; 21] = [
     "nvim",
     "vim",
     "vi",
@@ -215,6 +215,7 @@ pub const BUILTIN_EDITORS: [&str; 20] = [
     "emacs",
     "emacsclient",
     "micro",
+    "weft",
     "kak",
     "hidemaru",
     "sakura",
@@ -290,6 +291,7 @@ mod tests {
         assert_eq!(args("nano"), ["+12,3"]);
         assert_eq!(args("emacsclient"), ["+12:3"]);
         assert_eq!(args("micro"), ["+12:3"]);
+        assert_eq!(args("weft"), ["+12:3"], "weft counts characters");
         assert_eq!(args("kak"), ["+12:7"], "kakoune counts bytes");
         assert_eq!(args("hidemaru"), ["/j12,3"]);
         assert_eq!(args("sakura"), ["-Y=12", "-X=3"]);
