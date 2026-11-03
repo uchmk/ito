@@ -12,7 +12,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | tsumugi、kura |
 | `ito-layout` | 矩形をペインに分ける木と、egui の仕切り。`panels` の機能で、幅を変えられる egui のパネル（`Panels::show`: 中身が少なくても縮まない・ドラッグした大きさを `state_dir` の `panels.toml` に覚える） | tsumugi、kura、yagura、fumi |
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する | tsumugi、yagura |
-| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd）。機能 `egui`: `from_egui`・`from_clipboard`、1 フレームのイベントをキーと文字の順に読む `read(events, now, took)`（Alt+文字の文字を落とす・AltGr と Alt+テンキーは残す・Cut/Copy/Paste を和音に戻す。`quit_shortcuts` の注意つき） | yagura |
+| `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd）。機能 `egui`: `from_egui`・`from_clipboard`、1 フレームのイベントをキーと文字と IME の順に読む `read(events, now, took)` → `Input::{Key, Text, Ime(ImeEvent)}`（Alt+文字の文字を落とす・macOS の Option は `took` が取ったときだけ落とす（`read_for(.., mac)`）・AltGr と Alt+テンキー（同じフレームで数字→Alt を離す→Text）は残してキーにしない・Cut/Copy/Paste を和音に戻す。数字キーも Shift を持つ（`<A-S-5>` ≠ `<A-5>`）。`quit_shortcuts` の注意つき） | yagura |
 | `ito-match` | 検索の一致の規則（正規表現か、fzf 風の曖昧一致） | tsumugi、kura |
 | `ito-ipc` | 動いているアプリへの手元の扉（Unix ソケット・名前付きパイプ）と、長さ付きの serde のメッセージ。`single`: 窓は 1 つだけ（`acquire(app, env, proto, &msg, wake)` が先のプロセスを `Owner`（`try_iter`）にし、後のは `msg` を渡して `Forwarded`。同時起動でも 1 つ・死んだソケットは取り替え・5 秒で諦める・1 MiB まで）。`OpenRequest::parse`（`+LINE:COL FILE` の argv → `FileArg`） | tsumugi、kura、fude（weft） |
 | `ito-mcp` | stdio の小さな MCP サーバ（非同期ランタイムなし）。窓との扉は `ito-ipc::door`。`destructive`・`needs_confirm` の印、エージェントが開いたものの `Opened`、`Phase` と上限つきの `wait` | tsumugi、kura、michi |

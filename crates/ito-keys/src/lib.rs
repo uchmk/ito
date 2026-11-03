@@ -429,8 +429,10 @@ pub fn from_egui(key: egui::Key, mods: &egui::Modifiers) -> Option<Key> {
             // and then no binding spelled `<C-+>` can ever match, on any layout.
             // Letters are the exception -- `printable` lowercases them, so the
             // shift is the only thing telling `<C-A>` from `<C-a>` -- and so is
-            // Space, which types the same with Shift or without.
-            let shift = mods.shift && (c.is_ascii_alphabetic() || c == ' ');
+            // Space, which types the same with Shift or without. Digits keep
+            // their shift too: egui has no key for `%`, so Alt+Shift+5 is
+            // `Num5` + shift and must differ from Alt+5 (`<A-S-5>` / `<A-5>`).
+            let shift = mods.shift && (c.is_ascii_alphanumeric() || c == ' ');
             Some(Key { code: Code::Char(c), ctrl, alt, shift, sup })
         }
     }
@@ -487,6 +489,11 @@ pub enum Input {
     Key(Key),
     /// Typed text the app should insert.
     Text(String),
+    /// An input-method event (`Event::Ime`: preedit, commit, enable, disable),
+    /// at the place in the frame where it came. The app applies it in order
+    /// with the `Key` and `Text` items around it (a commit followed by a
+    /// space is the commit, then the space).
+    Ime(egui::ImeEvent),
 }
 
 /// A frame's events as keys and text, in the order they came, for an app
@@ -510,15 +517,29 @@ pub enum Input {
 /// `ViewportCommand::Close` before the app sees it. An app whose keymap uses
 /// that chord sets `quit_shortcuts` to an empty list.
 #[cfg(feature = "egui")]
-pub fn read(events: &[egui::Event], now: &egui::Modifiers, mut took: impl FnMut(&Key) -> bool) -> Vec<Input> {
+pub fn read(events: &[egui::Event], now: &egui::Modifiers, took: impl FnMut(&Key) -> bool) -> Vec<Input> {
+    read_for(events, now, took, cfg!(target_os = "macos"))
+}
+
+/// [`read`] with the platform spelled out: on a Mac (`mac`) Option is how
+/// people type characters (`å`, `€`, `\` on a JIS keyboard), so an Alt chord's
+/// text is kept unless `took` says the keymap runs that key.
+#[cfg(feature = "egui")]
+pub fn read_for(events: &[egui::Event], now: &egui::Modifiers, mut took: impl FnMut(&Key) -> bool, mac: bool) -> Vec<Input> {
     let mut out = Vec::new();
     let mut skip_text = false;
     for (i, ev) in events.iter().enumerate() {
         match ev {
+            egui::Event::Key { pressed: true, .. } if is_numpad_code(&events[i..]) => {
+                // Part of an Alt+numpad code: not a chord, and its text is kept.
+                skip_text = false;
+            }
+            egui::Event::Ime(e) => out.push(Input::Ime(e.clone())),
             egui::Event::Key { key, pressed: true, modifiers, .. } => match from_egui(*key, modifiers) {
                 Some(k) => {
                     let taken = took(&k);
-                    skip_text = taken || (modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.mac_cmd);
+                    let alt_chord = !mac && modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.mac_cmd;
+                    skip_text = taken || alt_chord;
                     out.push(Input::Key(k));
                 }
                 None => skip_text = false,
@@ -539,6 +560,36 @@ pub fn read(events: &[egui::Event], now: &egui::Modifiers, mut took: impl FnMut(
         }
     }
     out
+}
+
+/// Whether `events[0]`, a key press, is a digit of an Alt+numpad code: Alt
+/// held (nothing else), and in this frame the digits are let go with Alt up
+/// and then the text arrives (`Alt+0165` types `¥` after Alt is released),
+/// with no other key press in between. A code split over two frames is not
+/// recognised.
+#[cfg(feature = "egui")]
+fn is_numpad_code(events: &[egui::Event]) -> bool {
+    use egui::Key as K;
+    let digit = |k: &K| matches!(k, K::Num0 | K::Num1 | K::Num2 | K::Num3 | K::Num4 | K::Num5 | K::Num6 | K::Num7 | K::Num8 | K::Num9);
+    let bare_alt = |m: &egui::Modifiers| m.alt && !m.ctrl && !m.shift && !m.command && !m.mac_cmd;
+    match events.first() {
+        Some(egui::Event::Key { key, pressed: true, modifiers, .. }) if digit(key) && bare_alt(modifiers) => {}
+        _ => return false,
+    }
+    let mut let_go = false;
+    for e in &events[1..] {
+        match e {
+            egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                if !digit(key) || !bare_alt(modifiers) {
+                    return false;
+                }
+            }
+            egui::Event::Key { pressed: false, modifiers, .. } => let_go |= !modifiers.alt,
+            egui::Event::Text(_) => return let_go,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// The character a key types without Shift (letters lowercase), for keys
@@ -680,6 +731,82 @@ mod tests {
             egui::Event::Text("A".into()),
         ];
         assert_eq!(read(&ev, &none, |_| false).last(), Some(&Input::Text("A".into())));
+    }
+
+    #[cfg(feature = "egui")]
+    fn release(key: egui::Key, mods: egui::Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: mods }
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn read_puts_ime_commits_in_event_order() {
+        use egui::ImeEvent as I;
+        let none = egui::Modifiers::default();
+        let ev = [
+            egui::Event::Ime(I::Preedit { text: String::new(), active_range_chars: None }),
+            egui::Event::Ime(I::Commit("한".into())),
+            press(egui::Key::Space, none),
+            egui::Event::Text(" ".into()),
+            release(egui::Key::Space, none),
+        ];
+        assert_eq!(
+            read(&ev, &none, |_| false),
+            vec![
+                Input::Ime(I::Preedit { text: String::new(), active_range_chars: None }),
+                Input::Ime(I::Commit("한".into())),
+                Input::Text(" ".into()),
+            ]
+        );
+        let ev = [egui::Event::Text("a".into()), egui::Event::Ime(I::Commit("日本".into()))];
+        assert_eq!(read(&ev, &none, |_| false), vec![Input::Text("a".into()), Input::Ime(I::Commit("日本".into()))]);
+        let ev = [egui::Event::Ime(I::Commit("日本".into())), press(egui::Key::A, none), egui::Event::Text("a".into())];
+        assert_eq!(read(&ev, &none, |_| false), vec![Input::Ime(I::Commit("日本".into())), Input::Text("a".into())]);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn on_a_mac_option_text_is_kept_unless_the_keymap_took_the_key() {
+        let ev = [press(egui::Key::A, alt()), egui::Event::Text("å".into())];
+        let got = read_for(&ev, &alt(), |_| false, true);
+        assert_eq!(got, vec![Input::Key(Key::parse("<A-a>").unwrap()), Input::Text("å".into())]);
+        assert_eq!(read_for(&ev, &alt(), |_| true, true), vec![Input::Key(Key::parse("<A-a>").unwrap())]);
+        // Elsewhere an Alt chord's text is dropped.
+        assert_eq!(read_for(&ev, &alt(), |_| false, false).len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn digit_keys_keep_shift() {
+        assert_ne!(Key::parse("<A-S-5>"), Key::parse("<A-5>"));
+        let shifted = egui::Modifiers { alt: true, shift: true, ..Default::default() };
+        assert_eq!(from_egui(egui::Key::Num5, &shifted), Key::parse("<A-S-5>"));
+        assert_eq!(from_egui(egui::Key::Num5, &alt()), Key::parse("<A-5>"));
+        let k = Key::parse("<A-S-5>").unwrap();
+        assert_eq!(Key::parse(&k.to_string()), Some(k));
+    }
+
+    #[test]
+    #[cfg(feature = "egui")]
+    fn an_alt_numpad_code_is_not_a_chord_and_keeps_its_text() {
+        use egui::Key as K;
+        let none = egui::Modifiers::default();
+        let mut ev = Vec::new();
+        for k in [K::Num0, K::Num1, K::Num6, K::Num5] {
+            ev.push(press(k, alt()));
+        }
+        ev.push(release(K::Num5, none));
+        ev.push(egui::Event::Text("¥".into()));
+        let mut asked = Vec::new();
+        let got = read(&ev, &none, |k| {
+            asked.push(*k);
+            true
+        });
+        assert_eq!(got, vec![Input::Text("¥".into())]);
+        assert!(asked.is_empty());
+        // A plain Alt+5 chord still runs its binding.
+        let ev = [press(K::Num5, alt()), egui::Event::Text("5".into()), release(K::Num5, alt())];
+        assert_eq!(read(&ev, &alt(), |_| true), vec![Input::Key(Key::parse("<A-5>").unwrap())]);
     }
 
     /// `<A-G>` as written in a keymap is what Alt+Shift+G arrives as: the
