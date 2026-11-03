@@ -87,8 +87,15 @@ pub fn headings(text: &str, max_level: u8) -> Vec<Heading> {
 }
 
 /// The index of the heading whose section holds `byte` and is the deepest, or `None` before the first heading.
+/// A caret at the very end of the text (`byte == text.len()`) belongs to the sections that run to the end.
 pub fn at_byte(headings: &[Heading], byte: usize) -> Option<usize> {
-    headings.iter().enumerate().filter(|(_, h)| h.section.contains(&byte)).map(|(i, _)| i).next_back()
+    let end = headings.iter().map(|h| h.section.end).max();
+    headings
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| h.section.contains(&byte) || (byte == h.section.end && Some(byte) == end))
+        .map(|(i, _)| i)
+        .next_back()
 }
 
 #[cfg(test)]
@@ -143,5 +150,32 @@ mod tests {
         assert_eq!(at_byte(&h, 0), None);
         assert_eq!(at_byte(&h, DOC.find("more").unwrap()), Some(1));
         assert_eq!(at_byte(&h, DOC.find("last").unwrap()), Some(3));
+    }
+
+    #[test]
+    fn a_caret_at_the_end_of_the_text() {
+        let heading_last = "# A
+
+text
+
+## B";
+        let h = headings(heading_last, 6);
+        assert_eq!(at_byte(&h, heading_last.len()), Some(1));
+        let body_last = "# A
+
+## B
+body
+";
+        let h = headings(body_last, 6);
+        assert_eq!(at_byte(&h, body_last.len()), Some(1));
+        assert_eq!(at_byte(&h, body_last.len() + 1), None);
+        let h = headings(DOC, 6);
+        assert_eq!(at_byte(&h, DOC.len()), Some(3));
+        // A boundary inside the text still goes to the heading that starts there.
+        assert_eq!(at_byte(&h, h[2].section.end), Some(3));
+        let none = "just text
+";
+        assert_eq!(at_byte(&headings(none, 6), none.len()), None);
+        assert_eq!(at_byte(&headings("", 6), 0), None);
     }
 }
