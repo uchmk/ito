@@ -4,7 +4,7 @@
 //! key.
 //!
 //! - blocks and sections: [`move_block`], [`move_section`], [`promote_section`], [`demote_section`]
-//! - lists: [`indent_item`], [`outdent_item`], [`toggle_task`], [`renumber`]
+//! - lists: [`move_item`], [`indent_item`], [`outdent_item`], [`toggle_task`], [`renumber`]
 //! - tables: [`format_table`], [`next_cell`]
 //!
 //! All positions are byte offsets on `char` boundaries of the given text.
@@ -16,7 +16,7 @@ mod list;
 mod table;
 
 pub use blocks::{demote_section, move_block, move_section, promote_section, Dir};
-pub use list::{indent_item, outdent_item, renumber, toggle_task};
+pub use list::{indent_item, move_item, outdent_item, renumber, toggle_task};
 pub use table::{format_table, next_cell, Step};
 
 /// One edit: replace `range` of the old text with `text`, and put the caret at `cursor` of the new text.
