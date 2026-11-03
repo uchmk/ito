@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.226.0] - 2026-11-03
+
+### 追加
+- `ito-mdedit`: `move_item(text, byte, Dir) -> Option<Change>`（#160）。キャレットのあるリストの項目 1 つを、入れ子の項目と続きの行ごと、隣の項目と入れ替える。`move_block` はリスト全体を動かす。
+  - 最初／最後の項目、1 つだけのリスト、リストの外、種類（`-` と `1.`）の違う隣は `None`（アプリは `move_block` に戻せる）。キャレットは項目の中の位置のまま付いていく。
+  - 番号つきのリストは番号をその場に残して中身を入れ替える（`renumber` は呼ばない）。タスク（`- [x]`）・全角・CRLF・タブの字下げに対応。
+- `ito-textbuf`（#159）:
+  - 行の索引: `Buffer::line_count`・`line_of`・`line_range`・`line_col`・`byte_at`（行頭の並びを持ち、編集・undo・redo で更新。`pos` の関数と同じ答えで、探すのは O(log n)）。
+  - 保存の印が undo/redo に付いてくる: `Doc::mark_saved`・`Doc::is_dirty`。保存した文章に undo で戻れば clean。保存した点が履歴から消えれば dirty。`mark_saved` は打鍵のまとまりを区切る。
+  - 続けた削除を 1 手に: `Doc::deleted(range, now_ms)`（`typed` と同じ時計・`pause_ms`・`seal`。Backspace と Delete は混ぜない。選択の削除は単独の 1 手）。
+- 使う側がやること: 無し（追加だけ）。weft は自前の dirty の判定・行の索引・削除のまとめを、これに置き換えられる。
+
 ## [0.225.1] - 2026-11-03
 
 ### 修正
