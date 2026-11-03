@@ -1,8 +1,8 @@
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
-use crate::{change_from_edits, line_of, lines, Change, Dir};
+use crate::{change_from_edits, line_of, lines, Change, Dir, SelChange};
 
 struct Item {
     indent: usize,
@@ -31,121 +31,390 @@ fn blank(line: &str) -> bool {
     line.trim().is_empty()
 }
 
-/// Indent the list item on the line of `byte` with its nested lines by one level (2 spaces under a bullet, the width
-/// of the marker under a number). The numbers are not touched: see [`renumber`].
+/// Indent the list item on the line of `byte` with its nested lines. It moves to the content column of the item above
+/// it, its new parent (3 under `9. `, 4 under `10. `); with no item above, by 2 under a bullet or the width of its own
+/// marker under a number. The ordered lists the item leaves and joins are numbered again (a new sublist from 1).
 pub fn indent_item(text: &str, byte: usize) -> Option<Change> {
     shift_item(text, byte, true)
 }
 
-/// Take the list item on the line of `byte` and its nested lines out by one level. `None` at the left edge.
+/// Take the list item on the line of `byte` and its nested lines out by one level: back to the column where its
+/// parent's marker starts, so an indent and an outdent undo each other, numbers included. `None` at the left edge.
 pub fn outdent_item(text: &str, byte: usize) -> Option<Change> {
     shift_item(text, byte, false)
+}
+
+/// How many columns the item on line `k` moves: in, to the content column of the item above it; out, to the column of
+/// its parent's marker. Without such an item it moves by its own marker (2 for a bullet). `0` when it cannot move.
+fn amount(text: &str, ls: &[Range<usize>], code: &[bool], k: usize, it: &Item, tabbed: bool, deeper: bool) -> usize {
+    let w = it.indent;
+    let own = if it.number.is_some() { it.marker } else { 2 };
+    let item_at = |j: usize| if code[j] { None } else { item_ws(&text[ls[j].clone()]).map(|(i, _)| i) };
+    let nearest = |less: bool| {
+        (0..k).rev().find(|&j| {
+            let l = &text[ls[j].clone()];
+            let lw = lead(l).0;
+            !blank(l) && if less { lw < w } else { lw <= w }
+        })
+    };
+    if deeper {
+        if let Some(p) = nearest(false).and_then(item_at) {
+            let to = p.indent + p.marker;
+            if to > w {
+                return to - w;
+            }
+        }
+        // With no item to go under, the item moves by its marker, but from column 0 not past column 3 (4 is a code block).
+        return if w == 0 { own.min(3) } else { own };
+    }
+    if w == 0 {
+        return 0;
+    }
+    if tabbed {
+        // An item indented with a tab goes out to the previous tab stop.
+        return w - (w - 1) / 4 * 4;
+    }
+    if let Some(p) = nearest(true).and_then(item_at) {
+        // Out to the parent's marker; an item deeper than the parent's content first comes to that content.
+        let content = p.indent + p.marker;
+        return w - if w > content { content } else { p.indent };
+    }
+    own.min(w)
+}
+
+/// How the leading blanks of a line change.
+#[derive(Clone, Copy)]
+enum How {
+    /// By this many columns; the blanks are written as spaces.
+    Width(i64),
+    /// One more tab.
+    TabIn,
+    /// One tab less (or 4 columns of spaces).
+    TabOut,
+}
+
+/// Push the edit that changes the leading blanks of line `k`, when they change.
+fn shift_edit(text: &str, ls: &[Range<usize>], k: usize, how: How, edits: &mut Vec<(Range<usize>, String)>) {
+    let line = &text[ls[k].clone()];
+    let (lw, ln) = lead(line);
+    let old = &line[..ln];
+    let new = match how {
+        How::Width(d) => " ".repeat((lw as i64 + d).max(0) as usize),
+        How::TabIn => format!("\t{old}"),
+        How::TabOut => match old.strip_prefix('\t') {
+            Some(rest) => rest.to_string(),
+            None => " ".repeat(lw - lw.min(4)),
+        },
+    };
+    if new != old {
+        edits.push((ls[k].start..ls[k].start + ln, new));
+    }
+}
+
+/// An item (with its nested lines) that moved, for [`finish`].
+struct Moved {
+    li: usize,
+    last: usize,
+    old_w: usize,
 }
 
 fn shift_item(text: &str, byte: usize, deeper: bool) -> Option<Change> {
     let byte = byte.min(text.len());
     let ls = lines(text);
     let li = line_of(&ls, byte)?;
-    if code_lines(text, &ls)[li] {
+    let code = analyze(text, &ls).code;
+    if code[li] {
         return None;
     }
     let (it, lead_n) = item_ws(&text[ls[li].clone()])?;
     let w = it.indent;
-    if !deeper && w == 0 {
+    let tabbed = text[ls[li].start..ls[li].start + lead_n].contains('\t');
+    let n = amount(text, &ls, &code, li, &it, tabbed, deeper);
+    if n == 0 {
         return None;
     }
-    let tabbed = text[ls[li].start..ls[li].start + lead_n].contains('\t');
-    let unit = if deeper || !tabbed {
-        if it.number.is_some() {
-            it.marker
-        } else {
-            2
-        }
-    } else {
-        // An item indented with a tab goes out to the previous tab stop.
-        w - (w - 1) / 4 * 4
-    };
-    let n = if deeper { unit } else { unit.min(w) };
     let last = extent(text, &ls, li, w);
-    let mut new = String::new();
-    let mut cursor = byte;
+    let d = if deeper { n as i64 } else { -(n as i64) };
+    let mut edits = Vec::new();
     for k in li..=last {
+        if !blank(&text[ls[k].clone()]) {
+            shift_edit(text, &ls, k, How::Width(d), &mut edits);
+        }
+    }
+    let (mut change, at) = finish(text, &ls, &code, edits, &[Moved { li, last, old_w: w }], &[(byte, true)])?;
+    change.cursor = at[0];
+    Some(change)
+}
+
+/// What [`shift_lines`] adds to or takes from the indent of a line that is not in a list item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    /// This many spaces.
+    Spaces(u8),
+    /// One tab (out: one tab, or 4 spaces).
+    Tab,
+}
+
+impl Unit {
+    fn how(self, deeper: bool) -> How {
+        match self {
+            Unit::Spaces(n) => How::Width(if deeper { n as i64 } else { -(n as i64) }),
+            Unit::Tab if deeper => How::TabIn,
+            Unit::Tab => How::TabOut,
+        }
+    }
+}
+
+/// Tab (`deeper`) or Shift+Tab over a selection of `sel` (a range; `start > end` is a selection made backwards, and
+/// the selection that comes back is backwards too, with the caret at its end). One parse, one [`Change`].
+///
+/// - A list item on a selected line moves with its nested lines, by what [`indent_item`] / [`outdent_item`] move it;
+///   a run of items at one indent moves by one amount, so `9.` and `10.` stay in line. Nested items that are selected
+///   too move with their parent, not once more. Numbers are counted again as [`indent_item`] does.
+/// - A line that is not in an item gets `unit`, except after a moved item in the selection: it moves by the amount of
+///   the last item that moved before it (even when that amount is 0), so it is neither pulled into the list nor left
+///   out of it, and Tab then Shift+Tab gives the text back. Lines before the first selected item get `unit`.
+/// - Blank lines are not touched (nor do they count as the end of an item). A table row moves only with an item that
+///   holds it. Lines of a fenced code block are text, but a fence that the selection covers only in part moves whole,
+///   from its opening to its closing line.
+/// - A non-empty selection that ends at the start of a line does not touch that line.
+/// - Leading tabs are read with a width of 4; a line that changes is written with spaces (`Unit::Tab` keeps its tabs).
+///
+/// `None` when nothing moves: blank lines only, the left edge, a caret in no line.
+pub fn shift_lines(text: &str, sel: Range<usize>, deeper: bool, unit: Unit) -> Option<SelChange> {
+    let (from, to) = (sel.start.min(text.len()), sel.end.min(text.len()));
+    let (lo, hi) = (from.min(to), from.max(to));
+    let ls = lines(text);
+    if lo == hi && lo > ls.last()?.end {
+        // On the empty line after the last line break.
+        return None;
+    }
+    let mut a = line_of(&ls, lo)?;
+    let mut b = line_of(&ls, hi)?;
+    if hi > lo && b > a && ls[b].start == hi {
+        b -= 1;
+    }
+    // Cheap answers before the parse.
+    let mut any = false;
+    let mut indented = false;
+    for l in &ls[a..=b] {
+        let line = &text[l.clone()];
+        if !blank(line) {
+            any = true;
+            indented |= lead(line).1 > 0;
+        }
+    }
+    if !any || (!deeper && !indented && !text.contains("```") && !text.contains("~~~")) {
+        return None;
+    }
+    let bl = analyze(text, &ls);
+    // A fence the selection touches moves whole.
+    let first = bl.fences.partition_point(|f| f.1 < a);
+    let end = b;
+    for f in bl.fences[first..].iter().take_while(|f| f.0 <= end) {
+        a = a.min(f.0);
+        b = b.max(f.1);
+    }
+    let sign = |n: usize| if deeper { n as i64 } else { -(n as i64) };
+    let mut edits = Vec::new();
+    let mut moved = Vec::new();
+    // The amounts of the items of the selection by indent: a run of siblings moves alike.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    // What the last moved item moved by.
+    let mut after_item: Option<usize> = None;
+    let mut k = a;
+    while k <= b {
         let line = &text[ls[k].clone()];
-        let (lw, ln) = lead(line);
-        let nw = if blank(line) {
-            lw
-        } else if deeper {
-            lw + n
-        } else {
-            lw - n.min(lw)
-        };
-        // The blanks are written as spaces, so a tab-indented line has the width it is read with.
-        let blanks = if blank(line) { line[..ln].to_string() } else { " ".repeat(nw) };
-        new.push_str(&blanks);
-        new.push_str(&line[ln..]);
-        if k == li {
-            let col = byte - ls[li].start;
-            cursor = ls[li].start + if col >= ln { blanks.len() + col - ln } else { col.min(blanks.len()) };
+        if blank(line) {
+            k += 1;
+            continue;
         }
-        if k < last {
-            new.push_str(&text[ls[k].end..ls[k + 1].start]);
+        let lw = lead(line).0;
+        let it = if bl.code[k] { None } else { item_ws(line) };
+        if let Some((it, lead_n)) = it {
+            while stack.last().is_some_and(|&(w, _)| w > lw) {
+                stack.pop();
+            }
+            let n = match stack.last() {
+                Some(&(w, n)) if w == lw => n,
+                _ => {
+                    let tabbed = line[..lead_n].contains('\t');
+                    let n = amount(text, &ls, &bl.code, k, &it, tabbed, deeper);
+                    stack.push((lw, n));
+                    n
+                }
+            };
+            let last = extent(text, &ls, k, lw);
+            after_item = Some(n);
+            if n > 0 {
+                for j in k..=last {
+                    if !blank(&text[ls[j].clone()]) {
+                        shift_edit(text, &ls, j, How::Width(sign(n)), &mut edits);
+                    }
+                }
+                moved.push(Moved { li: k, last, old_w: lw });
+            }
+            k = last + 1;
+            continue;
         }
+        while stack.last().is_some_and(|&(w, _)| w >= lw) {
+            stack.pop();
+        }
+        if !bl.table[k] {
+            let how = after_item.map_or_else(|| unit.how(deeper), |n| How::Width(sign(n)));
+            shift_edit(text, &ls, k, how, &mut edits);
+        }
+        k += 1;
     }
-    let shifted = Change { range: ls[li].start..ls[last].end, text: new, cursor };
-    Some(fix_numbers(text, shifted, li, last, w))
+    if edits.is_empty() {
+        return None;
+    }
+    let (mut change, at) = finish(text, &ls, &bl.code, edits, &moved, &[(lo, lo == hi), (hi, true)])?;
+    let selection = if from <= to { at[0]..at[1] } else { at[1]..at[0] };
+    change.cursor = selection.end;
+    Some(SelChange { change, selection, unflanked: false })
 }
 
-/// After an item moved to another indent, number the ordered lists it touches again: the list it joined (a new
-/// sublist starts at 1: a nested list that starts at another number would not be a list) and the one it left.
-fn fix_numbers(text: &str, shifted: Change, li: usize, last: usize, old_w: usize) -> Change {
-    let mut cur = shifted.apply(text);
-    let mut total = shifted;
-    let ls = lines(&cur);
-    let ordered_at = |k: usize| -> bool { item_ws(&cur[ls[k].clone()]).is_some_and(|(i, _)| i.indent == old_w && i.number.is_some()) };
-    let before = (0..li).rev().find(|&k| !blank(&cur[ls[k].clone()]) && lead(&cur[ls[k].clone()]).0 <= old_w).filter(|&k| ordered_at(k));
-    let after = (last + 1..ls.len()).find(|&k| !blank(&cur[ls[k].clone()])).filter(|&k| ordered_at(k));
-    for target in [Some(li), before, after].into_iter().flatten() {
-        let ls = lines(&cur);
-        let code = code_lines(&cur, &ls);
-        let edits = renumber_edits(&cur, &ls, &code, target, true);
-        let Some(b) = change_from_edits(&cur, &edits, total.cursor) else { continue };
-        let next = b.apply(&cur);
-        total = compose(text, total, &cur, b);
-        cur = next;
+/// Where `pos` of the old text is after `edits` (sorted, in old bytes). A position inside an edit goes into its new
+/// text, at most to its end. One at the start of an edit stays before it, unless it is an insertion and `follow`.
+fn map_pos(pos: usize, edits: &[(Range<usize>, String)], follow: bool) -> usize {
+    let mut delta = 0isize;
+    for (r, s) in edits {
+        if pos < r.start || (pos == r.start && !(follow && r.is_empty())) {
+            break;
+        }
+        if pos >= r.end {
+            delta += s.len() as isize - r.len() as isize;
+        } else {
+            return (r.start as isize + delta) as usize + (pos - r.start).min(s.len());
+        }
     }
-    total
+    (pos as isize + delta) as usize
 }
 
-/// One change from the original `text` that does what `a` (on `text`) and then `b` (on the text `a` makes, `mid`) do.
-fn compose(text: &str, a: Change, mid: &str, b: Change) -> Change {
-    let a_new_end = a.range.start + a.text.len();
-    let map_end = |x: usize| {
-        if x <= a.range.start {
-            x
-        } else if x >= a_new_end {
-            x - a.text.len() + a.range.len()
-        } else {
-            a.range.end
+fn apply_edits(text: &str, edits: &[(Range<usize>, String)]) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut at = 0;
+    for (r, s) in edits {
+        out.push_str(&text[at..r.start]);
+        out.push_str(s);
+        at = r.end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// After the items in `moved` changed their indent (`edits`: the new blanks of their lines, sorted), number the
+/// ordered lists they touch again: the list an item joined (a new sublist starts at 1: a nested list that starts at
+/// another number would not be a list) and the one it left. Gives one [`Change`] (its `cursor` is not set) and where
+/// each of `pos` (a byte, and whether it follows an insertion at it) goes. The edits keep the lines and their code
+/// flags as they are, so nothing is parsed again.
+fn finish(
+    text: &str,
+    ls: &[Range<usize>],
+    code: &[bool],
+    edits: Vec<(Range<usize>, String)>,
+    moved: &[Moved],
+    pos: &[(usize, bool)],
+) -> Option<(Change, Vec<usize>)> {
+    let mid = apply_edits(text, &edits);
+    let ls2 = lines(&mid);
+    debug_assert_eq!(ls.len(), ls2.len());
+    let mut targets = Vec::new();
+    let mut floor = 0;
+    for m in moved {
+        let line = |k: usize| &mid[ls2[k].clone()];
+        let ordered_at = |k: &usize| item_ws(line(*k)).is_some_and(|(i, _)| i.indent == m.old_w && i.number.is_some());
+        targets.push(m.li);
+        targets.extend((floor..m.li).rev().find(|&k| !blank(line(k)) && lead(line(k)).0 <= m.old_w).filter(ordered_at));
+        targets.extend((m.last + 1..ls2.len()).find(|&k| !blank(line(k))).filter(ordered_at));
+        floor = m.last + 1;
+    }
+    targets.sort_unstable();
+    targets.dedup();
+    let mut digits: Vec<(Range<usize>, String)> = Vec::new();
+    // (indent, last line) of the lists numbered already: a target inside one needs no second look.
+    let mut done: Vec<(usize, usize)> = Vec::new();
+    for t in targets {
+        let Some((it, _)) = item_ws(&mid[ls2[t].clone()]) else { continue };
+        if done.iter().any(|&(w, e)| w == it.indent && t <= e) {
+            continue;
         }
+        let (fresh, end) = renumber_edits(&mid, &ls2, code, t, true);
+        done.push((it.indent, end));
+        digits.extend(fresh);
+    }
+    digits.sort_by_key(|(r, _)| r.start);
+    digits.dedup();
+    let last = if digits.is_empty() { mid.clone() } else { apply_edits(&mid, &digits) };
+    let (range, new) = diff(text, &last)?;
+    let at = pos.iter().map(|&(p, follow)| map_pos(map_pos(p, &edits, follow), &digits, follow)).collect();
+    Some((Change { range, text: new, cursor: 0 }, at))
+}
+
+/// The smallest replacement that turns `old` into `new`; `None` when they are the same.
+fn diff(old: &str, new: &str) -> Option<(Range<usize>, String)> {
+    if old == new {
+        return None;
+    }
+    let (ob, nb) = (old.as_bytes(), new.as_bytes());
+    let mut p = ob.iter().zip(nb).take_while(|(x, y)| x == y).count();
+    while !old.is_char_boundary(p) || !new.is_char_boundary(p) {
+        p -= 1;
+    }
+    let mut s = ob[p..].iter().rev().zip(nb[p..].iter().rev()).take_while(|(x, y)| x == y).count();
+    while !old.is_char_boundary(old.len() - s) || !new.is_char_boundary(new.len() - s) {
+        s -= 1;
+    }
+    Some((p..old.len() - s, new[p..new.len() - s].to_string()))
+}
+
+/// What one parse of a text says about its lines.
+pub(crate) struct Analysis {
+    /// For each line, whether it is inside a code block (fenced or indented). The line of an item that holds a fence
+    /// after its marker is not code.
+    pub code: Vec<bool>,
+    /// For each line, whether it is inside a table.
+    pub table: Vec<bool>,
+    /// The first and the last line of each fenced code block.
+    pub fences: Vec<(usize, usize)>,
+}
+
+pub(crate) fn analyze(text: &str, ls: &[Range<usize>]) -> Analysis {
+    let (mut code, mut table, mut fenced) = (Vec::new(), Vec::new(), Vec::new());
+    for (e, r) in Parser::new_ext(text, Options::ENABLE_TABLES).into_offset_iter() {
+        match e {
+            Event::Start(Tag::CodeBlock(kind)) => {
+                if matches!(kind, CodeBlockKind::Fenced(_)) {
+                    fenced.push(r.clone());
+                }
+                code.push(r);
+            }
+            Event::Start(Tag::Table(_)) => table.push(r),
+            _ => {}
+        }
+    }
+    // The blocks come in the order they start and do not overlap.
+    let flags = |v: &[Range<usize>]| -> Vec<bool> {
+        if v.is_empty() {
+            return vec![false; ls.len()];
+        }
+        ls.iter()
+            .map(|l| {
+                let at = l.start + lead(&text[l.clone()]).1;
+                let i = v.partition_point(|b| b.start <= at);
+                i > 0 && at < v[i - 1].end
+            })
+            .collect()
     };
-    let start = a.range.start.min(b.range.start);
-    let old_end = a.range.end.max(map_end(b.range.end));
-    let done = b.apply(mid);
-    let new_end = done.len() - (text.len() - old_end);
-    Change { range: start..old_end, text: done[start..new_end].to_string(), cursor: b.cursor }
+    let fences = fenced.iter().filter_map(|r| Some((line_of(ls, r.start)?, line_of(ls, r.end.saturating_sub(1).max(r.start))?))).collect();
+    Analysis { code: flags(&code), table: flags(&table), fences }
 }
 
 /// For each line, whether it is inside a code block (fenced or indented). The line of an item that holds a fence
 /// after its marker is not code.
 pub(crate) fn code_lines(text: &str, ls: &[Range<usize>]) -> Vec<bool> {
-    let blocks: Vec<Range<usize>> =
-        Parser::new(text).into_offset_iter().filter_map(|(e, r)| matches!(e, Event::Start(Tag::CodeBlock(_))).then_some(r)).collect();
-    ls.iter()
-        .map(|l| {
-            let at = l.start + lead(&text[l.clone()]).1;
-            blocks.iter().any(|b| b.start <= at && at < b.end)
-        })
-        .collect()
+    analyze(text, ls).code
 }
 
 /// The width of the leading blanks of `line` (a tab goes to the next multiple of 4) and their byte length.
@@ -322,16 +591,22 @@ pub fn renumber(text: &str, byte: usize) -> Option<Change> {
     let ls = lines(text);
     let li = line_of(&ls, byte)?;
     let code = code_lines(text, &ls);
-    let edits = renumber_edits(text, &ls, &code, li, false);
+    let (edits, _) = renumber_edits(text, &ls, &code, li, false);
     change_from_edits(text, &edits, byte)
 }
 
 /// The edits (the digits of each number that is wrong) that number the list holding the ordered item on line `li`.
 /// With `nested_from_one`, a list that is indented and follows a line of text starts at 1.
-fn renumber_edits(text: &str, ls: &[Range<usize>], code: &[bool], li: usize, nested_from_one: bool) -> Vec<(Range<usize>, String)> {
-    let Some((it, _)) = item_ws(&text[ls[li].clone()]) else { return Vec::new() };
+fn renumber_edits(
+    text: &str,
+    ls: &[Range<usize>],
+    code: &[bool],
+    li: usize,
+    nested_from_one: bool,
+) -> (Vec<(Range<usize>, String)>, usize) {
+    let Some((it, _)) = item_ws(&text[ls[li].clone()]) else { return (Vec::new(), li) };
     if code[li] || it.number.is_none() {
-        return Vec::new();
+        return (Vec::new(), li);
     }
     let n = it.indent;
     let belongs = |k: usize| -> bool {
@@ -376,7 +651,7 @@ fn renumber_edits(text: &str, ls: &[Range<usize>], code: &[bool], li: usize, nes
             edits.push((digits, fresh));
         }
     }
-    edits
+    (edits, e)
 }
 
 #[cfg(test)]
@@ -559,5 +834,156 @@ mod tests {
         assert_eq!(n, "- [ ] い\r\n\t- 子\r\n- [x] あ\r\n");
         let t = "- p\n\t- a\n    - b\n";
         assert_eq!(mv(t, 4, Dir::Down).unwrap().0, "- p\n    - b\n\t- a\n");
+    }
+
+    #[test]
+    fn indent_then_outdent_gives_the_text_back() {
+        for nums in [1..=11u32, 95..=101] {
+            let t: String = nums.map(|n| format!("{n}. x{n}\n")).collect();
+            for l in lines(&t) {
+                let c = indent_item(&t, l.start).unwrap();
+                let moved = c.apply(&t);
+                let back = outdent_item(&moved, c.cursor).unwrap_or_else(|| panic!("{moved:?} cursor {}", c.cursor));
+                assert_eq!(back.apply(&moved), t, "item at byte {} of {t:?}", l.start);
+            }
+        }
+        // The item goes to the content column of the item above, and the list it joins starts at 1.
+        let t = "9. x9\n10. x10\n";
+        assert_eq!(indent_item(t, 6).unwrap().apply(t), "9. x9\n   1. x10\n");
+        // A bullet under `10. ` goes to column 4 and comes back to column 0.
+        let t = "10. a\n- b\n";
+        let c = indent_item(t, 7).unwrap();
+        let moved = c.apply(t);
+        assert_eq!(moved, "10. a\n    - b\n");
+        assert_eq!(outdent_item(&moved, c.cursor).unwrap().apply(&moved), t);
+        // An item deeper than its parent's content comes to that content first.
+        let t = "10. a\n        - b\n";
+        assert_eq!(outdent_item(t, 10).unwrap().apply(t), "10. a\n    - b\n");
+    }
+
+    fn sl(t: &str, sel: Range<usize>, deeper: bool) -> Option<(String, Range<usize>)> {
+        shift_lines(t, sel, deeper, Unit::Spaces(2)).map(|c| (c.apply(t), c.selection))
+    }
+
+    fn all(t: &str, deeper: bool) -> Option<String> {
+        sl(t, 0..t.len(), deeper).map(|r| r.0)
+    }
+
+    #[test]
+    fn tab_and_shift_tab_over_a_mixed_selection_give_the_text_back() {
+        let t = "para\n- p\n  - c\n```\ncode\n```\n";
+        let (once, sel) = sl(t, 0..t.len(), true).unwrap();
+        assert_eq!(once, "  para\n  - p\n    - c\n  ```\n  code\n  ```\n");
+        assert_eq!(sel, 0..once.len());
+        let (twice, sel) = sl(&once, sel, true).unwrap();
+        let (back, sel) = sl(&twice, sel, false).unwrap();
+        assert_eq!(back, once);
+        let (back, _) = sl(&back, sel, false).unwrap();
+        assert_eq!(back, t);
+    }
+
+    #[test]
+    fn a_line_after_a_moved_item_moves_like_the_item() {
+        assert_eq!(all("- a\n- b\n\npara\n", true).unwrap(), "  - a\n  - b\n\n  para\n");
+        assert_eq!(all("- a\n- b\npara\n", true).unwrap(), "  - a\n  - b\n  para\n");
+        let t = "para\n- a\n";
+        assert_eq!(all(t, true).unwrap(), "  para\n  - a\n");
+        assert_eq!(all(&all(t, true).unwrap(), false).unwrap(), t);
+        // Nothing moves a line that is at the left edge out, item or not.
+        assert!(all("- a\npara\n", false).is_none());
+    }
+
+    #[test]
+    fn numbered_items_move_alike_and_are_counted_again() {
+        let t: String = (1..=11).map(|n| format!("{n}. x\n")).collect();
+        let moved = all(&t, true).unwrap();
+        assert_eq!(moved, t.lines().map(|l| format!("   {l}\n")).collect::<String>());
+        assert_eq!(all(&moved, false).unwrap(), t);
+        // Two items join the sublist of the item above; the list they left goes on without them.
+        let t = "1. p\n2. a\n3. b\n4. q\n";
+        let (moved, _) = sl(t, 5..14, true).unwrap();
+        assert_eq!(moved, "1. p\n   1. a\n   2. b\n2. q\n");
+        let (back, _) = sl(&moved, 5..moved.len() - 5, false).unwrap();
+        assert_eq!(back, t);
+    }
+
+    #[test]
+    fn tables_move_only_with_an_item() {
+        let t = "- a\n  | h | i |\n  |---|---|\n  | 1 | 2 |\n- b\n";
+        assert_eq!(all(t, true).unwrap(), "  - a\n    | h | i |\n    |---|---|\n    | 1 | 2 |\n  - b\n");
+        let t = "text\n\n| h | i |\n|---|---|\n| 1 | 2 |\n";
+        assert_eq!(all(t, true).unwrap(), "  text\n\n| h | i |\n|---|---|\n| 1 | 2 |\n");
+        assert!(all("| h | i |\n|---|---|\n| 1 | 2 |\n", true).is_none());
+    }
+
+    #[test]
+    fn crlf_blank_lines_and_tabs_are_kept() {
+        assert_eq!(all("a\r\n- b\r\n  c\r\n", true).unwrap(), "  a\r\n  - b\r\n    c\r\n");
+        assert_eq!(all("a\n\n   \nb\n", true).unwrap(), "  a\n\n   \n  b\n");
+        // A tab counts 4 columns: the item goes out to column 0 and its child keeps its place under it.
+        let t = "- p\n\t- c\n\t\t- d\n";
+        assert_eq!(sl(t, 4..t.len(), false).unwrap().0, "- p\n- c\n    - d\n");
+        let u = |t: &str, deeper| shift_lines(t, 0..t.len(), deeper, Unit::Tab).map(|c| c.apply(t));
+        assert_eq!(u("a\n  b\n", true).unwrap(), "\ta\n\t  b\n");
+        assert_eq!(u("\ta\n    b\nc\n", false).unwrap(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn the_selection_decides_which_lines_move() {
+        // A selection that ends at the start of a line leaves that line alone.
+        let (n, sel) = sl("a\nb\nc\n", 0..4, true).unwrap();
+        assert_eq!((n.as_str(), sel), ("  a\n  b\nc\n", 0..8));
+        // A caret moves the line it is on, and stays at the same place in its text.
+        let t = "ab\ncd\n";
+        let c = shift_lines(t, 4..4, true, Unit::Spaces(2)).unwrap();
+        assert_eq!(c.apply(t), "ab\n  cd\n");
+        assert_eq!(c.selection, 6..6);
+        assert_eq!(c.change.cursor, 6);
+        // At the start of the line the caret goes after the new blanks.
+        assert_eq!(shift_lines(t, 3..3, true, Unit::Spaces(2)).unwrap().selection, 5..5);
+        // A selection made backwards stays backwards, with the caret at its end.
+        let t = "a\nb\n";
+        let back = std::ops::Range { start: 3, end: 0 };
+        let c = shift_lines(t, back, true, Unit::Spaces(2)).unwrap();
+        assert_eq!(c.selection, std::ops::Range { start: 7, end: 0 });
+        assert_eq!(c.change.cursor, 0);
+        // A fence the selection covers in part moves whole.
+        let t = "x\n```\nfoo\nbar\n```\ny\n";
+        let at = t.find("foo").unwrap() + 1;
+        let (n, _) = sl(t, at..at, true).unwrap();
+        assert_eq!(n, "x\n  ```\n  foo\n  bar\n  ```\ny\n");
+        let at = t.find("bar").unwrap();
+        let (n, _) = sl(t, at - 3..at, true).unwrap();
+        assert_eq!(n, "x\n  ```\n  foo\n  bar\n  ```\ny\n");
+    }
+
+    #[test]
+    fn nothing_to_move_gives_none() {
+        assert!(sl("", 0..0, true).is_none());
+        assert!(sl("\n\n  \n", 0..5, true).is_none());
+        assert!(sl("a\n", 2..2, true).is_none());
+        assert!(all("a\n- b\n", false).is_none());
+        let nested = "- a\n  - b\n";
+        assert!(all(nested, false).is_none());
+        assert!(sl(nested, 4..11, false).is_some());
+        assert!(shift_lines("a\n", 0..2, true, Unit::Spaces(0)).is_none());
+    }
+
+    #[test]
+    fn a_big_selection_is_one_quick_call() {
+        let t: String = (0..1000).map(|i| format!("- item {i} {}\n", "lorem ipsum ".repeat(85))).collect();
+        assert!(t.len() > 1_000_000);
+        let best = (0..3)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                let c = shift_lines(&t, 0..t.len(), true, Unit::Spaces(2)).unwrap();
+                let took = start.elapsed();
+                assert_eq!(c.apply(&t).len(), t.len() + 2000);
+                took
+            })
+            .min()
+            .unwrap();
+        let limit = if cfg!(debug_assertions) { 3000 } else { 50 };
+        assert!(best.as_millis() < limit, "took {best:?}");
     }
 }

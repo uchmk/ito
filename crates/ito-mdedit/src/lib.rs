@@ -4,7 +4,8 @@
 //! key.
 //!
 //! - blocks and sections: [`move_block`], [`move_section`], [`promote_section`], [`demote_section`]
-//! - lists: [`move_item`], [`indent_item`], [`outdent_item`], [`toggle_task`], [`renumber`]
+//! - lists: [`move_item`], [`indent_item`], [`outdent_item`], [`toggle_task`], [`renumber`], [`shift_lines`] (Tab and
+//!   Shift+Tab over a selection: items, other lines, fences)
 //! - tables: [`format_table`], [`next_cell`]
 //! - table of contents: [`insert_toc`] (insert, or rebuild the one the document has)
 //! - structural selection: [`expand_selection`], [`shrink_selection`]
@@ -29,7 +30,7 @@ mod toc;
 pub use blocks::{demote_section, move_block, move_section, promote_section, Dir};
 pub use format::{check_tasks, inline, line_type, set_tasks, toggle_tasks, uncheck_tasks, Inline, Line, SelChange};
 pub use heading::{delete_heading, HeadingDelete};
-pub use list::{indent_item, move_item, outdent_item, renumber, toggle_task};
+pub use list::{indent_item, move_item, outdent_item, renumber, shift_lines, toggle_task, Unit};
 pub use nav::{next, Target};
 pub use select::{expand_selection, shrink_selection};
 pub use table::{format_table, next_cell, Step};
