@@ -6,18 +6,30 @@
 //! - blocks and sections: [`move_block`], [`move_section`], [`promote_section`], [`demote_section`]
 //! - lists: [`move_item`], [`indent_item`], [`outdent_item`], [`toggle_task`], [`renumber`]
 //! - tables: [`format_table`], [`next_cell`]
+//! - table of contents: [`insert_toc`] (insert, or rebuild the one the document has)
+//! - structural selection: [`expand_selection`], [`shrink_selection`]
+//! - heading deletes that keep the structure: [`delete_heading`]
+//! - navigation (a byte, no change): [`next`]
 //!
 //! All positions are byte offsets on `char` boundaries of the given text.
 
 use std::ops::Range;
 
 mod blocks;
+mod heading;
 mod list;
+mod nav;
+mod select;
 mod table;
+mod toc;
 
 pub use blocks::{demote_section, move_block, move_section, promote_section, Dir};
+pub use heading::{delete_heading, HeadingDelete};
 pub use list::{indent_item, move_item, outdent_item, renumber, toggle_task};
+pub use nav::{next, Target};
+pub use select::{expand_selection, shrink_selection};
 pub use table::{format_table, next_cell, Step};
+pub use toc::insert_toc;
 
 /// One edit: replace `range` of the old text with `text`, and put the caret at `cursor` of the new text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +47,42 @@ impl Change {
         out.push_str(&self.text);
         out.push_str(&text[self.range.end..]);
         out
+    }
+}
+
+/// Several non-overlapping edits (sorted, in old-text bytes) as one [`Change`] spanning them all. The caret keeps its
+/// place in the text around the edits; inside an edited range it goes to the start of that edit.
+pub(crate) fn change_from_edits(text: &str, edits: &[(Range<usize>, String)], caret: usize) -> Option<Change> {
+    let (first, last) = (edits.first()?, edits.last()?);
+    let span = first.0.start..last.0.end;
+    let mut new = String::new();
+    let mut at = span.start;
+    let (mut delta, mut cursor) = (0isize, None);
+    for (r, s) in edits {
+        new.push_str(&text[at..r.start]);
+        new.push_str(s);
+        at = r.end;
+        if cursor.is_none() {
+            if caret >= r.end {
+                delta += s.len() as isize - (r.end - r.start) as isize;
+            } else {
+                cursor = Some(if caret >= r.start { (r.start as isize + delta) as usize } else { (caret as isize + delta) as usize });
+            }
+        }
+    }
+    let cursor = cursor.unwrap_or_else(|| (caret as isize + delta) as usize);
+    Some(Change { range: span, text: new, cursor })
+}
+
+/// The end of the line break at `pos` (CRLF or LF), or `pos` when there is none.
+pub(crate) fn after_break(text: &str, pos: usize) -> usize {
+    let rest = &text[pos..];
+    if rest.starts_with("\r\n") {
+        pos + 2
+    } else if rest.starts_with('\n') {
+        pos + 1
+    } else {
+        pos
     }
 }
 

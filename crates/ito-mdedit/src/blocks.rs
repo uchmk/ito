@@ -11,7 +11,7 @@ pub enum Dir {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Heading,
     Meta,
     Other,
@@ -19,7 +19,7 @@ enum Kind {
 
 /// The top-level blocks (paragraph, list, table, code, quote, rule, heading, front matter), each without its
 /// trailing line breaks.
-fn top_blocks(text: &str) -> Vec<(Range<usize>, Kind)> {
+pub(crate) fn top_blocks(text: &str) -> Vec<(Range<usize>, Kind)> {
     let mut out = Vec::new();
     let (mut depth, mut start, mut kind) = (0usize, 0, Kind::Other);
     for (event, r) in Parser::new_ext(text, ito_outline::options()).into_offset_iter() {
