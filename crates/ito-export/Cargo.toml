@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 # SVG to pixels; the same version and features as kura's preview.
-resvg = { version = "0.48", default-features = false, features = ["text", "system-fonts"] }
+resvg = { version = "0.49", default-features = false, features = ["text", "system-fonts"] }
 # SVG to PDF (text stays text, the fonts are subset and embedded), and the
 # page tree around it (the same pdf-writer as svg2pdf's). Pure Rust, like resvg.
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
