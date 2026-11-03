@@ -8,6 +8,8 @@
 //! - tables: [`format_table`], [`next_cell`]
 //! - table of contents: [`insert_toc`] (insert, or rebuild the one the document has)
 //! - structural selection: [`expand_selection`], [`shrink_selection`]
+//! - markup on a selection (a [`SelChange`]: the change and the selection after it): [`inline`] (bold, italic, code,
+//!   strike, link; a toggle), [`line_type`] (heading, quote, fence, bullet, number, task), [`set_tasks`]
 //! - heading deletes that keep the structure: [`delete_heading`]
 //! - navigation (a byte, no change): [`next`]
 //!
@@ -16,6 +18,7 @@
 use std::ops::Range;
 
 mod blocks;
+mod format;
 mod heading;
 mod list;
 mod nav;
@@ -24,6 +27,7 @@ mod table;
 mod toc;
 
 pub use blocks::{demote_section, move_block, move_section, promote_section, Dir};
+pub use format::{check_tasks, inline, line_type, set_tasks, toggle_tasks, uncheck_tasks, Inline, Line, SelChange};
 pub use heading::{delete_heading, HeadingDelete};
 pub use list::{indent_item, move_item, outdent_item, renumber, toggle_task};
 pub use nav::{next, Target};

@@ -137,7 +137,7 @@ fn compose(text: &str, a: Change, mid: &str, b: Change) -> Change {
 
 /// For each line, whether it is inside a code block (fenced or indented). The line of an item that holds a fence
 /// after its marker is not code.
-fn code_lines(text: &str, ls: &[Range<usize>]) -> Vec<bool> {
+pub(crate) fn code_lines(text: &str, ls: &[Range<usize>]) -> Vec<bool> {
     let blocks: Vec<Range<usize>> =
         Parser::new(text).into_offset_iter().filter_map(|(e, r)| matches!(e, Event::Start(Tag::CodeBlock(_))).then_some(r)).collect();
     ls.iter()
