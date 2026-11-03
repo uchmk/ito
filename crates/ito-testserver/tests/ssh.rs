@@ -268,3 +268,15 @@ fn a_silent_server_times_out() {
     assert!(matches!(Session::connect(&t), Err(Error::Connect(_))));
     assert!(started.elapsed() < Duration::from_secs(5));
 }
+
+#[test]
+fn the_one_shot_exec_delivers_term_before_it_returns() {
+    for _ in 0..12 {
+        let server = SshServer::start_with(config()).unwrap();
+        server.on_command("sleep", Output::new().hang());
+        let opts = ExecOptions { env: vec![], timeout: Some(Duration::from_millis(200)) };
+        let r = exec(&pw(&server), "sleep 99", &opts, &AtomicBool::new(false), &mut |_, _| {});
+        assert_eq!(r.unwrap_err(), Error::Timeout);
+        assert!(server.wait_until(Duration::from_secs(5), |s| s.signals().contains(&"TERM".to_owned()) && s.channels_closed() >= 1));
+    }
+}

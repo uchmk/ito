@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.242.0] - 2026-11-03
+
+### 修正
+- `ito-sftp`（#184）: 一発の `exec()` が、TERM とチャンネルの close を積んだ直後にランタイムを捨てるため、止める・時間切れのときにサーバーへ届かないことがあった（4 回に 1 回ほど）。
+  今は切断を送って接続が閉じるまで（最大 2 秒）待ってから戻る。`Session::exec` は元から確実。
+- 回帰テスト `ito-testserver/tests/ssh.rs` の `the_one_shot_exec_delivers_term_before_it_returns`（12 回繰り返し）。
+
+### 使う側がやること
+- `rev` を上げるだけ。止める・時間切れの `exec()` が最大 2 秒ほど長く待つことがある（相手が切断に応えないとき）。
+
 ## [0.241.0] - 2026-11-03
 
 ### 追加
