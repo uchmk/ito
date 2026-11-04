@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.244.0] - 2026-11-05
+
+### 追加
+- `ito-match`（#189）: 置換の編集の一覧。
+  - `Subst::edits(text)` / `edits_in(text, range)`: `(バイト範囲, 置換後の文字)` を昇順・重ならずに返す（`$1`・`${name}` は展開済み。空の一致も含み、止まらなくなることはない。`edits_in` は範囲に収まる一致だけ・lookaround は範囲の外も見る）。
+  - `Subst::from_query(query, rep, Query)`: `Matcher::new` と同じスマートケースと `(?m)`。`Query { regex, whole_word, ignore_case, all }` で文字どおり検索・単語単位・大文字小文字を選ぶ。
+  - `nth_after(ranges, byte)` / `nth_before(ranges, byte)`: 一致の一覧をキャレットから次・前へ（端で回る）。
+
+### 使う側がやること
+- `rev` を上げるだけ。
+
 ## [0.243.0] - 2026-11-05
 
 ### 追加

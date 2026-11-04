@@ -12,8 +12,10 @@
 pub mod fuzzy;
 mod glob;
 mod matcher;
+mod nav;
 mod subst;
 
 pub use glob::{glob_match, has_wildcard};
 pub use matcher::Matcher;
-pub use subst::Subst;
+pub use nav::{nth_after, nth_before};
+pub use subst::{Query, Subst};

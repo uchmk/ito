@@ -28,7 +28,7 @@ pub struct Matcher {
 }
 
 /// Whether `query` names a capital letter itself, skipping what follows a `\`.
-fn has_capital(query: &str) -> bool {
+pub(crate) fn has_capital(query: &str) -> bool {
     let mut chars = query.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
