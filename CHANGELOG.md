@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.245.0] - 2026-11-05
+
+### 追加
+- `ito-find`（#190）: エディターの検索・置換バー。`FindBar`（Find / Replace の欄・正規表現 / 大文字小文字 / 単語 / 選択範囲の切り替え・`3 / 12`・`No results`・エラーの 1 行・`searching…`）と `show(ui, look, &Words) -> Output { query_changed, next, prev, replace_one, replace_all, closed }`。
+  バーは文章を編集しない。置換は `FindBar::subst()`（`ito-match` の `Subst`）の `edits` でアプリが 1 回の undo にする。
+  検索はアプリがワーカースレッドで走らせ、`version()` を付けて `set_result` で返す（古い結果は捨てる）。`ranges(text, selection)` で強調と次・前の一覧が取れる。
+  Enter / Shift+Enter で次・前、Esc で閉じる（変換中は奪わない）。キーの名前は `cmd`（`find.open`・`find.next`・`find.prev`・`replace.open`・`replace.all`）。
+
+### 使う側がやること
+- 文言は `Words` で渡す。キーマップに `cmd` の名前を割り当てる。
+
 ## [0.244.0] - 2026-11-05
 
 ### 追加

@@ -67,7 +67,8 @@
 | コードの色分け | `ito-syntax` |
 | 日本語の変換中の下線・候補窓の位置 | `ito-ime` |
 | 描いた文字をマウスで範囲選択してコピー | `ito-select` |
-| 検索の一致（正規表現・曖昧） | `ito-match` |
+| 検索の一致（正規表現・曖昧）・置換の編集 | `ito-match`（`Matcher`・`Subst::edits`） |
+| **検索・置換のバー**（Ctrl+F / Ctrl+H） | `ito-find`（`FindBar`） |
 | 行の差分（ガターの変更表示、保存前の比較） | `ito-diff` |
 | 外のプログラムで開く（`$EDITOR`、diff ツール） | `ito-openin` |
 | PNG・PDF・印刷に書き出す | `ito-export` |

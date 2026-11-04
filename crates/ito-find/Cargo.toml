@@ -1,0 +1,15 @@
+[package]
+name = "ito-find"
+description = "The Find / Replace bar of a text editor: the state (queries, toggles, result count, a version that drops stale results), an egui bar, and the outputs the app turns into edits with ito-match"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-a11y = { path = "../ito-a11y", features = ["egui"] }
+ito-match = { path = "../ito-match" }
+ito-prefs = { path = "../ito-prefs" }
+ito-theme = { path = "../ito-theme" }
