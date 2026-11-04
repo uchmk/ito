@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.243.0] - 2026-11-05
+
+### 追加
+- `ito-theme`（#186）: 名前のついた役割を `Colors` に足した。テーマのファイルのキーは増やさず、今の 12 色から出す（20 テーマと高コントラストで読める比をテストで守る）。`css_vars` にも出る。
+  - 意味: `accent`（`run`）・`success`（`done`）・`warning`（`wait`）。
+  - エディター: `gutter`・`gutter_active`・`current_line`・`caret`・`caret_idle`・`invisible`・`invisible_fill`・`ime_underline`。選択は今までの `selection()`。
+  - 差分・検索: `diff_added`・`diff_modified`・`diff_removed`、背景の `diff_bg(mark)`、`match_bg`・`match_current_bg`（背景だけ）、`fold`。差分は色だけにせず形（`+`・棒）を添える。
+- docs/design-tokens.md・docs/interaction.md。
+
+### 使う側がやること
+- `rev` を上げるだけ。アプリで `mix(dim, bg, 0.4)` などで代用していた所は、上の役割に置き換えられる。
+
 ## [0.242.0] - 2026-11-03
 
 ### 修正

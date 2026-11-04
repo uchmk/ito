@@ -247,6 +247,84 @@ impl Colors {
         ito_select::fill(self.panel, self.run, self.light)
     }
 
+    // Named roles over the same twelve (uchmk/ito#186). None is a new theme-file key, so a theme
+    // file that sets the twelve gets all of them, and `high_contrast` carries them along.
+
+    /// The one colour that says "this is the way": the primary button, the focus. It is `run`.
+    pub fn accent(&self) -> Color32 {
+        self.run
+    }
+    /// Something went through. It is `done`; draw it with `ito_a11y::State` as well.
+    pub fn success(&self) -> Color32 {
+        self.done
+    }
+    /// Something needs a look. It is `wait`; draw it with `ito_a11y::State` as well.
+    pub fn warning(&self) -> Color32 {
+        self.wait
+    }
+
+    /// Line numbers: quieter than the text.
+    pub fn gutter(&self) -> Color32 {
+        mix(self.dim, self.bg, 0.25)
+    }
+    /// The line number of the line the caret is on: the only strong one.
+    pub fn gutter_active(&self) -> Color32 {
+        mix(self.dim, self.fg, 0.7)
+    }
+    /// A faint band behind the line the caret is on.
+    pub fn current_line(&self) -> Color32 {
+        mix(self.bg, self.fg, 0.05)
+    }
+    /// The caret in a window that has the keyboard; it shows over a heading's colour too.
+    pub fn caret(&self) -> Color32 {
+        self.strong()
+    }
+    /// The caret in a window that does not.
+    pub fn caret_idle(&self) -> Color32 {
+        self.dim
+    }
+    /// A mark for what cannot be seen (a full-width space, the end of a line): quiet, but there in every theme.
+    pub fn invisible(&self) -> Color32 {
+        mix(self.dim, self.bg, 0.35)
+    }
+    /// The box behind such a mark.
+    pub fn invisible_fill(&self) -> Color32 {
+        mix(self.bg, self.dim, 0.14)
+    }
+    /// The underline of text an input method is still composing.
+    pub fn ime_underline(&self) -> Color32 {
+        self.run
+    }
+
+    /// An added line or gutter bar. Pair it with a shape (a `+` or a bar), never colour alone.
+    pub fn diff_added(&self) -> Color32 {
+        self.done
+    }
+    /// A changed line or gutter bar.
+    pub fn diff_modified(&self) -> Color32 {
+        self.blue
+    }
+    /// A removed line or gutter mark.
+    pub fn diff_removed(&self) -> Color32 {
+        self.err
+    }
+    /// The faint background of an added, changed or removed line (`diff_*` is the mark; this sits under the text).
+    pub fn diff_bg(&self, mark: Color32) -> Color32 {
+        mix(self.bg, mark, 0.14)
+    }
+    /// Behind each search match; background only, so the text keeps its colour.
+    pub fn match_bg(&self) -> Color32 {
+        mix(self.bg, self.wait, 0.15)
+    }
+    /// Behind the match the search is on now.
+    pub fn match_current_bg(&self) -> Color32 {
+        mix(self.bg, self.wait, 0.24)
+    }
+    /// A folded range's line.
+    pub fn fold(&self) -> Color32 {
+        mix(self.bg, self.dim, 0.18)
+    }
+
     /// The terminal's sixteen: black and white from the theme's own text
     /// and panel, the brights a little lighter (darker on a light theme).
     pub fn ansi(&self) -> [Color32; 16] {
@@ -518,7 +596,7 @@ impl Colors {
     /// `--strong`, `--faint`, `--wait-bg`, `--wait-text`, `--on-accent`, `--selection`) and `color-scheme`.
     /// Each is `#rrggbb`, or `rgba(...)` where the alpha is under 255.
     pub fn css_vars(&self) -> String {
-        let rows: [(&str, Color32); 22] = [
+        let rows: [(&str, Color32); 42] = [
             ("bg", self.bg),
             ("side", self.side),
             ("panel", self.panel),
@@ -541,6 +619,26 @@ impl Colors {
             ("wait-text", self.wait_text()),
             ("on-accent", self.on_accent()),
             ("selection", self.selection()),
+            ("accent", self.accent()),
+            ("success", self.success()),
+            ("warning", self.warning()),
+            ("gutter", self.gutter()),
+            ("gutter-active", self.gutter_active()),
+            ("current-line", self.current_line()),
+            ("caret", self.caret()),
+            ("caret-idle", self.caret_idle()),
+            ("invisible", self.invisible()),
+            ("invisible-fill", self.invisible_fill()),
+            ("ime-underline", self.ime_underline()),
+            ("diff-added", self.diff_added()),
+            ("diff-modified", self.diff_modified()),
+            ("diff-removed", self.diff_removed()),
+            ("diff-added-bg", self.diff_bg(self.diff_added())),
+            ("diff-modified-bg", self.diff_bg(self.diff_modified())),
+            ("diff-removed-bg", self.diff_bg(self.diff_removed())),
+            ("match-bg", self.match_bg()),
+            ("match-current-bg", self.match_current_bg()),
+            ("fold", self.fold()),
         ];
         let mut out = String::new();
         for (name, c) in rows {
@@ -673,6 +771,45 @@ mod tests {
             for (what, s) in [("wait", c.wait), ("run", c.run), ("err", c.err), ("done", c.done)] {
                 assert!(contrast(s, c.panel) >= 3.0, "{name}: {what} {:.1}", contrast(s, c.panel));
             }
+        }
+    }
+
+    /// The editor and diff roles (uchmk/ito#186) read in every theme, and in its high-contrast variant.
+    #[test]
+    fn the_editor_and_diff_roles_read() {
+        for t in builtin() {
+            for (kind, c) in [("", t.colors), (" high-contrast", t.colors.high_contrast())] {
+                let name = format!("{}{kind}", t.name);
+                let on = |what: &str, fg: Color32, bg: Color32, want: f32| {
+                    let got = contrast(fg, bg);
+                    assert!(got >= want, "{name}: {what} {got:.2} < {want}");
+                };
+                on("gutter on bg", c.gutter(), c.bg, 2.5);
+                on("active gutter on current line", c.gutter_active(), c.current_line(), 4.5);
+                assert!(contrast(c.gutter_active(), c.bg) > contrast(c.gutter(), c.bg), "{name}: active gutter is stronger");
+                on("text on current line", c.fg, c.current_line(), 6.0);
+                on("caret on bg", c.caret(), c.bg, 4.5);
+                on("idle caret on bg", c.caret_idle(), c.bg, 3.0);
+                on("invisible on bg", c.invisible(), c.bg, 1.5);
+                on("invisible on its fill", c.invisible(), c.invisible_fill(), 1.3);
+                on("ime underline on bg", c.ime_underline(), c.bg, 3.0);
+                for (what, m) in [("added", c.diff_added()), ("modified", c.diff_modified()), ("removed", c.diff_removed())] {
+                    on(&format!("{what} mark on bg"), m, c.bg, 3.0);
+                    on(&format!("text on {what} bg"), c.fg, c.diff_bg(m), 4.5);
+                }
+                on("text on match", c.fg, c.match_bg(), 4.5);
+                on("text on current match", c.fg, c.match_current_bg(), 4.5);
+                on("text on fold", c.fg, c.fold(), 4.5);
+                assert!(c.match_current_bg() != c.match_bg(), "{name}: the current match stands out");
+            }
+        }
+    }
+
+    #[test]
+    fn css_vars_carry_the_new_roles() {
+        let css = builtin()[0].colors.css_vars();
+        for name in ["accent", "gutter-active", "current-line", "caret", "invisible-fill", "diff-removed-bg", "match-current-bg", "fold"] {
+            assert!(css.contains(&format!("--{name}: ")), "{name}");
         }
     }
 

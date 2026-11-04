@@ -31,12 +31,12 @@ weft の設計書は意味の色を Surface・Text・Border・Accent・State・E
 | Surface | `bg`・`side`・`panel`・`raised` | — |
 | Text | `fg`・`dim`・`strong`・`faint` | — |
 | Border | `border`・`border_strong` | — |
-| Accent | `run` を代用 | 専用の役割（[#186](https://github.com/uchmk/ito/issues/186)） |
-| State | `err`・`done`・`wait` | Success・Warning の専用色（#186） |
-| Editor | `selection` だけ | 現在行・行番号・キャレット・印・IME の下線（#186） |
-| Diff・検索 | なし（`ito-diff` の使う側が決めている） | 追加・変更・削除、一致、折りたたみ（#186） |
+| Accent | `accent()`（= `run`） | — |
+| State | `err`・`success()`（= `done`）・`warning()`（= `wait`） | — |
+| Editor | `selection`・`gutter`・`gutter_active`・`current_line`・`caret`・`caret_idle`・`invisible`・`invisible_fill`・`ime_underline` | — |
+| Diff・検索 | `diff_added`・`diff_modified`・`diff_removed`・`diff_bg(mark)`・`match_bg`・`match_current_bg`・`fold` | — |
 
-足りない役割を、アプリに 16 進や `mix(dim, bg, 0.4)` で書かない。#186 が入るまでは、近い役割から混ぜて、コメントに `ito #186` と書く。
+役割はテーマのファイルのキーではなく、基本の 12 色から出す。アプリに 16 進や `mix(dim, bg, 0.4)` で書かない。
 
 ### 色の直書きが残る所
 
