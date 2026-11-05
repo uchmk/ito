@@ -506,7 +506,12 @@ pub fn about_page(ui: &mut egui::Ui, l: Look, w: &MoreWords, words: &Words, name
     let mut out = Vec::new();
     section(ui, l, w.about, |ui| {
         let line = |ui: &mut egui::Ui, label: &str, value: &str| {
-            row(ui, l, label, "", |ui| ui.label(egui::RichText::new(value).size(z(ui, 13.0)).color(l.c.dim)));
+            row(ui, l, label, "", |ui| {
+                let text = egui::RichText::new(value).size(z(ui, 13.0)).color(l.c.dim);
+                // A multi-line value sits in a right-to-left row; keep its lines left-aligned.
+                let label = if value.contains('\n') { egui::Label::new(text).halign(egui::Align::LEFT) } else { egui::Label::new(text) };
+                ui.add(label)
+            });
         };
         line(ui, w.version, a.version);
         if let Some(c) = a.commit.filter(|c| !c.is_empty()) {
