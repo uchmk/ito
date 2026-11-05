@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.260.0] - 2026-11-05
+
+### 修正
+- アプリの雛形 `templates/app/scripts/verify.sh` の clippy の分岐を ito 自身の `scripts/verify.sh` と同じにした。以前は `*-linux-gnu:*`・`*-windows-msvc:*` が「どのホストでも素の clippy」になり、C の依存を足すと Windows などのホストから Linux ターゲットで落ちた。今はホストと同じターゲットだけ素の clippy、ほかは cargo-zigbuild を通す。
+- 使う側がやること: 既存のアプリ（tsumugi など）の `scripts/verify.sh` は `lanes.sh sync` で配られないので、`case "$t:$host"` の 1 行目を `*-apple-darwin:*-apple-darwin | *-linux-gnu:*-linux-gnu | *-windows-msvc:*-windows-msvc)` に手で直す。
+
 ## [0.259.0] - 2026-11-05
 
 ### 変更

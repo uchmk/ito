@@ -56,7 +56,7 @@ tests=$(echo "$last" | grep 'test result' | awk '{p+=$4; f+=$6} END {print p " p
 run cargo +stable clippy -q --workspace --all-targets --all-features -- -D warnings
 for t in $others; do
     case "$t:$host" in
-        *-apple-darwin:*-apple-darwin | *-linux-gnu:* | *-windows-msvc:*)
+        *-apple-darwin:*-apple-darwin | *-linux-gnu:*-linux-gnu | *-windows-msvc:*-windows-msvc)
             run cargo +stable clippy -q --workspace --all-targets --all-features --target "$t" -- -D warnings ;;
         *) zigbuild clippy -q --workspace --all-targets --all-features --target "$t" -- -D warnings ;;
     esac
