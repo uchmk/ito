@@ -117,7 +117,7 @@ fn popup(ctx: &Context, l: Look, id: Id, anchor: &Response, words: &EmojiWords, 
             egui::Frame::new()
                 .fill(c.side)
                 .stroke(Stroke::new(1.0, c.border_strong()))
-                .corner_radius(10.0)
+                .corner_radius(ito_theme::scale::radius::BOX)
                 .inner_margin(pad)
                 .shadow(egui::Shadow { offset: [0, 6], blur: 20, spread: 1, color: Color32::from_black_alpha(80) })
                 .show(ui, |ui| {

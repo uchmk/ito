@@ -151,86 +151,91 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
         .fixed_pos(anchor.right_bottom() + vec2(0.0, 4.0));
     let mut first = None;
     let resp = area.show(ctx, |ui| {
-        egui::Frame::NONE.fill(c.panel).stroke(Stroke::new(1.0, c.border_strong())).corner_radius(10.0).inner_margin(10.0).show(ui, |ui| {
-            ui.set_width(WIDTH);
-            let unread = unread(notices);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(words.title).strong().color(c.fg));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mark = ui.add_enabled(unread > 0, egui::Button::new(words.mark_read).small());
-                    if unread > 0 {
-                        first = Some(mark.id);
-                    }
-                    if mark.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if mark.clicked() {
-                        action = Some(Action::ReadAll);
-                    }
-                });
-            });
-            ui.separator();
-            if notices.is_empty() {
-                ui.label(RichText::new(words.empty).color(c.dim));
-                return;
-            }
-            // The rows' own height, not what an Area leaves of its last
-            // frame's size: a list that gained an entry stayed at 1.5 rows.
-            let rows = notices.len() as f32 * (ROW_H + ui.spacing().item_spacing.y);
-            egui::ScrollArea::vertical()
-                .max_height(rows.min(MAX_ROWS_H))
-                .min_scrolled_height(rows.min(MAX_ROWS_H))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for (row, n) in notices.iter().rev().enumerate() {
-                        let text_color = if n.read { c.dim } else { c.fg };
-                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-                        first = first.or(Some(resp.id));
-                        if resp.hovered() {
+        egui::Frame::NONE
+            .fill(c.panel)
+            .stroke(Stroke::new(1.0, c.border_strong()))
+            .corner_radius(ito_theme::scale::radius::BOX)
+            .inner_margin(10.0)
+            .show(ui, |ui| {
+                ui.set_width(WIDTH);
+                let unread = unread(notices);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(words.title).strong().color(c.fg));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mark = ui.add_enabled(unread > 0, egui::Button::new(words.mark_read).small());
+                        if unread > 0 {
+                            first = Some(mark.id);
+                        }
+                        if mark.hovered() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
-                        let p = ui.painter_at(rect);
-                        let keyed = sel == Some(row);
-                        if keyed && moved {
-                            resp.scroll_to_me(None);
+                        if mark.clicked() {
+                            action = Some(Action::ReadAll);
                         }
-                        if resp.hovered() || keyed {
-                            p.rect_filled(rect, 6.0, c.selection().gamma_multiply(0.6));
-                        }
-                        let color = n.kind.color();
-                        let dot = rect.left_top() + vec2(10.0, 14.0);
-                        if n.read {
-                            p.circle_stroke(dot, 4.0, Stroke::new(1.2, color));
-                        } else {
-                            p.circle_filled(dot, 4.0, color);
-                        }
-                        // The age first, then the word, and the title cut short
-                        // in what is left: a long one ran over both.
-                        let line = |text: String, size: f32, color: Color32, width: f32| {
-                            let mut job = egui::text::LayoutJob::simple_singleline(text, FontId::proportional(size), color);
-                            job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(10.0));
-                            ui.fonts_mut(|f| f.layout_job(job))
-                        };
-                        let since = now.duration_since(n.at).unwrap_or_default();
-                        let ago = line(words.ago.replace("{}", &age(since)), 11.0, c.dim, rect.width());
-                        let room = rect.width() - 22.0 - 6.0 - ago.size().x - 10.0;
-                        let word = line(format!(" · {}", words.kinds[n.kind.index()]), 13.0, text_color, room / 2.0);
-                        let title = line(n.title.clone(), 13.0, text_color, room - word.size().x);
-                        let head = rect.left_top() + vec2(22.0, 6.0);
-                        let after = head + vec2(title.size().x, 0.0);
-                        p.galley(egui::pos2(rect.right() - 6.0 - ago.size().x, rect.top() + 6.0), ago, c.dim);
-                        p.galley(head, title, text_color);
-                        p.galley(after, word, text_color);
-                        if let Some(note) = n.note.as_ref().filter(|s| !s.is_empty()) {
-                            let note = line(note.clone(), 11.5, c.dim, rect.width() - 22.0 - 6.0);
-                            p.galley(rect.left_top() + vec2(22.0, 25.0), note, c.dim);
-                        }
-                        if resp.clicked() {
-                            action = Some(Action::Open(n.go.clone(), n.id));
-                        }
-                    }
+                    });
                 });
-        });
+                ui.separator();
+                if notices.is_empty() {
+                    ui.label(RichText::new(words.empty).color(c.dim));
+                    return;
+                }
+                // The rows' own height, not what an Area leaves of its last
+                // frame's size: a list that gained an entry stayed at 1.5 rows.
+                let rows = notices.len() as f32 * (ROW_H + ui.spacing().item_spacing.y);
+                egui::ScrollArea::vertical()
+                    .max_height(rows.min(MAX_ROWS_H))
+                    .min_scrolled_height(rows.min(MAX_ROWS_H))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (row, n) in notices.iter().rev().enumerate() {
+                            let text_color = if n.read { c.dim } else { c.fg };
+                            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+                            first = first.or(Some(resp.id));
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            let p = ui.painter_at(rect);
+                            let keyed = sel == Some(row);
+                            if keyed && moved {
+                                resp.scroll_to_me(None);
+                            }
+                            if resp.hovered() || keyed {
+                                p.rect_filled(rect, 6.0, c.selection().gamma_multiply(0.6));
+                            }
+                            let color = n.kind.color();
+                            let dot = rect.left_top() + vec2(10.0, 14.0);
+                            if n.read {
+                                p.circle_stroke(dot, 4.0, Stroke::new(1.2, color));
+                            } else {
+                                p.circle_filled(dot, 4.0, color);
+                            }
+                            // The age first, then the word, and the title cut short
+                            // in what is left: a long one ran over both.
+                            let line = |text: String, size: f32, color: Color32, width: f32| {
+                                let mut job = egui::text::LayoutJob::simple_singleline(text, FontId::proportional(size), color);
+                                job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(10.0));
+                                ui.fonts_mut(|f| f.layout_job(job))
+                            };
+                            let since = now.duration_since(n.at).unwrap_or_default();
+                            let ago = line(words.ago.replace("{}", &age(since)), 11.0, c.dim, rect.width());
+                            let room = rect.width() - 22.0 - 6.0 - ago.size().x - 10.0;
+                            let word = line(format!(" · {}", words.kinds[n.kind.index()]), 13.0, text_color, room / 2.0);
+                            let title = line(n.title.clone(), 13.0, text_color, room - word.size().x);
+                            let head = rect.left_top() + vec2(22.0, 6.0);
+                            let after = head + vec2(title.size().x, 0.0);
+                            p.galley(egui::pos2(rect.right() - 6.0 - ago.size().x, rect.top() + 6.0), ago, c.dim);
+                            p.galley(head, title, text_color);
+                            p.galley(after, word, text_color);
+                            if let Some(note) = n.note.as_ref().filter(|s| !s.is_empty()) {
+                                let note = line(note.clone(), 11.5, c.dim, rect.width() - 22.0 - 6.0);
+                                p.galley(rect.left_top() + vec2(22.0, 25.0), note, c.dim);
+                            }
+                            if resp.clicked() {
+                                action = Some(Action::Open(n.go.clone(), n.id));
+                            }
+                        }
+                    });
+            });
     });
     keep_tab_inside(ctx, resp.response.layer_id, first);
     // A click on the bell is the app's to answer (it opens or closes the list):

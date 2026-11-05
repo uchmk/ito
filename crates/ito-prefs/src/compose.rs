@@ -405,7 +405,7 @@ impl<'a> FloatCard<'a> {
             let frame = egui::Frame::new()
                 .fill(c.side)
                 .stroke(Stroke::new(1.0, c.border_strong()))
-                .corner_radius(12.0)
+                .corner_radius(ito_theme::scale::radius::BOX)
                 .shadow(egui::Shadow { offset: [0, 6], blur: 24, spread: 2, color: Color32::from_black_alpha(90) });
             frame.show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;

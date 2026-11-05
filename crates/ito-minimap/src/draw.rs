@@ -63,7 +63,7 @@ pub fn show(
 ) -> Shown {
     let c = ito_theme::colors();
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(3), c.bg);
+    painter.rect_filled(rect, CornerRadius::same(ito_theme::scale::radius::MARK), c.bg);
 
     let len = rows.len();
     // A short file keeps its natural height at the top; the rest of the strip stays empty.
@@ -199,10 +199,10 @@ fn hover(
     let pointed = (k - window.start) as f32 * row_h + 2.0;
     let card = hover_card(p.y, area(body), area(strip), w, rows.len() as f32 * row_h + 4.0, pointed + row_h / 2.0);
     let card = Rect::from_min_max(pos2(card.left, card.top), pos2(card.right, card.bottom));
-    painter.rect_filled(card, CornerRadius::same(3), mix(c.bg, c.fg, 0.06));
+    painter.rect_filled(card, CornerRadius::same(ito_theme::scale::radius::MARK), mix(c.bg, c.fg, 0.06));
     let mark = Rect::from_min_size(card.left_top() + vec2(1.0, pointed), vec2(card.width() - 2.0, row_h));
     painter.rect_filled(mark, CornerRadius::ZERO, mix(c.panel, c.fg, 0.12));
-    painter.rect_stroke(card, CornerRadius::same(3), Stroke::new(1.0, c.border), StrokeKind::Inside);
+    painter.rect_stroke(card, CornerRadius::same(ito_theme::scale::radius::MARK), Stroke::new(1.0, c.border), StrokeKind::Inside);
     for (i, g) in rows.into_iter().enumerate() {
         painter.galley(card.left_top() + vec2(6.0, 2.0 + i as f32 * row_h), g, c.fg);
     }

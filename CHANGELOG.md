@@ -3,6 +3,11 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.254.0] - 2026-11-05
+
+### 変更
+- 角丸を `scale::radius` の段に寄せた（#185）。箱（`ito-notices` の一覧、`ito-prefs` のカード・キーの窓・絵文字・日付・返信の窓）の 10・12 → `BOX`（8）、`ito-prefs` の 7 → `CONTROL`（6）、行の強調・コードの角など 3 → `MARK`（4）（`ito-outline`・`ito-markdown`・`ito-minimap`）。丸みが 1〜4 pt 変わる。余白と文字の大きさは未着手。
+
 ## [0.253.0] - 2026-11-05
 
 ### 変更

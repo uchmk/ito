@@ -194,7 +194,7 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
                                 done = true;
                             }
                             let b = egui::Button::new(RichText::new(w.save).size(z(ui, 12.5)))
-                                .corner_radius(7.0)
+                                .corner_radius(ito_theme::scale::radius::CONTROL)
                                 .min_size(egui::vec2(0.0, z(ui, 30.0)));
                             let r = ui.add_enabled(!bad, b);
                             take_keys(ui, &r);

@@ -162,9 +162,13 @@ mod draw {
             let here = cur == Some(k);
             // Bright only where the keys are, so the entry being read stays quiet.
             if here {
-                clip.rect_filled(row, CornerRadius::same(3), mix(c.panel, c.fg, if focused { 0.18 } else { 0.08 }));
+                clip.rect_filled(
+                    row,
+                    CornerRadius::same(ito_theme::scale::radius::MARK),
+                    mix(c.panel, c.fg, if focused { 0.18 } else { 0.08 }),
+                );
             } else if resp.hovered() {
-                clip.rect_stroke(row, CornerRadius::same(3), Stroke::new(1.0, hover), StrokeKind::Inside);
+                clip.rect_stroke(row, CornerRadius::same(ito_theme::scale::radius::MARK), Stroke::new(1.0, hover), StrokeKind::Inside);
             }
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);

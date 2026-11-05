@@ -236,11 +236,16 @@ impl Md {
                 Deco::Task(on) => {
                     let b = Rect::from_center_size(pos2(at.x - GUTTER + 8.0, at.y + line_mid(&part.text)), vec2(11.0, 11.0));
                     if *on {
-                        p.rect_filled(b, CornerRadius::same(3), accent());
+                        p.rect_filled(b, CornerRadius::same(ito_theme::scale::radius::MARK), accent());
                         p.line_segment([b.left_center() + vec2(2.5, 0.0), b.center_bottom() + vec2(-0.5, -2.5)], Stroke::new(1.5, c.bg));
                         p.line_segment([b.center_bottom() + vec2(-0.5, -2.5), b.right_top() + vec2(-2.0, 2.5)], Stroke::new(1.5, c.bg));
                     } else {
-                        p.rect_stroke(b, CornerRadius::same(3), Stroke::new(1.0, c.border_strong()), StrokeKind::Inside);
+                        p.rect_stroke(
+                            b,
+                            CornerRadius::same(ito_theme::scale::radius::MARK),
+                            Stroke::new(1.0, c.border_strong()),
+                            StrokeKind::Inside,
+                        );
                     }
                 }
                 Deco::Quote(h) => {

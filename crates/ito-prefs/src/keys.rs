@@ -510,7 +510,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
     egui::Frame::NONE
         .fill(c.panel)
         .stroke(egui::Stroke::new(1.0, c.border))
-        .corner_radius(10.0)
+        .corner_radius(ito_theme::scale::radius::BOX)
         .inner_margin(egui::Margin::symmetric(18, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

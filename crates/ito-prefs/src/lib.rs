@@ -755,7 +755,7 @@ pub fn section(ui: &mut egui::Ui, l: Look, head: &str, mut rows: impl FnMut(&mut
     egui::Frame::NONE
         .fill(c.panel)
         .stroke(egui::Stroke::new(1.0, c.border))
-        .corner_radius(10.0)
+        .corner_radius(ito_theme::scale::radius::BOX)
         .inner_margin(egui::Margin::symmetric(18, 2))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -1088,7 +1088,7 @@ pub fn button_with(ui: &mut egui::Ui, l: Look, words: &str, tone: Tone) -> egui:
     let b = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(text))
         .fill(fill)
         .stroke(stroke)
-        .corner_radius(7.0)
+        .corner_radius(ito_theme::scale::radius::CONTROL)
         .min_size(egui::vec2(0.0, z(ui, 30.0)));
     let r = ui.add(b);
     take_keys(ui, &r);
@@ -1402,7 +1402,7 @@ pub fn theme_page(
             egui::Frame::NONE
                 .fill(c.panel)
                 .stroke(egui::Stroke::new(1.0, c.border))
-                .corner_radius(10.0)
+                .corner_radius(ito_theme::scale::radius::BOX)
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
                     for t in list {
