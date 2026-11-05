@@ -4,14 +4,29 @@
 use egui::text::LayoutJob;
 use egui::{pos2, vec2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, TextFormat, Ui};
 
-use crate::{at_line, band_pixels, hover_card, hover_window, indent_chars, line_at_y, per_band, scroll_to, Area, Row};
+use crate::{at_line, band_pixels, hover_card, hover_window, indent_chars, ink, line_at_y, per_band, runs, scroll_to, Area, Row};
 use crate::{HOVER_CARD_SHARE, HOVER_MAX_CHARS};
 
 /// How the pane lays its text out: the hover card is drawn on the same grid.
 pub struct Look {
+    /// How the bands are drawn.
+    pub style: Style,
     /// Height of one row of the pane's text, in points.
     pub row_h: f32,
     pub font: FontId,
+}
+
+/// How a line is drawn in the strip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Style {
+    /// One rectangle per band, spanning the widest line in it. Cheap for any file; needs no line text.
+    #[default]
+    Bands,
+    /// Each word its own coloured block, gaps blank (like VS Code's minimap). Needs `line(i)` for every line that fits
+    /// one band or more; a file with more lines than the strip has bands falls back to [`Style::Bands`].
+    Runs,
+    /// Like `Runs`, but one cell per character with its alpha following the ink (letters dense, punctuation light).
+    Glyphs,
 }
 
 /// What the strip did this frame.
@@ -54,7 +69,52 @@ pub fn show(
     let unit = rect.width() / 80.0;
     let ppp = ui.ctx().pixels_per_point();
     let band_h = (at_line(per, len) * rect.height()).max(1.0);
+    let detailed = look.style != Style::Bands && per == 1;
     for (b, band) in rows.chunks(per).enumerate() {
+        if detailed {
+            let y = at(b);
+            if y + band_h > rect.bottom() + 0.5 {
+                break;
+            }
+            let (top, bottom) = band_pixels(y, at(b + 1).min(rect.bottom()), ppp);
+            let pieces = line(b);
+            let max_cols = 80usize;
+            if look.style == Style::Glyphs {
+                let mut col = 0usize;
+                for (text, color) in &pieces {
+                    let base = color.map_or(c.fg, |[r, g, b]| Color32::from_rgb(r, g, b));
+                    for ch in text.chars() {
+                        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                        if col >= max_cols {
+                            break;
+                        }
+                        let a = ink(ch);
+                        if a > 0.0 && w > 0 {
+                            let x0 = rect.left() + col as f32 * unit;
+                            let x1 = (x0 + w as f32 * unit).min(rect.right());
+                            painter.rect_filled(
+                                Rect::from_min_max(pos2(x0, top), pos2(x1, bottom)),
+                                CornerRadius::ZERO,
+                                base.gamma_multiply(0.75 * a),
+                            );
+                        }
+                        col += w;
+                    }
+                }
+            } else {
+                for r in runs(pieces.iter().map(|(t, k)| (t.as_str(), *k)), max_cols) {
+                    let x0 = (rect.left() + r.start as f32 * unit).min(rect.right());
+                    let x1 = (x0 + r.len as f32 * unit).min(rect.right());
+                    let base = r.color.map_or(c.fg, |[r, g, b]| Color32::from_rgb(r, g, b));
+                    painter.rect_filled(
+                        Rect::from_min_max(pos2(x0, top), pos2(x1.max(x0 + 1.0), bottom)),
+                        CornerRadius::ZERO,
+                        base.gamma_multiply(0.7),
+                    );
+                }
+            }
+            continue;
+        }
         let Some(lead) = band.iter().filter(|r| r.len > 0).max_by_key(|r| r.len) else { continue };
         let indent = band.iter().filter(|r| r.len > 0).map(|r| r.indent).min().unwrap_or(0);
         let x0 = (rect.left() + indent as f32 * unit).min(rect.right());
@@ -201,7 +261,7 @@ mod tests {
     #[test]
     fn the_strip_draws_in_a_headless_frame() {
         let rows: Vec<Row> = (0..400).map(|i| Row { indent: (i % 8) as u16, len: 40, color: None }).collect();
-        let look = Look { row_h: 16.0, font: FontId::monospace(13.0) };
+        let look = Look { style: Style::Bands, row_h: 16.0, font: FontId::monospace(13.0) };
         let ctx = egui::Context::default();
         let mut out = Shown { scroll_to: Some(1) };
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -211,5 +271,22 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert_eq!(out, Shown { scroll_to: None });
+    }
+
+    #[test]
+    fn runs_and_glyphs_draw_in_a_headless_frame() {
+        let rows: Vec<Row> = (0..40).map(|_| Row { indent: 2, len: 20, color: None }).collect();
+        for style in [Style::Runs, Style::Glyphs] {
+            let look = Look { style, row_h: 16.0, font: FontId::monospace(13.0) };
+            let ctx = egui::Context::default();
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let body = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0));
+                let rect = Rect::from_min_size(pos2(606.0, 0.0), vec2(56.0, 300.0));
+                show(ui, rect, body, &rows, 0, 20, &look, &|i| {
+                    vec![("  let".into(), None), (format!(" x{i} = 日本;"), Some([200, 80, 80]))]
+                });
+            })
+            .drop_without_applying_deltas();
+        }
     }
 }

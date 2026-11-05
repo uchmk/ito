@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.248.0] - 2026-11-05
+
+### 追加
+- `ito-minimap`（#193）: VS Code 風の描き方。`Look::style`（`Style::{Bands, Runs, Glyphs}`）で選ぶ。
+  - `Runs`: 単語ごとに、その色の塊を並べる（語の間は空く）。`Glyphs`: 1 文字 1 セルで、インクの量（文字は濃く、記号は薄く）が濃さになる。
+  - 窓なしの `runs(pieces, max_cols)` → `Run { start, len, color }` と `ink(char)`。
+  - 1 行が 1 帯以上になるとき（行数が帯の数以内）だけ詳しく描く。それより長いファイルは `Bands` に戻る。見える帯の分だけ `line(i)` を呼ぶ。
+
+### 使う側がやること
+- `Look { row_h, font }` に `style` を足す（今までの見た目は `style: Style::Bands`、新しい見た目は `Style::Runs`）。`Runs`・`Glyphs` では `show` の `line(i)` が毎フレーム呼ばれる（行数ぶん。軽く返すこと）。
+
 ## [0.247.0] - 2026-11-05
 
 ### 追加

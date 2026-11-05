@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthChar;
 #[cfg(feature = "egui")]
 mod draw;
 #[cfg(feature = "egui")]
-pub use draw::{show, Look, Shown};
+pub use draw::{show, Look, Shown, Style};
 
 /// Height of one band, in points. Two is enough to read the shape of a file and coarse enough that a thousand lines
 /// fit in a pane.
@@ -81,6 +81,59 @@ where
     P: IntoIterator<Item = (&'a str, Option<[u8; 3]>)>,
 {
     lines.into_iter().map(row).collect()
+}
+
+/// One word of a line on the cell grid: where it starts (counting the indent), how many cells it covers, and its color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Run {
+    pub start: u16,
+    pub len: u16,
+    pub color: Option<[u8; 3]>,
+}
+
+/// The words of a line as coloured runs, up to `max_cols` cells. A run ends at white space or where the next piece
+/// begins, so the gaps between words stay blank. Unlike [`row`] this keeps every piece's color.
+pub fn runs<'a>(pieces: impl IntoIterator<Item = (&'a str, Option<[u8; 3]>)>, max_cols: usize) -> Vec<Run> {
+    let mut out = Vec::new();
+    let mut col = 0usize;
+    for (text, color) in pieces {
+        let mut from: Option<usize> = None;
+        for ch in text.chars() {
+            if col >= max_cols {
+                break;
+            }
+            let w = ch.width().unwrap_or(0);
+            if ch.is_whitespace() {
+                if let Some(a) = from.take() {
+                    out.push(Run { start: a as u16, len: (col - a) as u16, color });
+                }
+            } else if from.is_none() {
+                from = Some(col);
+            }
+            col += w;
+        }
+        if let Some(a) = from {
+            let end = col.min(max_cols);
+            if end > a {
+                out.push(Run { start: a as u16, len: (end - a) as u16, color });
+            }
+        }
+        if col >= max_cols {
+            break;
+        }
+    }
+    out
+}
+
+/// How much ink a character leaves, 0 to 1: letters and digits are dense, punctuation light, white space none.
+pub fn ink(c: char) -> f32 {
+    if c.is_whitespace() || c.is_control() {
+        0.0
+    } else if c.is_alphanumeric() {
+        0.85
+    } else {
+        0.45
+    }
 }
 
 /// A rectangle in points, `y` growing down. The sums below use this so they need no window.
@@ -185,6 +238,29 @@ mod tests {
 
     fn strip(top: f32, h: f32) -> Area {
         Area::new(200.0, top, 220.0, top + h)
+    }
+
+    #[test]
+    fn runs_keep_the_gaps_between_words_and_each_pieces_color() {
+        let red = Some([255, 0, 0]);
+        let r = runs([("  let", None), (" x", red), (" = 1;", None)], 80);
+        assert_eq!(
+            r,
+            vec![
+                Run { start: 2, len: 3, color: None },
+                Run { start: 6, len: 1, color: red },
+                Run { start: 8, len: 1, color: None },
+                Run { start: 10, len: 2, color: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn runs_stop_at_the_strip_width_and_count_wide_letters_double() {
+        let r = runs([("abcdef", None)], 4);
+        assert_eq!(r, vec![Run { start: 0, len: 4, color: None }]);
+        assert_eq!(runs([("日本", None)], 80), vec![Run { start: 0, len: 4, color: None }]);
+        assert!(ink('a') > ink('.') && ink(' ') == 0.0);
     }
 
     #[test]
