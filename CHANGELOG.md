@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.246.0] - 2026-11-05
+
+### 追加
+- `ito-theme::scale`（#185）: 共通のサイズのスケール。文字は役割の名前で引く `Text`（`EditorText` 14・`EditorGutter` 12.5・`ChromeBody` 13・`ChromeButton` 12・`ChromeSmall` 11・`DialogTitle` 16・`DialogKey` 12・`DialogHint` 11.5・`PageTitle` 18）。`size()` は倍率前、`at(ctx)` は `set_text_zoom` の倍率つき。
+  角は `radius::{BOX 8, CONTROL 6, MARK 4}`（箱は 1 つ）、余白は `space::{XS 4, SM 6, MD 10, LG 16, XL 24}`、高さは `height::{CONTROL 28, ROW 24}`。値は `docs/design-tokens.md` の表。
+- `ito-mdview`（#188）: 機能 `egui` で、整形した `Doc` を egui に描く `show(ui, &Doc, &mut State, &Options) -> Output`。等幅のマス目に、見えている行だけを描く（見出し・コード帯・罫線・引用・インラインコード・太字・取り消し線・下線・`Placeholder`）。色は `ito_theme::colors()`、文字の大きさは `scale::Text::EditorText`。
+  - `State::scroll_to_byte(byte)` で元の文章のバイトの行を先頭に出す。`Output::top_byte` が今の先頭のバイト。`Output::scrolled` は人のスクロールだけ true（`scroll_to_byte` の動きは false なので、エディターと互いに追いかけても戻らない）。
+  - クリックは `Output::clicked_byte`（新しい `Doc::byte_at(line, col)`。印を落とした行では近い値で、正確ではない。呼ぶ側が文字の境目に寄せる）。
+  - `Options::matcher` の一致を `match_bg`、`caret_byte` の行に `current_line`、その行の最初の一致に `match_current_bg`。
+  - `Output::cols` が幅に入る桁数。`doc.body_cols` と違えば、アプリが（ワーカーで）その桁で `render` し直す。描くときに解析はしない。
+
+### 使う側がやること
+- `ito-mdview` を `features = ["egui"]` で読む。`render` は `output.cols` で。
+- 新しく書く画面は直書きの数値でなく `scale` を使う。既存の直書きは部品を直すときに順に置き換える（ito 側もまだ置き換えていない）。
+
 ## [0.245.0] - 2026-11-05
 
 ### 追加

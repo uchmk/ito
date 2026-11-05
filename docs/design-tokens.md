@@ -43,23 +43,31 @@ weft の設計書は意味の色を Surface・Text・Border・Accent・State・E
 ito-theme の外で `Color32::from_rgb` などを使う箇所は 56（2026-11 の調べ）。多くは `ito-pane`（端末の色）で、これは別扱いでよい。
 `ito-prefs` の `tag.rs`（色見本）と、アクセントの上の文字色の直書きは、`on_accent` などへの置き換えを調べる。
 
-## 余白・角・高さ・文字の大きさ
+## 余白・角・高さ・文字の大きさ（`ito_theme::scale`）
 
-**共通のスケールはまだ無い**（[#185](https://github.com/uchmk/ito/issues/185)）。現状:
+数値でなく**役割・段の名前**で引く（[#185](https://github.com/uchmk/ito/issues/185)、0.246.0）。倍率（`set_text_zoom`）は文字だけに掛かる（`Text::at(ctx)`）。角・余白・高さは egui の `set_zoom_factor` が運ぶので掛けない。
 
-| 項目 | 現状 |
+| 文字の役割 | pt | 用途 |
+|---|---|---|
+| `editor.text` | 14 | エディターの本文 |
+| `editor.gutter` | 12.5 | 行番号（本文より一段下） |
+| `chrome.body` | 13 | 一覧・欄・ラベル |
+| `chrome.button` | 12 | ボタンの文字 |
+| `chrome.small` | 11 | 件数・注釈 |
+| `dialog.title` | 16 | ダイアログの見出し |
+| `dialog.key` | 12 | キーの札（等幅） |
+| `dialog.hint` | 11.5 | 見出しの下の説明 |
+| `page.title` | 18 | 設定のページなどの見出し |
+
+| 段 | 値 |
 |---|---|
-| 角丸 | 4・6・7・8・10 が混在（`ito-prefs/lib.rs` だけで 9 か所） |
-| 余白 | `vec2(10.0, 8.0)` などの直書き |
-| 窓の枠の高さ | 定数: titlebar 40（`ito_titlebar::HEIGHT`）、statusbar 26、タブの帯 30 |
-| ダイアログの幅 | `ito_confirm::MAX_WIDTH` 600 |
-| 文字の大きさ | 部品ごとの直書き（`ito-prefs`・`ito-confirm`・`ito-titlebar`・`ito-statusbar`・`ito-help` ほか 44 か所） |
+| `radius::BOX` / `CONTROL` / `MARK` | 8 / 6 / 4（箱の角は `BOX` の 1 つ） |
+| `space::XS` `SM` `MD` `LG` `XL` | 4 / 6 / 10 / 16 / 24 |
+| `height::CONTROL` / `ROW` | 28 / 24 |
 
-方針（#185 で決める）:
+窓の枠の高さは各クレートの定数のまま: titlebar 40（`ito_titlebar::HEIGHT`）、statusbar 26、タブの帯 30、ダイアログの幅 `ito_confirm::MAX_WIDTH` 600。
 
-- 数値でなく**役割の名前**で引く（`editor.text`・`chrome.body`・`dialog.title`・`page.title` のように）。
-- 箱（ダイアログ・カード）の角は 1 つの値にそろえる。
-- 倍率（`ito-statusbar::scale_text`）と高コントラストで崩れないこと。
+既存の直書き（`ito-prefs` ほか 44 か所の文字、角丸 4/6/7/8/10）は**まだ置き換えていない**。部品を直すときに順にこの表へ寄せる。新しく書く画面は最初から使う。
 
 ## フォント（`ito-fonts`）
 

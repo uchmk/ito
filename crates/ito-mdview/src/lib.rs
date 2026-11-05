@@ -11,6 +11,11 @@
 use std::ops::Range;
 
 mod lay;
+#[cfg(feature = "egui")]
+mod view;
+
+#[cfg(feature = "egui")]
+pub use view::{show, Options, Output, State};
 
 pub use lay::{lay_out, render, table_lines, Row, MAX_LINES};
 
@@ -90,6 +95,29 @@ impl Doc {
             Some(l) => l.bytes.start,
             None => self.lines.last().map_or(0, |l| l.bytes.end),
         }
+    }
+
+    /// The original byte under cell `col` of rendered `line` (a click on the preview). The text a line shows is
+    /// shorter than the bytes it came from where markup was dropped (`**`, link targets), so past the markup the
+    /// answer is the line's start plus the bytes of the text before `col`, clamped to the line's bytes: close, not
+    /// exact. The caller snaps it to a character boundary of the original. Quote bars and list markers (`indent`)
+    /// give the start of the line.
+    pub fn byte_at(&self, line: usize, col: usize) -> usize {
+        let Some(l) = self.lines.get(line) else { return self.byte_at_line(line) };
+        let (mut at, mut seen) = (0, 0);
+        'spans: for s in &l.spans {
+            for c in s.text.chars() {
+                let w = cells(c.encode_utf8(&mut [0; 4]));
+                if at >= col {
+                    break 'spans;
+                }
+                if at >= usize::from(l.indent) {
+                    seen += c.len_utf8();
+                }
+                at += w;
+            }
+        }
+        l.bytes.start + seen.min(l.bytes.len())
     }
 
     /// Where `m` matches in the rendered lines `from..to`: for each, the byte ranges of its spans' text laid end to
@@ -215,4 +243,28 @@ fn marks(doc: &Doc, m: &ito_match::Matcher, from: usize, to: usize) -> Vec<Vec<R
         at = end;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_at_follows_columns_past_the_markers() {
+        let d = render(
+            "- ab日c
+",
+            40,
+            &Palette::default(),
+        )
+        .0;
+        let l = &d.lines[0];
+        assert!(l.indent >= 2);
+        let at = |col| d.byte_at(0, col);
+        assert_eq!(at(0), l.bytes.start);
+        assert_eq!(at(usize::from(l.indent)), l.bytes.start);
+        assert_eq!(at(usize::from(l.indent) + 2), l.bytes.start + 2);
+        assert!(at(500) <= l.bytes.end);
+        assert_eq!(d.byte_at(99, 0), d.byte_at_line(99));
+    }
 }

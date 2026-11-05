@@ -60,7 +60,7 @@
 | Markdown を HTML・プレーンに書き出す | `ito-markdown::to_html`・`to_plain` |
 | **Markdown の目次**(見出し一覧・節の範囲・右の列) | `ito-outline`(`headings`・`section`、機能 `egui` の `column::show`) |
 | **ミニマップ**(右端の細い帯・見えている範囲の枠・ホバーで周りの数行) | `ito-minimap`(`rows`・`show`。色は `ito-syntax` の出力から) |
-| **整形した Markdown**(折り返し・リスト・表・色分けのコード。元の文章と描いた行の対応) | `ito-mdview`(`render`・`Doc::line_at_byte`/`byte_at_line`・`headings`。数式・図は `Placeholder`) |
+| **整形した Markdown**(折り返し・リスト・表・色分けのコード。元の文章と描いた行の対応) | `ito-mdview`(`render`・`Doc::line_at_byte`/`byte_at_line`・`headings`。数式・図は `Placeholder`。機能 `egui` の `show` で描く) |
 | **Markdown の構造の編集**(ブロック・節の移動、リストの字下げ、タスク、表の整形。キーは持たず `Change` を返す) | `ito-mdedit`(`move_block`・`demote_section`・`indent_item`・`toggle_task`・`format_table`/`next_cell`) |
 | **文書のタブ**(複数のファイルを 1 つの窓で。並び・前面・上限・保存は窓なしのモデル、帯は `Op` を返すだけで閉じない。未保存なら閉じる前に `ito-confirm`) | `ito-tabs`(`Tabs`・`labels`・`Settings`・`cmd`、機能 `egui` の `bar`) |
 | **文書の編集の土台**(自分で持つバッファ、選択、undo/redo、BOM と改行を保つ。`egui::TextEdit` を使わないとき) | `ito-textbuf`(`Doc`・`Transaction`・`typed`/`commit`・`pos`) |

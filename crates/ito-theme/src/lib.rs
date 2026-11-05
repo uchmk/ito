@@ -8,6 +8,8 @@
 //! ([`load_dir`]); which one is in force is common.toml's `theme`
 //! ([`pick`]).
 
+pub mod scale;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};

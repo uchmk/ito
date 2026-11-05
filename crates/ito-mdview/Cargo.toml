@@ -10,12 +10,16 @@ repository.workspace = true
 [features]
 # `Palette::from_theme`: the colours of the page from `ito_theme::colors()`.
 theme = ["dep:ito-theme"]
+# `show`: draws a `Doc` in egui on the cell grid, with scroll sync, click-to-byte and search marks.
+egui = ["theme", "dep:egui", "dep:ito-fonts"]
 
 [dependencies]
 ito-syntax = { path = "../ito-syntax" }
 ito-outline = { path = "../ito-outline" }
 ito-match = { path = "../ito-match" }
 ito-theme = { path = "../ito-theme", optional = true }
+egui = { version = "0.36", optional = true }
+ito-fonts = { path = "../ito-fonts", optional = true }
 unicode-width = "0.2"
 # Pure Rust.
 pulldown-cmark = { version = "0.13", default-features = false }
