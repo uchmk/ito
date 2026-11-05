@@ -243,7 +243,7 @@ impl FindBar {
                 });
                 if self.replace_open {
                     ui.horizontal(|ui| {
-                        ui.add_space(22.0);
+                        ui.add_space(ito_theme::scale::space::XL);
                         let r = ui.add(egui::TextEdit::singleline(&mut self.replace).hint_text(w.replace_hint).desired_width(240.0));
                         ito_a11y::say(&r, ito_a11y::Role::Label, w.replace_hint);
                         if r.lost_focus() && !composing && ui.input(|i| i.key_pressed(Key::Enter)) {

@@ -486,7 +486,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         }
         ui.label(RichText::new(w.changed_only).size(z(ui, 12.5)).color(c.fg));
     });
-    ui.add_space(12.0);
+    ui.add_space(ito_theme::scale::space::MD);
 
     // The rows shown, with the words each is found by.
     let q = st.query.trim().to_lowercase();
@@ -570,7 +570,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                     if !one_layer {
                         ui.allocate_ui_with_layout(egui::vec2(layer_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                             ui.set_width(layer_w);
-                            ui.add_space(9.0);
+                            ui.add_space(ito_theme::scale::space::MD);
                             ui.label(RichText::new(layer.as_str()).size(z(ui, 12.5)).color(c.dim));
                         });
                     }

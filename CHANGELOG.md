@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.255.0] - 2026-11-05
+
+### 変更
+- #185 の続き（余白）: 段にいちばん近い値の `add_space` を `ito_theme::scale::space` に寄せた（9・12 → `MD`、18 → `LG`、22 → `XL`。`ito-prefs`・`ito-find`）。1〜3 pt 動く。
+  段の真ん中で決められない 8 と 20、細い隙間の 2、文字の大きさは、画面で比べてから決めるので触っていない。
+
 ## [0.254.0] - 2026-11-05
 
 ### 変更

@@ -355,7 +355,7 @@ pub fn fieldset<R>(ui: &mut Ui, l: Look, title: &str, aside: &str, body: impl Fn
     ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, c.border));
     ui.add_space(ito_theme::scale::space::MD);
     let out = body(ui);
-    ui.add_space(18.0);
+    ui.add_space(ito_theme::scale::space::LG);
     out
 }
 

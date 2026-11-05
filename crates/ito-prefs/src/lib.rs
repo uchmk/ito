@@ -761,7 +761,7 @@ pub fn section(ui: &mut egui::Ui, l: Look, head: &str, mut rows: impl FnMut(&mut
             ui.set_width(ui.available_width());
             rows(ui);
         });
-    ui.add_space(22.0);
+    ui.add_space(ito_theme::scale::space::XL);
 }
 
 /// The line between two rows of a card, across the whole card.
