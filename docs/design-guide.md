@@ -76,7 +76,7 @@
 
 ## 見た目を決めるときの約束
 
-値（色・角・文字）は [design-tokens.md](design-tokens.md)、状態と操作の共通ルールは [interaction.md](interaction.md)。
+原則は [design-principles.md](design-principles.md)、撮って確かめる手順は [visual-review.md](visual-review.md)。値（色・角・文字）は [design-tokens.md](design-tokens.md)、状態と操作の共通ルールは [interaction.md](interaction.md)。
 
 - 色は `ito_theme::colors()`。ダークでもライトでも高コントラストでも崩れないように、**意味のある名前の色**（強調色・エラー色・弱い文字）で選ぶ。
 - 一つの行に主なボタンは一つ。Esc／Enter が押すものを主にする。

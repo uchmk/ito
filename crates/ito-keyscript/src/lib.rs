@@ -22,6 +22,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod review;
+
 use ito_keys::{self as keys, Code, Key};
 
 /// The pause after each step, so the frame that follows a key has drawn
@@ -1252,6 +1254,9 @@ pub struct Runner {
     pointer: VecDeque<Vec<egui::Event>>,
     /// Where `<Shot:>` and `<State:>` write.
     pub dir: PathBuf,
+    /// What the app says about its shots (`app`, `version`, `component`, `state`, `zoom`); `<Theme:>` and
+    /// `<Lang:>` keep `theme` and `lang`. [`Runner::shot`] writes it, with the size and time, to `<name>.json`.
+    pub info: review::Meta,
     /// The app's `<APP>_KEYS_DONE`.
     pub done: Option<PathBuf>,
     /// The clipboard's text for `<Paste>` and `<C-v>`.
@@ -1290,6 +1295,7 @@ impl Runner {
             shot: None,
             pointer: VecDeque::new(),
             dir,
+            info: review::Meta { zoom: 1.0, component: "window".into(), ..Default::default() },
             done,
             clipboard: String::new,
             finished: false,
@@ -1400,8 +1406,14 @@ impl Runner {
                 // The window lays out again at the new size before the next step.
                 self.next = now + SETTLE;
             }
-            Press::Theme(name) => return Some(Do::Theme(name)),
-            Press::Lang(code) => return Some(Do::Lang(code)),
+            Press::Theme(name) => {
+                self.info.theme = name.clone();
+                return Some(Do::Theme(name));
+            }
+            Press::Lang(code) => {
+                self.info.lang = code.clone();
+                return Some(Do::Lang(code));
+            }
             Press::ClickText { right, text } => match locate(ctx, &text) {
                 Ok(pos) => {
                     self.deadline = None;
@@ -1505,7 +1517,19 @@ impl Runner {
         self.next = now + GAP;
         self.note(now);
         let path = self.dir.join(format!("{name}.png"));
-        save_png(&path, &image).err().map(|e| format!("Shot {name}: {e}"))
+        if let Err(e) = save_png(&path, &image) {
+            return Some(format!("Shot {name}: {e}"));
+        }
+        let screen = ctx.content_rect().size();
+        let meta = review::Meta {
+            name: name.clone(),
+            size: [screen.x, screen.y],
+            rect: [0.0, 0.0, screen.x, screen.y],
+            time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            pixels_per_point: ctx.pixels_per_point(),
+            ..self.info.clone()
+        };
+        std::fs::write(self.dir.join(format!("{name}.json")), meta.to_json()).err().map(|e| format!("Shot {name}: {e}"))
     }
 }
 

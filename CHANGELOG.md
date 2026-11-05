@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.247.0] - 2026-11-05
+
+### 追加
+- `ito-keyscript::review`（#187）: Visual Review の道具。窓なしで、PNG と文字列だけで動く。
+  - `Runner::shot` が `<名前>.png` の隣に `<名前>.json` を書く（`name`・`app`・`version`・`theme`・`lang`・`size`・`zoom`・`state`・`component`・`rect`・`time`・`pixels_per_point`）。アプリは `Runner::info`（`review::Meta`）に `app`・`version`・`zoom`・`state`・`component` を入れる。`theme`・`lang` は `<Theme:>`・`<Lang:>` を通ると自動で入る。
+  - `review::compare(&old, &new, threshold)` → `Diff { fraction, bounds, image }`（変わった割合・変わった所を囲む矩形・赤で示した差分の画像）。`Image::{read, decode, encode, write}`。
+  - `review::crop(&Image, [x, y, w, h])` と、点の矩形を画素にする `rect_pixels(rect, pixels_per_point)`。どの矩形かは今までどおりアプリ（`Dialect::shot_suffixes`）が決める。
+  - `review::matrix(themes, states, enter, leave)`: テーマ × 状態を順に撮る台本の文字列を作る。
+- `docs/design-principles.md`（Quiet Precision の原則・優先順位・役割の分担・完了の条件）と `docs/visual-review.md`（撮り方・比べ方・レビュー指示の雛形）。
+
+### 使う側がやること
+- 何もしなくても `<Shot:>` が JSON を書く。中身を正しくするには `runner.info.app`・`version` などを入れる。
+
 ## [0.246.0] - 2026-11-05
 
 ### 追加

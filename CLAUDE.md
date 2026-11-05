@@ -3,6 +3,8 @@
 uchmk のアプリが使う共有のクレートを集めたリポジトリ。糸（ito）のように、アプリをつなぐ。Rust、Windows 優先。
 使う側は tsumugi（紬、ターミナル）、kura（蔵、ファイラー。旧 filer）、yagura（櫓、システムモニター。旧 mimamori）。michi（道、Git のクライアント）も使う。fuda（札、TODO）と fude（筆、エディター）も使う予定。
 
+デザインの原則は [docs/design-principles.md](docs/design-principles.md)、撮って確かめる手順は [docs/visual-review.md](docs/visual-review.md)（`ito-keyscript::review`: 撮影の JSON・`compare`・`crop`・`matrix`）。
+
 **画面を作るときは、先に [docs/design-guide.md](docs/design-guide.md)（「こういうときはこのクレート」の早見表。ボタン・印・空の一覧・確認・Markdown の欄など）を見る。**
 
 デザイン（レイアウト・見た目の案）で迷ったら、Google Stitch（MCP の `mcp__stitch__*`。`generate_screen_from_text`・`generate_variants`・`edit_screens`）で案を出して比べてから決める。決めた形は、まず上の早見表の ito のクレートで組めるか確かめ、足りない部品は `crate-request` で頼む。
