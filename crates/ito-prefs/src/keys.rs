@@ -448,7 +448,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             .font(FontId::proportional(z(ui, 12.5)));
         let r = ui.add(search);
         crate::focus_ring(ui, &r);
-        ui.add_space(8.0);
+        ui.add_space(ito_theme::scale::space::SM);
         if st.listening {
             let words = if st.by_key.is_empty() { w.listening.to_owned() } else { format!("{} …", human_seq_for(&st.by_key, t.sup)) };
             chip(ui, l, &words, true, false);
@@ -470,7 +470,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             }
         }
     });
-    ui.add_space(8.0);
+    ui.add_space(ito_theme::scale::space::SM);
     ui.horizontal(|ui| {
         if !one_layer {
             ui.label(RichText::new(w.layer).size(z(ui, 12.5)).color(c.dim));
@@ -539,7 +539,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                 crate::sep(ui, l);
                 ui.add_space(ito_theme::scale::space::MD);
                 ui.label(RichText::new(w.nothing).size(z(ui, 12.5)).color(c.dim));
-                ui.add_space(8.0);
+                ui.add_space(ito_theme::scale::space::SM);
             }
             for (row, desc, layer, hay) in &shown {
                 crate::sep(ui, l);
@@ -552,7 +552,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                     ui.spacing_mut().item_spacing.x = gap;
                     ui.allocate_ui_with_layout(egui::vec2(op_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.set_width(op_w);
-                        ui.add_space(8.0);
+                        ui.add_space(ito_theme::scale::space::SM);
                         ui.label(RichText::new(desc.as_str()).size(z(ui, 13.0)).color(c.strong()));
                         if !row.desc.is_empty() {
                             ui.add(

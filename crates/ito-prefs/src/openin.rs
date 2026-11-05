@@ -138,7 +138,7 @@ pub fn open_card(
         }
         ui.add_space(ito_theme::scale::space::XS);
         ui.label(RichText::new(found_line(w, found)).size(z(ui, 12.0)).color(l.c.dim));
-        ui.add_space(8.0);
+        ui.add_space(ito_theme::scale::space::SM);
     });
 
     crate::section(ui, l, w.own_head, |ui| {
@@ -216,7 +216,7 @@ pub fn open_card(
         });
         if !form.error.is_empty() {
             status(ui, &form.error, l.c.err);
-            ui.add_space(8.0);
+            ui.add_space(ito_theme::scale::space::SM);
         }
     });
     edits

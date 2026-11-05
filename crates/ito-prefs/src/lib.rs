@@ -1359,7 +1359,7 @@ pub fn theme_page(
     // a row of its own height.
     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 36.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.label(RichText::new(w.mode).size(z(ui, 12.0)).color(c.dim));
-        ui.add_space(8.0);
+        ui.add_space(ito_theme::scale::space::SM);
         egui::Frame::NONE
             .stroke(egui::Stroke::new(1.0, c.border_strong()))
             .corner_radius(ito_theme::scale::radius::BOX)
@@ -1464,7 +1464,7 @@ pub fn theme_page(
                 });
             ui.label(RichText::new(note).size(z(ui, 12.0)).color(c.dim));
         });
-        ui.add_space(20.0);
+        ui.add_space(ito_theme::scale::space::XL);
         ui.vertical(|ui| {
             // By the name picked, not the colours: a theme.toml that repaints
             // the window leaves no theme with these colours (kura #321).

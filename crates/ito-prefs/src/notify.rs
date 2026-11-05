@@ -211,7 +211,7 @@ pub fn notify_page(
                 n.reset(defaults);
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(ito_theme::scale::space::SM);
     }
     section(ui, l, w.notify_when, |ui| {
         let Notify { system, sound, hooks, .. } = n;

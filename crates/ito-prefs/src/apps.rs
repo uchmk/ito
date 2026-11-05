@@ -121,7 +121,7 @@ pub fn apps_card(ui: &mut egui::Ui, l: Look, w: &AppsWords, rows: Option<&[Row]>
         if !form.error.is_empty() {
             status(ui, &form.error, l.c.err);
         }
-        ui.add_space(8.0);
+        ui.add_space(ito_theme::scale::space::SM);
     });
     edits
 }
