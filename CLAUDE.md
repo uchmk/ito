@@ -34,7 +34,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 | `ito-eventlog` | システムのログに 1 行書く（`Log::open(source)`・`write(Level, id, text)`。Windows はイベント ログ（アプリケーション）、ほかは syslog の `logger`。読むのは `Subscription::new(channel, &Filter, From)`・`poll`・`position`（Windows のみ。Security は `Denied`）） | koyomi |
 | `ito-tray` | タスクトレイの常駐アイコン（`Tray::new(icon, tip)`・`set_state` で色と記号のバッジ（`ito-a11y::State`）・`set_tip`・`set_menu`・押した・選んだは `events()` のチャンネル、`new_with` で起こす関数も渡せる。Windows のみ、ほかは `Unsupported`） | koyomi（tsumugi の server も） |
 | `ito-secret` | 秘密（Webhook のアドレス・パスワード）を OS の資格情報ストア（Windows 資格情報マネージャー・macOS キーチェーン・Linux `secret-tool`）に置く `get`/`set`/`delete`、ログ用の `mask`。ファイルには退避しない。`ito-notify::webhook` の `secret:` 参照が使う | koyomi（yagura・tsumugi も） |
-| `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示） | yagura（tsumugi も載せ替える） |
+| `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示）と、キャレットに付く補完の小さな一覧 `show_at`（`InlineView`。下に開き、足りなければ上へ返す・窓の内に収める・8 行まで・Up/Down/Ctrl+P/N/Enter/Tab/Esc だけ取り、打鍵はエディターに残す） | yagura（tsumugi も載せ替える） |
 | `ito-select` | 描画で並べた文字（ガラスのレイアウト）をマウスの範囲選択でコピーする（プレビュー・詳細欄のように、部品でなく painter で描く窓向け） | kura、minato |
 | `ito-browser` | ペインの横のウェブのページ（Windows・macOS は OS の WebView を窓の子に、Linux はシステムのブラウザへ）、egui のアドレスの欄、打った行の読み方 | tsumugi・minato |
 | `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。依存は serde と toml だけ | kura（dev-dependencies） |

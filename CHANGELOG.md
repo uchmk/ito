@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.258.0] - 2026-11-05
+
+### 追加
+- #198: `ito-palette` に `show_at(ctx, caret, &mut InlineView, entries, style)`。エディターのキャレットに付く補完の小さな一覧（`[[…]]` のリンクやパスの補完向け）。
+  キャレットの矩形の下に開き、下に足りなければ上へ返し、窓の内に収める。8 行まで・選択に窓が付いてくる。`entries` は順位つきで `hits` 付き（ここでは絞らない）。
+  取るキーは Up/Down・Ctrl+P/N・Enter/Tab（選ぶ）・Esc（`Answer::Close`）だけで、打鍵はエディターに残る。窓の外を押すと `Close`。候補が空なら何も描かず、キーも取らない。
+  使う側がやること: 開く・閉じる（IME の変換中は閉じる）はアプリが決め、候補が変わったら `view.selected = 0` にする。色は `Style` をパレットと同じに渡す。
+- 一覧の行の描画を `rows` に分け、パレットと共有した（見た目は変わらない）。
+
 ## [0.257.0] - 2026-11-05
 
 ### 追加
