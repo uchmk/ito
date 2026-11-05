@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.252.0] - 2026-11-05
+
+### 追加
+- `ito-lineindex`（新しいクレート）: 大きなテキストファイルを、丸ごと読まずに行番号で読む。`LineIndex::open(path)` が別スレッドで 64 KiB ずつ読んで行頭の位置を覚え（1 行 8 バイト）、`lines(range)` が seek で必要な行だけを読む（mmap は使わない）。1 行は 8 KiB で切り（`Line::cut`）、全文は `full_line`。`grow()` は追記を拾い、切り詰め・書き直しは末尾 32 バイトの比較で `Grow::Rebuild`。`guess` が BOM・NUL の割合・UTF-8・EUC-JP・Shift_JIS で文字コードを推す（UTF-16 は 2 バイト単位）。`start_of`・`line_at`・`count`・`progress`・`is_done`・`cancel`。編集・色分け・内容の検索は含まない（#196）。
+
+### 使う側がやること
+- kura: `src/preview/logindex.rs` をこのクレートに置き換える（内容の検索は kura のまま）。weft: 8 MiB 以上のファイルに使う。
+
 ## [0.251.0] - 2026-11-05
 
 ### 追加
