@@ -500,18 +500,75 @@ pub fn about_text(name: &str, a: &About) -> String {
     s
 }
 
+/// Re-flows a license text for display: inside a paragraph (blank-line separated) the hard line
+/// breaks become spaces so the label wraps to its width. Rule lines (`----`), numbered items
+/// (`1)`, `2.`) and URL-only lines keep their line breaks.
+fn reflow_license(text: &str) -> String {
+    fn is_rule(l: &str) -> bool {
+        let t = l.trim();
+        t.len() >= 3 && t.chars().all(|c| matches!(c, '-' | '=' | '_' | '*'))
+    }
+    fn is_item(l: &str) -> bool {
+        let t = l.trim_start();
+        let digits = t.chars().take_while(char::is_ascii_digit).count();
+        digits > 0 && matches!(t[digits..].chars().next(), Some(')' | '.')) && t[digits + 1..].starts_with(' ')
+    }
+    fn is_url(l: &str) -> bool {
+        let t = l.trim();
+        (t.starts_with("http://") || t.starts_with("https://")) && !t.contains(' ')
+    }
+    let text = text.replace("\r\n", "\n");
+    let mut out = String::with_capacity(text.len());
+    let mut prev: Option<&str> = None;
+    for line in text.split('\n') {
+        if line.trim().is_empty() {
+            if prev.is_some() {
+                out.push('\n');
+            }
+            out.push('\n');
+            prev = None;
+            continue;
+        }
+        let t = line.trim();
+        if let Some(p) = prev {
+            let hard = is_rule(t) || is_item(t) || is_url(t) || is_rule(p) || is_url(p);
+            out.push(if hard { '\n' } else { ' ' });
+        }
+        out.push_str(t);
+        prev = Some(t);
+    }
+    out.trim_end_matches('\n').to_string()
+}
+
 /// The About page's cards: the version and system (and a button that copies
 /// them), then the Feedback card.
 pub fn about_page(ui: &mut egui::Ui, l: Look, w: &MoreWords, words: &Words, name: &str, a: &About) -> Vec<AboutAction> {
     let mut out = Vec::new();
     section(ui, l, w.about, |ui| {
         let line = |ui: &mut egui::Ui, label: &str, value: &str| {
-            row(ui, l, label, "", |ui| {
-                let text = egui::RichText::new(value).size(z(ui, 13.0)).color(l.c.dim);
-                // A multi-line value sits in a right-to-left row; keep its lines left-aligned.
-                let label = if value.contains('\n') { egui::Label::new(text).halign(egui::Align::LEFT) } else { egui::Label::new(text) };
-                ui.add(label)
+            let c = l.c;
+            let hit = !l.q.is_empty() && [label, value].iter().any(|t| t.to_lowercase().contains(l.q));
+            let behind = ui.painter().add(egui::Shape::Noop);
+            let shown = ui.horizontal_top(|ui| {
+                ui.add_space(ito_theme::scale::space::SM);
+                // The label's column, then the value to its right, left-aligned and wrapping.
+                let col = z(ui, 110.0);
+                ui.allocate_ui_with_layout(egui::vec2(col, 0.0), egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                    ui.add_space(ito_theme::scale::space::SM);
+                    ui.label(egui::RichText::new(label).size(z(ui, 13.0)).color(c.strong()));
+                });
+                ui.vertical(|ui| {
+                    ui.set_max_width(ui.available_width());
+                    ui.add_space(ito_theme::scale::space::SM);
+                    let text = egui::RichText::new(value).size(z(ui, 13.0)).color(c.dim);
+                    ui.add(egui::Label::new(text).halign(egui::Align::LEFT));
+                    ui.add_space(ito_theme::scale::space::SM);
+                });
             });
+            if hit {
+                let lit = egui::Shape::rect_filled(shown.response.rect.expand2(egui::vec2(10.0, 0.0)), 6.0, c.wait.gamma_multiply(0.14));
+                ui.painter().set(behind, lit);
+            }
         };
         line(ui, w.version, a.version);
         if let Some(c) = a.commit.filter(|c| !c.is_empty()) {
@@ -522,7 +579,7 @@ pub fn about_page(ui: &mut egui::Ui, l: Look, w: &MoreWords, words: &Words, name
         line(ui, w.system, a.system);
         if let Some(x) = a.license {
             sep(ui, l);
-            line(ui, w.license, x);
+            line(ui, w.license, &reflow_license(x));
         }
         sep(ui, l);
         if row(ui, l, w.copy_label, w.copy_note, |ui| button(ui, l, w.copy_button)) {
@@ -668,6 +725,16 @@ pub fn forget_place(dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn license_reflow_joins_paragraph_lines_and_keeps_structure() {
+        let src =
+            "Copyright 2020 A\nB C\nline two\n\nPERMISSION\nis granted\n----\n1) first\ncontinued\n2) second\nhttps://x.org/OFL\nafter";
+        let want = "Copyright 2020 A B C line two\n\nPERMISSION is granted\n----\n1) first continued\n2) second\nhttps://x.org/OFL\nafter";
+        assert_eq!(reflow_license(src), want);
+        assert_eq!(reflow_license("a\r\nb\r\n"), "a b");
+        assert_eq!(reflow_license("one line"), "one line");
+    }
+
     use super::*;
 
     #[test]
