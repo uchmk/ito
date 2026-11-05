@@ -186,6 +186,15 @@ pub fn line_at_y(y: f32, top: f32, height: f32, lines: usize) -> usize {
     ((t * lines as f32) as usize).min(lines - 1)
 }
 
+/// Height of a line in the strip when the file is short enough not to need squeezing, in points.
+pub const LINE_H: f32 = 3.0;
+
+/// How tall the map is in a strip `height` points tall: a short file keeps its natural size at the top (as in VS
+/// Code) instead of being stretched down the whole strip. A long one fills the strip.
+pub fn map_height(lines: usize, height: f32) -> f32 {
+    height.min(lines as f32 * LINE_H).max(0.0)
+}
+
 /// How many lines one band holds when the strip is `height` points tall.
 pub fn per_band(lines: usize, height: f32) -> usize {
     let bands = ((height / BAND_H).floor() as usize).max(1);
@@ -261,6 +270,13 @@ mod tests {
         assert_eq!(r, vec![Run { start: 0, len: 4, color: None }]);
         assert_eq!(runs([("日本", None)], 80), vec![Run { start: 0, len: 4, color: None }]);
         assert!(ink('a') > ink('.') && ink(' ') == 0.0);
+    }
+
+    #[test]
+    fn a_short_file_keeps_its_natural_height() {
+        assert_eq!(map_height(33, 800.0), 99.0);
+        assert_eq!(map_height(5000, 800.0), 800.0);
+        assert_eq!(map_height(0, 800.0), 0.0);
     }
 
     #[test]

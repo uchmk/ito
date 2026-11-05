@@ -4,7 +4,9 @@
 use egui::text::LayoutJob;
 use egui::{pos2, vec2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, TextFormat, Ui};
 
-use crate::{at_line, band_pixels, hover_card, hover_window, indent_chars, ink, line_at_y, per_band, runs, scroll_to, Area, Row};
+use crate::{
+    at_line, band_pixels, hover_card, hover_window, indent_chars, ink, line_at_y, map_height, per_band, runs, scroll_to, Area, Row,
+};
 use crate::{HOVER_CARD_SHARE, HOVER_MAX_CHARS};
 
 /// How the pane lays its text out: the hover card is drawn on the same grid.
@@ -64,6 +66,8 @@ pub fn show(
     painter.rect_filled(rect, CornerRadius::same(3), c.bg);
 
     let len = rows.len();
+    // A short file keeps its natural height at the top; the rest of the strip stays empty.
+    let rect = Rect::from_min_size(rect.min, vec2(rect.width(), map_height(len, rect.height())));
     let per = per_band(len, rect.height());
     let at = |l: usize| rect.top() + at_line(l, len) * rect.height();
     let unit = rect.width() / 80.0;

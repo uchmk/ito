@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.249.0] - 2026-11-05
+
+### 変更
+- `ito-minimap`: 短いファイルは、ストリップ全体に引き伸ばさず、1 行 `LINE_H`（3pt）の自然な高さで上に寄せて描く（VS Code と同じ）。長いファイルは今までどおり全体に収める。窓なしの `map_height(lines, height)`。マップの下の空きは、クリック・ホバーに反応しない。全部の `Style` に効く。
+
+### 使う側がやること
+- なし（rev を上げるだけ）。
+
 ## [0.248.0] - 2026-11-05
 
 ### 追加
