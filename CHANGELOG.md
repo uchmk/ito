@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.253.0] - 2026-11-05
+
+### 変更
+- 内部: 角丸 4・6・8 と余白 4・6・10・16 の直書きを `ito_theme::scale` の `radius::{MARK, CONTROL, BOX}`・`space::{XS, SM, MD, LG}` に置き換えた（`ito-find`・`ito-guide`・`ito-markdown`・`ito-palette`・`ito-prefs`・`ito-statusbar`）。値は同じで見た目は変わらない。段に乗らない値（3・5・10 の角丸、2・5・8・12 の余白、文字の大きさ）は残してある（#185）。
+
+### 修正
+- `ito-notify`: テスト `toasts_are_written_and_numbered` が、通し番号を共有する別のテストと並ぶと落ちることがあったのを直した（テストだけ）。
+
 ## [0.252.0] - 2026-11-05
 
 ### 追加

@@ -191,7 +191,7 @@ impl FindBar {
         egui::Frame::new()
             .fill(c.raised())
             .stroke(egui::Stroke::new(1.0, c.border_strong()))
-            .corner_radius(8.0)
+            .corner_radius(ito_theme::scale::radius::BOX)
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {

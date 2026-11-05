@@ -247,11 +247,11 @@ impl Md {
                     p.rect_filled(Rect::from_min_size(pos2(at.x - 14.0, at.y), vec2(3.0, *h)), CornerRadius::same(1), c.border_strong());
                 }
                 Deco::Code(w, h) => {
-                    p.rect_filled(Rect::from_min_size(at, vec2(*w, *h)), CornerRadius::same(6), ground());
+                    p.rect_filled(Rect::from_min_size(at, vec2(*w, *h)), CornerRadius::same(ito_theme::scale::radius::CONTROL), ground());
                 }
                 Deco::Table(cells, w, h) => {
                     let r = Rect::from_min_size(at, vec2(*w, *h));
-                    p.rect_stroke(r, CornerRadius::same(4), Stroke::new(1.0, c.border), StrokeKind::Inside);
+                    p.rect_stroke(r, CornerRadius::same(ito_theme::scale::radius::MARK), Stroke::new(1.0, c.border), StrokeKind::Inside);
                     let mut last_y = None;
                     for (cx, cy, t) in cells {
                         if last_y.is_some_and(|ly| ly != *cy) {
@@ -265,7 +265,7 @@ impl Md {
                     p.line_segment([at, pos2(at.x + w, at.y)], Stroke::new(1.0, c.border));
                 }
                 Deco::Summary(w, h) => {
-                    p.rect_filled(Rect::from_min_size(at, vec2(*w, *h)), CornerRadius::same(4), ground());
+                    p.rect_filled(Rect::from_min_size(at, vec2(*w, *h)), CornerRadius::same(ito_theme::scale::radius::MARK), ground());
                     let m = pos2(at.x + 11.0, at.y + h / 2.0);
                     let tri = vec![m + vec2(-4.0, -2.5), m + vec2(4.0, -2.5), m + vec2(0.0, 3.0)];
                     p.add(egui::Shape::convex_polygon(tri, c.dim, Stroke::NONE));

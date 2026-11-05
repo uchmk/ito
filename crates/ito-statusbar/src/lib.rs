@@ -54,10 +54,10 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
         ui.ctx().request_repaint_after(Clock::next_minute(&now));
     }
     if let Some(words) = scale_words(ui.ctx(), spec.lang) {
-        end.add_space(16.0);
+        end.add_space(ito_theme::scale::space::LG);
         end.label(RichText::new(words).font(FontId::monospace(11.5)).color(c.wait));
     }
-    end.add_space(16.0);
+    end.add_space(ito_theme::scale::space::LG);
     right(&mut end);
     // The left stops short of it, and what does not fit is cut off (the last
     // item that is wider than the room ends in `…`).
@@ -71,14 +71,14 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
 /// Plain words in the bar.
 pub fn item(ui: &mut Ui, text: &str, color: Color32) {
     ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate());
-    ui.add_space(10.0);
+    ui.add_space(ito_theme::scale::space::MD);
 }
 
 /// A word that is a link: true when it was clicked.
 pub fn link(ui: &mut Ui, text: &str) -> bool {
     let c = ito_theme::colors();
     let r = ui.add(egui::Label::new(RichText::new(text).size(12.0).color(c.blue).underline()).sense(Sense::click()));
-    ui.add_space(10.0);
+    ui.add_space(ito_theme::scale::space::MD);
     r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
@@ -86,14 +86,14 @@ pub fn link(ui: &mut Ui, text: &str) -> bool {
 pub fn divider(ui: &mut Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, 14.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, ito_theme::colors().border);
-    ui.add_space(10.0);
+    ui.add_space(ito_theme::scale::space::MD);
 }
 
 /// A small coloured dot (a state), before the item it belongs to.
 pub fn dot(ui: &mut Ui, color: Color32) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
     ui.painter().circle_filled(r.center(), 3.5, color);
-    ui.add_space(4.0);
+    ui.add_space(ito_theme::scale::space::XS);
 }
 
 /// The scale was set to `scale`: the bar says so for a few seconds.

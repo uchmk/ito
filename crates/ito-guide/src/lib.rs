@@ -190,27 +190,32 @@ pub fn show(ctx: &egui::Context, guide: &mut Guide, words: &Words) -> Outcome {
         .order(egui::Order::Foreground)
         .fixed_pos(pos2(screen.center().x - width / 2.0 - 8.0, screen.top() + 40.0))
         .show(ctx, |ui| {
-            egui::Frame::new().fill(c.panel).stroke(Stroke::new(1.0, c.border)).corner_radius(6.0).inner_margin(8.0).show(ui, |ui| {
-                ui.set_width(width);
-                let small = egui::FontId::proportional(12.0);
-                ui.label(RichText::new(words.title).strong());
-                ui.label(RichText::new(words.lead).font(small.clone()).color(c.dim));
-                for p in guide.problems() {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(&p.what).color(c.wait));
-                    for step in &p.steps {
-                        let resp = ui.add(egui::Label::new(RichText::new(&step.command).monospace()).sense(Sense::click()));
-                        ui.label(RichText::new(&step.why).font(small.clone()).color(c.dim));
-                        if resp.clicked() {
-                            out.copy = Some(step.command.clone());
+            egui::Frame::new()
+                .fill(c.panel)
+                .stroke(Stroke::new(1.0, c.border))
+                .corner_radius(ito_theme::scale::radius::CONTROL)
+                .inner_margin(8.0)
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    let small = egui::FontId::proportional(12.0);
+                    ui.label(RichText::new(words.title).strong());
+                    ui.label(RichText::new(words.lead).font(small.clone()).color(c.dim));
+                    for p in guide.problems() {
+                        ui.add_space(ito_theme::scale::space::SM);
+                        ui.label(RichText::new(&p.what).color(c.wait));
+                        for step in &p.steps {
+                            let resp = ui.add(egui::Label::new(RichText::new(&step.command).monospace()).sense(Sense::click()));
+                            ui.label(RichText::new(&step.why).font(small.clone()).color(c.dim));
+                            if resp.clicked() {
+                                out.copy = Some(step.command.clone());
+                            }
                         }
                     }
-                }
-                ui.add_space(6.0);
-                for line in words.footer {
-                    ui.label(RichText::new(*line).font(small.clone()).color(c.dim));
-                }
-            });
+                    ui.add_space(ito_theme::scale::space::SM);
+                    for line in words.footer {
+                        ui.label(RichText::new(*line).font(small.clone()).color(c.dim));
+                    }
+                });
         });
     let outside = out.copy.is_none()
         && ctx.input(|i| i.pointer.any_pressed())

@@ -93,7 +93,7 @@ fn framed<R>(ui: &mut Ui, error: bool, width: Option<f32>, body: impl FnOnce(&mu
         let mut frame = egui::Frame::new()
             .fill(c.bg)
             .stroke(Stroke::new(1.0, c.border))
-            .corner_radius(6.0)
+            .corner_radius(ito_theme::scale::radius::CONTROL)
             .inner_margin(egui::Margin::symmetric(8, 5))
             .begin(ui);
         frame.content_ui.set_min_width((w - 18.0).max(0.0));
@@ -287,10 +287,10 @@ impl<'a> CodeBox<'a> {
                         ui.label(RichText::new(self.aside).size(z(ui, 11.0)).color(mix(c.bg, c.dim, 0.8)));
                     });
                 });
-                ui.add_space(4.0);
+                ui.add_space(ito_theme::scale::space::XS);
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
                 ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, c.border));
-                ui.add_space(4.0);
+                ui.add_space(ito_theme::scale::space::XS);
             }
             let mut out = None;
             egui::ScrollArea::vertical()
@@ -350,10 +350,10 @@ pub fn fieldset<R>(ui: &mut Ui, l: Look, title: &str, aside: &str, body: impl Fn
             });
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(ito_theme::scale::space::SM);
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
     ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, c.border));
-    ui.add_space(10.0);
+    ui.add_space(ito_theme::scale::space::MD);
     let out = body(ui);
     ui.add_space(18.0);
     out

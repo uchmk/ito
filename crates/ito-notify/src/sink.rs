@@ -130,7 +130,8 @@ mod tests {
         let f = d.path().join("sink.toml");
         let a = toast(&f, "uchmk.x", "T", "B", "tag", "open", &["Open=open".into()]);
         let b = toast(&f, "uchmk.x", "T2", "B2", "", "", &[]);
-        assert_eq!(b, a + 1);
+        // The counter is process-wide and other tests take numbers too, so only the order is certain.
+        assert!(b > a);
         let text = std::fs::read_to_string(&f).unwrap();
         assert!(text.contains("title = \"T2\"") && text.contains("actions = [\"Open=open\"]"));
         sound(&f, "chime");

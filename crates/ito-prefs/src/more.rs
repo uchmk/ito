@@ -583,7 +583,7 @@ pub fn fonts_card(ui: &mut egui::Ui, l: Look, w: &MoreWords, drafts: &mut crate:
         }
         if !now.using.is_empty() {
             ui.label(egui::RichText::new(now.using).size(z(ui, 11.5)).color(l.c.dim));
-            ui.add_space(6.0);
+            ui.add_space(ito_theme::scale::space::SM);
         }
         sep(ui, l);
         let (lo, hi) = now.size_range;

@@ -307,7 +307,7 @@ pub fn webhook_rows(ui: &mut egui::Ui, l: Look, w: &Words, hooks: &mut Vec<Hook>
         }
         if !h.url.is_empty() && !is_http(&h.url) {
             status(ui, w.webhook_bad, c.err);
-            ui.add_space(4.0);
+            ui.add_space(ito_theme::scale::space::XS);
         }
         sep(ui, l);
         let picked =
@@ -453,7 +453,7 @@ pub fn mail_rows(ui: &mut egui::Ui, l: Look, w: &Words, mails: &mut Vec<Mail>, s
         });
         if !m.password.is_empty() && !secret {
             status(ui, w.mail_password_plain, c.err);
-            ui.add_space(4.0);
+            ui.add_space(ito_theme::scale::space::XS);
         }
     }
     let (label, note) = if mails.is_empty() { (w.mail, w.mail_none) } else { (w.mail_more, "") };

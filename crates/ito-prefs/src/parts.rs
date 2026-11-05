@@ -51,7 +51,7 @@ pub fn notice(ui: &mut Ui, l: Look, m: Mark, text: &str, action: Option<&str>) -
     egui::Frame::new()
         .fill(mix(c.side, c.run, 0.12))
         .stroke(Stroke::new(1.0, mix(c.border, c.run, 0.4)))
-        .corner_radius(6.0)
+        .corner_radius(ito_theme::scale::radius::CONTROL)
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

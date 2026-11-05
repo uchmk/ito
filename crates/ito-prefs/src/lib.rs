@@ -508,7 +508,7 @@ pub fn show_with(
     if keys.find {
         searched.request_focus();
     }
-    nav_ui.add_space(10.0);
+    nav_ui.add_space(ito_theme::scale::space::MD);
     let mut q = state.query.trim().to_lowercase();
     // Esc clears the search first, when the screen reads every page.
     if extras.results.is_some() && !q.is_empty() && keys.close {
@@ -623,20 +623,20 @@ pub fn show_with(
                     let back = egui::Button::new(RichText::new(format!("\u{2190} {}", extras.back)).size(z(ui, 12.5)).color(c.dim))
                         .fill(Color32::TRANSPARENT)
                         .stroke(egui::Stroke::new(1.0, c.border_strong()))
-                        .corner_radius(6.0);
+                        .corner_radius(ito_theme::scale::radius::CONTROL);
                     let back = ui.add(back);
                     focus_ring(ui, &back);
                     ui.label(RichText::new("Esc").size(z(ui, 11.0)).color(c.faint()));
                     out.close |= back.clicked();
                 });
-                ui.add_space(10.0);
+                ui.add_space(ito_theme::scale::space::MD);
             }
             ui.horizontal(|ui| {
                 ui.label(RichText::new(heading).size(z(ui, 24.0)).strong().color(c.strong()));
                 if results.is_none() && !extras.shared_tag.is_empty() && extras.shared.contains(&page) {
                     egui::Frame::NONE
                         .stroke(egui::Stroke::new(1.0, c.border_strong()))
-                        .corner_radius(6.0)
+                        .corner_radius(ito_theme::scale::radius::CONTROL)
                         .inner_margin(egui::Margin::symmetric(8, 2))
                         .show(ui, |ui| {
                             ui.label(RichText::new(extras.shared_tag).size(z(ui, 11.0)).color(c.dim));
@@ -645,7 +645,7 @@ pub fn show_with(
             });
             ui.add_space(2.0);
             ui.label(RichText::new(lead).size(z(ui, 13.5)).color(c.dim));
-            ui.add_space(16.0);
+            ui.add_space(ito_theme::scale::space::LG);
             match results {
                 None => body(ui, page, l),
                 Some(r) => {
@@ -675,7 +675,7 @@ pub fn show_with(
         let button = egui::Button::new(RichText::new(words).size(z(ui, 12.5)).color(c.dim))
             .fill(Color32::TRANSPARENT)
             .stroke(egui::Stroke::new(1.0, c.border_strong()))
-            .corner_radius(6.0);
+            .corner_radius(ito_theme::scale::radius::CONTROL);
         let button = nav_ui.put(foot, button);
         focus_ring(&nav_ui, &button);
         if button.clicked() {
@@ -751,7 +751,7 @@ pub fn section(ui: &mut egui::Ui, l: Look, head: &str, mut rows: impl FnMut(&mut
         }
     }
     ui.label(RichText::new(label).size(z(ui, 11.0)).strong().color(if hit { c.wait } else { c.dim }));
-    ui.add_space(6.0);
+    ui.add_space(ito_theme::scale::space::SM);
     egui::Frame::NONE
         .fill(c.panel)
         .stroke(egui::Stroke::new(1.0, c.border))
@@ -801,7 +801,7 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
             if jump {
                 ui.data_mut(|d| d.remove::<bool>(egui::Id::new(JUMP_HERE)));
             }
-            ui.add_space(16.0);
+            ui.add_space(ito_theme::scale::space::LG);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.vertical(|ui| {
                     ui.set_max_width(ui.available_width());
@@ -812,7 +812,7 @@ pub fn keyed_row<R>(ui: &mut egui::Ui, l: Look, key: &str, label: &str, note: &s
                     if !note.is_empty() {
                         ui.label(RichText::new(note).size(z(ui, 12.0)).color(c.dim));
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(ito_theme::scale::space::SM);
                 });
             });
         });
@@ -1201,7 +1201,7 @@ pub fn keycap(ui: &mut egui::Ui, l: Look, words: &str, lit: bool) -> egui::Respo
     let b = egui::Button::new(RichText::new(words).font(FontId::monospace(z(ui, 12.0))).color(c.strong()))
         .fill(c.side)
         .stroke(egui::Stroke::new(1.0, stroke))
-        .corner_radius(6.0);
+        .corner_radius(ito_theme::scale::radius::CONTROL);
     ui.add(b)
 }
 
@@ -1360,9 +1360,11 @@ pub fn theme_page(
     ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 36.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.label(RichText::new(w.mode).size(z(ui, 12.0)).color(c.dim));
         ui.add_space(8.0);
-        egui::Frame::NONE.stroke(egui::Stroke::new(1.0, c.border_strong())).corner_radius(8.0).inner_margin(egui::Margin::same(3)).show(
-            ui,
-            |ui| {
+        egui::Frame::NONE
+            .stroke(egui::Stroke::new(1.0, c.border_strong()))
+            .corner_radius(ito_theme::scale::radius::BOX)
+            .inner_margin(egui::Margin::same(3))
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     for (k, label) in [("system", w.follow_os), ("light", w.light), ("dark", w.dark)] {
@@ -1370,7 +1372,7 @@ pub fn theme_page(
                         let b = egui::Button::new(RichText::new(label).size(z(ui, 12.5)).color(if on { c.strong() } else { c.dim }))
                             .fill(if on { c.chosen() } else { Color32::TRANSPARENT })
                             .stroke(egui::Stroke::NONE)
-                            .corner_radius(6.0)
+                            .corner_radius(ito_theme::scale::radius::CONTROL)
                             .min_size(egui::vec2(z(ui, 84.0), z(ui, 26.0)));
                         let r = ui.add(b);
                         focus_ring(ui, &r);
@@ -1385,10 +1387,9 @@ pub fn theme_page(
                         }
                     }
                 });
-            },
-        );
+            });
     });
-    ui.add_space(10.0);
+    ui.add_space(ito_theme::scale::space::MD);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(300.0);

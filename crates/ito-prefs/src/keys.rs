@@ -347,7 +347,12 @@ fn chip(ui: &mut egui::Ui, l: Look, words: &str, lit: bool, removed: bool) -> eg
         text = text.strikethrough();
     }
     let stroke = if lit { egui::Stroke::new(1.5, c.run) } else { egui::Stroke::new(1.0, c.border_strong()) };
-    ui.add(egui::Button::new(text).fill(if removed { Color32::TRANSPARENT } else { c.side }).stroke(stroke).corner_radius(6.0))
+    ui.add(
+        egui::Button::new(text)
+            .fill(if removed { Color32::TRANSPARENT } else { c.side })
+            .stroke(stroke)
+            .corner_radius(ito_theme::scale::radius::CONTROL),
+    )
 }
 
 /// A small button of one sign, with a tooltip, named by it.
@@ -474,7 +479,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             if let Some(k) = select(ui, "keys-layer", layer_at, &options) {
                 st.layer = if k == 0 { String::new() } else { layers[k - 1].to_owned() };
             }
-            ui.add_space(16.0);
+            ui.add_space(ito_theme::scale::space::LG);
         }
         if switch(ui, l, st.changed_only) {
             st.changed_only = !st.changed_only;
@@ -529,10 +534,10 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                     head(ui, w.layer, layer_w);
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(ito_theme::scale::space::XS);
             if shown.is_empty() {
                 crate::sep(ui, l);
-                ui.add_space(10.0);
+                ui.add_space(ito_theme::scale::space::MD);
                 ui.label(RichText::new(w.nothing).size(z(ui, 12.5)).color(c.dim));
                 ui.add_space(8.0);
             }
@@ -554,13 +559,13 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                                 egui::Label::new(RichText::new(&row.run).font(FontId::monospace(z(ui, 11.0))).color(c.faint())).truncate(),
                             );
                         }
-                        ui.add_space(6.0);
+                        ui.add_space(ito_theme::scale::space::SM);
                     });
                     ui.allocate_ui_with_layout(egui::vec2(keys_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.set_width(keys_w);
-                        ui.add_space(6.0);
+                        ui.add_space(ito_theme::scale::space::SM);
                         keys_cell(ui, l, w, t, row, layer, st, &mut out);
-                        ui.add_space(6.0);
+                        ui.add_space(ito_theme::scale::space::SM);
                     });
                     if !one_layer {
                         ui.allocate_ui_with_layout(egui::vec2(layer_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {

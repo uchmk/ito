@@ -136,7 +136,7 @@ pub fn open_card(
         if let Some(i) = row(ui, l, w.tool_label, w.tool_note, |ui| crate::select(ui, "open-diff-tool", now, &options)) {
             edits.push(Edit::DiffTool(choices[i].0.clone()));
         }
-        ui.add_space(4.0);
+        ui.add_space(ito_theme::scale::space::XS);
         ui.label(RichText::new(found_line(w, found)).size(z(ui, 12.0)).color(l.c.dim));
         ui.add_space(8.0);
     });

@@ -240,9 +240,12 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
         .order(egui::Order::Foreground)
         .fixed_pos(egui::pos2(screen.center().x - width / 2.0 - 8.0, screen.top() + 40.0))
         .show(ctx, |ui| {
-            egui::Frame::new().fill(style.panel).stroke(egui::Stroke::new(1.0, style.border)).corner_radius(6.0).inner_margin(8.0).show(
-                ui,
-                |ui| {
+            egui::Frame::new()
+                .fill(style.panel)
+                .stroke(egui::Stroke::new(1.0, style.border))
+                .corner_radius(ito_theme::scale::radius::CONTROL)
+                .inner_margin(8.0)
+                .show(ui, |ui| {
                     ui.set_width(width);
                     let before = view.query.clone();
                     let edit = ui.add(
@@ -260,7 +263,7 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                     if view.query != before {
                         view.selected = 0;
                     }
-                    ui.add_space(4.0);
+                    ui.add_space(ito_theme::scale::space::XS);
                     if !words.header.is_empty() {
                         ui.colored_label(style.dim, words.header);
                     }
@@ -326,11 +329,10 @@ pub fn show<T: Clone>(ctx: &egui::Context, view: &mut View, entries: &[Entry<T>]
                         }
                     }
                     if !words.footer.is_empty() {
-                        ui.add_space(4.0);
+                        ui.add_space(ito_theme::scale::space::XS);
                         ui.colored_label(style.dim, words.footer);
                     }
-                },
-            );
+                });
         });
     if answer.is_none() && !opening && ctx.input(|i| i.pointer.any_pressed()) {
         let outside = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p));
