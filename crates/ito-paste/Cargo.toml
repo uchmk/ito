@@ -1,0 +1,12 @@
+[package]
+name = "ito-paste"
+description = "Smart paste for text editors: the clipboard's HTML flavour, an HTML fragment to Markdown (headings, lists, links, code, GFM tables), and tab-separated text from a spreadsheet to a GFM table"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The clipboard's HTML flavour (CF_HTML on Windows, text/html elsewhere). Text only: no image feature.
+arboard = { version = "3.6", default-features = false }

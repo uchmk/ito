@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.257.0] - 2026-11-05
+
+### 追加
+- #197: 新しいクレート `ito-paste`（貼り付けを賢く）。`clipboard_html()`（クリップボードの HTML。`Result<Option<String>, Error>`）、`html_to_markdown(html)`（見出し・段落・太字/斜体/取り消し線/コード・リンク・画像・入れ子のリスト・引用・コードブロック・表 → GFM・タスクの箱）、`tsv_to_table(text)`（表計算のコピー → GFM の表）。
+  script/style は捨て、`javascript:` のリンクはリンクを外す。壊れた HTML・深い入れ子でも落ちない。
+  使う側がやること: 貼り付けのときに `clipboard_html()` を（ワーカースレッドで）読み、あれば `html_to_markdown`、無ければプレーンテキストを `tsv_to_table` に通して `Some` なら表として貼る。
+
 ## [0.256.0] - 2026-11-05
 
 ### 変更
