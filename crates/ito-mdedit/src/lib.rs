@@ -13,6 +13,7 @@
 //!   strike, link; a toggle), [`line_type`] (heading, quote, fence, bullet, number, task), [`set_tasks`]
 //! - heading deletes that keep the structure: [`delete_heading`]
 //! - navigation (a byte, no change): [`next`]
+//! - the front matter block at the top: [`front_matter`] (the structure commands leave it alone)
 //!
 //! All positions are byte offsets on `char` boundaries of the given text.
 
@@ -20,6 +21,7 @@ use std::ops::Range;
 
 mod blocks;
 mod format;
+mod frontmatter;
 mod heading;
 mod list;
 mod nav;
@@ -29,6 +31,7 @@ mod toc;
 
 pub use blocks::{demote_section, move_block, move_section, promote_section, Dir};
 pub use format::{check_tasks, inline, line_type, set_tasks, toggle_tasks, uncheck_tasks, Inline, Line, SelChange};
+pub use frontmatter::front_matter;
 pub use heading::{delete_heading, HeadingDelete};
 pub use list::{indent_item, move_item, outdent_item, renumber, shift_lines, toggle_task, Unit};
 pub use nav::{next, Target};

@@ -264,7 +264,10 @@ struct Spans {
 
 fn spans(text: &str) -> Spans {
     let mut s = Spans::default();
-    for (ev, r) in Parser::new_ext(text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH).into_offset_iter() {
+    for (ev, r) in
+        Parser::new_ext(text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS)
+            .into_offset_iter()
+    {
         match ev {
             Event::Code(_) => s.code.push(r),
             Event::Start(Tag::Strong) => s.bold.push(r),

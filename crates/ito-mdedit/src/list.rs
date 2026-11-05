@@ -445,8 +445,9 @@ pub(crate) struct Analysis {
 
 pub(crate) fn analyze(text: &str, ls: &[Range<usize>]) -> Analysis {
     let (mut code, mut table, mut fenced) = (Vec::new(), Vec::new(), Vec::new());
-    for (e, r) in Parser::new_ext(text, Options::ENABLE_TABLES).into_offset_iter() {
+    for (e, r) in Parser::new_ext(text, Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS).into_offset_iter() {
         match e {
+            Event::Start(Tag::MetadataBlock(_)) => code.push(r),
             Event::Start(Tag::CodeBlock(kind)) => {
                 if matches!(kind, CodeBlockKind::Fenced(_)) {
                     fenced.push(r.clone());

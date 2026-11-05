@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.251.0] - 2026-11-05
+
+### 追加
+- `ito-mdedit`: `front_matter(text) -> Option<Range<usize>>`。先頭（BOM は読み飛ばす）の `---` から、閉じの `---` か `...` の行の改行までの範囲。閉じが無ければ `None`（先頭の `---` だけなら水平線のまま）（#195）。
+
+### 修正
+- `ito-mdedit`: 箇条書き・表の解析（`shift_lines`・`renumber` など）と `inline` の解析が、front matter を 1 つのブロックとして読むようにした。中の `1. a` や `**x**` が箇条書き・強調として扱われない（`ito-outline`・`ito-mdview` は前から対応済み）。
+
+### 使う側がやること
+- なし。front matter の色分けは、`front_matter` の範囲を `ito_syntax::Stream::for_token("yaml")` に渡す（#195 の残り: `ito-mdview` の「静かな属性ブロック」の見た目は未着手）。
+
 ## [0.250.0] - 2026-11-05
 
 ### 追加
