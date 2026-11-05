@@ -554,6 +554,7 @@ pub fn about_page(ui: &mut egui::Ui, l: Look, w: &MoreWords, words: &Words, name
                 // The label's column, then the value to its right, left-aligned and wrapping.
                 let col = z(ui, 110.0);
                 ui.allocate_ui_with_layout(egui::vec2(col, 0.0), egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                    ui.set_width(col);
                     ui.add_space(ito_theme::scale::space::SM);
                     ui.label(egui::RichText::new(label).size(z(ui, 13.0)).color(c.strong()));
                 });

@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.1] - 2026-11-06
+
+### 修正
+
+- `ito-prefs`: 「このアプリについて」で、ラベルの列の幅が確保されず、ラベルと値がくっついていたのを直した（ラベルの列を固定幅にした）。
+
 ## [0.262.0] - 2026-11-06
 
 ### 変更
