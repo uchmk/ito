@@ -197,7 +197,7 @@ pub fn show(ctx: &egui::Context, guide: &mut Guide, words: &Words) -> Outcome {
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     ui.set_width(width);
-                    let small = egui::FontId::proportional(12.0);
+                    let small = egui::FontId::proportional(ito_theme::scale::Text::ChromeButton.size());
                     ui.label(RichText::new(words.title).strong());
                     ui.label(RichText::new(words.lead).font(small.clone()).color(c.dim));
                     for p in guide.problems() {

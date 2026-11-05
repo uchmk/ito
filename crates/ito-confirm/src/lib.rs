@@ -257,10 +257,10 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
 fn with_key(label: &str, key: &str, fg: Color32, primary: bool) -> LayoutJob {
     let mut job = LayoutJob::default();
     let fmt = |font_id: FontId, color: Color32| TextFormat { font_id, color, ..Default::default() };
-    job.append(label, 0.0, fmt(FontId::proportional(14.0), fg));
+    job.append(label, 0.0, fmt(FontId::proportional(ito_theme::scale::Text::ChromeBody.size()), fg));
     if !key.is_empty() {
         let dim = if primary { fg.gamma_multiply(0.8) } else { fg.gamma_multiply(0.6) };
-        job.append(key, 10.0, fmt(FontId::monospace(11.0), dim));
+        job.append(key, 10.0, fmt(FontId::monospace(ito_theme::scale::Text::ChromeSmall.size()), dim));
     }
     job
 }
@@ -282,20 +282,20 @@ fn card(ui: &mut Ui, c: &Card, focused: bool, recommended: bool, badge: &str, st
         style.title
     };
     let w = ui.available_width();
-    let small = FontId::proportional(12.0);
-    let mono = FontId::monospace(11.0);
+    let small = FontId::proportional(ito_theme::scale::Text::ChromeButton.size());
+    let mono = FontId::monospace(ito_theme::scale::Text::ChromeSmall.size());
     let key_w = if c.key.is_empty() { 0.0 } else { text_width(ui, &c.key).max(8.0) + 14.0 };
     let inner = (w - 2.0 * PAD - if key_w > 0.0 { key_w + 10.0 } else { 0.0 }).max(40.0);
     let fmt = |font_id: FontId, color: Color32| TextFormat { font_id, color, ..Default::default() };
 
     let mut job = LayoutJob::default();
     job.wrap.max_width = inner;
-    job.append(&c.title, 0.0, fmt(FontId::proportional(14.0), hue));
+    job.append(&c.title, 0.0, fmt(FontId::proportional(ito_theme::scale::Text::ChromeBody.size()), hue));
     if !c.en.is_empty() {
         job.append(&c.en, 8.0, fmt(mono.clone(), style.dim));
     }
     if green && !badge.is_empty() {
-        let mut f = fmt(FontId::proportional(11.0), OK_TEXT);
+        let mut f = fmt(FontId::proportional(ito_theme::scale::Text::ChromeSmall.size()), OK_TEXT);
         f.background = OK_TEXT.gamma_multiply(0.18);
         job.append(badge, 8.0, f);
     }
@@ -398,7 +398,7 @@ fn diff_view(ui: &mut Ui, items: &[ito_diff::Item], style: &Style) {
     use ito_diff::{Item, Kind};
     let digits =
         items.iter().filter_map(|i| if let Item::Line(l) = i { l.old_no.max(l.new_no) } else { None }).max().unwrap_or(0).to_string().len();
-    let font = FontId::monospace(12.0);
+    let font = FontId::monospace(ito_theme::scale::Text::DialogKey.size());
     let fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
     egui::ScrollArea::vertical().max_height(DIFF_MAX_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;

@@ -143,7 +143,11 @@ pub fn brand(ui: &mut Ui, rect: Rect, name: &str, logo: impl FnOnce(u32) -> Vec<
         ui.painter().image(t.id(), at, uv, Color32::WHITE);
         x = at.right() + 8.0;
     }
-    let galley = ui.painter().layout_no_wrap(name.to_owned(), FontId::proportional(13.0), ito_theme::colors().fg);
+    let galley = ui.painter().layout_no_wrap(
+        name.to_owned(),
+        FontId::proportional(ito_theme::scale::Text::ChromeBody.size()),
+        ito_theme::colors().fg,
+    );
     let right = x + galley.size().x;
     ui.painter().galley(Pos2::new(x, rect.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
     right
@@ -248,9 +252,13 @@ fn search_box(ui: &mut Ui, r: Rect, compact: bool, words: &Words<'_>) -> bool {
     p.circle_stroke(glass, 4.0, stroke);
     p.line_segment([glass + Vec2::new(3.0, 3.0), glass + Vec2::new(6.0, 6.0)], stroke);
     if !compact {
-        let key = p.layout_no_wrap(words.search_key.to_owned(), FontId::monospace(11.0), c.faint());
+        let key = p.layout_no_wrap(words.search_key.to_owned(), FontId::monospace(ito_theme::scale::Text::ChromeSmall.size()), c.faint());
         let key_x = r.right() - 10.0 - key.size().x;
-        let mut job = egui::text::LayoutJob::simple_singleline(words.search.to_owned(), FontId::proportional(12.0), c.dim);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            words.search.to_owned(),
+            FontId::proportional(ito_theme::scale::Text::ChromeButton.size()),
+            c.dim,
+        );
         job.wrap = egui::text::TextWrapping::truncate_at_width((key_x - r.left() - 40.0).max(0.0));
         let text = ui.fonts_mut(|f| f.layout_job(job));
         if key_x - r.left() > 140.0 {
@@ -288,7 +296,7 @@ pub struct ThemeTag {
 pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>) -> ThemeTag {
     let c = ito_theme::colors();
     let text = if dark_now { words.dark } else { words.light };
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(12.0), c.dim);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(ito_theme::scale::Text::ChromeButton.size()), c.dim);
     let size = Vec2::new(galley.size().x + 18.0, 22.0);
     let r = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - size.y / 2.0), size);
     if r.right() > rect.right() {

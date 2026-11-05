@@ -49,13 +49,17 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
     let mut end = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::right_to_left(Align::Center)));
     if spec.clock.show {
         let now = chrono::Local::now().naive_local();
-        let r = end.label(RichText::new(spec.clock.text(&now, spec.lang)).font(FontId::monospace(12.0)).color(c.strong()));
+        let r = end.label(
+            RichText::new(spec.clock.text(&now, spec.lang))
+                .font(FontId::monospace(ito_theme::scale::Text::DialogKey.size()))
+                .color(c.strong()),
+        );
         r.on_hover_text(Clock::full(&now, spec.lang));
         ui.ctx().request_repaint_after(Clock::next_minute(&now));
     }
     if let Some(words) = scale_words(ui.ctx(), spec.lang) {
         end.add_space(ito_theme::scale::space::LG);
-        end.label(RichText::new(words).font(FontId::monospace(11.5)).color(c.wait));
+        end.label(RichText::new(words).font(FontId::monospace(ito_theme::scale::Text::DialogHint.size())).color(c.wait));
     }
     end.add_space(ito_theme::scale::space::LG);
     right(&mut end);
@@ -70,14 +74,17 @@ pub fn show(ui: &mut Ui, spec: &Spec, left: impl FnOnce(&mut Ui), right: impl Fn
 
 /// Plain words in the bar.
 pub fn item(ui: &mut Ui, text: &str, color: Color32) {
-    ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate());
+    ui.add(egui::Label::new(RichText::new(text).size(ito_theme::scale::Text::ChromeButton.size()).color(color)).truncate());
     ui.add_space(ito_theme::scale::space::MD);
 }
 
 /// A word that is a link: true when it was clicked.
 pub fn link(ui: &mut Ui, text: &str) -> bool {
     let c = ito_theme::colors();
-    let r = ui.add(egui::Label::new(RichText::new(text).size(12.0).color(c.blue).underline()).sense(Sense::click()));
+    let r = ui.add(
+        egui::Label::new(RichText::new(text).size(ito_theme::scale::Text::ChromeButton.size()).color(c.blue).underline())
+            .sense(Sense::click()),
+    );
     ui.add_space(ito_theme::scale::space::MD);
     r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }

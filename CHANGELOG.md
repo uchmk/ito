@@ -3,6 +3,15 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.259.0] - 2026-11-05
+
+### 変更
+- 文字の大きさの直書きを `ito_theme::scale::Text` の役割に寄せた（#185）。`ito-confirm`（14 → `ChromeBody`、12 → `ChromeButton`、11 → `ChromeSmall`、diff の等幅 12 → `DialogKey`）、
+  `ito-titlebar`（13 → `ChromeBody`、12 → `ChromeButton`、11 → `ChromeSmall`）、`ito-statusbar`（12 → `ChromeButton`／時計の等幅は `DialogKey`、11.5 → `DialogHint`）、`ito-guide`（12 → `ChromeButton`）。
+  値が変わるのは `ito-confirm` の 14 → 13 だけ（ボタンの文字とカードの題が 1pt 小さくなる）。ほかは同じ値で見た目は変わらない。拡大（`scale_text`）では従来どおり動かない（`size()` を使う）。
+  使う側がやること: なし。`ito-confirm` は `ito-theme` に直接依存するようになった。
+  残し: `ito-markdown` の 13.5、バッジの 10（役割に当たる段が無い）。
+
 ## [0.258.0] - 2026-11-05
 
 ### 追加

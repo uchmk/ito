@@ -11,3 +11,4 @@ repository.workspace = true
 egui = "0.36"
 ito-diff = { path = "../ito-diff" }
 ito-prefs = { path = "../ito-prefs" }
+ito-theme = { path = "../ito-theme" }
