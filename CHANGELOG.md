@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.250.0] - 2026-11-05
+
+### 追加
+- `ito-find`: `cmd::REPLACE_ONE`（`"replace.one"`）。`FindBar::command` が `Output::replace_one` を立てる。キーに割り当て、パレットに載せられる（#191）。
+- `ito-image`: `Rgba::fit_width(max)`。縦横比を保ち、`max` 画素幅まで面積平均で縮める（透明な画素で色が暗くならないよう、アルファで重みを付ける）。すでに狭ければそのまま（#194）。
+- `ito-outline`（機能 `egui`）: `column::split(rect, items, &look) -> Option<Split { text, column, cols }>`。右の目次の列が本文に重ならないよう、ペインを本文の矩形と列の矩形に分ける。`items` が空、またはペインが 40 セル未満なら `None`（本文を全幅で描く）。本文は `text` の上の子 `Ui` で `ito_mdview::show` すれば、返る `cols` が狭い幅になる。列は `show(.., split.column, .., overlay = false, ..)` で描く（#192）。
+
+### 使う側がやること
+- 列の `overlay = true` で本文を隠していたアプリは、`split` に替える。
+
 ## [0.249.0] - 2026-11-05
 
 ### 変更

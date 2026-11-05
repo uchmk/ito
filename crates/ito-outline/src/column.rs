@@ -51,7 +51,7 @@ pub fn first_row(current: Option<usize>, len: usize, slots: usize) -> usize {
 }
 
 #[cfg(feature = "egui")]
-pub use draw::{sep_x, show, Look};
+pub use draw::{sep_x, show, split, Look, Split};
 
 #[cfg(feature = "egui")]
 mod draw {
@@ -75,6 +75,34 @@ mod draw {
     /// Where the rule left of a column `cols` wide goes, in a pane `rect`.
     pub fn sep_x(rect: Rect, cols: u16, look: &Look) -> f32 {
         rect.right() - 8.0 - cols as f32 * look.cell - 1.5 * look.cell
+    }
+
+    /// A pane cut into the text and the column beside it.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Split {
+        /// Where the text goes: the pane up to the column's rule. Lay the text out for this width (draw it in a child
+        /// `Ui` over this rect and the width it reports is the narrower one).
+        pub text: Rect,
+        /// The column's place: from the rule to the pane's right edge. Pass it to [`show`] with `overlay` false.
+        pub column: Rect,
+        /// Width of the column in cells (what [`show`] takes).
+        pub cols: u16,
+    }
+
+    /// Cut `rect` (the whole pane) into text and column, so the column covers nothing. `None` when `items` is empty
+    /// or the pane is under 40 cells wide: then draw the text across the whole pane and no column.
+    pub fn split(rect: Rect, items: &[Item], look: &Look) -> Option<Split> {
+        let pane_cols = (rect.width() / look.cell.max(1.0)).floor().min(f32::from(u16::MAX)) as u16;
+        if items.is_empty() || pane_cols < 40 {
+            return None;
+        }
+        let cols = super::cols_for(items, pane_cols);
+        let sep = sep_x(rect, cols, look);
+        Some(Split {
+            text: Rect::from_x_y_ranges(rect.left()..=sep, rect.y_range()),
+            column: Rect::from_x_y_ranges(sep..=rect.right(), rect.y_range()),
+            cols,
+        })
     }
 
     fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -222,5 +250,22 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert_eq!(jump, None);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn split_leaves_the_text_clear_of_the_column() {
+        use egui::{pos2, vec2, FontId, Rect};
+        let look = Look { cell: 8.0, row_h: 20.0, font: FontId::monospace(13.0), bold: None, title: "Contents".into() };
+        let it = items(&heads(), |h| h.line);
+        let rect = Rect::from_min_size(pos2(10.0, 5.0), vec2(800.0, 400.0));
+        let s = split(rect, &it, &look).unwrap();
+        assert_eq!(s.cols, cols_for(&it, 100));
+        assert_eq!(s.text.right(), s.column.left());
+        assert_eq!((s.text.left(), s.column.right()), (rect.left(), rect.right()));
+        assert_eq!(s.column.left(), sep_x(rect, s.cols, &look));
+        assert!(s.text.width() > rect.width() * 0.6, "the column takes at most about a third");
+        assert!(split(rect, &[], &look).is_none());
+        assert!(split(Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 400.0)), &it, &look).is_none());
     }
 }

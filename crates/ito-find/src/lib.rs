@@ -22,6 +22,7 @@ pub mod cmd {
     pub const NEXT: &str = "find.next";
     pub const PREV: &str = "find.prev";
     pub const REPLACE_OPEN: &str = "replace.open";
+    pub const REPLACE_ONE: &str = "replace.one";
     pub const REPLACE_ALL: &str = "replace.all";
 }
 
@@ -117,6 +118,7 @@ impl FindBar {
             cmd::REPLACE_OPEN => self.open_replace(seed),
             cmd::NEXT => out.next = true,
             cmd::PREV => out.prev = true,
+            cmd::REPLACE_ONE => out.replace_one = true,
             cmd::REPLACE_ALL => out.replace_all = true,
             _ => {}
         }
@@ -349,6 +351,7 @@ mod tests {
         b.open_find(Some("two\nlines"));
         assert_eq!(b.find, "word", "a multi-line selection is not a query");
         assert!(b.command(cmd::REPLACE_ALL, None).replace_all);
+        assert!(b.command(cmd::REPLACE_ONE, None).replace_one);
     }
 
     #[test]

@@ -73,6 +73,50 @@ impl Rgba {
         h
     }
 
+    /// A copy at most `max` pixels wide, the aspect kept (area average, alpha-weighted so see-through edges do not
+    /// darken). Unchanged when already narrow enough; `max` 0 counts as 1. The height is at least 1.
+    pub fn fit_width(&self, max: u32) -> Rgba {
+        let max = max.max(1);
+        if self.width <= max {
+            return self.clone();
+        }
+        let (sw, sh) = (self.width as usize, self.height as usize);
+        let dw = max as usize;
+        let dh = ((sh as u64 * dw as u64 + sw as u64 / 2) / sw as u64).max(1) as usize;
+        // Source span of destination cell `i` of `n` over `len`, as (first, last_exclusive, weight_of(k)).
+        let span =
+            |i: usize, n: usize, len: usize| -> (f64, f64) { (i as f64 * len as f64 / n as f64, (i + 1) as f64 * len as f64 / n as f64) };
+        let overlap = |k: usize, a: f64, b: f64| -> f64 { ((k as f64 + 1.0).min(b) - (k as f64).max(a)).max(0.0) };
+        let mut pixels = Vec::with_capacity(dw * dh * 4);
+        for y in 0..dh {
+            let (y0, y1) = span(y, dh, sh);
+            for x in 0..dw {
+                let (x0, x1) = span(x, dw, sw);
+                let (mut r, mut g, mut b, mut a, mut wsum) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+                for ky in (y0.floor() as usize)..(y1.ceil() as usize).min(sh) {
+                    let wy = overlap(ky, y0, y1);
+                    for kx in (x0.floor() as usize)..(x1.ceil() as usize).min(sw) {
+                        let w = wy * overlap(kx, x0, x1);
+                        let p = &self.pixels[(ky * sw + kx) * 4..][..4];
+                        let wa = w * p[3] as f64;
+                        r += wa * p[0] as f64;
+                        g += wa * p[1] as f64;
+                        b += wa * p[2] as f64;
+                        a += wa;
+                        wsum += w;
+                    }
+                }
+                if a > 0.0 {
+                    pixels.extend([(r / a).round() as u8, (g / a).round() as u8, (b / a).round() as u8]);
+                    pixels.push((a / wsum).round().min(255.0) as u8);
+                } else {
+                    pixels.extend([0, 0, 0, 0]);
+                }
+            }
+        }
+        Rgba { width: max, height: dh as u32, pixels }
+    }
+
     /// Turns premultiplied pixels (colour already scaled by alpha) into straight ones.
     pub fn unpremultiply(&mut self) {
         for p in self.pixels.chunks_exact_mut(4) {
@@ -247,6 +291,28 @@ mod os {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_width_averages_and_keeps_aspect() {
+        let img = Rgba::new(4, 2, [[255, 0, 0, 255], [255, 0, 0, 255], [0, 0, 255, 255], [0, 0, 255, 255]].repeat(2).concat()).unwrap();
+        assert_eq!(img.fit_width(8), img, "already narrow enough");
+        let half = img.fit_width(2);
+        assert_eq!((half.width, half.height), (2, 1));
+        assert_eq!(half.pixels, vec![255, 0, 0, 255, 0, 0, 255, 255]);
+        let one = img.fit_width(1);
+        assert_eq!((one.width, one.height), (1, 1));
+        assert_eq!(one.pixels[3], 255);
+        assert!((one.pixels[0] as i32 - 128).abs() <= 1);
+    }
+
+    #[test]
+    fn fit_width_does_not_darken_see_through_pixels() {
+        let img = Rgba::new(2, 1, vec![200, 100, 50, 255, 0, 0, 0, 0]).unwrap();
+        let one = img.fit_width(1);
+        assert_eq!(one.pixels, vec![200, 100, 50, 128]);
+        let wide = Rgba::new(1000, 1, vec![9; 4000]).unwrap().fit_width(10);
+        assert_eq!((wide.width, wide.height), (10, 1), "height is at least 1");
+    }
 
     #[test]
     fn new_checks_length() {
