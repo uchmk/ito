@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.2] - 2026-11-06
+
+### 変更
+
+- `ito-confirm`: 直書きの余白・角丸のうち、スケールに同じ値があるもの（6・10・角 6）を `ito_theme::scale` の `space::SM`・`space::MD`・`radius::CONTROL` に置き換えた（#185）。見た目は変わらない。値が合うトークンが無いもの（8・14・2・5・ito-markdown の 13.5・タイトルバーのバッジ 10）は直書きのまま。
+
 ## [0.262.1] - 2026-11-06
 
 ### 修正

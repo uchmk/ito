@@ -17,6 +17,7 @@
 use egui::text::{LayoutJob, TextFormat};
 use egui::{vec2, Align2, Color32, Context, CursorIcon, FontId, Id, Order, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
 use ito_prefs::Mark;
+use ito_theme::scale::space::{MD, SM};
 use std::sync::Arc;
 
 /// The colours of the box.
@@ -125,7 +126,7 @@ pub const OK_TEXT: Color32 = Color32::from_rgb(0x56, 0xd3, 0x64);
 const MARK_ROOM: f32 = 20.0;
 
 /// How round the buttons' corners are, in points.
-const BUTTON_RADIUS: f32 = 6.0;
+const BUTTON_RADIUS: f32 = ito_theme::scale::radius::CONTROL as f32;
 
 /// The widest the box gets, in points.
 pub const MAX_WIDTH: f32 = 600.0;
@@ -148,11 +149,12 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
     });
     let w = width(screen.width());
     egui::Area::new(Id::new("ito-confirm")).order(Order::Tooltip).anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
-        let frame = egui::Frame::new().fill(style.panel).stroke(Stroke::new(1.0, style.border)).corner_radius(6.0).inner_margin(14.0);
+        let frame =
+            egui::Frame::new().fill(style.panel).stroke(Stroke::new(1.0, style.border)).corner_radius(BUTTON_RADIUS).inner_margin(14.0);
         let resp = frame.show(ui, |ui| {
             ui.set_width(w - 28.0);
             ui.label(RichText::new(q.title).strong().color(style.title));
-            ui.add_space(6.0);
+            ui.add_space(SM);
             // Everything between the title and the buttons scrolls when the
             // box would not fit the window; the title, buttons and hint stay.
             let reserve = 26.0 + if q.buttons.is_empty() { 0.0 } else { 52.0 } + if q.hint.is_empty() { 0.0 } else { 40.0 };
@@ -169,17 +171,17 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                     });
                 }
                 if !q.body.is_empty() {
-                    ui.add_space(6.0);
+                    ui.add_space(SM);
                     for line in q.body {
                         ui.add(egui::Label::new(RichText::new(line).color(style.text)).wrap());
                     }
                 }
                 if !q.diff.is_empty() {
-                    ui.add_space(6.0);
+                    ui.add_space(SM);
                     diff_view(ui, q.diff, style);
                 }
                 if !q.notes.is_empty() {
-                    ui.add_space(6.0);
+                    ui.add_space(SM);
                     for line in q.notes {
                         ui.add(egui::Label::new(RichText::new(line).color(style.warn)).wrap());
                     }
@@ -190,12 +192,12 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                         if card(ui, c, q.focus == Some(i), q.recommended == Some(i), q.recommended_label, style) {
                             clicked = Some(i);
                         }
-                        ui.add_space(6.0);
+                        ui.add_space(SM);
                     }
                 }
             });
             if !q.buttons.is_empty() {
-                ui.add_space(if q.cards.is_empty() { 10.0 } else { 2.0 });
+                ui.add_space(if q.cards.is_empty() { MD } else { 2.0 });
                 // At the box's right edge, the last button rightmost; a row too
                 // long for the box wraps to the next line, not past the edge.
                 // Sized to its own height: a bare `with_layout` would take all the
@@ -238,7 +240,7 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                 });
             }
             if !q.hint.is_empty() {
-                ui.add_space(6.0);
+                ui.add_space(SM);
                 ui.add(egui::Label::new(RichText::new(q.hint).color(style.dim)).wrap());
             }
         });
@@ -270,7 +272,7 @@ type Chip = (Color32, Color32, Color32);
 
 /// Draw one card across the box and say whether it was clicked.
 fn card(ui: &mut Ui, c: &Card, focused: bool, recommended: bool, badge: &str, style: &Style) -> bool {
-    const PAD: f32 = 10.0;
+    const PAD: f32 = MD;
     let red = c.danger || matches!(c.undo, Undo::No(_));
     // Red wins over green: a card that cannot be undone is never "recommended".
     let green = recommended && !red;
