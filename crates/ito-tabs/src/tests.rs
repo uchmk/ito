@@ -98,8 +98,12 @@ fn the_limit_drops_the_leftmost_tab_that_is_not_the_new_one() {
 
 #[test]
 fn labels_add_the_parent_folder_only_where_names_clash() {
-    let l = labels(&["C:\\dev\\docs\\README.md", "C:\\dev\\api\\README.md", "C:\\dev\\notes.md"]);
-    assert_eq!(l, ["docs/README.md", "api/README.md", "notes.md"]);
+    // A `\` separates components only where it is the platform's separator.
+    #[cfg(windows)]
+    {
+        let l = labels(&["C:\\dev\\docs\\README.md", "C:\\dev\\api\\README.md", "C:\\dev\\notes.md"]);
+        assert_eq!(l, ["docs/README.md", "api/README.md", "notes.md"]);
+    }
     let l = labels(&["/a/x/README.md", "/b/x/README.md", "/b/x/other.md"]);
     assert_eq!(l, ["a/x/README.md", "b/x/README.md", "other.md"]);
     assert_eq!(labels(&["/same/README.md"]), ["README.md"]);
