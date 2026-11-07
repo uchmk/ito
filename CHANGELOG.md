@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.7] - 2026-11-08
+
+### 修正
+
+- `scripts/lanes/xrun.sh`（#202）: `--keys` のとき、`keys.done` の最後の行が `keys: done` でなければ（`keys: failed`・`keys: unsettled`・`keys: refused`・`keys: stalled`、またはファイルが無い）、
+  `shot.png`・`title.txt`・`clip.txt` を撮ったあとで、`keys:`・`step:`・`why:`・`pressed:`・`left:`・`unsettled:` の行を stderr に出して非 0 で終わる。
+  アプリが自分で先に終わっていたときはその終了コード（0 なら 1）。これまでは `keys: stalled` のときに警告を出すだけで、いつも 0 で終わっていた。
+  使う側（kura・yagura・tsumugi）は `scripts/lanes.sh sync` で写す。`xrun.sh` を呼ぶ手順が非 0 を「結果なし」として扱えるか確かめる。
+- `ito-watch` のテスト `a_file_made_below_a_watched_folder_is_told`: Linux の inotify は、できたばかりのサブフォルダーの監視を後から足すので、その前の書き込みを取りこぼす。
+  知らせが来るまでファイルを書き直すようにした（CI の ubuntu で落ちていた。ライブラリの動きは変えない）。
+
 ## [0.262.6] - 2026-11-08
 
 ### 修正

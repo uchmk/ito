@@ -29,7 +29,11 @@
 #                did not finish and the result is of a half-pressed script;
 #                `keys: failed` (a step the app could not carry out, a file it
 #                could not write) and `keys: unsettled` (a key went in before
-#                the app had settled) are not results either
+#                the app had settled) are not results either. With `--keys`
+#                any last line other than `keys: done` (or no file) is
+#                reported on stderr after shot.png/title.txt/clip.txt are
+#                taken, and this script ends non-zero: the app's own exit
+#                code if it had exited by itself, else 1
 #
 # A reused OUTDIR is first emptied of the last run's files (keys.done, `*.txt`,
 # `*.png`, `*.json`, `*.log`): a `<State:>` or `<Shot:>` this run never wrote was
@@ -124,6 +128,27 @@ import -window root "$out/shot.png"
 xdotool getwindowname "$win" >"$out/title.txt" 2>/dev/null
 timeout 2 xclip -selection clipboard -o >"$out/clip.txt" 2>/dev/null || true
 
+alive=1
+kill -0 "$pid" 2>/dev/null || alive=0
 kill "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
+code=$?
 echo "xrun: $out (title: $(cat "$out/title.txt"))"
+
+# With --keys, only a done file whose last line is `keys: done` is a result.
+# `keys: failed`, `keys: unsettled`, `keys: refused`, `keys: stalled` or no file
+# at all is not: say why (the shot and the title above are kept for that) and
+# end non-zero, so a lane cannot take it for a pressed script.
+if [ "$keyed" = 1 ] && [ "$(tail -1 "$out/keys.done" 2>/dev/null)" != "keys: done" ]; then
+    if [ -e "$out/keys.done" ]; then
+        echo "xrun: --keys did not end with 'keys: done'; this is not a result:" >&2
+        grep -E '^(keys|step|why|pressed|left|unsettled):' "$out/keys.done" | sed 's/^/xrun:   /' >&2
+    else
+        echo "xrun: --keys wrote no keys.done; this is not a result" >&2
+    fi
+    if [ "$alive" = 0 ]; then
+        echo "xrun: the app had exited by itself (exit code $code); see $log" >&2
+        [ "$code" -ne 0 ] && exit "$code"
+    fi
+    exit 1
+fi

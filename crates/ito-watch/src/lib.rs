@@ -166,8 +166,25 @@ mod tests {
         assert!(!w.watch(vec![dir.clone()]), "the same wish is not sent again");
         assert!(wait_for(&rx, |e| matches!(e, Event::Watching(true))), "the folder is watched");
         std::fs::create_dir(dir.join("sub")).unwrap();
-        std::fs::write(dir.join("sub").join("a.txt"), "x").unwrap();
-        assert!(wait_for(&rx, |e| matches!(e, Event::Paths(p) if p.iter().any(|p| p.ends_with("a.txt")))), "the file is told");
+        // inotify adds the watch on `sub` only after it hears of `sub`, so a write made before that is missed:
+        // write again until the file is told.
+        let file = dir.join("sub").join("a.txt");
+        let mut told = false;
+        for i in 0..50 {
+            std::fs::write(&file, format!("x{i}")).unwrap();
+            let end = Instant::now() + Duration::from_millis(200);
+            while let Some(left) = end.checked_duration_since(Instant::now()) {
+                match rx.recv_timeout(left) {
+                    Ok(Event::Paths(p)) if p.iter().any(|p| p.ends_with("a.txt")) => told = true,
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            if told {
+                break;
+            }
+        }
+        assert!(told, "the file is told");
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
     }
