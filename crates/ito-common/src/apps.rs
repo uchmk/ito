@@ -292,7 +292,13 @@ mod tests {
     #[test]
     fn a_cargo_build_does_not_register() {
         let d = scratch("dev");
-        for p in ["/w/kura/target/release/kura.exe", r"R:\cargo-target\kura\release\kura.exe"] {
+        // A Windows path is only one on Windows: `\` is not a separator elsewhere.
+        let paths: &[&str] = if cfg!(windows) {
+            &["/w/kura/target/release/kura.exe", r"R:\cargo-target\kura\release\kura.exe"]
+        } else {
+            &["/w/kura/target/release/kura.exe", "/r/cargo-target/kura/release/kura.exe"]
+        };
+        for p in paths.iter().copied() {
             assert!(is_build_output(Path::new(p)), "{p}");
             assert_eq!(register_in(&d, "kura", "1", Path::new(p)), Ok(false));
         }

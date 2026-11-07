@@ -3,6 +3,14 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.4] - 2026-11-08
+
+### 修正
+
+- `ito-common`: `in_temp` が、存在しないパスを一時フォルダーの下と判定できないことがあったのを直した（一時フォルダーが短い名前（`RUNNER~1`）などで、親が存在しないとき。存在する一番近い親を解決してから残りを戻す）。
+- `ito-common`: `apps` のテストが Linux で `\` 区切りの Windows のパスを使って落ちていたのを直した（テストだけ）。
+- CI の clippy: Windows 向けを `cargo-zigbuild` で回す（素の `cargo clippy` だと `ring` が `lib.exe` を要して落ちる。`verify.sh` と同じ）。
+
 ## [0.262.3] - 2026-11-07
 
 ### 修正

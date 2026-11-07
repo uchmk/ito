@@ -86,10 +86,15 @@ pub fn in_temp(path: &Path) -> bool {
         if let Ok(c) = std::fs::canonicalize(p) {
             return plain(c);
         }
-        if let (Some(dir), Some(name)) = (p.parent(), p.file_name()) {
+        // The nearest folder above that exists, resolved (a short `RUNNER~1` name, a link), with the rest put back.
+        let mut rest = Vec::new();
+        let mut at = p;
+        while let (Some(dir), Some(name)) = (at.parent(), at.file_name()) {
+            rest.push(name);
             if let Ok(c) = std::fs::canonicalize(dir) {
-                return plain(c.join(name));
+                return plain(rest.iter().rev().fold(c, |acc, n| acc.join(n)));
             }
+            at = dir;
         }
         plain(p.to_path_buf())
     }
