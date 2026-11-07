@@ -12,6 +12,11 @@ Gives the run its own folder (the keys_env file, `<State:name>` and `<Shot:name>
 files all land there), starts the app, waits for it, then prints the done file and
 every `*.txt` beside it, one block per file. Returns the folder's path.
 
+A reused -Out is first emptied of the last run's files (the done file, `*.txt`,
+`*.png`, `*.json`, `isolate\`): a `<State:>` or `<Shot:>` this run never wrote was
+printed and read as this run's. A folder this script did not make (no `.keys-run`
+and no `keys.done` in it) is refused, exit 4, so nothing of anyone else's is deleted.
+
   -Launches   the keys start a program (sections 22, 26, 32, 37, `<F12>`). `-Wait`
               waits for descendants too and would never return while the editor or
               browser is open (kura#234), so this waits on the app's own id instead.
@@ -31,12 +36,14 @@ A system dialog in front while the app runs is written to `blocked.txt` in the r
 folder and makes the run no result (exit 3): its keys may have gone to the dialog.
 
 End the keys with `<Quit>` where `q` means something else (kura#236). A done file
-whose last line is not `keys: done` (`keys: stalled`, `keys: refused`) is not a
-result: say so in the report with its lines.
+whose last line is not `keys: done` (`keys: stalled`, `keys: refused`, `keys: failed`
+for a step the app could not carry out or a file it could not write, `keys: unsettled`
+for a key that went in before the app had settled) is not a result: say so in the
+report with its lines.
 
 Exit code: 0 for a result; 1 when the done file is missing or does not end with
-`keys: done`; 2 when the app outlived -Timeout; 3 when a system dialog was in front.
-The output is printed either way.
+`keys: done`; 2 when the app outlived -Timeout; 3 when a system dialog was in front;
+4 when -Out is a folder this script did not make. The output is printed either way.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -104,10 +111,19 @@ if (-not $name -or -not $conf['keys_env']) { throw 'keys.ps1: scripts\lanes.conf
 if (-not $Bin) { $Bin = Join-Path (Split-Path $PSScriptRoot -Parent) "target\release\$name.exe" }
 if (-not (Test-Path -LiteralPath $Bin)) { throw "keys.ps1: $Bin does not exist (cargo build --release, or pass -Bin)" }
 if (-not $Out) { $Out = Join-Path ([IO.Path]::GetTempPath()) ("$name-keys-" + [guid]::NewGuid().ToString('N').Substring(0, 8)) }
-New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $done = Join-Path $Out 'keys.done'
-Remove-Item -LiteralPath $done -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $Out 'blocked.txt') -ErrorAction SilentlyContinue
+$marker = Join-Path $Out '.keys-run'
+if ((Test-Path -LiteralPath $Out) -and -not (Test-Path -LiteralPath $marker) -and -not (Test-Path -LiteralPath $done) -and
+    (Get-ChildItem -LiteralPath $Out -Force | Select-Object -First 1)) {
+    Write-Warning "keys.ps1: -Out $Out has files this script did not write; pass a new or empty folder"
+    exit 4
+}
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+Set-Content -LiteralPath $marker -Value "a keys.ps1 run folder: each run empties it of the last run's files" -Encoding utf8
+# A file that cannot be removed stops the run (ErrorActionPreference): it would be read as this run's.
+Get-ChildItem -LiteralPath $Out -File | Where-Object { $_.Name -like 'keys.done*' -or $_.Extension -in '.txt', '.png', '.json' } |
+    Remove-Item -Force
+if (Test-Path -LiteralPath (Join-Path $Out 'isolate')) { Remove-Item -LiteralPath (Join-Path $Out 'isolate') -Recurse -Force }
 [Environment]::SetEnvironmentVariable($conf['keys_env'], $done)
 if ($Isolate) {
     $vars = @(($conf['isolate'] -split '\s+') | Where-Object { $_ })

@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.3] - 2026-11-07
+
+### 修正
+
+- `scripts/lanes/keys.ps1`・`xrun.sh`: 使い回した `-Out` / `OUTDIR` に前回の成果物（`<State:>` の `*.txt`・`<Shot:>` の `*.png`・`*.json`・`xrun.sh` は `*.log`、`keys.ps1` は `isolate\`）が残り、今回の run が書けなかったものが今回の結果として読まれていたのを直した。走らせるたびに目印 `.keys-run` を置き、前回の成果物を消してから始める（消せなければ止まる）。スクリプトが作ったのでないフォルダー（`.keys-run` も `keys.done` も無く中身がある）は拒む（`keys.ps1` は exit 4、`xrun.sh` は exit 2）。説明に、成果物にならない最終行 `keys: failed`・`keys: unsettled` を足した。使う側は `scripts/lanes.sh sync` で写す。`xrun.sh` は最終行が `keys: done` でなくても exit 0 のまま（警告だけ）。
+- `ito-common`: `access` のテストが、一時フォルダーの ACL（サンドボックス用アカウントや `Authenticated Users` の継承）に依存して落ちていたのを直した。Windows ではテスト用のフォルダーの継承を切って本人だけにし、対象ファイル自身の指摘だけを見る。コードは変えていない。
+
 ## [0.262.2] - 2026-11-06
 
 ### 変更
