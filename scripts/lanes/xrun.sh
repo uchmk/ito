@@ -26,7 +26,15 @@
 #   <bin>.log    what the app printed (kura.log)
 #   keys.done    there when every `--keys` key went in (last line `keys: done`);
 #                missing, or `keys: stalled` (kura v0.67.12), means the script
-#                did not finish and the result is of a half-pressed script
+#                did not finish and the result is of a half-pressed script;
+#                `keys: failed` (a step the app could not carry out, a file it
+#                could not write) and `keys: unsettled` (a key went in before
+#                the app had settled) are not results either
+#
+# A reused OUTDIR is first emptied of the last run's files (keys.done, `*.txt`,
+# `*.png`, `*.json`, `*.log`): a `<State:>` or `<Shot:>` this run never wrote was
+# read as this run's. A folder this script did not make (no `.keys-run`, no
+# keys.done and no shot.png in it) is refused, so nothing of anyone else's is deleted.
 #
 # The clipboard is armed with XRUN-SENTINEL first, so an unchanged clipboard
 # reads as that rather than as the previous run's. <BIN>_BIN (KURA_BIN)
@@ -36,7 +44,14 @@
 set -u
 out="${1:?usage: scripts/xrun.sh OUTDIR [app arguments...]}"
 shift
+if [ -n "$(ls -A -- "$out" 2>/dev/null)" ] && [ ! -e "$out/.keys-run" ] && [ ! -e "$out/keys.done" ] && [ ! -e "$out/shot.png" ]; then
+    echo "xrun: $out has files this script did not write; pass a new or empty folder" >&2
+    exit 2
+fi
 mkdir -p -- "$out"
+printf "an xrun.sh run folder: each run empties it of the last run's files\n" >"$out/.keys-run"
+find "$out" -maxdepth 1 -type f \( -name 'keys.done*' -o -name '*.txt' -o -name '*.png' -o -name '*.json' -o -name '*.log' \) -delete \
+    || { echo "xrun: could not empty $out of the last run's files" >&2; exit 2; }
 conf() { sed -n "s/^$1=//p" "$(dirname "$0")/lanes.conf"; }
 name=$(conf bin)
 keys_env=$(conf keys_env)
@@ -48,7 +63,6 @@ keyed=0
 for a in "$@"; do [ "$a" = "--keys" ] && keyed=1; done
 if [ "$keyed" = 1 ]; then wait_s="${XRUN_WAIT:-1}"; else wait_s="${XRUN_WAIT:-3}"; fi
 keys_timeout="${XRUN_KEYS_TIMEOUT:-120}"
-rm -f -- "$out/keys.done"
 
 for tool in Xvfb xdotool xclip import; do
     command -v "$tool" >/dev/null || { echo "xrun: $tool is missing (apt-get install -y xvfb xdotool xclip imagemagick)" >&2; exit 2; }
