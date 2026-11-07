@@ -305,6 +305,15 @@ mod tests {
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ito-access-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // The temp folder's own entries (a sandbox account, `Authenticated Users`) are inherited
+        // by what is made in it; cut them so these tests see only what they set themselves.
+        #[cfg(windows)]
+        {
+            let me = std::env::var("USERNAME").unwrap();
+            let ok =
+                quiet(std::process::Command::new("icacls").arg(&dir).args(["/inheritance:r", "/grant:r"]).arg(format!("{me}:(OI)(CI)F")));
+            assert!(ok.unwrap(), "icacls could not make {} private", dir.display());
+        }
         dir
     }
 
@@ -321,7 +330,10 @@ mod tests {
         let dir = temp("own");
         let f = dir.join("jobs.toml");
         std::fs::write(&f, "x = 1\n").unwrap();
-        assert_eq!(others_can_write(&f).unwrap(), Vec::<String>::new());
+        // Only the file itself: the folders above it are the machine's (a sandbox account
+        // on the temp folder, `Authenticated Users` on `C:\`), not what this test makes.
+        let own: Vec<_> = findings(&f).unwrap().into_iter().filter(|x| x.path == f.canonicalize().unwrap()).collect();
+        assert!(own.is_empty(), "{own:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -333,8 +345,9 @@ mod tests {
         open_to_everyone(&f).unwrap();
         let who = others_can_write(&f).unwrap();
         assert!(!who.is_empty(), "{who:?}");
+        // The finding is on the file itself, with its path (folders above it may add their own).
         let found = findings(&f).unwrap();
-        assert!(found.iter().all(|x| x.path == f.canonicalize().unwrap()), "{found:?}");
+        assert!(found.iter().any(|x| x.path == f.canonicalize().unwrap()), "{found:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
