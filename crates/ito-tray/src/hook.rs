@@ -250,13 +250,16 @@ mod tests {
         assert_eq!(fake.events().recv_timeout(Duration::from_secs(5)).unwrap(), Event::Click);
         assert_eq!(fake.events().recv_timeout(Duration::from_secs(5)).unwrap(), Event::Menu("quit".into()));
         let done = d.path().join("keys.txt.done");
+        // `fs::write` creates the file before it fills it, so wait for the text, not for the file.
+        let mut text = String::new();
         for _ in 0..100 {
-            if done.exists() {
+            text = std::fs::read_to_string(&done).unwrap_or_default();
+            if !text.is_empty() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert_eq!(std::fs::read_to_string(&done).unwrap(), "ok\n");
+        assert_eq!(text, "ok\n");
         assert_eq!(woke.load(Ordering::SeqCst), 2);
         let t = std::fs::read_to_string(&state).unwrap();
         assert!(t.contains("state = \"Waiting\"") && t.contains("id = \"quit\""), "{t}");

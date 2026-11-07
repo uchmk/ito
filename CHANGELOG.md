@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.262.6] - 2026-11-08
+
+### 修正
+
+- `ito-tray`: フェイクのトレイのテストが、`.done` ファイルが作られた直後の空の状態を読んで落ちることがあった。中身が書かれるまで待つ。
+
 ## [0.262.5] - 2026-11-08
 
 ### 修正
