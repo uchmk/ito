@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.267.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: 読み取りを実際にいつ取ったかを記録する（#203、時間を決めた読み取り）。`Runner::since_action()`（直前の操作の最初の入力が入ってからの時間。最初の操作の前は `None`）と `since_action_line(since)`（`<State:>` の行 `since last action: 153 ms`、操作の前は `since last action: none`。ミリ秒は切り捨て、最後に改行）。ポインターの手順は最初のフレームで 1 回だけ時刻を取る。`<Wait>`・`<State>`・`<Now>` では変わらない。
+  - アプリがやること: 使うなら、`Do::State` を受けたフレームで `since_action()` を読み、`since_action_line` の行を `<State:>` のファイルに足す（ファイルを書くときではなく、状態を取るときに読む）。自動では書かない。
+
+### 変更
+
+- `ito-keyscript`: `<Now>` のあとに `<Wait:N>` を置けるようにした（時間を決めた読み取り）。`<Now>` は、間の `<Wait:N>` を越えて、次の待ちでない手順に掛かる。
+  - 書き方: `x<Now><State:a><Now><Wait:150><State:b>`（`a` は `x` が描かれたらすぐ、`b` は `a` の約 150 ms 後。間の待ちも落ち着きを待たない）。`<Now>` は 1 つの手順で使い切るので、`<Now><State:a><Wait:150><State:b>` の `b` は今までどおり落ち着きを待つ。
+  - 待ちが続くときは 1 つずつ順に数え、それぞれ 1 フレームほど延びることがある。N は下限で、約束ではない。届いたかの確認・アプリの設定の書き込みの待ち・木の読み取りの鮮度の規則は、`<Now>` でも飛ばさない。
+  - 通るようになったのは、`<Now><Wait:N>` のあとに待ちでない手順が続く形だけ（`<Now><Wait:N>x` など。今までは断っていた）。今までどおり断る形: 最後の `<Now>`、`<Now><Now>`、`<Now><Quit>`、`<Now><Wait:N>` で終わる、`<Now><Wait:N><Quit>`、`<Now><Wait:N><Now>…`。違ったときの文言を直した（`` …, or before `<Wait:N>` and then one (`<Now><Wait:150><State:b>`) ``）。
+  - `Runner` の時間の進め方は変えていない（落ち着きの待ちが無く、手順の間に `GAP`（60 ms）を置く）。だから `Runner` の時間を決めた読み取りは、N より `GAP` ほど遅い。進め方をそろえるのは ito#204。
+  - kura がやること: 自分のループはもうこの意味で動く（`<Wait>` は `<Now>` を解かない）。27.6 の行を `<Now><State:a><Now><Wait:150><State:b>` に直す。`state_report` に `since last action:` の行を足す。Drag は続きのフレームでも時刻を取り直さず、操作の最初の入力の時刻を使う。
+
 ## [0.266.0] - 2026-11-08
 
 ### 追加

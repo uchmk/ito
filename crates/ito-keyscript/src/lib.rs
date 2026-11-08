@@ -41,16 +41,27 @@ const FRAME: Duration = Duration::from_millis(20);
 pub enum Step {
     Key(Key),
     /// `<Wait:500>`: this long after the key before it went in, before the
-    /// next one does. A shell in the pane runs at its own pace, which the app
+    /// next one does. Several waits in a row count one after the other, each
+    /// from the end of the one before, and each may take a frame longer. A
+    /// shell in the pane runs at its own pace, which the app
     /// cannot see, so "settled" says nothing about it; every real-machine run
     /// that drove the pane filled the gap with harmless keys instead and
     /// guessed how long they took (#93, #119 and five more).
     Wait(Duration),
-    /// `<Now>`: the key after it goes in on the next frame, without waiting
-    /// for what the key before started to settle. For the rows that measure
-    /// something halfway -- a trash still running (12.14), two keys inside the
-    /// preview's 40 ms debounce (47.2) -- which the settled wait otherwise
-    /// waits out (Q41).
+    /// `<Now>` applies to the next step that is not a `<Wait:N>`: that step goes
+    /// in without waiting for what came before to settle, and the waits before
+    /// it do not wait for settle either. For the rows that measure something
+    /// halfway: a trash still running (12.14), two keys inside the preview's
+    /// 40 ms debounce (47.2) (Q41).
+    ///
+    /// A timed read is `x<Now><State:a><Now><Wait:150><State:b>`: `a` as soon
+    /// as `x` is drawn, `b` about 150 ms after `a`. Each `<Now>` is spent by
+    /// one step, so in `<Now><State:a><Wait:150><State:b>` the read `b` still
+    /// waits for things to settle. `<Now>` does not skip the check that the
+    /// last input was drawn, nor an app's wait for its config writes, nor the
+    /// rule that a reading of the tree needs a frame drawn after the last
+    /// action. So N is a lower bound, not a promise: [`Runner::since_action`]
+    /// and [`since_action_line`] record when a reading was really taken.
     Now,
     /// `<Shot:name@preview>` crops it to the preview pane (the name keeps the
     /// suffix). `<Shot:name>`: the window as it is now, saved as `name.png` beside the
@@ -1482,7 +1493,7 @@ pub struct Dialect<'a> {
 
 /// `<Tab>C<C-S-t>gg` as the keys it names, in yazi's notation: `<…>` is one
 /// key, anything else is one key per character. `<Wait:N>` pauses N ms, and
-/// `<Now>` presses the next key without waiting for the last one to settle,
+/// `<Now>` sends the next step (past any `<Wait:N>`) without waiting for settle,
 /// `<Shot:name>` saves the window as `name.png` and `<State:name>` the state
 /// report as `name.txt`.
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
@@ -1623,13 +1634,15 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             out.push(step.clone());
         }
     }
-    // `<Now>` is about the key after it, so there has to be one.
+    // `<Now>` is about the step after it (past any `<Wait:N>`), so there has to be one.
     for (i, step) in out.iter().enumerate() {
-        if *step == Step::Now && !matches!(out.get(i + 1), Some(s) if !matches!(s, Step::Wait(_) | Step::Now | Step::Quit)) {
-            return Err(
-                "`<Now>` has to come right before a key or a reading (`<State:x>`, `<Shot:x>`), as `d<Now>w` or `<A-c><Now><State:mid>`"
-                    .into(),
-            );
+        if *step != Step::Now {
+            continue;
+        }
+        let next = out[i + 1..].iter().find(|s| !matches!(s, Step::Wait(_)));
+        if !matches!(next, Some(s) if !matches!(s, Step::Now | Step::Quit)) {
+            return Err("`<Now>` has to come right before a key or a reading (`d<Now>w`, `<A-c><Now><State:mid>`), or before `<Wait:N>` and then one (`<Now><Wait:150><State:b>`)"
+                .into());
         }
     }
     // A `<ClickId:x>` proves nothing by itself (see `Step::ClickId`), so a check of its result has to come after it.
@@ -1886,6 +1899,18 @@ pub struct Runner {
     last_read: Option<String>,
     /// Where the copies and announcements stood when the last action's first input went in (`None` before the first action).
     since: Option<Mark>,
+    /// When the last action's first input went in (`None` before the first action).
+    acted: Option<Instant>,
+}
+
+/// The `<State:>` line that says when a reading was really taken, ending in a newline:
+/// `since last action: 153 ms` (whole milliseconds, rounded down), or `since last action: none` before the first
+/// action. A timed read (`<Now><Wait:N>`) is not held to its N; this line says how long it really took.
+pub fn since_action_line(since: Option<Duration>) -> String {
+    match since {
+        Some(d) => format!("since last action: {} ms\n", d.as_millis()),
+        None => "since last action: none\n".into(),
+    }
 }
 
 /// What an app reads for `<ReadHas:NAME=TEXT>` (a terminal pane's text, say). The runner asks for it in each frame
@@ -1931,6 +1956,7 @@ impl Runner {
             pointer_step: String::new(),
             last_read: None,
             since: None,
+            acted: None,
             pointer_new: false,
             steps: steps.into(),
             next: Instant::now() + Duration::from_millis(500),
@@ -2046,7 +2072,7 @@ impl Runner {
             raw.events.extend(frame);
             // The step's first frame is the action: a copy made by the press still counts after the release.
             if std::mem::take(&mut self.pointer_new) {
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
             }
             self.next = now + FRAME;
             self.fly(ctx, now, self.pointer_step.clone(), true);
@@ -2062,6 +2088,18 @@ impl Runner {
         let did = self.take(&step, ctx, raw, now, reader);
         self.note(now);
         did
+    }
+
+    /// How long ago the last action's first input went in (`None` before the first action). Read it in the frame
+    /// that got `Do::State` (when the state is taken), not later when a file is written.
+    pub fn since_action(&self) -> Option<Duration> {
+        self.acted.map(|t| t.elapsed())
+    }
+
+    /// The last action's first input goes in now: remember the copies and announcements, and the time.
+    fn act(&mut self, ctx: &egui::Context, now: Instant) {
+        self.since = Some(mark(ctx));
+        self.acted = Some(now);
     }
 
     /// An input has gone in (`events`: into the raw input): wait for the main window to draw it.
@@ -2090,11 +2128,12 @@ impl Runner {
         match press(step)? {
             Press::Events(events) => {
                 raw.events.extend(events);
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), true);
             }
             Press::Wait(d) => self.next = now + d,
-            // This runner has no settling to skip.
+            // This runner has no settling to skip. Its pacing (`GAP`) is unchanged, so a timed read here
+            // (`<Now><Wait:N>`) is about `GAP` later than N (ito#204 shares the pacing).
             Press::Now => self.next = now,
             Press::Shot(name) => self.shot = Some((name, false)),
             Press::State(name) => return Some(Do::State(name)),
@@ -2109,18 +2148,18 @@ impl Runner {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
                 // The window lays out again at the new size before the next step.
                 self.next = now + SETTLE;
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), false);
             }
             Press::Theme(name) => {
                 self.info.theme = name.clone();
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), false);
                 return Some(Do::Theme(name));
             }
             Press::Lang(code) => {
                 self.info.lang = code.clone();
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), false);
                 return Some(Do::Lang(code));
             }
@@ -2200,12 +2239,12 @@ impl Runner {
             }
             Press::Paste => {
                 raw.events.push(egui::Event::Paste((self.clipboard)()));
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), true);
             }
             Press::PasteText(text) => {
                 raw.events.push(paste_text_event(&text));
-                self.since = Some(mark(ctx));
+                self.act(ctx, now);
                 self.fly(ctx, now, label(step), true);
             }
             p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
@@ -2460,17 +2499,40 @@ mod tests {
         }
     }
 
-    /// Q41: `<Now>` marks the key after it, and only a key can follow it.
+    /// Q41: `<Now>` marks the next step past any waits, and a key or a reading has to follow it.
     #[test]
-    fn now_marks_the_next_key() {
+    fn now_marks_the_next_step() {
         let got = parse("d<Now>w").unwrap();
         assert_eq!(got[1], Step::Now);
         assert!(matches!(got[2], Step::Key(_)));
         assert_eq!(press(&got[1]), Some(Press::Now));
-        for bad in ["d<Now>", "<Now><Wait:100>x", "<Now><Now>x"] {
+        for ok in [
+            "d<Now>w",
+            "<A-c><Now><State:mid>",
+            "x<Now><Wait:150><State:b>",
+            "x<Now><Wait:100><Wait:50>y",
+            "<Now><Wait:0><State:a>",
+            "<Now><Wait:100>x",
+        ] {
+            assert!(parse(ok).is_ok(), "{ok}: {:?}", parse(ok));
+        }
+        for bad in ["d<Now>", "<Now><Now>x", "<Now><Quit>", "<Now><Wait:100>", "<Now><Wait:100><Quit>", "<Now><Wait:100><Now>x"] {
             let err = parse(bad).unwrap_err();
             assert!(err.contains("<Now>"), "{bad}: {err}");
         }
+        let got = parse("x<Now><Wait:150><State:b>").unwrap();
+        assert_eq!(got.len(), 4);
+        assert!(matches!(got[0], Step::Key(_)));
+        assert_eq!(got[1], Step::Now);
+        assert_eq!(got[2], Step::Wait(Duration::from_millis(150)));
+        assert_eq!(got[3], Step::State("b".into()));
+    }
+
+    #[test]
+    fn since_action_line_says_whole_milliseconds() {
+        assert_eq!(since_action_line(None), "since last action: none\n");
+        assert_eq!(since_action_line(Some(Duration::from_micros(153_900))), "since last action: 153 ms\n");
+        assert_eq!(since_action_line(Some(Duration::ZERO)), "since last action: 0 ms\n");
     }
 
     /// `<Size:WxH>`, `<Theme:x>` and `<Lang:x>` parse, print back as written, and refuse nonsense.
@@ -2702,12 +2764,13 @@ mod tests {
     }
 
     /// #268: `<Now>` may come before a reading, to take it with a job still
-    /// running; before a wait it still means nothing.
+    /// running; before a wait it reaches through to the step after it.
     #[test]
     fn now_may_come_before_a_reading() {
         assert!(parse("<A-c><Now><State:mid>").is_ok());
         assert!(parse("<Now><Shot:a>").is_ok());
-        assert!(parse("<Now><Wait:5>x").is_err());
+        assert!(parse("<Now><Wait:5>x").is_ok());
+        assert!(parse("<Now><Wait:5>").is_err());
         assert!(parse("<Now>").is_err());
     }
 
@@ -2911,6 +2974,94 @@ mod tests {
             ctx.run_ui(raw, |ui| app(ui, 0)).drop_without_applying_deltas();
         }
         assert_eq!((states, out), (1, Some(Do::Done)));
+    }
+
+    /// Plays `script` one `input` call at a time without hurrying the waits; `trace` sees each call's result and `acted`.
+    fn play(script: &str, mut trace: impl FnMut(&Runner, &Option<Do>)) {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse(script).unwrap(), None);
+        r.next = Instant::now();
+        let end = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < end {
+            let mut raw = egui::RawInput::default();
+            let did = r.input(&ctx, &mut raw);
+            trace(&r, &did);
+            if matches!(did, Some(Do::Done | Do::Failed { .. })) {
+                return;
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("{script}: did not finish");
+    }
+
+    fn state_of(did: &Option<Do>) -> Option<String> {
+        match did {
+            Some(Do::State(n)) => Some(n.clone()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn since_action_starts_at_the_first_action_and_only_actions_move_it() {
+        let mut trail = Vec::new();
+        play("<State:a>x<Now><Wait:10><State:b>", |r, did| trail.push((state_of(did), r.acted)));
+        let first = trail.iter().position(|(d, _)| d.as_deref() == Some("a")).unwrap();
+        assert_eq!(trail[first].1, None, "no action before the first state");
+        assert!(trail.iter().take(first + 1).all(|(_, a)| a.is_none()));
+        let acted = trail.last().unwrap().1.expect("the key is an action");
+        let set_at = trail.iter().position(|(_, a)| a.is_some()).unwrap();
+        assert!(trail[set_at..].iter().all(|(_, a)| *a == Some(acted)), "a wait, state or <Now> never moves it");
+        let b = trail.iter().position(|(d, _)| d.as_deref() == Some("b")).unwrap();
+        assert!(b > set_at);
+    }
+
+    #[test]
+    fn a_pointer_step_marks_the_time_at_its_first_frame_only() {
+        for script in ["<Click:0.5,0.5>", "<Drag:0.1,0.1-0.9,0.9>"] {
+            let mut trail = Vec::new();
+            play(script, |r, did| trail.push((state_of(did), r.acted, r.pointer.len())));
+            let first = trail.iter().position(|(_, a, _)| a.is_some()).expect(script);
+            let acted = trail[first].1;
+            // The first frame has gone in; frames of the same step are still to come.
+            assert!(trail[first].2 > 0, "{script}: the step has later frames");
+            assert!(trail[first..].iter().all(|(_, a, _)| *a == acted), "{script}");
+        }
+    }
+
+    #[test]
+    fn a_timed_read_waits_its_time_between_the_two_readings() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("x<Now><State:a><Now><Wait:150><State:b>").unwrap(), None);
+        r.next = Instant::now();
+        let (mut at_a, mut at_b, mut seen_due) = (None, None, false);
+        let mut order = Vec::new();
+        let end = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < end && at_b.is_none() {
+            let mut raw = egui::RawInput::default();
+            match r.input(&ctx, &mut raw) {
+                Some(Do::State(n)) => {
+                    let t = Instant::now();
+                    if n == "a" {
+                        at_a = Some(t);
+                    } else {
+                        at_b = Some(t);
+                    }
+                    order.push(n);
+                }
+                Some(d) => panic!("{d:?}"),
+                None => {}
+            }
+            // The Wait step gave the watchdog its due: `note` reports `next`.
+            if at_a.is_some() && r.next > Instant::now() + Duration::from_millis(100) {
+                seen_due = true;
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(order, ["a", "b"]);
+        assert!(seen_due, "next is about 150 ms ahead after the wait");
+        assert!(at_b.unwrap() - at_a.unwrap() >= Duration::from_millis(150));
     }
 
     #[test]
