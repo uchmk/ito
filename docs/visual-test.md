@@ -171,7 +171,7 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 |---|---|---|
 | state JSON v1 | スキーマと書き出しは ito、中身は各アプリ（kura が最初） | **ito 側は v0.275.0 で実装。** `state/<name>.json` に、`<State:>` のテキストと並べて書く。`settled`・`theme`・`lang`・`window`・`ui[]`・`toasts[]`・`capabilities`・`stable`、アプリだけの値は `app_state` の中。分からない値は `null`（[穴の表](#gaps)）。 |
 | Test ID | `ito-a11y` の `test_id`。名前は各アプリ（ito の部品の分は ito） | egui の id と別の、変わらない名前（kura なら `spot.scroll.thumb`、ito の設定の画面なら `settings.field.<id>`）。観点はこれで対象を指す。 |
-| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#205 の B。矩形は state JSON に v0.275.0 で入り、`<Snap:>` はこれから） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 4 つのアプリ（yagura・koyomi・michi・fude）はそのまま使え、kura は自前の実行に写す。 |
+| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#205 の B。矩形は state JSON に v0.275.0 で、`<Snap:>` は v0.276.0 で入った） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 4 つのアプリ（yagura・koyomi・michi・fude）はそのまま使え、kura は自前の実行に写す。 |
 | Shot の付属 JSON | ito（いまの `review::Meta` を広げる） | PNG ごとに run_id・snapshot_seq・前後の state のハッシュ・環境。名前は `shots/<name>.json`（State と分ける。v0.273.0 で実装。`theme`・`lang` は撮ると頼んだ時点で効いていたもの、`theme_requested`・`lang_requested` は `<Theme:>`・`<Lang:>` が頼んだもの。run_id・snapshot_seq・ハッシュは ito#205）。 |
 | kura の `<Tree:>`・`<Assert:>`・`<Is:>` | kura だけ | **済み（kura v0.154.0）。** ito の `tree_text` などを呼んで自前の実行で読む。Runner のアプリはもう使える。 |
 
@@ -274,7 +274,7 @@ runner はどのアプリも ito から写した同じスクリプト: Windows �
 |---|---|---|
 | 1 | 対象と期待値が明確 | 行の check spec が実行の前にコミットされている（コミットの時刻 < 実行の開始）。観点ごとに test_id、期待値、許容差、失敗の見え方。 |
 | 2 | スクリーンショットがある | PNG があり、sha256 が manifest にあり、大きさ = 窓 × 倍率。 |
-| 3 | state JSON がある | `schema_version` が 1、`settled: true`（v0.275.0 では `settled` はまだ `null`。`<Snap:>` で入れる）、観点に要る `capabilities` がある。 |
+| 3 | state JSON がある | `schema_version` が 1、`settled: true`（v0.276.0 から Pace が入れる）、観点に要る `capabilities` がある。 |
 | 4 | 画像と state が同じ実行 | run_id と snapshot_seq が同じ。前後の state のハッシュが同じ。 |
 | 5 | 機械が問題を見つけていない | `assertions.json` がすべて PASS。ERROR が無い。 |
 | 6 | Vision が指定の観点を確認した | Tier 2: 全観点に答えと bbox がある。Tier 1: 要らない（走らせたなら FAIL が無いこと）。 |
@@ -383,11 +383,11 @@ C:\dev\filer-evidence\20261107-101203-41.15\
                         後片付けの結果、全ファイルの sha256
   keys.done
   run.json              Runner が書く実行の記録（v0.273.0。app・ito の rev・status・steps・failed の手順。manifest.json の元になる）
-  trace.jsonl           1 手順 1 行: step, label, settled, frame, time
-  state\02-top-before.json   state JSON v1（Snap の前。テキストの State も並べて置く）
-  state\02-top-after.json    Snap の後
-  shots\02-top.png      全体
-  shots\02-top.json     Shot の付属 JSON
+  trace.jsonl           1 手順 1 行（v0.276.0。Runner が書く）: step, label, outcome, settled, frame, time, why
+  state\top-before.json   state JSON v1（Snap の前。テキストの State も並べて置く）
+  state\top-after.json    Snap の後（同じ capture_id と snapshot_seq）
+  shots\top.png      全体
+  shots\top.json     Shot / Snap の付属 JSON（Snap では前後の state の path・sha256・png_sha256・state_unchanged）
   crops\41.15-thumb-top.png
   canary\…              Tier 2 だけ。名前は伏せ、対応表は manifest の外（scratch）に
   machine\assertions.json

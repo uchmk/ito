@@ -13,7 +13,7 @@ files all land there), starts the app, waits for it, then prints the done file a
 every `*.txt` beside it, one block per file. Returns the folder's path.
 
 A reused -Out is first emptied of the last run's files (the done file, `*.txt`,
-`*.png`, `*.json`, `isolate\`): a `<State:>` or `<Shot:>` this run never wrote was
+`*.png`, `*.json`, `*.jsonl` (trace.jsonl), `isolate\`): a `<State:>` or `<Shot:>` this run never wrote was
 printed and read as this run's. A folder this script did not make (no `.keys-run`
 and no `keys.done` in it) is refused, exit 4, so nothing of anyone else's is deleted.
 
@@ -121,7 +121,7 @@ if ((Test-Path -LiteralPath $Out) -and -not (Test-Path -LiteralPath $marker) -an
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 Set-Content -LiteralPath $marker -Value "a keys.ps1 run folder: each run empties it of the last run's files" -Encoding utf8
 # A file that cannot be removed stops the run (ErrorActionPreference): it would be read as this run's.
-Get-ChildItem -LiteralPath $Out -File | Where-Object { $_.Name -like 'keys.done*' -or $_.Name -eq 'run.json.part' -or $_.Extension -in '.txt', '.png', '.json' } |
+Get-ChildItem -LiteralPath $Out -File | Where-Object { $_.Name -like 'keys.done*' -or $_.Name -eq 'run.json.part' -or $_.Extension -in '.txt', '.png', '.json', '.jsonl' } |
     Remove-Item -Force
 # The shots (`shots\<name>.png` and `.json`) and the `<State:>` files live in subfolders: empty them too. Something else
 # there (a link, a file) is not ours to delete, and is not a folder this run can write into: stop.

@@ -3,6 +3,32 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.276.0] - 2026-11-08
+
+### 追加
+
+- `<Snap:名前>`（ito#205 の B）: 状態（`state/<名前>-before.json`）→ 絵（`shots/<名前>.png`）→ 状態（`state/<名前>-after.json`）を 1 つの手順にする。
+  - 前後の state は同じ `capture_id` と `snapshot_seq` を持つ（`phase` は `before` / `after`）。付属の `shots/<名前>.json` は after の state が書けたあと、手順が終わる前に書く。前後の path・sha256・`state_unchanged`・`png_sha256` を持つ。
+  - state JSON を使わない（`Runner::state_json(true)` を呼ばない）実行では、`<Snap:>` は理由つきで失敗する。
+  - 同じ名前の `<Snap:a>` が 2 つ、`<Snap:a>` と `<Shot:a>`、`<Snap:a>` と `<State:a-before|a-after>` は同じファイルに書くので、解析の時点で断る（`@接尾辞` つきの Shot は別名）。
+- `trace.jsonl`: Runner が 1 手順 1 行（step・label・outcome・settled・frame・time・why）で書く。書けなければ `<trace.jsonl>` の手順で失敗にする。`keys.ps1` は `*.jsonl` も片付ける。
+- `<State:>` の `settled` を Pace が入れる（これまでは `null`）。
+- 適合テストに `snap_*` の 11 例を足した。
+
+### 変更
+
+- `ito-a11y`: `REPEAT_GAP` の説明を直した（同じトーストを続けて読むときの最短の間隔。`Told` がトーストごとに持つので、別のトーストは 2 つとも続けて読む）。動きは変わらない。
+
+### 使う側がやること
+
+- `Step::Snap`・`Press::Snap` が増えた。kura の `unsupported()` に `Press::Snap { .. }` の腕を足し、`Taken::Failed` を返す。
+- `state::Ack::Written` に `snapshot_seq` が増えた。`Ack::Written { name, .. }` で受ける。
+- `state::Header` に `phase`・`capture_id` が増えた。`..Default::default()` で足す。
+- `Runner::write_state` は、待っている `<State:>`（または `<Snap:>` の前後）が無いときに `Err` を返す。これまでは `after_step` を空にして書いていた。実行は止めない。
+- 自前の実行で Snap に対応するなら、after の `state_saved` は付属 JSON が durable になってから呼ぶ。
+- 任意: `Pace::take_settled`、`Pace::take_trace` と `evidence::TraceFile`、`review::Capture` と `Meta::to_json_with`（`Meta` の欄は増やしていない）。
+- 適合テスト: `Answer::Stage` と `Need::Snap` は追加。`Answer::taken` は内部用。`pub fn acts` は `Stage` を手順で解く。
+
 ## [0.275.0] - 2026-11-08
 
 ### 追加

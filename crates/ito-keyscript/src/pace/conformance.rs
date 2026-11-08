@@ -6,7 +6,7 @@
 //! numbers. Scripts are parsed with one app reading, `Pane` (tag `pane`), for `<ReadHas:Pane=...>`.
 
 use super::{Config, Ending, Entry, Frame, How, Kind, More, Next, Pace, Taken};
-use crate::{parse_with, Dialect, Press};
+use crate::{parse_with, Dialect, Press, SnapStage};
 use ito_common::writes::{Failure, Pending, Status};
 use std::time::{Duration, Instant};
 
@@ -58,13 +58,22 @@ pub enum Answer {
     Shot(&'static str),
     /// The app was asked to write the state JSON of `<State:name>`: [`Taken::State`].
     State(&'static str),
+    /// The right answer for the stage of a `<Snap:>` the take is for (`State("a-before")`, `Shot("s.png")`,
+    /// `State("a-after")`): the names are not `'static`, so it is resolved with the entry.
+    Stage,
     Quit,
     Failed(&'static str),
 }
 
 impl Answer {
-    pub(crate) fn taken(&self) -> Taken {
+    pub(crate) fn taken(&self, e: &Entry) -> Taken {
         match self {
+            Answer::Stage => match &e.press {
+                Press::Snap { name, stage: SnapStage::Before } => Taken::State { name: format!("{name}-before") },
+                Press::Snap { stage: SnapStage::Shot, .. } => Taken::Shot { path: "s.png".to_owned() },
+                Press::Snap { name, stage: SnapStage::After } => Taken::State { name: format!("{name}-after") },
+                _ => Taken::Done,
+            },
             Answer::Input { flight, more } => Taken::Input { flight: *flight, more: more.clone() },
             Answer::Changed(more) => Taken::Changed { more: more.clone() },
             Answer::Done => Taken::Done,
@@ -82,6 +91,7 @@ impl Answer {
             Kind::Input => Answer::Input { flight: false, more: Vec::new() },
             // A look that is not `<Tree:>` finds its target and presses it (so it acts); `<Tree:>` only writes a file.
             Kind::Look if !matches!(e.press, Press::Tree(_)) => Answer::Input { flight: false, more: Vec::new() },
+            _ if matches!(e.press, Press::Snap { .. }) => Answer::Stage,
             Kind::Shot => Answer::Shot("s.png"),
             Kind::Quit => Answer::Quit,
             _ => Answer::Done,
@@ -98,7 +108,7 @@ impl Answer {
 ///   writes a file), `Failed` or `Again`, it did not press anything.
 /// - Every other kind (a continuation, a check, a poll, a record, a shot, a quit) never acts.
 pub fn acts(entry: &Entry, answer: &Answer) -> bool {
-    acts_taken(entry, &answer.taken())
+    acts_taken(entry, &answer.taken(entry))
 }
 
 /// [`acts`] for a host that has the [`Taken`] itself.
@@ -213,6 +223,8 @@ pub enum Need {
     Changed,
     /// Some answer is `Answer::State` or some tick has a state event: the subject writes a state JSON and acknowledges it.
     StateJson,
+    /// The script has a `<Snap:>`: the subject takes its three stages (and writes state JSON for two of them).
+    Snap,
 }
 
 impl Case {
@@ -222,7 +234,8 @@ impl Case {
         let has_then = |more: &[More]| more.iter().any(|m| matches!(m, More::Then(_)));
         let mut then = false;
         let mut changed = false;
-        let mut state_json = self.ticks.iter().any(|t| t.state.is_some());
+        let snap = self.script.contains("<Snap:");
+        let mut state_json = snap || self.ticks.iter().any(|t| t.state.is_some());
         for a in self.ticks.iter().filter_map(|t| t.answer.as_ref()) {
             match a {
                 Answer::Input { more, .. } => then |= has_then(more),
@@ -230,7 +243,7 @@ impl Case {
                     changed = true;
                     then |= has_then(more);
                 }
-                Answer::State(_) => state_json = true,
+                Answer::State(_) | Answer::Stage => state_json = true,
                 _ => {}
             }
         }
@@ -243,6 +256,7 @@ impl Case {
             (first, Need::FirstWait),
             (changed, Need::Changed),
             (state_json, Need::StateJson),
+            (snap, Need::Snap),
         ]
         .into_iter()
         .filter_map(|(on, n)| on.then_some(n))
@@ -366,7 +380,7 @@ impl Subject for PaceSubject {
                     if acts(&entry, &answer) && pace.act(now) {
                         tr.marks.push((entry.idx, tick.ms));
                     }
-                    if let Some(e) = pace.taken(&frame, answer.taken()) {
+                    if let Some(e) = pace.taken(&frame, answer.taken(&entry)) {
                         ended = Some(e);
                         end_ms = Some(tick.ms);
                         break;
@@ -1012,6 +1026,161 @@ pub fn cases() -> Vec<Case> {
             ended_left: Some(2),
             ..Trace::default()
         },
+    ));
+    // ---- <Snap:>: one script step, three stages (state before, picture, state after), each a take of the same index.
+    // A continuation needs a new pass and a frame (16 ms) since the stage before it was taken.
+    out.push(case(
+        "snap_stages_in_order",
+        "<Snap:a>",
+        vec![
+            T::t(0, 2),
+            T::t(20, 3).state(StateEvent::Saved),
+            T::t(40, 4).shot(ShotEvent::Saved),
+            T::t(60, 5).state(StateEvent::Saved),
+            T::t(70, 6),
+            T::t(80, 7),
+        ],
+        Trace { takes: vec![(0, 0, false), (0, 20, true), (0, 40, true)], tail: done_tail(), end_ms: Some(70), ..Trace::default() },
+    ));
+    out.push(case(
+        "snap_settles_only_before_the_first_stage",
+        "<Snap:a>",
+        vec![
+            T::t(0, 2).moving(),
+            T::t(100, 3).moving(),
+            T::t(200, 4),
+            T::t(220, 5).state(StateEvent::Saved).moving(),
+            T::t(240, 6).shot(ShotEvent::Saved).moving(),
+            T::t(260, 7).state(StateEvent::Saved).moving(),
+        ],
+        Trace { takes: vec![(0, 200, false), (0, 220, true), (0, 240, true)], ..Trace::default() },
+    ));
+    out.push(case(
+        "snap_unsettled_is_recorded_once",
+        "<Snap:a>",
+        vec![
+            T::t(0, 2).moving(),
+            T::t(5000, 3).moving(),
+            T::t(5001, 4).moving(),
+            T::t(5030, 5).state(StateEvent::Saved).moving(),
+            T::t(5050, 6).shot(ShotEvent::Saved).moving(),
+            T::t(5070, 7).state(StateEvent::Saved).moving(),
+        ],
+        Trace { takes: vec![(0, 5001, false), (0, 5030, true), (0, 5050, true)], failed: true, unsettled: vec![0], ..Trace::default() },
+    ));
+    out.push(case(
+        "snap_a_stage_failure_names_the_stage",
+        "<Snap:a>",
+        vec![T::t(0, 2), T::t(10, 3).state(StateEvent::Failed("disk full"))],
+        Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<Snap:a>", "state-before: <Snap:a>: disk full", 1),
+            failed: true,
+            why: Some("state-before: <Snap:a>: disk full".to_owned()),
+            end_ms: Some(10),
+            ..Trace::default()
+        },
+    ));
+    let never = "shot: no picture of <Snap:a> arrived within 5 s; s.png was not saved";
+    out.push(case(
+        "snap_a_picture_that_never_arrives_fails",
+        "<Snap:a>",
+        vec![T::t(0, 2), T::t(20, 3).state(StateEvent::Saved), T::t(5020, 4), T::t(5021, 5)],
+        Trace {
+            takes: vec![(0, 0, false), (0, 20, true)],
+            tail: failed_tail("<Snap:a>", never, 1),
+            failed: true,
+            why: Some(never.to_owned()),
+            end_ms: Some(5021),
+            ..Trace::default()
+        },
+    ));
+    let wrong = "state-before: the host answered Done for <Snap:a>";
+    out.push(case(
+        "snap_a_wrong_answer_fails",
+        "<Snap:a>",
+        vec![T::t(0, 2).answer(A::Done)],
+        Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<Snap:a>", wrong, 1),
+            failed: true,
+            why: Some(wrong.to_owned()),
+            end_ms: Some(0),
+            ..Trace::default()
+        },
+    ));
+    let again = "state-before: <Snap:a>: the host asked to look again, which a snap cannot do (later)";
+    out.push(case(
+        "snap_again_fails_at_the_first_stage",
+        "<Snap:a>",
+        vec![T::t(0, 2).answer(A::Again("later"))],
+        Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<Snap:a>", again, 1),
+            failed: true,
+            why: Some(again.to_owned()),
+            end_ms: Some(0),
+            ..Trace::default()
+        },
+    ));
+    let again = "shot: <Snap:a>: the host asked to look again, which a snap cannot do (later)";
+    out.push(case(
+        "snap_again_fails_at_the_picture_stage",
+        "<Snap:a>",
+        vec![T::t(0, 2), T::t(20, 3).state(StateEvent::Saved).answer(A::Again("later"))],
+        Trace {
+            takes: vec![(0, 0, false), (0, 20, true)],
+            tail: failed_tail("<Snap:a>", again, 1),
+            failed: true,
+            why: Some(again.to_owned()),
+            end_ms: Some(20),
+            ..Trace::default()
+        },
+    ));
+    let closed = "shot: the window was closed before the picture of <Snap:a> was saved";
+    out.push(Case {
+        name: "snap_closing_with_the_picture_out_fails",
+        script: "<Snap:a>",
+        config: Config::new("app"),
+        ticks: vec![T::t(0, 2), T::t(20, 3).state(StateEvent::Saved), T::t(30, 4)],
+        end: Some((40, Ending::Closed)),
+        expect: Trace {
+            takes: vec![(0, 0, false), (0, 20, true)],
+            tail: failed_tail("<Snap:a>", closed, 1),
+            failed: true,
+            why: Some(closed.to_owned()),
+            end_ms: Some(40),
+            ..Trace::default()
+        },
+    });
+    let closed = "shot: the window was closed before this stage of <Snap:a> ran";
+    out.push(Case {
+        name: "snap_closing_between_stages_fails",
+        script: "<Snap:a>",
+        config: Config::new("app"),
+        ticks: vec![T::t(0, 2), T::t(10, 3).state(StateEvent::Saved)],
+        end: Some((10, Ending::Closed)),
+        expect: Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<Snap:a>", closed, 1),
+            failed: true,
+            why: Some(closed.to_owned()),
+            end_ms: Some(10),
+            ..Trace::default()
+        },
+    });
+    out.push(case(
+        "snap_a_late_save_changes_nothing",
+        "<Snap:a>b",
+        vec![
+            T::t(0, 2),
+            T::t(10, 3).shot(ShotEvent::Saved),
+            T::t(20, 4).state(StateEvent::Saved),
+            T::t(30, 5).state(StateEvent::Saved),
+            T::t(40, 6).shot(ShotEvent::Saved),
+            T::t(50, 7).shot(ShotEvent::Saved),
+        ],
+        Trace { takes: vec![(0, 0, false), (0, 20, true), (0, 40, true)], left: 2, ..Trace::default() },
     ));
     // `ended_left` is the number in the tail's `left:` line (0 when it has none): derived, so the older rows need no tag.
     for c in &mut out {

@@ -235,7 +235,8 @@ pub fn toast_line(level: Option<State>, text: &str, lang: &str) -> String {
     }
 }
 
-/// The shortest time between two spoken toasts. A burst is not read out in a batch.
+/// The shortest time between two readings of the same toast. [`Told`] keeps it per toast: two different toasts are both
+/// read at once.
 const REPEAT_GAP: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// What the screen reader was told about one toast. The app keeps it next to the toast (not `Copy`: a copy would be

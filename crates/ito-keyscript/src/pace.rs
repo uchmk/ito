@@ -28,8 +28,8 @@
 //! 16. otherwise the step is taken.
 
 use crate::{
-    closed_report, failed_report, label, press, quit_report, since_action_line, Press, Progress, Step, DELIVER_WAIT, FRAME, GAP, READ_WAIT,
-    TEXT_WAIT,
+    closed_report, failed_report, label, press, quit_report, since_action_line, Press, Progress, SnapStage, Step, DELIVER_WAIT, FRAME, GAP,
+    READ_WAIT, TEXT_WAIT,
 };
 use ito_common::writes::Status;
 use std::collections::{BTreeSet, VecDeque};
@@ -109,9 +109,11 @@ pub fn kind(p: &Press) -> Kind {
     match p {
         Press::Wait(d) => Kind::Wait(*d),
         Press::Now => Kind::Now,
-        Press::Shot(_) => Kind::Shot,
+        Press::Shot(_) | Press::Snap { stage: SnapStage::Before, .. } => Kind::Shot,
         Press::Quit => Kind::Quit,
         Press::State(_) | Press::Read { .. } => Kind::Record,
+        // The later stages of a snap are queued by Pace itself (as `Kind::Then`), never parsed.
+        Press::Snap { .. } => Kind::Then,
         Press::ReadHas { .. } => Kind::Poll,
         Press::Assert { .. }
         | Press::Is { .. }
@@ -261,6 +263,10 @@ struct StateOut {
     idx: usize,
     name: String,
     since: Instant,
+    /// The next stage of a `<Snap:>`, queued when this one is saved.
+    then: Option<Press>,
+    /// `Some((name, stage))` while the state belongs to a `<Snap:>`.
+    snap: Option<(String, SnapStage)>,
 }
 
 #[derive(Debug)]
@@ -269,6 +275,64 @@ struct ShotOut {
     name: String,
     path: String,
     since: Instant,
+    then: Option<Press>,
+    snap: Option<(String, SnapStage)>,
+}
+
+/// How a trace line ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// The step's work completed.
+    Done,
+    /// The step failed (or a failure belongs to it).
+    Failed,
+    /// The run ended while the step was running (the window closed, the app quit).
+    Cut,
+}
+
+impl Outcome {
+    /// `"done"`, `"failed"` or `"cut"`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Outcome::Done => "done",
+            Outcome::Failed => "failed",
+            Outcome::Cut => "cut",
+        }
+    }
+}
+
+/// One line of `trace.jsonl`: a script step that ran.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct TraceLine {
+    /// 1-based step number; `None` for a failure that belongs to no step (`<run.json>`, a config write, ...).
+    pub step: Option<usize>,
+    pub label: String,
+    pub outcome: Outcome,
+    /// The `settled` value when the step was first handed out; `None` for `<Wait:>`, `<Now>` and the no-step line.
+    pub settled: Option<bool>,
+    /// The pass when the step started.
+    pub frame: u64,
+    /// Milliseconds since the `now` given to [`Pace::new`], when the step started.
+    pub time_ms: u64,
+    pub end_frame: u64,
+    pub end_ms: u64,
+    pub why: Option<String>,
+}
+
+impl TraceLine {
+    /// A line that starts and ends at `frame` / `time_ms` (a host's own no-step failure, for one).
+    pub fn new(step: Option<usize>, label: &str, outcome: Outcome, frame: u64, time_ms: u64, why: Option<String>) -> Self {
+        Self { step, label: label.to_owned(), outcome, settled: None, frame, time_ms, end_frame: frame, end_ms: time_ms, why }
+    }
+}
+
+#[derive(Debug)]
+struct OpenLine {
+    idx: usize,
+    settled: Option<bool>,
+    frame: u64,
+    ms: u64,
 }
 
 /// The state machine. See the module documentation.
@@ -300,6 +364,12 @@ pub struct Pace {
     unsettled_end: bool,
     failed: bool,
     finished: bool,
+    /// The `settled` of the take that is out.
+    take_settled: Option<bool>,
+    open: Option<OpenLine>,
+    trace: Vec<TraceLine>,
+    /// The last pass and time Pace was told about.
+    last: (u64, Instant),
 }
 
 fn hold(wake: Option<Duration>) -> Next {
@@ -334,7 +404,96 @@ impl Pace {
             unsettled_end: false,
             failed: false,
             finished: false,
+            take_settled: None,
+            open: None,
+            trace: Vec::new(),
+            last: (0, now),
         }
+    }
+
+    fn ms(&self, now: Instant) -> u64 {
+        u64::try_from(now.saturating_duration_since(self.start).as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn trace_open(&mut self, idx: usize, settled: Option<bool>, frame: u64, now: Instant) {
+        if self.open.as_ref().is_some_and(|o| o.idx == idx) {
+            return;
+        }
+        self.trace_close(Outcome::Done, None, frame, now);
+        self.open = Some(OpenLine { idx, settled, frame, ms: self.ms(now) });
+    }
+
+    fn trace_close(&mut self, outcome: Outcome, why: Option<String>, frame: u64, now: Instant) {
+        let Some(o) = self.open.take() else { return };
+        let line = TraceLine {
+            step: Some(o.idx + 1),
+            label: self.label(o.idx),
+            outcome,
+            settled: o.settled,
+            frame: o.frame,
+            time_ms: o.ms,
+            end_frame: frame,
+            end_ms: self.ms(now),
+            why,
+        };
+        self.trace.push(line);
+    }
+
+    /// Whether step `idx` still has work to do: a slot, a queued piece, a flight, or a take.
+    fn outstanding(&self, idx: usize) -> bool {
+        self.shot.as_ref().is_some_and(|s| s.idx == idx)
+            || self.state.as_ref().is_some_and(|s| s.idx == idx)
+            || self.queue.front().is_some_and(|e| e.idx == idx)
+            || self.flight.as_ref().is_some_and(|f| f.idx == idx)
+            || self.take.as_ref().is_some_and(|e| e.idx == idx)
+    }
+
+    /// Closes the open line `Done` when its step has nothing left to do.
+    fn trace_settle(&mut self, frame: u64, now: Instant) {
+        if let Some(idx) = self.open.as_ref().map(|o| o.idx) {
+            if !self.outstanding(idx) {
+                self.trace_close(Outcome::Done, None, frame, now);
+            }
+        }
+    }
+
+    fn trace_cut(&mut self) {
+        let (frame, now) = self.last;
+        self.trace_close(Outcome::Cut, None, frame, now);
+    }
+
+    fn trace_fail(&mut self, idx: Option<usize>, label: &str, why: &str) {
+        let (frame, now) = self.last;
+        match idx {
+            Some(i) if self.open.as_ref().is_some_and(|o| o.idx == i) => {
+                self.trace_close(Outcome::Failed, Some(why.to_owned()), frame, now)
+            }
+            _ => {
+                self.trace_close(Outcome::Cut, None, frame, now);
+                let ms = self.ms(now);
+                self.trace.push(TraceLine::new(idx.map(|i| i + 1), label, Outcome::Failed, frame, ms, Some(why.to_owned())));
+            }
+        }
+    }
+
+    /// The trace lines closed since the last call, in order.
+    pub fn take_trace(&mut self) -> Vec<TraceLine> {
+        std::mem::take(&mut self.trace)
+    }
+
+    /// A `Failed` line that belongs to no step, stamped with the last pass and time Pace saw (a host's own failure
+    /// after the end, which [`Pace::host_failed`] cannot report any more).
+    pub fn no_step_line(&self, label: &str, why: &str) -> TraceLine {
+        TraceLine::new(None, label, Outcome::Failed, self.last.0, self.ms(self.last.1), Some(why.to_owned()))
+    }
+
+    /// While a [`Next::Take`] is out: the `settled` [`Pace::next`] saw when it handed the step out.
+    pub fn take_settled(&self) -> Option<bool> {
+        self.take.as_ref().and(self.take_settled)
+    }
+
+    fn note_frame(&mut self, pass: u64, now: Instant) {
+        self.last = (pass.max(self.last.0), now);
     }
 
     fn label(&self, idx: usize) -> String {
@@ -363,10 +522,15 @@ impl Pace {
     fn fail_at(&mut self, idx: usize, why: String) -> Ended {
         let label = self.label(idx);
         let left = self.left_with(Some(idx));
-        self.fail_as(&label, left, why)
+        self.fail_core(Some(idx), &label, left, why)
     }
 
     fn fail_as(&mut self, label: &str, left: usize, why: String) -> Ended {
+        self.fail_core(None, label, left, why)
+    }
+
+    fn fail_core(&mut self, idx: Option<usize>, label: &str, left: usize, why: String) -> Ended {
+        self.trace_fail(idx, label, &why);
         self.failed = true;
         self.queue.clear();
         self.shot = None;
@@ -404,6 +568,7 @@ impl Pace {
             debug_assert!(false, "Pace::next called while a take is outstanding");
             return hold(None);
         }
+        self.note_frame(f.pass, f.now);
         if self.finished || (!self.config.report && self.queue.is_empty() && self.shot.is_none() && self.state.is_none()) {
             return hold(None);
         }
@@ -421,6 +586,7 @@ impl Pace {
             self.flight = None;
             self.action_gen = f.generation;
             self.progress_at = f.now;
+            self.trace_settle(f.pass, f.now);
         }
         // A config write that failed, or has not been answered, holds the script: what it reads next would be the old
         // config.
@@ -461,6 +627,11 @@ impl Pace {
         // drawing frames that change nothing.
         if let Some(Kind::Wait(d)) = self.queue.front().map(|e| e.kind) {
             let left = d.saturating_sub(since);
+            if self.shot.is_none() && self.state.is_none() {
+                if let Some(idx) = self.queue.front().map(|e| e.idx) {
+                    self.trace_open(idx, None, f.pass, f.now);
+                }
+            }
             if !left.is_zero() && self.shot.is_none() && self.state.is_none() && f.pass >= self.at.0.saturating_add(2) && settled {
                 return hold(Some(left));
             }
@@ -471,7 +642,11 @@ impl Pace {
                 return hold(Some(Duration::ZERO));
             }
             let idx = shot.idx;
-            let why = format!("no picture arrived within {} s; {} was not saved", self.config.shot_deadline.as_secs(), shot.path);
+            let secs = self.config.shot_deadline.as_secs();
+            let why = match &shot.snap {
+                Some((a, _)) => format!("shot: no picture of <Snap:{a}> arrived within {secs} s; {} was not saved", shot.path),
+                None => format!("no picture arrived within {secs} s; {} was not saved", shot.path),
+            };
             return Next::End(self.fail_at(idx, why));
         }
         // The state JSON being written holds the next step the same way. One that never comes is a harness failure.
@@ -480,12 +655,19 @@ impl Pace {
                 return hold(Some(Duration::ZERO));
             }
             let idx = state.idx;
-            let why = format!("no state JSON for <State:{}> within {} s", state.name, self.config.state_deadline.as_secs());
+            let secs = self.config.state_deadline.as_secs();
+            let why = match &state.snap {
+                Some((a, stage)) => format!("{}: no state JSON for <Snap:{a}> within {secs} s", stage.name()),
+                None => format!("no state JSON for <State:{}> within {secs} s", state.name),
+            };
             return Next::End(self.fail_at(idx, why));
         }
         // `<Now>` is for the step after it only. Several in a row are spent on the same step.
         while self.queue.front().is_some_and(|e| e.kind == Kind::Now) {
-            self.queue.pop_front();
+            if let Some(e) = self.queue.pop_front() {
+                self.trace_open(e.idx, None, f.pass, f.now);
+                self.trace_close(Outcome::Done, None, f.pass, f.now);
+            }
             self.now_flag = true;
         }
         if !self.begun {
@@ -524,17 +706,23 @@ impl Pace {
                 self.at = (f.pass, f.now);
                 self.progress_at = f.now;
                 self.begun = true;
+                self.trace_open(entry.idx, None, f.pass, f.now);
+                self.trace_settle(f.pass, f.now);
             } else {
+                self.trace_open(entry.idx, None, f.pass, f.now);
                 self.queue.push_front(entry);
             }
             return hold(Some(Duration::ZERO));
         }
         self.late_take = late && entry.kind != Kind::Then;
+        self.trace_open(entry.idx, Some(settled), f.pass, f.now);
+        self.take_settled = Some(settled);
         self.take = Some(entry.clone());
         Next::Take(entry)
     }
 
     fn finish(&mut self, late: bool) -> Ended {
+        self.trace_cut();
         self.finished = true;
         self.unsettled_end = late;
         let lines = self.unsettled_text();
@@ -573,6 +761,24 @@ impl Pace {
             return None;
         };
         let idx = entry.idx;
+        self.note_frame(f.pass, f.now);
+        self.take_settled = None;
+        if let Press::Snap { name, stage } = &entry.press {
+            self.check_since = None;
+            self.read_has_since = None;
+            if let Err(why) = self.snap_taken(f, idx, name, *stage, t) {
+                return Some(self.fail_at(idx, why));
+            }
+            // The first stage is the step that waited for the screen; it records a screen that never settled.
+            if *stage == SnapStage::Before && self.late_take {
+                self.record_unsettled(idx);
+            }
+            self.now_flag = false;
+            self.progress_at = f.now;
+            self.begun = true;
+            self.trace_settle(f.pass, f.now);
+            return None;
+        }
         if let Taken::Again { why } = t {
             // Nothing was pressed: no `at`, no progress, not unsettled.
             let (clock, limit) = match entry.kind {
@@ -601,11 +807,11 @@ impl Pace {
                     Press::Shot(name) => name.clone(),
                     _ => String::new(),
                 };
-                self.shot = Some(ShotOut { idx, name, path, since: f.now });
+                self.shot = Some(ShotOut { idx, name, path, since: f.now, then: None, snap: None });
                 self.at = (f.pass, f.now);
             }
             Taken::State { name } => {
-                self.state = Some(StateOut { idx, name, since: f.now });
+                self.state = Some(StateOut { idx, name, since: f.now, then: None, snap: None });
                 self.at = (f.pass, f.now);
             }
             Taken::Failed(why) => return Some(self.fail_at(idx, why)),
@@ -617,7 +823,41 @@ impl Pace {
         self.now_flag = false;
         self.progress_at = f.now;
         self.begun = true;
+        self.trace_settle(f.pass, f.now);
         None
+    }
+
+    /// The host's answer to one stage of a `<Snap:>`. `Err` is the failure's reason.
+    fn snap_taken(&mut self, f: &Frame, idx: usize, a: &str, stage: SnapStage, t: Taken) -> Result<(), String> {
+        let what = match &t {
+            Taken::Failed(why) => return Err(format!("{}: <Snap:{a}>: {why}", stage.name())),
+            Taken::Again { why } => {
+                return Err(format!("{}: <Snap:{a}>: the host asked to look again, which a snap cannot do ({why})", stage.name()))
+            }
+            Taken::State { name } => format!("State {name:?}"),
+            Taken::Input { .. } => "Input".to_owned(),
+            Taken::Done => "Done".to_owned(),
+            Taken::Changed { .. } => "Changed".to_owned(),
+            Taken::Shot { .. } => "Shot".to_owned(),
+            Taken::Quit => "Quit".to_owned(),
+        };
+        let snap = Some((a.to_owned(), stage));
+        match (stage, t) {
+            (SnapStage::Before, Taken::State { name }) if name == format!("{a}-before") => {
+                let then = Some(Press::Snap { name: a.to_owned(), stage: SnapStage::Shot });
+                self.state = Some(StateOut { idx, name, since: f.now, then, snap });
+            }
+            (SnapStage::Shot, Taken::Shot { path }) => {
+                let then = Some(Press::Snap { name: a.to_owned(), stage: SnapStage::After });
+                self.shot = Some(ShotOut { idx, name: a.to_owned(), path, since: f.now, then, snap });
+            }
+            (SnapStage::After, Taken::State { name }) if name == format!("{a}-after") => {
+                self.state = Some(StateOut { idx, name, since: f.now, then: None, snap });
+            }
+            _ => return Err(format!("{}: the host answered {what} for <Snap:{a}>", stage.name())),
+        }
+        self.at = (f.pass, f.now);
+        Ok(())
     }
 
     fn put_in(&mut self, f: &Frame, idx: usize, flight: bool, events: bool, more: Vec<More>) {
@@ -636,26 +876,46 @@ impl Pace {
 
     /// The picture was saved.
     pub fn shot_saved(&mut self, now: Instant) {
-        self.shot = None;
+        let Some(out) = self.shot.take() else { return };
         self.progress_at = now;
+        self.last.1 = now;
+        if let Some(press) = out.then {
+            self.queue.push_front(Entry { idx: out.idx, kind: Kind::Then, press });
+        }
+        self.trace_settle(self.last.0, now);
     }
 
     /// The picture could not be saved. `None` when no picture is awaited (a late callback).
     pub fn shot_failed(&mut self, why: String) -> Option<Ended> {
-        let idx = self.shot.as_ref()?.idx;
+        let out = self.shot.as_ref()?;
+        let idx = out.idx;
+        let why = match &out.snap {
+            Some((a, stage)) => format!("{}: <Snap:{a}>: {why}", stage.name()),
+            None => why,
+        };
         Some(self.fail_at(idx, why))
     }
 
     /// The state JSON was written and acknowledged.
     pub fn state_saved(&mut self, now: Instant) {
-        self.state = None;
+        let Some(out) = self.state.take() else { return };
         self.progress_at = now;
+        self.last.1 = now;
+        if let Some(press) = out.then {
+            self.queue.push_front(Entry { idx: out.idx, kind: Kind::Then, press });
+        }
+        self.trace_settle(self.last.0, now);
     }
 
     /// The state JSON could not be written. `None` when none is awaited (a late acknowledgement).
     pub fn state_failed(&mut self, why: &str) -> Option<Ended> {
-        let idx = self.state.as_ref()?.idx;
-        Some(self.fail_at(idx, why.to_owned()))
+        let out = self.state.as_ref()?;
+        let idx = out.idx;
+        let why = match &out.snap {
+            Some((a, stage)) => format!("{}: <Snap:{a}>: {why}", stage.name()),
+            None => why.to_owned(),
+        };
+        Some(self.fail_at(idx, why))
     }
 
     /// The host failed outside the steps (it could not write its evidence): the run fails at `label`. `None` once the run has ended.
@@ -668,20 +928,46 @@ impl Pace {
     }
 
     /// The window closed or the app quit. `None` when there is nothing to write (no report, or the run has ended).
-    pub fn end(&mut self, how: Ending, _now: Instant, writes: Option<&Status>) -> Option<Ended> {
+    pub fn end(&mut self, how: Ending, now: Instant, writes: Option<&Status>) -> Option<Ended> {
+        if self.finished {
+            return None;
+        }
+        self.last.1 = now;
         let what = match how {
             Ending::Closed => "the window was closed".to_owned(),
             Ending::Quit => format!("{} quit", self.config.app),
         };
         if let Some(shot) = &self.shot {
-            let (idx, why) = (shot.idx, format!("{what} before the picture of <Shot:{}> was saved", shot.name));
+            let why = match &shot.snap {
+                Some((a, _)) => format!("shot: {what} before the picture of <Snap:{a}> was saved"),
+                None => format!("{what} before the picture of <Shot:{}> was saved", shot.name),
+            };
+            let idx = shot.idx;
             return Some(self.fail_at(idx, why));
         }
         if let Some(state) = &self.state {
-            let (idx, why) = (state.idx, format!("{what} before the state JSON of <State:{}> was written", state.name));
+            let why = match &state.snap {
+                Some((a, stage)) => format!("{}: {what} before the state JSON of <Snap:{a}> was written", stage.name()),
+                None => format!("{what} before the state JSON of <State:{}> was written", state.name),
+            };
+            let idx = state.idx;
             return Some(self.fail_at(idx, why));
         }
-        if !self.config.report || self.finished {
+        // A stage was saved and the next one is queued, not taken yet.
+        if self.take.is_none() {
+            if let Some(Entry { idx, press: Press::Snap { name, stage }, .. }) = self.queue.front() {
+                let (idx, why) = (*idx, format!("{}: {what} before this stage of <Snap:{name}> ran", stage.name()));
+                return Some(self.fail_at(idx, why));
+            }
+        }
+        if !self.config.report {
+            self.trace_cut();
+            self.finished = true;
+            self.queue.clear();
+            self.take = None;
+            self.flight = None;
+            self.check_since = None;
+            self.read_has_since = None;
             return None;
         }
         if let Some(failure) = writes.and_then(|w| w.failed.as_ref()) {
@@ -710,6 +996,7 @@ impl Pace {
         if lines.is_some() {
             self.failed = true;
         }
+        self.trace_cut();
         self.finished = true;
         Some(Ended {
             how: match how {
@@ -1051,5 +1338,152 @@ mod tests {
         assert!(matches!(pace.next(&f), Next::Take(_)));
         assert_eq!(pace.taken(&f, Taken::Again { why: "no".into() }), None);
         assert_eq!(pace.due(), Some(Duration::from_millis(16)));
+    }
+
+    /// Run `script` on a Pace the way a host would: 25 ms per pass, every answer the plain one, every shot and state saved
+    /// one pass later. Stops at the end of the run or after `max` passes. Returns the Pace, the start and the end.
+    fn drive(script: &str, cfg: Config, max: u64, answer: &dyn Fn(&Entry) -> Taken) -> (Pace, Instant, Option<Ended>) {
+        let base = Instant::now();
+        let steps = parse_with(script, &conformance::dialect()).unwrap();
+        let mut pace = Pace::new(cfg, &steps, base);
+        for pass in 1..=max {
+            let now = base + Duration::from_millis(25 * pass);
+            if pace.shot.is_some() {
+                pace.shot_saved(now);
+            }
+            if pace.state.is_some() {
+                pace.state_saved(now);
+            }
+            let f = frame(pass, now);
+            match pace.next(&f) {
+                Next::Hold { .. } => {}
+                Next::End(e) => return (pace, base, Some(e)),
+                Next::Take(entry) => {
+                    let taken = answer(&entry);
+                    if conformance::acts_taken(&entry, &taken) {
+                        pace.act(now);
+                    }
+                    if let Some(e) = pace.taken(&f, taken) {
+                        return (pace, base, Some(e));
+                    }
+                }
+            }
+        }
+        (pace, base, None)
+    }
+
+    fn plain(e: &Entry) -> Taken {
+        conformance::Answer::default_for(e).taken(e)
+    }
+
+    fn outcomes(lines: &[TraceLine]) -> Vec<(Option<usize>, &'static str)> {
+        lines.iter().map(|l| (l.step, l.outcome.name())).collect()
+    }
+
+    #[test]
+    fn the_trace_has_a_done_line_per_step() {
+        let (mut pace, _, ended) = drive("a<Wait:30><Now>b", Config::new("app"), 200, &plain);
+        assert!(ended.is_some());
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "done"), (Some(3), "done"), (Some(4), "done")]);
+        assert_eq!(lines[0].settled, Some(true));
+        assert_eq!((lines[1].settled, lines[2].settled), (None, None), "<Wait:> and <Now> have no settled");
+        assert!(lines.iter().all(|l| l.end_frame >= l.frame && l.end_ms >= l.time_ms && l.why.is_none()));
+        assert!(pace.take_trace().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_shot_line_closes_when_the_picture_is_saved() {
+        let (mut pace, _, _) = drive("a<Shot:s>b", Config::new("app"), 200, &plain);
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "done"), (Some(3), "done")]);
+        assert!(lines[1].end_ms > lines[1].time_ms, "the shot line is open until shot_saved: {lines:?}");
+    }
+
+    #[test]
+    fn a_snap_is_one_trace_line() {
+        let (mut pace, _, ended) = drive("a<Snap:x>b", Config::new("app"), 300, &plain);
+        assert!(ended.is_some());
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "done"), (Some(3), "done")]);
+        assert!(lines[1].label.contains("Snap"), "{}", lines[1].label);
+        assert!(lines[1].end_ms > lines[1].time_ms);
+    }
+
+    #[test]
+    fn a_flight_holds_the_line_open() {
+        let flying = |e: &Entry| match e.press {
+            Press::Events(_) => Taken::Input { flight: true, more: Vec::new() },
+            _ => plain(e),
+        };
+        let (mut pace, base, _) = drive("ab", Config::new("app"), 300, &flying);
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "done")]);
+        assert!(lines[0].end_frame > lines[0].frame, "closed when the flight landed, not when the input went in");
+        assert!(lines[0].time_ms <= lines[0].end_ms && base <= base);
+    }
+
+    #[test]
+    fn a_failure_closes_its_line_with_the_reason() {
+        let fail = |e: &Entry| match e.press {
+            Press::Events(_) if e.idx == 2 => Taken::Failed("it broke".into()),
+            _ => plain(e),
+        };
+        let (mut pace, _, ended) = drive("a<Now>bc", Config::new("app"), 300, &fail);
+        assert!(ended.is_some());
+        let lines = pace.take_trace();
+        let last = lines.last().unwrap();
+        assert_eq!((last.step, last.outcome), (Some(3), Outcome::Failed), "{lines:?}");
+        assert!(last.why.as_deref().is_some_and(|w| w.contains("it broke")), "{last:?}");
+        assert!(lines[..lines.len() - 1].iter().all(|l| l.outcome == Outcome::Done));
+    }
+
+    #[test]
+    fn closing_the_window_in_a_wait_cuts_the_line() {
+        let (mut pace, base, ended) = drive("a<Wait:5000>b", Config::new("app"), 20, &plain);
+        assert!(ended.is_none());
+        let done = pace.end(Ending::Closed, base + Duration::from_millis(900), None);
+        assert!(done.is_some());
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "cut")]);
+        // A host failure after the end has no step: it is a line of its own.
+        let line = pace.no_step_line("<trace.jsonl>", "cannot write");
+        assert_eq!((line.step, line.outcome), (None, Outcome::Failed));
+        assert_eq!(line.why.as_deref(), Some("cannot write"));
+    }
+
+    #[test]
+    fn an_answered_quit_stays_done_and_end_repeats_nothing() {
+        let (mut pace, base, ended) = drive("a<Quit>b", Config::new("app"), 200, &plain);
+        assert!(ended.is_some());
+        assert!(pace.end(Ending::Quit, base + Duration::from_secs(9), None).is_none(), "the run has ended");
+        assert!(pace.end(Ending::Quit, base + Duration::from_secs(9), None).is_none());
+        let lines = pace.take_trace();
+        assert!(lines.iter().all(|l| l.outcome == Outcome::Done), "{lines:?}");
+        assert_eq!(lines[1].label, "<Quit>");
+    }
+
+    #[test]
+    fn ending_between_the_stages_of_a_snap_fails_it_once() {
+        // Stop after the first stage was saved: the shot stage is queued but not taken.
+        let (mut pace, base, ended) = drive("<Snap:x>", Config::new("app"), 3, &plain);
+        assert!(ended.is_none());
+        let now = base + Duration::from_millis(500);
+        let e = pace.end(Ending::Closed, now, None);
+        assert!(e.as_ref().is_some_and(|e| e.failed), "{e:?}");
+        assert!(pace.end(Ending::Closed, now, None).is_none(), "ending twice reports once");
+        let lines = pace.take_trace();
+        assert_eq!(lines.iter().filter(|l| l.outcome == Outcome::Failed).count(), 1, "{lines:?}");
+        assert!(lines.iter().all(|l| l.step == Some(1)));
+    }
+
+    #[test]
+    fn trace_lines_are_kept_without_a_report() {
+        let mut cfg = Config::new("app");
+        cfg.report = false;
+        let (mut pace, base, _) = drive("a<Wait:5000>", cfg, 20, &plain);
+        assert!(pace.end(Ending::Closed, base + Duration::from_millis(900), None).is_none());
+        let lines = pace.take_trace();
+        assert_eq!(outcomes(&lines), vec![(Some(1), "done"), (Some(2), "cut")]);
     }
 }

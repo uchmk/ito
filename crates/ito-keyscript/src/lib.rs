@@ -83,6 +83,11 @@ pub enum Step {
     /// script ending in `q` reports `overlay: none`, and reading a state
     /// halfway meant leaving the `q` off and stopping the app from outside (#230).
     State(String),
+    /// `<Snap:name>`: one step that writes the state JSON before (`state/name-before.json`), the picture (`shots/name.png`)
+    /// and the state JSON after (`state/name-after.json`), then the side JSON `shots/name.json` that ties the three
+    /// together with their hashes. Needs `Runner::state_json(true)`. The name must not be used by another `<Snap:>`,
+    /// `<Shot:>` or `<State:>` (`name-before`, `name-after`) in the same script.
+    Snap(String),
     /// `<Quit>`: end the app whatever is open, as the window's close button
     /// would. **A script that opens a window must end with it**: without a
     /// `<Quit>` the last step ends the script but not the app. `q` is a key like any other, and the compare view, the pane
@@ -323,6 +328,11 @@ pub enum Press {
     Now,
     Shot(String),
     State(String),
+    /// One stage of `<Snap:name>`. The parsed step is the `Before` stage; Pace queues the later ones itself.
+    Snap {
+        name: String,
+        stage: SnapStage,
+    },
     Quit,
     Read {
         tag: String,
@@ -384,6 +394,28 @@ pub enum Press {
     },
 }
 
+/// The three stages of a `<Snap:name>`, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapStage {
+    /// The state JSON before the picture (`state/name-before.json`).
+    Before,
+    /// The picture (`shots/name.png`).
+    Shot,
+    /// The state JSON after the picture (`state/name-after.json`), then the side JSON.
+    After,
+}
+
+impl SnapStage {
+    /// The stage as failure messages and the trace name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            SnapStage::Before => "state-before",
+            SnapStage::Shot => "shot",
+            SnapStage::After => "state-after",
+        }
+    }
+}
+
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
 pub fn press(step: &Step) -> Option<Press> {
     match step {
@@ -422,6 +454,7 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
         Step::State(name) => Some(Press::State(name.clone())),
+        Step::Snap(name) => Some(Press::Snap { name: name.clone(), stage: SnapStage::Before }),
         Step::Quit => Some(Press::Quit),
     }
 }
@@ -434,6 +467,7 @@ pub fn label(step: &Step) -> String {
         Step::Now => "<Now>".into(),
         Step::Shot(name) => format!("<Shot:{name}>"),
         Step::State(name) => format!("<State:{name}>"),
+        Step::Snap(name) => format!("<Snap:{name}>"),
         Step::Quit => "<Quit>".into(),
         Step::Paste => "<Paste>".into(),
         Step::PasteText(t) => format!("<Paste:{}>", paste_text_escape(t)),
@@ -1576,6 +1610,7 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             None if token == "<Quit>" => Step::Quit,
             None if token.starts_with("<Shot:") => Step::Shot(shot_name(token, dialect.shot_suffixes)?),
             None if token.starts_with("<State:") => Step::State(named(token, "State", "state")?),
+            None if token.starts_with("<Snap:") => Step::Snap(named(token, "Snap", "snap")?),
             None if token == "<Paste>" => Step::Paste,
             None if token.starts_with("<Paste:") => Step::PasteText(paste_text(token, "Paste")?),
             None if token.starts_with("<Preedit:") => Step::Preedit(paste_text(token, "Preedit")?),
@@ -1658,6 +1693,7 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 | Step::Quit
                 | Step::Shot(_)
                 | Step::State(_)
+                | Step::Snap(_)
                 | Step::Read { .. }
                 | Step::ClickId(_)
                 | Step::IdCheck(_)
@@ -1698,7 +1734,8 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
     // A `<ClickId:x>` proves nothing by itself (see `Step::ClickId`), so a check of its result has to come after it.
     for (i, step) in out.iter().enumerate() {
         let Step::ClickId(name) = step else { continue };
-        let next = out[i + 1..].iter().find(|s| !matches!(s, Step::Wait(_) | Step::State(_) | Step::Shot(_) | Step::Read { .. }));
+        let next =
+            out[i + 1..].iter().find(|s| !matches!(s, Step::Wait(_) | Step::State(_) | Step::Snap(_) | Step::Shot(_) | Step::Read { .. }));
         let checked =
             matches!(next, Some(Step::IdCheck(IdCheck::Focused(_) | IdCheck::Value { .. } | IdCheck::Present(_) | IdCheck::Absent(_))));
         if !checked {
@@ -1707,7 +1744,49 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             ));
         }
     }
+    refuse_name_clashes(&out)?;
     Ok(out)
+}
+
+/// Two steps that would write the same evidence file are refused: the second would overwrite the first without a word.
+/// Plain repeated `<State:>` / `<Shot:>` names stay allowed.
+fn refuse_name_clashes(steps: &[Step]) -> Result<(), String> {
+    let mut snaps: Vec<&str> = Vec::new();
+    let mut shots: Vec<&str> = Vec::new();
+    let mut states: Vec<&str> = Vec::new();
+    for s in steps {
+        match s {
+            Step::Snap(n) => {
+                if snaps.contains(&n.as_str()) {
+                    return Err(format!("`<Snap:{n}>` is used twice; the second would overwrite shots/{n}.png"));
+                }
+                if shots.contains(&n.as_str()) {
+                    return Err(format!("`<Snap:{n}>` and `<Shot:{n}>` would both write shots/{n}.png"));
+                }
+                snaps.push(n);
+            }
+            Step::Shot(n) => shots.push(n),
+            Step::State(n) => states.push(n),
+            _ => {}
+        }
+    }
+    for s in steps {
+        match s {
+            Step::Shot(n) if snaps.contains(&n.as_str()) => {
+                return Err(format!("`<Snap:{n}>` and `<Shot:{n}>` would both write shots/{n}.png"));
+            }
+            Step::Snap(n) => {
+                for suffix in ["before", "after"] {
+                    let file = format!("{n}-{suffix}");
+                    if states.contains(&file.as_str()) {
+                        return Err(format!("`<State:{file}>` and `<Snap:{n}>` would both write state/{file}.json"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// `<C-c>` and `<C-x>` as a keyboard's Ctrl+C and Ctrl+X arrive: egui-winit
@@ -1945,6 +2024,18 @@ pub struct Runner {
     state_json: bool,
     /// The `<State:>` step waiting for its state JSON: its name and index.
     state_out: Option<(String, usize)>,
+    /// The `settled` Pace had when it handed out the `<State:>` that is waiting.
+    state_settled: Option<bool>,
+    /// The `<Snap:>` that is running.
+    snap: Option<SnapRun>,
+    /// `trace.jsonl`, once opened and while it can be written.
+    trace: Option<evidence::TraceFile>,
+    /// [`Runner::open_trace`] has run.
+    trace_started: bool,
+    /// Why the trace could not be created or written, until it is reported.
+    trace_err: Option<String>,
+    /// A trace failure has been reported (as the run's failure, or in `say`).
+    trace_reported: bool,
     /// What the last `<ReadHas:>` read, while it waits.
     last_read: Option<String>,
     /// Where the copies and announcements stood when the last action's first input went in (`None` before the first action).
@@ -1965,11 +2056,44 @@ pub struct Runner {
 /// A picture asked for with `<Shot:>`.
 struct PendingShot {
     name: String,
+    /// The index of the script step.
+    idx: usize,
+    /// The picture is the middle stage of a `<Snap:>`.
+    snap: bool,
     /// The request has gone out.
     sent: bool,
-    /// The theme and language in force when the request went out (the frame the picture is of); empty when unknown.
-    theme: String,
-    lang: String,
+    /// Everything the side JSON says about the frame the picture is of, frozen when the request went out (the theme and
+    /// language in force then, the size, the time); the picture arrives a frame or more later.
+    meta: review::Meta,
+    /// The pass the request went out in.
+    requested_frame: u64,
+}
+
+/// A state a `<Snap:>` has written.
+struct SnapState {
+    path: String,
+    sha256: String,
+    stable: state::Stable,
+    seq: u64,
+}
+
+/// A `<Snap:>` picture that is saved.
+struct SnapShot {
+    meta: review::Meta,
+    png_sha256: String,
+    size_px: [u32; 2],
+    requested_frame: u64,
+    received_frame: u64,
+}
+
+/// The `<Snap:name>` that is running.
+struct SnapRun {
+    name: String,
+    capture_id: String,
+    /// The `settled` of the step, kept by the before state for the after one.
+    settled: Option<bool>,
+    before: Option<SnapState>,
+    shot: Option<SnapShot>,
 }
 
 /// What [`Runner::decide`] came to for a frame.
@@ -2055,6 +2179,12 @@ impl Runner {
             reads_window,
             state_json: false,
             state_out: None,
+            state_settled: None,
+            snap: None,
+            trace: None,
+            trace_started: false,
+            trace_err: None,
+            trace_reported: false,
             last_read: None,
             since: None,
             ended: None,
@@ -2096,23 +2226,44 @@ impl Runner {
     /// rectangles come from; a pass egui throws away hands it to the next) and a writer thread writes
     /// `<dir>/state/<name>.json`. Fill only what the app knows ([`state::App`]).
     ///
-    /// `Err` when state JSON is off or the submission is refused; the run then fails at once (when it is on).
+    /// `Err` when state JSON is off, no `<State:>` is waiting for `name`, or the submission is refused. A `name` that is not
+    /// the one waiting, and a refused submission, fail the run at once.
     pub fn write_state(&mut self, ctx: &egui::Context, name: &str, app: state::App) -> Result<(), String> {
         if !self.state_json {
             return Err("state JSON is off; build the Runner with .state_json(true)".to_owned());
         }
-        let after = self.state_out.as_ref().filter(|(n, _)| n == name).map(|(_, i)| *i).and_then(|i| i.checked_sub(1));
+        let Some((want, idx)) = self.state_out.clone() else {
+            return Err(format!("no <State:> is waiting for {name}"));
+        };
+        if want != name {
+            let why = format!("write_state was given {name} while <State:{want}> is waiting");
+            self.state_failed(&why);
+            return Err(why);
+        }
+        let after = idx.checked_sub(1);
+        // The stages of a snap say which one they are and share the snap's capture ID.
+        let (phase, capture_id, settled) = match &self.snap {
+            Some(snap) if name == format!("{}-before", snap.name) => {
+                (Some(state::Phase::Before), Some(snap.capture_id.clone()), snap.settled)
+            }
+            Some(snap) if name == format!("{}-after", snap.name) => {
+                (Some(state::Phase::After), Some(snap.capture_id.clone()), snap.settled)
+            }
+            _ => (None, None, self.state_settled),
+        };
         let header = state::Header {
             dir: self.dir.clone(),
             name: name.to_owned(),
             run_id: current_run_id().map(str::to_owned),
             after_step: after,
             after_label: after.and_then(|i| self.labels.get(i).cloned()),
-            settled: None,
+            settled,
             app_name: Some(self.info.app.clone()).filter(|a| !a.is_empty()),
             app_version: Some(self.info.version.clone()).filter(|a| !a.is_empty()),
             theme_requested: Some(self.info.theme_requested.clone()).filter(|a| !a.is_empty()),
             lang_requested: Some(self.info.lang_requested.clone()).filter(|a| !a.is_empty()),
+            phase,
+            capture_id,
         };
         let sent = state::submit(ctx, header, app);
         if let Err(why) = &sent {
@@ -2128,23 +2279,95 @@ impl Runner {
         }
     }
 
-    /// Hand Pace the acknowledgements of the state writer.
+    /// Hand Pace the acknowledgements of the state writer. One with nothing waiting for it is dropped.
     fn drain_state(&mut self, ctx: &egui::Context, now: Instant) {
         if !self.state_json {
             return;
         }
         while let Some(ack) = state::take_ack(ctx) {
+            let Some((want, _)) = self.state_out.clone() else { continue };
             match ack {
-                state::Ack::Written { name, .. } => match self.state_out.take() {
-                    Some((want, _)) if want == name => self.pace.state_saved(now),
-                    other => {
-                        let want = other.map_or_else(|| "none".to_owned(), |(w, _)| w);
-                        self.state_failed(&format!("state JSON for {name} arrived while waiting for {want}"));
-                    }
-                },
-                state::Ack::Failed { why, .. } => self.state_failed(&why),
+                state::Ack::Written { name, path, sha256, stable, snapshot_seq, .. } if name == want => {
+                    self.state_written(&name, &path, sha256, stable, snapshot_seq, now);
+                }
+                state::Ack::Written { name, .. } => self.state_failed(&format!("state JSON for {name} arrived while waiting for {want}")),
+                state::Ack::Failed { name, why } if name == want => self.state_failed(&why),
+                state::Ack::Failed { name, why } => {
+                    self.state_failed(&format!("state JSON for {name} failed ({why}) while waiting for {want}"));
+                }
             }
         }
+    }
+
+    /// The state `name` is on disk. A snap keeps what its side JSON says about it; the after state is the last piece, and
+    /// the side JSON is written before Pace hears that the step is done.
+    fn state_written(&mut self, name: &str, path: &std::path::Path, sha256: String, stable: state::Stable, seq: u64, now: Instant) {
+        let reference = |sha256: String, stable: state::Stable| SnapState {
+            path: format!("state/{}", path.file_name().map_or_else(|| name.to_owned(), |f| f.to_string_lossy().into_owned())),
+            sha256,
+            stable,
+            seq,
+        };
+        let snap_name = self.snap.as_ref().map(|s| s.name.clone());
+        match snap_name {
+            Some(a) if name == format!("{a}-before") => {
+                if let Some(snap) = self.snap.as_mut() {
+                    snap.before = Some(reference(sha256, stable));
+                }
+                self.state_out = None;
+                self.pace.state_saved(now);
+            }
+            Some(a) if name == format!("{a}-after") => {
+                let after = reference(sha256, stable);
+                match self.write_snap_json(&a, &after) {
+                    Ok(()) => {
+                        self.state_out = None;
+                        self.snap = None;
+                        self.pace.state_saved(now);
+                    }
+                    Err(why) => self.state_failed(&why),
+                }
+            }
+            _ => {
+                self.state_out = None;
+                self.pace.state_saved(now);
+            }
+        }
+    }
+
+    /// `shots/<a>.json` of a snap, once its after state is written.
+    fn write_snap_json(&self, a: &str, after: &SnapState) -> Result<(), String> {
+        let snap = self.snap.as_ref().ok_or_else(|| format!("cannot write shots/{a}.json: no <Snap:{a}> is running"))?;
+        let (Some(before), Some(shot)) = (&snap.before, &snap.shot) else {
+            return Err(format!("cannot write shots/{a}.json: the before state or the picture of <Snap:{a}> is missing"));
+        };
+        if before.seq != after.seq {
+            return Err(format!("state-after of <Snap:{a}> has snapshot_seq {} but state-before had {}", after.seq, before.seq));
+        }
+        let state_ref = |s: &SnapState| review::StateRef {
+            path: s.path.clone(),
+            sha256: s.sha256.clone(),
+            projection: s.stable.projection,
+            ui_sha256: s.stable.ui_sha256.clone(),
+            app_sha256: s.stable.app_sha256.clone(),
+        };
+        let unchanged = before.stable.ui_sha256 == after.stable.ui_sha256 && before.stable.app_sha256 == after.stable.app_sha256;
+        let capture = review::Capture {
+            run_id: current_run_id().map(str::to_owned),
+            snapshot_seq: Some(before.seq),
+            capture_id: snap.capture_id.clone(),
+            png: format!("{a}.png"),
+            png_sha256: shot.png_sha256.clone(),
+            size_px: shot.size_px,
+            state_before: Some(state_ref(before)),
+            state_after: Some(state_ref(after)),
+            state_unchanged: Some(unchanged),
+            requested_frame: shot.requested_frame,
+            received_frame: shot.received_frame,
+            env: env_of(&shot.meta),
+        };
+        evidence::write_durable(&self.shot_path(a, "json"), shot.meta.to_json_with(&capture).as_bytes())
+            .map_err(|e| format!("cannot write shots/{a}.json: {e}"))
     }
 
     /// The only clock the runner reads.
@@ -2198,7 +2421,7 @@ impl Runner {
             None if !self.delivered => self.ended.clone().inspect(|_| self.delivered = true),
             None => None,
         };
-        self.note();
+        self.sync();
         got
     }
 
@@ -2215,35 +2438,114 @@ impl Runner {
     /// hand back what was kept.
     fn keep(&mut self, mut e: pace::Ended, delivered: bool) -> pace::Ended {
         self.shot = None;
+        self.state_out = None;
+        self.state_settled = None;
+        self.snap = None;
         if !self.run_closed && self.done.is_some() {
             self.run_closed = true;
             self.run_started = true;
+            // 1. The trace first: a run that ends before its first input still gets one.
+            self.open_trace();
+            self.flush_trace();
+            if let Some(why) = self.trace_err.take() {
+                if !std::mem::replace(&mut self.trace_reported, true) {
+                    self.end_failure(&mut e, evidence::TRACE_STEP, why);
+                }
+            }
+            // 2. The last run.json, with the ending as it is now.
             self.run.run_id = current_run_id().map(str::to_owned);
             self.run.end(&e, evidence::now_ms());
             if let Err(err) = self.run.write(&self.dir) {
                 let why = format!("cannot write {}: {err}", evidence::FILE);
-                {
-                    use std::io::Write;
-                    let _ = writeln!(std::io::stderr(), "keys: {why}");
-                }
-                self.pace.write_failed();
-                e.failed = true;
-                e.say = Some(match e.say.take() {
-                    Some(old) => format!("{old}; {why}"),
-                    None => why.clone(),
-                });
-                // An ending that reads as a success (`keys: done`, also a quit or a close with nothing left) becomes a
-                // failure at `<run.json>`. One that already fails (unsettled, or closed or quit with steps left) keeps its
-                // tail and carries the reason in `say`. The file on disk stays at its `running` record.
-                if matches!(e.how, pace::How::Done) || e.tail.ends_with("keys: done\n") {
-                    e.tail = failed_report(evidence::STEP, &why, e.left);
-                    e.how = pace::How::Failed { step: evidence::STEP.to_owned(), why };
+                self.end_failure(&mut e, evidence::STEP, why.clone());
+                // 3. Pace has ended and cannot report it; the trace says so itself.
+                if let Some(trace) = self.trace.as_mut() {
+                    let line = self.pace.no_step_line(evidence::STEP, &why);
+                    if let Err(err) = trace.write(&line) {
+                        let more = format!("cannot write {}: {err}", evidence::TRACE);
+                        e.say = Some(match e.say.take() {
+                            Some(old) => format!("{old}; {more}"),
+                            None => more,
+                        });
+                    }
                 }
             }
+            // 4.
+            self.trace = None;
         }
         self.ended = Some(e.clone());
         self.delivered = delivered;
         e
+    }
+
+    /// The run's ending `e` meets a failure of the evidence (`step` is its label). The first failure is the ending's; one
+    /// that follows only goes to `say`.
+    fn end_failure(&mut self, e: &mut pace::Ended, step: &str, why: String) {
+        {
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr(), "keys: {why}");
+        }
+        self.pace.write_failed();
+        e.failed = true;
+        e.say = Some(match e.say.take() {
+            Some(old) => format!("{old}; {why}"),
+            None => why.clone(),
+        });
+        // An ending that reads as a success (`keys: done`, also a quit or a close with nothing left) becomes a failure at
+        // `step`. One that already fails (unsettled, or closed or quit with steps left) keeps its tail and carries the
+        // reason in `say`. The file on disk stays at its `running` record.
+        if matches!(e.how, pace::How::Done) || e.tail.ends_with("keys: done\n") {
+            e.tail = failed_report(step, &why, e.left);
+            e.how = pace::How::Failed { step: step.to_owned(), why };
+        }
+    }
+
+    /// `trace.jsonl`, created once (a run with a done file). Never truncates one that is open.
+    fn open_trace(&mut self) {
+        if self.trace_started || self.done.is_none() {
+            return;
+        }
+        self.trace_started = true;
+        match evidence::TraceFile::create(&self.dir, current_run_id()) {
+            Ok(t) => self.trace = Some(t),
+            Err(e) => self.trace_err = Some(format!("cannot write {}: {e}", evidence::TRACE)),
+        }
+    }
+
+    /// Write the trace lines Pace has closed. The first write error drops the file.
+    fn flush_trace(&mut self) {
+        if !self.trace_started {
+            return;
+        }
+        let lines = self.pace.take_trace();
+        let Some(trace) = self.trace.as_mut() else { return };
+        for line in &lines {
+            if let Err(e) = trace.write(line) {
+                self.trace = None;
+                self.trace_err = Some(format!("cannot write {}: {e}", evidence::TRACE));
+                break;
+            }
+        }
+    }
+
+    /// A trace failure while the run goes on fails the run, the way a `run.json` failure does.
+    fn trace_report(&mut self) {
+        if self.trace_reported || self.run_closed {
+            return;
+        }
+        let Some(why) = self.trace_err.clone() else { return };
+        self.trace_reported = true;
+        self.trace_err = None;
+        if let Some(e) = self.pace.host_failed(evidence::TRACE_STEP, why) {
+            let _ = self.keep(e, false);
+        }
+    }
+
+    /// After a step of the script: write the trace, report its failure, tell the watch.
+    fn sync(&mut self) {
+        self.flush_trace();
+        self.trace_report();
+        self.note();
     }
 
     /// The first `run.json`, `running`, at the first frame (the app may have changed [`dir`](Self::dir) since
@@ -2253,12 +2555,14 @@ impl Runner {
             return;
         }
         self.run_started = true;
+        self.open_trace();
         self.run.run_id = current_run_id().map(str::to_owned);
         if let Err(err) = self.run.write(&self.dir) {
             let why = format!("cannot write {}: {err}", evidence::FILE);
             if let Some(e) = self.pace.host_failed(evidence::STEP, why) {
                 // There is no folder to write the last one in either.
                 self.run_closed = true;
+                self.trace = None;
                 self.keep(e, false);
             }
         }
@@ -2280,7 +2584,7 @@ impl Runner {
         self.progress = Some(progress.clone());
         let labels = self.labels.clone();
         let _ = std::thread::Builder::new().name("keys-watch".into()).spawn(move || watch_progress(progress, labels, done, ctx));
-        self.note();
+        self.sync();
     }
 
     /// Tell the watch the script has moved.
@@ -2331,7 +2635,7 @@ impl Runner {
                 self.answer(&frame, taken, out)
             }
         };
-        self.note();
+        self.sync();
         did
     }
 
@@ -2506,13 +2810,39 @@ impl Runner {
             Press::ReadHas { tag, text } => (self.read_has(tag, text, reader), None),
             Press::State(name) if self.state_json => {
                 self.state_out = Some((name.clone(), entry.idx));
+                self.state_settled = self.pace.take_settled();
                 (pace::Taken::State { name: name.clone() }, Some(Do::State(name.clone())))
             }
             Press::State(name) => (pace::Taken::Done, Some(Do::State(name.clone()))),
             Press::Read { tag, name } => (pace::Taken::Done, Some(Do::Read { tag: tag.clone(), name: name.clone() })),
             Press::Shot(name) => {
-                self.shot = Some(PendingShot { name: name.clone(), sent: false, theme: String::new(), lang: String::new() });
+                self.shot = Some(self.pending_shot(name, entry.idx, false));
                 (pace::Taken::Shot { path: self.shot_path(name, "png").to_string_lossy().into_owned() }, None)
+            }
+            Press::Snap { .. } if !self.state_json => {
+                (pace::Taken::Failed("<Snap:> needs state JSON: call Runner::state_json(true)".to_owned()), None)
+            }
+            Press::Snap { name, stage: SnapStage::Before } => {
+                let settled = self.pace.take_settled();
+                self.snap = Some(SnapRun {
+                    name: name.clone(),
+                    capture_id: format!("{}-{name}", entry.idx + 1),
+                    settled,
+                    before: None,
+                    shot: None,
+                });
+                let n = format!("{name}-before");
+                self.state_out = Some((n.clone(), entry.idx));
+                (pace::Taken::State { name: n.clone() }, Some(Do::State(n)))
+            }
+            Press::Snap { name, stage: SnapStage::Shot } => {
+                self.shot = Some(self.pending_shot(name, entry.idx, true));
+                (pace::Taken::Shot { path: self.shot_path(name, "png").to_string_lossy().into_owned() }, None)
+            }
+            Press::Snap { name, stage: SnapStage::After } => {
+                let n = format!("{name}-after");
+                self.state_out = Some((n.clone(), entry.idx));
+                (pace::Taken::State { name: n.clone() }, Some(Do::State(n)))
             }
             Press::Quit => (pace::Taken::Quit, None),
             Press::Wait(_) | Press::Now => {
@@ -2572,17 +2902,25 @@ impl Runner {
     /// `<Shot:name>`, once per frame: ask for the picture, then save it when
     /// it arrives. An error is returned for a toast.
     pub fn shot(&mut self, ctx: &egui::Context) -> Option<String> {
+        let toast = self.shot_frame(ctx);
+        self.flush_trace();
+        self.trace_report();
+        toast
+    }
+
+    fn shot_frame(&mut self, ctx: &egui::Context) -> Option<String> {
         let pending = self.shot.as_mut()?;
         let name = pending.name.clone();
         if !pending.sent {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(name)));
-            // What is in force now is what the picture shows; the image arrives a frame or more later.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(name.clone())));
+            // What is in force now is what the picture shows; the image arrives a frame or more later. Freeze it all.
             pending.sent = true;
-            pending.theme = ito_theme::name().unwrap_or_default();
-            pending.lang = ito_i18n::in_force().unwrap_or_default();
+            pending.requested_frame = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+            let theme = ito_theme::name().unwrap_or_default();
+            let lang = ito_i18n::in_force().unwrap_or_default();
+            pending.meta = frozen_meta(&self.info, &name, (&theme, &lang), ctx.content_rect().size(), ctx.pixels_per_point());
             return None;
         }
-        let (theme, lang) = (pending.theme.clone(), pending.lang.clone());
         let image = ctx.input(|i| {
             i.raw.events.iter().find_map(|e| match e {
                 egui::Event::Screenshot { user_data, image, .. }
@@ -2593,10 +2931,18 @@ impl Runner {
                 _ => None,
             })
         })?;
-        let screen = ctx.content_rect().size();
-        let saved = self.save_shot(&name, (&theme, &lang), &image, screen, ctx.pixels_per_point());
+        let received = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+        let (meta, idx, snap, requested) = {
+            let p = self.shot.as_ref()?;
+            (p.meta.clone(), p.idx, p.snap, p.requested_frame)
+        };
+        let saved = self.save_picture(&name, meta, &image, (idx, snap), (requested, received));
         let now = self.now();
         self.shot_result(&name, saved, now)
+    }
+
+    fn pending_shot(&self, name: &str, idx: usize, snap: bool) -> PendingShot {
+        PendingShot { name: name.to_owned(), idx, snap, sent: false, meta: review::Meta::default(), requested_frame: 0 }
     }
 
     /// `<dir>/shots/<name>.<ext>`: where a shot's picture (`png`) and sidecar (`json`) go.
@@ -2604,34 +2950,67 @@ impl Runner {
         self.dir.join("shots").join(format!("{name}.{ext}"))
     }
 
+    /// The picture, durably (`.part`, flushed, renamed): its SHA-256 and size in pixels.
+    fn store_png(&self, name: &str, image: &egui::ColorImage) -> Result<(String, [u32; 2]), String> {
+        std::fs::create_dir_all(self.dir.join("shots")).map_err(|e| e.to_string())?;
+        let bytes = png_bytes(image)?;
+        evidence::write_durable(&self.shot_path(name, "png"), &bytes).map_err(|e| e.to_string())?;
+        let [w, h] = image.size;
+        Ok((state::sha256_hex(&bytes), [u32::try_from(w).unwrap_or(u32::MAX), u32::try_from(h).unwrap_or(u32::MAX)]))
+    }
+
+    /// The picture of a shot, then its `shots/<name>.json` for a plain `<Shot:>`. A `<Snap:>` keeps what the side JSON will
+    /// say and writes it after its after state. `meta` was frozen when the picture was asked for.
+    fn save_picture(
+        &mut self,
+        name: &str,
+        meta: review::Meta,
+        image: &egui::ColorImage,
+        (idx, snap): (usize, bool),
+        (requested_frame, received_frame): (u64, u64),
+    ) -> Result<(), String> {
+        let (png_sha256, size_px) = self.store_png(name, image)?;
+        if snap {
+            let run = self.snap.as_mut().ok_or_else(|| format!("no <Snap:{name}> is running"))?;
+            run.shot = Some(SnapShot { meta, png_sha256, size_px, requested_frame, received_frame });
+            return Ok(());
+        }
+        let capture = review::Capture {
+            run_id: current_run_id().map(str::to_owned),
+            snapshot_seq: None,
+            capture_id: format!("{}-{name}", idx + 1),
+            png: format!("{name}.png"),
+            png_sha256,
+            size_px,
+            state_before: None,
+            state_after: None,
+            state_unchanged: None,
+            requested_frame,
+            received_frame,
+            env: env_of(&meta),
+        };
+        evidence::write_durable(&self.shot_path(name, "json"), meta.to_json_with(&capture).as_bytes()).map_err(|e| e.to_string())
+    }
+
     /// The picture and its `shots/<name>.json`; `in_force` is the theme and language that were in force when the picture
     /// was asked for.
+    #[cfg(test)]
     pub(crate) fn save_shot(
-        &self,
+        &mut self,
         name: &str,
         in_force: (&str, &str),
         image: &egui::ColorImage,
         screen: egui::Vec2,
         pixels_per_point: f32,
     ) -> Result<(), String> {
-        std::fs::create_dir_all(self.dir.join("shots")).map_err(|e| e.to_string())?;
-        save_png(&self.shot_path(name, "png"), image)?;
-        let meta = review::Meta {
-            name: name.to_owned(),
-            theme: in_force.0.to_owned(),
-            lang: in_force.1.to_owned(),
-            size: [screen.x, screen.y],
-            rect: [0.0, 0.0, screen.x, screen.y],
-            time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
-            pixels_per_point,
-            ..self.info.clone()
-        };
-        std::fs::write(self.shot_path(name, "json"), meta.to_json()).map_err(|e| e.to_string())
+        let meta = frozen_meta(&self.info, name, in_force, screen, pixels_per_point);
+        self.save_picture(name, meta, image, (0, false), (0, 0))
     }
 
     /// The picture was saved or could not be: tell Pace. A failure ends the run (its [`Do::Failed`] goes out at the
     /// next [`input`](Self::input)) and is returned for a toast as well.
     pub(crate) fn shot_result(&mut self, name: &str, saved: Result<(), String>, now: Instant) -> Option<String> {
+        let snap = self.shot.as_ref().is_some_and(|p| p.snap);
         self.shot = None;
         self.wake = Some(now);
         let toast = match saved {
@@ -2640,11 +3019,16 @@ impl Runner {
                 None
             }
             Err(e) => {
-                self.shot_failed(format!("cannot save the picture of <Shot:{name}>: {e}"));
+                // Pace adds `shot: <Snap:a>: ` to a snap's reason.
+                self.shot_failed(if snap {
+                    format!("cannot save the picture: {e}")
+                } else {
+                    format!("cannot save the picture of <Shot:{name}>: {e}")
+                });
                 Some(format!("Shot {name}: {e}"))
             }
         };
-        self.note();
+        self.sync();
         toast
     }
 
@@ -2659,14 +3043,53 @@ impl Runner {
 /// `image` as an 8-bit RGBA PNG at `path`; also for an app that crops its own
 /// shots (kura's `@preview`).
 pub fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), String> {
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut out = std::io::BufWriter::new(file);
+    encode_png(&mut out, image)?;
+    std::io::Write::flush(&mut out).map_err(|e| e.to_string())
+}
+
+/// `image` as an 8-bit RGBA PNG in memory.
+fn png_bytes(image: &egui::ColorImage) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    encode_png(&mut out, image)?;
+    Ok(out)
+}
+
+fn encode_png<W: std::io::Write>(out: W, image: &egui::ColorImage) -> Result<(), String> {
     let [w, h] = image.size;
     let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
+    let mut enc = png::Encoder::new(out, w as u32, h as u32);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(&rgba).map_err(|e| e.to_string())
+}
+
+/// What the side JSON says about the frame a picture is of, as it is when the picture is asked for.
+fn frozen_meta(info: &review::Meta, name: &str, in_force: (&str, &str), screen: egui::Vec2, pixels_per_point: f32) -> review::Meta {
+    review::Meta {
+        name: name.to_owned(),
+        theme: in_force.0.to_owned(),
+        lang: in_force.1.to_owned(),
+        size: [screen.x, screen.y],
+        rect: [0.0, 0.0, screen.x, screen.y],
+        time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+        pixels_per_point,
+        ..info.clone()
+    }
+}
+
+/// The `env` block of a side JSON.
+fn env_of(meta: &review::Meta) -> review::Env {
+    review::Env {
+        os: std::env::consts::OS.to_owned(),
+        arch: std::env::consts::ARCH.to_owned(),
+        wgpu_backend: None,
+        font_set_sha256: None,
+        theme: meta.theme.clone(),
+        pixels_per_point: meta.pixels_per_point,
+    }
 }
 
 #[cfg(test)]
@@ -4348,7 +4771,7 @@ mod tests {
                     }
                     Decided::Take(entry) => {
                         tr.takes.push((entry.idx, tick.ms, entry.kind == pace::Kind::Then));
-                        let taken = tick.answer.clone().unwrap_or_else(|| pace::conformance::Answer::default_for(&entry)).taken();
+                        let taken = tick.answer.clone().unwrap_or_else(|| pace::conformance::Answer::default_for(&entry)).taken(&entry);
                         let mut marked = false;
                         r.act_rule(&entry, &taken, now, || {
                             marked = true;
@@ -4484,6 +4907,210 @@ mod tests {
         assert!(err.contains("state JSON is off"), "{err}");
     }
 
+    /// Runs a Runner built by `state_runner` the way an app would: a state is written in the frame that asks for it, a
+    /// picture arrives the frame after it was asked for. Returns the last `Do` and the toasts.
+    fn run_snaps(r: &mut Runner, ctx: &egui::Context) -> (Option<Do>, Vec<String>) {
+        let (mut toasts, mut last) = (Vec::new(), None);
+        let mut sent_shot: Option<String> = None;
+        for _ in 0..600 {
+            r.skip(Duration::from_millis(25));
+            let mut raw = egui::RawInput::default();
+            if let Some(name) = sent_shot.take() {
+                let image = std::sync::Arc::new(egui::ColorImage::filled([4, 3], egui::Color32::from_rgb(1, 2, 3)));
+                raw.events.push(egui::Event::Screenshot {
+                    viewport_id: egui::ViewportId::ROOT,
+                    user_data: egui::UserData::new(name),
+                    image,
+                });
+            }
+            let d = r.input(ctx, &mut raw);
+            let mut submit_now = None;
+            match d {
+                Some(Do::State(name)) => submit_now = Some(name),
+                Some(other) => {
+                    last = Some(other);
+                    break;
+                }
+                None => {}
+            }
+            ctx.run_ui(raw, |ui| {
+                let b = ui.button("ok");
+                ito_a11y::test_id(&b, "ok");
+                if let Some(name) = &submit_now {
+                    let _ = r.write_state(ui.ctx(), name, state::App::default());
+                }
+                if let Some(t) = r.shot(ui.ctx()) {
+                    toasts.push(t);
+                }
+            })
+            .drop_without_applying_deltas();
+            if let Some(p) = r.shot.as_ref().filter(|p| p.sent) {
+                sent_shot = Some(p.name.clone());
+            }
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        (last, toasts)
+    }
+
+    fn json_of(dir: &std::path::Path, rel: &str) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(dir.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))).unwrap()
+    }
+
+    fn no_part_files(dir: &std::path::Path) {
+        for sub in ["state", "shots"] {
+            if let Ok(rd) = std::fs::read_dir(dir.join(sub)) {
+                for f in rd.flatten() {
+                    assert!(!f.file_name().to_string_lossy().ends_with(".part"), "{:?}", f.path());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_snap_writes_two_states_a_picture_and_a_side_json_that_agree() {
+        let (mut r, dir) = state_runner("<Snap:a><Quit>", "snap", Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let (last, toasts) = run_snaps(&mut r, &ctx);
+        assert!(matches!(last, Some(Do::Quit)), "{last:?} {toasts:?}");
+        let (before, after) = (json_of(&dir, "state/a-before.json"), json_of(&dir, "state/a-after.json"));
+        let side = json_of(&dir, "shots/a.json");
+        assert_eq!((before["phase"].as_str(), after["phase"].as_str()), (Some("before"), Some("after")));
+        assert_eq!(before["capture_id"], after["capture_id"]);
+        assert_eq!(before["snapshot_seq"], after["snapshot_seq"]);
+        assert_eq!(side["capture_id"], before["capture_id"]);
+        assert_eq!(side["snapshot_seq"], before["snapshot_seq"]);
+        let hash = |rel: &str| state::sha256_hex(&std::fs::read(dir.join(rel)).unwrap());
+        assert_eq!(side["state_before"]["sha256"], hash("state/a-before.json").as_str());
+        assert_eq!(side["state_after"]["sha256"], hash("state/a-after.json").as_str());
+        assert_eq!(side["state_before"]["path"], "state/a-before.json");
+        assert_eq!(side["png_sha256"], hash("shots/a.png").as_str());
+        assert_eq!(side["state_unchanged"], true);
+        no_part_files(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plain_shot_has_a_capture_id_and_no_state_references() {
+        let (mut r, dir) = state_runner("<Shot:s><Quit>", "plainshot", Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let (last, toasts) = run_snaps(&mut r, &ctx);
+        assert!(matches!(last, Some(Do::Quit)), "{last:?} {toasts:?}");
+        let side = json_of(&dir, "shots/s.json");
+        assert_eq!(side["capture_id"], "1-s");
+        assert!(side["state_before"].is_null() && side["state_after"].is_null(), "{side}");
+        assert!(side["snapshot_seq"].is_null());
+        no_part_files(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_snap_needs_state_json() {
+        let config = pace::Config::new("app");
+        let mut r = Runner::with_pace(config, parse("<Snap:a><Quit>").unwrap(), Instant::now());
+        let ctx = egui::Context::default();
+        let (last, _) = run_snaps(&mut r, &ctx);
+        let Some(Do::Failed { why, .. }) = last else { panic!("{last:?}") };
+        assert!(why.contains("<Snap:> needs state JSON: call Runner::state_json(true)"), "{why}");
+    }
+
+    #[test]
+    fn write_state_with_nothing_waiting_is_an_error_that_leaves_the_run_alone() {
+        let (mut r, dir) = state_runner("<Quit>", "nowait", Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let err = r.write_state(&ctx, "a", state::App::default()).unwrap_err();
+        assert!(err.contains("no <State:> is waiting"), "{err}");
+        let (last, _) = run_snaps(&mut r, &ctx);
+        assert!(matches!(last, Some(Do::Quit)), "{last:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_state_with_the_wrong_name_fails_the_run_naming_both() {
+        let (mut r, dir) = state_runner("<State:a><Quit>", "wrongname", Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let mut last = None;
+        for _ in 0..50 {
+            r.skip(Duration::from_millis(25));
+            let mut raw = egui::RawInput::default();
+            let d = r.input(&ctx, &mut raw);
+            let asked = matches!(d, Some(Do::State(_)));
+            if d.is_some() && !asked {
+                last = d;
+                break;
+            }
+            ctx.run_ui(raw, |ui| {
+                let b = ui.button("ok");
+                ito_a11y::test_id(&b, "ok");
+                if asked {
+                    assert!(r.write_state(ui.ctx(), "b", state::App::default()).is_err());
+                }
+            })
+            .drop_without_applying_deltas();
+        }
+        let Some(Do::Failed { why, .. }) = last else { panic!("{last:?}") };
+        assert!(why.contains('b') && why.contains("<State:a>"), "{why}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_trace_has_a_line_per_step_with_the_run_id() {
+        let (mut r, dir) = state_runner("<Snap:a><Wait:20><Quit>", "trace", Duration::from_secs(5));
+        r.done = Some(dir.join("done.txt"));
+        let ctx = egui::Context::default();
+        let (last, _) = run_snaps(&mut r, &ctx);
+        assert!(matches!(last, Some(Do::Quit)), "{last:?}");
+        let text = std::fs::read_to_string(dir.join(evidence::TRACE)).unwrap();
+        let lines: Vec<serde_json::Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let steps: Vec<(u64, &str)> = lines.iter().map(|l| (l["step"].as_u64().unwrap(), l["outcome"].as_str().unwrap())).collect();
+        assert_eq!(steps, vec![(1, "done"), (2, "done"), (3, "done")], "{text}");
+        assert!(lines[0]["label"].as_str().unwrap().contains("Snap"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failing_run_ends_its_trace_with_a_failed_line() {
+        let (mut r, dir) = state_runner("<Snap:a><Quit>", "tracefail", Duration::from_secs(5));
+        r.done = Some(dir.join("done.txt"));
+        // Make the picture unwritable: a file where the shots folder should be.
+        std::fs::write(dir.join("shots"), b"x").unwrap();
+        let ctx = egui::Context::default();
+        let (last, _) = run_snaps(&mut r, &ctx);
+        assert!(matches!(last, Some(Do::Failed { .. })), "{last:?}");
+        let text = std::fs::read_to_string(dir.join(evidence::TRACE)).unwrap();
+        let last_line: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(last_line["outcome"], "failed", "{text}");
+        assert!(last_line["why"].is_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snap_names_that_would_share_a_file_are_refused() {
+        let e = parse("<Snap:a><Snap:a>").unwrap_err();
+        assert!(e.contains("used twice"), "{e}");
+        for script in ["<Snap:a><Shot:a>", "<Shot:a><Snap:a>"] {
+            let e = parse(script).unwrap_err();
+            assert!(e.contains("would both write shots/a.png"), "{script}: {e}");
+        }
+        let e = parse("<State:a-before><Snap:a>").unwrap_err();
+        assert!(e.contains("state/a-before.json"), "{e}");
+        let e = parse("<Snap:a><State:a-after>").unwrap_err();
+        assert!(e.contains("state/a-after.json"), "{e}");
+        assert!(parse("<Snap:a><Snap:b><State:a><Shot:c>").is_ok());
+    }
+
+    #[test]
+    fn an_unwritable_trace_fails_a_run_that_would_have_passed() {
+        let (mut r, dir) = state_runner("<Wait:20><Quit>", "tracebad", Duration::from_secs(5));
+        r.done = Some(dir.join("done.txt"));
+        // A folder where the trace file should be.
+        std::fs::create_dir_all(dir.join(evidence::TRACE)).unwrap();
+        let ctx = egui::Context::default();
+        let (last, _) = run_snaps(&mut r, &ctx);
+        let Some(Do::Failed { step, why }) = last else { panic!("{last:?}") };
+        assert!(step.contains("trace.jsonl") || why.contains("trace.jsonl"), "{step} {why}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Plays `script` with a clock that moves `step` per frame. Returns the runner, the `Do`s in order with the skew they came at,
     /// and the skew at which each `Text` event went in.
     #[allow(clippy::type_complexity)]
@@ -4601,7 +5228,7 @@ mod tests {
     #[test]
     fn a_shot_goes_to_the_shots_folder_with_the_theme_and_language_in_force() {
         let dir = temp("shots");
-        let r = Runner::new(Vec::new(), Some(dir.join("done"))).app("demo", "1.2.3");
+        let mut r = Runner::new(Vec::new(), Some(dir.join("done"))).app("demo", "1.2.3");
         let image = egui::ColorImage::filled([4, 3], egui::Color32::RED);
         r.save_shot("main", ("tsumugi Dark", "ja"), &image, egui::vec2(4.0, 3.0), 1.0).unwrap();
         assert!(dir.join("shots").join("main.png").is_file());
@@ -4614,7 +5241,7 @@ mod tests {
         // A file called `shots` is an error, not a reason to write elsewhere.
         let other = temp("shots-file");
         std::fs::write(other.join("shots"), "x").unwrap();
-        let r = Runner::new(Vec::new(), Some(other.join("done")));
+        let mut r = Runner::new(Vec::new(), Some(other.join("done")));
         assert!(r.save_shot("main", ("", ""), &image, egui::vec2(4.0, 3.0), 1.0).is_err());
         assert!(!other.join("main.png").exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -4659,7 +5286,7 @@ mod tests {
         ito_theme::set_theme(&themes[1]);
         ito_i18n::set_in_force("en");
         let p = r.shot.as_ref().unwrap();
-        assert_eq!((p.theme.as_str(), p.lang.as_str()), (themes[0].name.as_str(), "ja"));
+        assert_eq!((p.meta.theme.as_str(), p.meta.lang.as_str()), (themes[0].name.as_str(), "ja"));
     }
 
     #[test]

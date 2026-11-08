@@ -55,11 +55,20 @@ pub(crate) fn esc(s: &str) -> String {
 impl Meta {
     /// One JSON object, keys in a fixed order.
     pub fn to_json(&self) -> String {
+        self.json(None)
+    }
+
+    /// [`to_json`](Self::to_json) with the capture's facts appended after `pixels_per_point`.
+    pub fn to_json_with(&self, c: &Capture) -> String {
+        self.json(Some(c))
+    }
+
+    fn json(&self, cap: Option<&Capture>) -> String {
         let n = |v: f32| if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v}") };
         let [w, h] = self.size;
         let [x, y, rw, rh] = self.rect;
-        format!(
-            "{{\n  \"name\": {},\n  \"app\": {},\n  \"version\": {},\n  \"theme\": {},\n  \"theme_requested\": {},\n  \"lang\": {},\n  \"lang_requested\": {},\n  \"size\": [{}, {}],\n  \"zoom\": {},\n  \"state\": {},\n  \"component\": {},\n  \"rect\": [{}, {}, {}, {}],\n  \"time\": {},\n  \"pixels_per_point\": {}\n}}\n",
+        let mut out = format!(
+            "{{\n  \"name\": {},\n  \"app\": {},\n  \"version\": {},\n  \"theme\": {},\n  \"theme_requested\": {},\n  \"lang\": {},\n  \"lang_requested\": {},\n  \"size\": [{}, {}],\n  \"zoom\": {},\n  \"state\": {},\n  \"component\": {},\n  \"rect\": [{}, {}, {}, {}],\n  \"time\": {},\n  \"pixels_per_point\": {}",
             esc(&self.name),
             esc(&self.app),
             esc(&self.version),
@@ -78,7 +87,96 @@ impl Meta {
             n(rh),
             self.time,
             n(self.pixels_per_point),
-        )
+        );
+        if let Some(c) = cap {
+            let opt_u = |v: Option<u64>| v.map_or_else(|| "null".to_owned(), |v| v.to_string());
+            let flag = c.state_unchanged.map_or_else(|| "null".to_owned(), |b| b.to_string());
+            out.push_str(&format!(
+                ",\n  \"run_id\": {},\n  \"snapshot_seq\": {},\n  \"capture_id\": {},\n  \"png\": {},\n  \"png_sha256\": {},\n  \"size_px\": [{}, {}],\n  \"state_before\": {},\n  \"state_after\": {},\n  \"state_unchanged\": {},\n  \"requested_frame\": {},\n  \"received_frame\": {},\n  \"env\": {{\"os\": {}, \"arch\": {}, \"wgpu_backend\": {}, \"font_set_sha256\": {}, \"theme\": {}, \"pixels_per_point\": {}}}",
+                opt_str(&c.run_id),
+                opt_u(c.snapshot_seq),
+                esc(&c.capture_id),
+                esc(&c.png),
+                esc(&c.png_sha256),
+                c.size_px[0],
+                c.size_px[1],
+                state_ref_json(&c.state_before),
+                state_ref_json(&c.state_after),
+                flag,
+                c.requested_frame,
+                c.received_frame,
+                esc(&c.env.os),
+                esc(&c.env.arch),
+                opt_str(&c.env.wgpu_backend),
+                opt_str(&c.env.font_set_sha256),
+                esc(&c.env.theme),
+                n(c.env.pixels_per_point),
+            ));
+        }
+        out.push_str("\n}\n");
+        out
+    }
+}
+
+/// Facts about one capture, added to the side JSON by [`Meta::to_json_with`]. Build with `Default` and assign the fields.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Capture {
+    pub run_id: Option<String>,
+    pub snapshot_seq: Option<u64>,
+    pub capture_id: String,
+    /// The PNG's file name beside this JSON (`<name>.png`).
+    pub png: String,
+    pub png_sha256: String,
+    pub size_px: [u32; 2],
+    pub state_before: Option<StateRef>,
+    pub state_after: Option<StateRef>,
+    /// `Some(true)` when both states have the same `ui_sha256` and `app_sha256`; `None` without both states.
+    pub state_unchanged: Option<bool>,
+    pub requested_frame: u64,
+    pub received_frame: u64,
+    pub env: Env,
+}
+
+/// A state JSON file a capture refers to.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct StateRef {
+    /// Relative to the done file's folder, `/` separators (`state/a-before.json`).
+    pub path: String,
+    pub sha256: String,
+    pub projection: u32,
+    pub ui_sha256: String,
+    pub app_sha256: String,
+}
+
+/// Where the picture was taken.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Env {
+    pub os: String,
+    pub arch: String,
+    pub wgpu_backend: Option<String>,
+    pub font_set_sha256: Option<String>,
+    pub theme: String,
+    pub pixels_per_point: f32,
+}
+
+fn opt_str(v: &Option<String>) -> String {
+    v.as_deref().map_or_else(|| "null".to_owned(), esc)
+}
+
+fn state_ref_json(r: &Option<StateRef>) -> String {
+    match r {
+        None => "null".to_owned(),
+        Some(r) => format!(
+            "{{\"path\": {}, \"sha256\": {}, \"stable\": {{\"projection\": {}, \"ui_sha256\": {}, \"app_sha256\": {}}}}}",
+            esc(&r.path),
+            esc(&r.sha256),
+            r.projection,
+            esc(&r.ui_sha256),
+            esc(&r.app_sha256)
+        ),
     }
 }
 
@@ -249,6 +347,48 @@ mod tests {
             assert!(j.contains(&format!("\"{k}\":")), "{k}");
         }
         assert!(j.contains("\"a\\\"b\"") && j.contains("[800, 600.5]") && j.contains("\"pixels_per_point\": 1.5"));
+    }
+
+    #[test]
+    fn to_json_with_appends_the_capture_in_order() {
+        let m = Meta { name: "a".into(), pixels_per_point: 1.5, ..Meta::default() };
+        let r = StateRef { path: "state/a-before.json".into(), sha256: "aa".into(), projection: 1, ..StateRef::default() };
+        let mut c = Capture {
+            capture_id: "1-a".into(),
+            png: "a.png".into(),
+            png_sha256: "ff".into(),
+            size_px: [8, 6],
+            state_before: Some(r),
+            ..Capture::default()
+        };
+        c.env.os = "os".into();
+        let j = m.to_json_with(&c);
+        let v: serde_json::Value = serde_json::from_str(&j).unwrap();
+        // `serde_json::Value` sorts its keys, so read the order from the text: the top-level keys are the ones at 2 spaces.
+        let keys: Vec<&str> = j.lines().filter_map(|l| l.strip_prefix("  \"")).filter_map(|l| l.split('"').next()).collect();
+        let tail = [
+            "pixels_per_point",
+            "run_id",
+            "snapshot_seq",
+            "capture_id",
+            "png",
+            "png_sha256",
+            "size_px",
+            "state_before",
+            "state_after",
+            "state_unchanged",
+            "requested_frame",
+            "received_frame",
+            "env",
+        ];
+        let at = keys.iter().position(|k| *k == "pixels_per_point").unwrap();
+        assert_eq!(&keys[at..], &tail);
+        assert!(v["run_id"].is_null() && v["snapshot_seq"].is_null() && v["state_after"].is_null() && v["state_unchanged"].is_null());
+        assert!(v["env"]["wgpu_backend"].is_null() && v["env"]["font_set_sha256"].is_null());
+        assert_eq!(v["state_before"]["stable"]["projection"], 1);
+        assert_eq!(v["size_px"], serde_json::json!([8, 6]));
+        assert_eq!(m.to_json(), m.to_json().trim_end().to_owned() + "\n");
+        assert!(!m.to_json().contains("capture_id"));
     }
 
     #[test]

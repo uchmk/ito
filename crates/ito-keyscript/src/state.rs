@@ -60,13 +60,33 @@ pub struct Header {
     pub app_version: Option<String>,
     pub theme_requested: Option<String>,
     pub lang_requested: Option<String>,
+    /// `Some` for the state before / after a `<Snap:>` picture; then `capture_id` has to be set too.
+    pub phase: Option<Phase>,
+    /// The id the before state, the after state and the side JSON of one capture share (`"{step}-{name}"`).
+    pub capture_id: Option<String>,
+}
+
+/// Which side of a `<Snap:>` picture a state is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    Before,
+    After,
+}
+
+impl Phase {
+    fn text(self) -> &'static str {
+        match self {
+            Phase::Before => "before",
+            Phase::After => "after",
+        }
+    }
 }
 
 /// The answer to a [`submit`].
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Ack {
-    Written { name: String, path: PathBuf, sha256: String, stable: Stable, frame: u64 },
+    Written { name: String, path: PathBuf, sha256: String, stable: Stable, frame: u64, snapshot_seq: u64 },
     Failed { name: String, why: String },
 }
 
@@ -86,6 +106,9 @@ pub struct Stable {
 pub fn submit(ctx: &egui::Context, header: Header, app: App) -> Result<(), String> {
     if !crate::good_name(&header.name) {
         return Err(format!("bad state name `{}` (use ASCII letters, digits, `-` and `_`)", header.name));
+    }
+    if header.phase.is_some() && header.capture_id.as_deref().is_none_or(str::is_empty) {
+        return Err(format!("state `{}` has a phase but no capture_id", header.name));
     }
     let pass = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
     ctx.with_plugin::<crate::Tap, _>(|t| t.state.submit(header, app, pass))
@@ -110,6 +133,7 @@ struct Job {
     name: String,
     frame: u64,
     stable: Stable,
+    snapshot_seq: u64,
 }
 
 /// The pending submission, the snapshot counter, the writer and its acknowledgements.
@@ -117,6 +141,8 @@ struct Job {
 pub(crate) struct Hub {
     pending: Option<Pending>,
     seq: u64,
+    /// The last `Before` state that no `After` has claimed: `(dir, run_id, capture_id, snapshot_seq)`.
+    open_pair: Option<(PathBuf, Option<String>, String, u64)>,
     writer: Option<mpsc::Sender<Job>>,
     acks: Arc<Mutex<VecDeque<Ack>>>,
 }
@@ -171,7 +197,21 @@ impl Hub {
             self.push(ctx, Ack::Failed { name, why });
             return;
         };
-        let built = build(&p.header, &p.app, pass.frame, self.seq + 1, pass.ppp, &tree);
+        let capture = p.header.capture_id.clone().unwrap_or_default();
+        let key = (p.header.dir.clone(), p.header.run_id.clone());
+        // An `After` takes the number of its `Before`; everything else takes the next one.
+        let seq = match p.header.phase {
+            Some(Phase::After) => match &self.open_pair {
+                Some((d, r, c, n)) if *d == key.0 && *r == key.1 && *c == capture => *n,
+                _ => {
+                    let why = format!("state-after {name} has no matching state-before (capture_id {capture})");
+                    self.push(ctx, Ack::Failed { name, why });
+                    return;
+                }
+            },
+            _ => self.seq + 1,
+        };
+        let built = build(&p.header, &p.app, pass.frame, seq, pass.ppp, &tree);
         let (bytes, stable) = match built {
             Ok(b) => b,
             Err(why) => {
@@ -179,8 +219,16 @@ impl Hub {
                 return;
             }
         };
-        self.seq += 1;
-        let job = Job { ctx: ctx.clone(), bytes, dir: p.header.dir.clone(), name: name.clone(), frame: pass.frame, stable };
+        match p.header.phase {
+            Some(Phase::After) => self.open_pair = None,
+            Some(Phase::Before) => {
+                self.seq = seq;
+                self.open_pair = Some((key.0, key.1, capture, seq));
+            }
+            None => self.seq = seq,
+        }
+        let job =
+            Job { ctx: ctx.clone(), bytes, dir: p.header.dir.clone(), name: name.clone(), frame: pass.frame, stable, snapshot_seq: seq };
         if let Err(why) = self.send(job) {
             self.push(ctx, Ack::Failed { name, why });
         }
@@ -226,9 +274,14 @@ fn write(job: &Job) -> Ack {
         std::fs::rename(&part, &path)
     })();
     match done {
-        Ok(()) => {
-            Ack::Written { name: job.name.clone(), path, sha256: sha256_hex(&job.bytes), stable: job.stable.clone(), frame: job.frame }
-        }
+        Ok(()) => Ack::Written {
+            name: job.name.clone(),
+            path,
+            sha256: sha256_hex(&job.bytes),
+            stable: job.stable.clone(),
+            frame: job.frame,
+            snapshot_seq: job.snapshot_seq,
+        },
         Err(e) => {
             let _ = std::fs::remove_file(&part);
             Ack::Failed { name: job.name.clone(), why: format!("cannot write {}: {e}", path.display()) }
@@ -493,8 +546,8 @@ fn build(h: &Header, app: &App, frame: u64, seq: u64, ppp: f32, tree: &TreeView<
         name: &h.name,
         run_id: &h.run_id,
         snapshot_seq: seq,
-        phase: None,
-        capture_id: None,
+        phase: h.phase.map(|p| p.text().to_owned()),
+        capture_id: h.capture_id.clone(),
         after_step: h.after_step,
         after_label: &h.after_label,
         frame,
@@ -660,6 +713,75 @@ mod tests {
         assert!(matches!(wait_ack(&ctx), Ack::Written { .. }));
         assert_eq!(read_json(&dir, "two").1["snapshot_seq"], 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn staged(dir: &std::path::Path, name: &str, run: &str, phase: Option<Phase>, capture: Option<&str>) -> Header {
+        Header { run_id: Some(run.into()), phase, capture_id: capture.map(str::to_owned), ..header(dir, name) }
+    }
+
+    /// Submit `h`, run the pass that merges it and return what the writer answered.
+    fn write_one(ctx: &egui::Context, draw: &mut dyn FnMut(&mut egui::Ui), h: Header) -> Ack {
+        submit(ctx, h, App::default()).unwrap();
+        pass(ctx, draw);
+        wait_ack(ctx)
+    }
+
+    fn seq_of(ack: &Ack) -> u64 {
+        match ack {
+            Ack::Written { snapshot_seq, .. } => *snapshot_seq,
+            Ack::Failed { name, why } => panic!("{name} failed: {why}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_numbers_plain_states_pairs_and_failures() {
+        let dir = temp("seq");
+        let ctx = egui::Context::default();
+        crate::observe(&ctx);
+        let mut draw = |ui: &mut egui::Ui| {
+            let r = ui.button("b");
+            ito_a11y::test_id(&r, "b");
+        };
+        pass(&ctx, &mut draw);
+        // Plain states count 1, 2.
+        assert_eq!(seq_of(&write_one(&ctx, &mut draw, staged(&dir, "p1", "r1", None, None))), 1);
+        assert_eq!(seq_of(&write_one(&ctx, &mut draw, staged(&dir, "p2", "r1", None, None))), 2);
+        // A pair shares one number, and the next plain state goes on from it.
+        let b = write_one(&ctx, &mut draw, staged(&dir, "a-before", "r1", Some(Phase::Before), Some("1-a")));
+        let a = write_one(&ctx, &mut draw, staged(&dir, "a-after", "r1", Some(Phase::After), Some("1-a")));
+        assert_eq!((seq_of(&b), seq_of(&a)), (3, 3));
+        let (_, vb) = read_json(&dir, "a-before");
+        let (_, va) = read_json(&dir, "a-after");
+        assert_eq!((vb["phase"].as_str(), va["phase"].as_str()), (Some("before"), Some("after")));
+        assert_eq!(vb["capture_id"], "1-a");
+        assert_eq!(va["capture_id"], "1-a");
+        assert_eq!(seq_of(&write_one(&ctx, &mut draw, staged(&dir, "p3", "r1", None, None))), 4);
+        // An unknown capture_id, and the right one from another run, fail and take no number.
+        write_one(&ctx, &mut draw, staged(&dir, "b-before", "r1", Some(Phase::Before), Some("2-b")));
+        for (run, cap) in [("r1", "9-x"), ("r2", "2-b")] {
+            let ack = write_one(&ctx, &mut draw, staged(&dir, "b-after", run, Some(Phase::After), Some(cap)));
+            assert!(matches!(&ack, Ack::Failed { why, .. } if why.contains("no matching state-before")), "{run} {cap}");
+        }
+        // The pair is still open for its own after state.
+        assert_eq!(seq_of(&write_one(&ctx, &mut draw, staged(&dir, "b-after", "r1", Some(Phase::After), Some("2-b")))), 5);
+        // A second before replaces an abandoned pair.
+        write_one(&ctx, &mut draw, staged(&dir, "c-before", "r1", Some(Phase::Before), Some("3-c")));
+        let n = seq_of(&write_one(&ctx, &mut draw, staged(&dir, "d-before", "r1", Some(Phase::Before), Some("4-d"))));
+        assert_eq!(n, 7);
+        let ack = write_one(&ctx, &mut draw, staged(&dir, "c-after", "r1", Some(Phase::After), Some("3-c")));
+        assert!(matches!(ack, Ack::Failed { .. }));
+        assert_eq!(seq_of(&write_one(&ctx, &mut draw, staged(&dir, "d-after", "r1", Some(Phase::After), Some("4-d")))), 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn submit_refuses_a_phase_without_a_capture_id() {
+        let ctx = egui::Context::default();
+        crate::observe(&ctx);
+        for capture in [None, Some("")] {
+            let e = submit(&ctx, staged(&temp("nocap"), "a", "r1", Some(Phase::Before), capture), App::default()).unwrap_err();
+            assert!(e.contains("capture_id"), "{e}");
+        }
     }
 
     #[test]

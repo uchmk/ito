@@ -176,9 +176,93 @@ impl Run {
     }
 }
 
+/// `bytes` at `path`, durably: `<path>.part` written and flushed, then renamed over `path`. The `.part` is removed on error.
+pub(crate) fn write_durable(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    let part = std::path::PathBuf::from(part);
+    let result = (|| {
+        let mut f = std::fs::File::create(&part)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&part, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    result
+}
+
+/// The trace's file name, in the done file's folder.
+pub const TRACE: &str = "trace.jsonl";
+/// The label a run fails at when its `trace.jsonl` cannot be written.
+pub const TRACE_STEP: &str = "<trace.jsonl>";
+
+/// `trace.jsonl`: one JSON object per line, one line per script step, appended as the step closes.
+#[derive(Debug)]
+pub struct TraceFile {
+    file: std::fs::File,
+    run_id: Option<String>,
+}
+
+impl TraceFile {
+    /// Creates (truncates) `<dir>/trace.jsonl`.
+    pub fn create(dir: &Path, run_id: Option<&str>) -> std::io::Result<Self> {
+        Ok(Self { file: std::fs::File::create(dir.join(TRACE))?, run_id: run_id.map(str::to_owned) })
+    }
+
+    /// One line as JSON (without the newline), keys in a fixed order.
+    pub fn line_json(&self, l: &crate::pace::TraceLine) -> String {
+        let num = |v: Option<u64>| v.map_or_else(|| "null".to_owned(), |v| v.to_string());
+        format!(
+            "{{\"schema_version\":{},\"run_id\":{},\"step\":{},\"label\":{},\"outcome\":{},\"settled\":{},\"frame\":{},\"time_ms\":{},\"end_frame\":{},\"end_ms\":{},\"why\":{}}}",
+            SCHEMA,
+            self.run_id.as_deref().map_or_else(|| "null".to_owned(), esc),
+            num(l.step.map(|s| s as u64)),
+            esc(&l.label),
+            esc(l.outcome.name()),
+            l.settled.map_or_else(|| "null".to_owned(), |b| b.to_string()),
+            l.frame,
+            l.time_ms,
+            l.end_frame,
+            l.end_ms,
+            l.why.as_deref().map_or_else(|| "null".to_owned(), esc),
+        )
+    }
+
+    /// Appends one line and flushes.
+    pub fn write(&mut self, l: &crate::pace::TraceLine) -> std::io::Result<()> {
+        let mut s = self.line_json(l);
+        s.push('\n');
+        self.file.write_all(s.as_bytes())?;
+        self.file.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trace_file_appends_lines() {
+        use crate::pace::{Outcome, TraceLine};
+        let dir = std::env::temp_dir().join(format!("ito-trace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut t = TraceFile::create(&dir, Some("r1")).unwrap();
+        t.write(&TraceLine::new(Some(1), "<Wait:1>", Outcome::Done, 3, 40, None)).unwrap();
+        t.write(&TraceLine::new(None, "<run.json>", Outcome::Failed, 4, 50, Some("a\"b".into()))).unwrap();
+        let text = std::fs::read_to_string(dir.join(TRACE)).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0],
+            "{\"schema_version\":1,\"run_id\":\"r1\",\"step\":1,\"label\":\"<Wait:1>\",\"outcome\":\"done\",\"settled\":null,\"frame\":3,\"time_ms\":40,\"end_frame\":3,\"end_ms\":40,\"why\":null}"
+        );
+        assert!(lines[1].contains("\"step\":null") && lines[1].contains("\"outcome\":\"failed\"") && lines[1].contains("a\\\"b"));
+        assert!(TraceFile::create(&dir.join("nope"), None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn run() -> Run {
         Run {
