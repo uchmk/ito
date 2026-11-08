@@ -49,7 +49,7 @@
 | システムの通知・音・webhook | `ito-notify` |
 | コマンドパレット（`Ctrl+Shift+P`）。**ツールバーも同じ元から出す** | `ito-palette` |
 | `?`/F1 のキーのヘルプ | `ito-help` |
-| 色だけに頼らない状態の印、読み上げ | `ito-a11y`（`State`、`announce`） |
+| 色だけに頼らない状態の印、読み上げ | `ito-a11y`（`State`、`announce`、トーストの読み上げは `announce_toast`） |
 
 ## 文字を扱う画面
 

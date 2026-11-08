@@ -12,7 +12,10 @@
 //! - **A screen reader reads what egui paints** only when the painted text is
 //!   given a label. With the `egui` feature, [`say`] gives a response that
 //!   label and a role, and [`announce`] tells the reader about a change that
-//!   has no widget (a toast, a finished job).
+//!   has no widget (a toast, a finished job). The message is a live region, so
+//!   the reader speaks it without the user moving focus. [`announce_toast`]
+//!   speaks a toast once per raise ([`Told`]), with its level in words
+//!   ([`toast_line`]).
 
 /// A state an app shows on a row, a pane, a tab or a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,14 +187,121 @@ fn heard(message: &str) {
     }
 }
 
+/// How soon the reader should speak an announcement.
+#[cfg(feature = "egui")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Urgency {
+    /// Wait for the reader to finish what it is saying.
+    #[default]
+    Polite,
+    /// Interrupt the reader (an error the user must not miss).
+    Assertive,
+}
+
 /// Tell the screen reader about a change that has no widget (a toast, a job
-/// finished): a hidden label for one frame, read as a live message. The
-/// reader speaks it when it appears; call it once per message.
+/// finished), politely: it waits for the reader to finish what it is saying.
+/// Same as [`announce_with`] with [`Urgency::Polite`].
+///
+/// The message is a hidden label marked as a live region, and it exists only
+/// for the frame this is called in. The reader speaks when such a node is
+/// added or its text changes, so calling it again in the very next frame with
+/// the same text at the same place is not a new message. Call it once per
+/// message ([`announce_toast`] does that for toasts).
 #[cfg(feature = "egui")]
 pub fn announce(ui: &mut egui::Ui, message: &str) {
+    announce_with(ui, message, Urgency::Polite);
+}
+
+/// Like [`announce`], with the urgency chosen by the caller.
+#[cfg(feature = "egui")]
+pub fn announce_with(ui: &mut egui::Ui, message: &str, urgency: Urgency) {
+    use egui::accesskit::Live;
     heard(message);
     let resp = ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
     say(&resp, Role::Label, message);
+    let live = match urgency {
+        Urgency::Polite => Live::Polite,
+        Urgency::Assertive => Live::Assertive,
+    };
+    ui.ctx().accesskit_node_builder(resp.id, |n| n.set_live(live));
+}
+
+/// The line a screen reader gets for a toast: the text, with the level in
+/// words in front when there is one (`注意: 保存できません`, `error: disk full`).
+pub fn toast_line(level: Option<State>, text: &str, lang: &str) -> String {
+    match level {
+        None => text.to_owned(),
+        Some(s) => format!("{}: {text}", s.name(lang)),
+    }
+}
+
+/// The shortest time between two spoken toasts. A burst is not read out in a batch.
+const REPEAT_GAP: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What the screen reader was told about one toast. The app keeps it next to the toast (not `Copy`: a copy would be
+/// updated instead of the kept one, and the toast spoken again).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Told {
+    raises: u32,
+    at: Option<std::time::Instant>,
+    line: u64,
+}
+
+impl Told {
+    /// Whether to speak now. `raises` counts how many times the app has raised this toast so far (1 for a new toast).
+    /// A raise already counted is not new. A new raise is spoken at once the first time, and later only when the last
+    /// spoken one is at least a second old; raises skipped inside that second are marked told and never spoken later.
+    pub fn due(&mut self, raises: u32, now: std::time::Instant) -> bool {
+        if raises <= self.raises {
+            return false;
+        }
+        let speak = match self.at {
+            None => true,
+            Some(at) => now.checked_duration_since(at).is_some_and(|d| d >= REPEAT_GAP),
+        };
+        self.raises = raises;
+        if speak {
+            self.at = Some(now);
+        }
+        speak
+    }
+
+    /// Forget everything if `line` is not the line told last: another text or level is another toast.
+    #[cfg_attr(not(feature = "egui"), allow(dead_code))]
+    fn follow(&mut self, line: &str) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        line.hash(&mut h);
+        let hash = h.finish();
+        if self.line != hash {
+            *self = Self { raises: 0, at: None, line: hash };
+        }
+    }
+}
+
+/// Tell the screen reader about a toast, once per raise: [`toast_line`] as a
+/// live message, assertive for [`State::Error`] and polite otherwise. `text`
+/// has no `x2` count. `raises` is how many times the app has raised this toast
+/// (1 for a new one); `told` is kept with the toast. A different line starts
+/// over, so it is spoken at once. Returns whether it spoke.
+#[cfg(feature = "egui")]
+pub fn announce_toast(
+    ui: &mut egui::Ui,
+    told: &mut Told,
+    raises: u32,
+    level: Option<State>,
+    text: &str,
+    lang: &str,
+    now: std::time::Instant,
+) -> bool {
+    let line = toast_line(level, text, lang);
+    told.follow(&line);
+    if !told.due(raises, now) {
+        return false;
+    }
+    let urgency = if level == Some(State::Error) { Urgency::Assertive } else { Urgency::Polite };
+    announce_with(ui, &line, urgency);
+    true
 }
 
 /// A test ID: lowercase ASCII letters, digits, `_` and `-`, in one or more parts joined by `.`
@@ -368,6 +478,100 @@ mod tests {
         pass(&ctx, &["c"]);
         let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
         assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["c"]);
+    }
+
+    #[cfg(feature = "egui")]
+    /// One pass that announces `text` with `urgency` (nothing for `None`); the nodes of that pass whose text is `text`.
+    fn live_pass(ctx: &egui::Context, text: &str, urgency: Option<Urgency>) -> Vec<(egui::accesskit::Role, Option<egui::accesskit::Live>)> {
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            if let Some(u) = urgency {
+                announce_with(ui, text, u);
+            }
+        });
+        let upd = out.platform_output.accesskit_update.clone().expect("an update");
+        out.drop_without_applying_deltas();
+        upd.nodes.iter().filter(|(_, n)| n.value() == Some(text)).map(|(_, n)| (n.role(), n.live())).collect()
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn announce_is_a_live_node_for_one_frame() {
+        use egui::accesskit::{Live, Role};
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let found = live_pass(&ctx, "saved-live", Some(Urgency::Polite));
+        assert_eq!(found, [(Role::Label, Some(Live::Polite))]);
+        // Not called: the node is gone, so the same text can be heard again when it comes back.
+        assert!(live_pass(&ctx, "saved-live", None).is_empty());
+        let again = live_pass(&ctx, "saved-live", Some(Urgency::Polite));
+        assert_eq!(again, [(Role::Label, Some(Live::Polite))]);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn announce_plain_is_polite_and_assertive_is_assertive() {
+        use egui::accesskit::Live;
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| announce(ui, "plain-polite"));
+        let upd = out.platform_output.accesskit_update.clone().expect("an update");
+        out.drop_without_applying_deltas();
+        assert!(upd.nodes.iter().any(|(_, n)| n.value() == Some("plain-polite") && n.live() == Some(Live::Polite)));
+        let found = live_pass(&ctx, "loud-live", Some(Urgency::Assertive));
+        assert_eq!(found.iter().map(|f| f.1).collect::<Vec<_>>(), [Some(Live::Assertive)]);
+    }
+
+    #[test]
+    fn told_speaks_once_per_raise_and_not_in_a_burst() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut t = Told::default();
+        assert!(t.due(1, t0));
+        assert!(!t.due(1, t0));
+        assert!(!t.due(2, ms(500)));
+        assert!(!t.due(3, ms(900)));
+        // The skipped raises are not spoken later.
+        assert!(!t.due(3, ms(1200)));
+        assert!(t.due(4, ms(1200)));
+        // Raises that jump (the app raised it three times between two frames) are spoken once.
+        assert!(t.due(7, ms(2300)));
+        assert!(!t.due(7, ms(3500)));
+        // The clock went back: not spoken, no panic.
+        assert!(!t.due(8, t0));
+    }
+
+    #[test]
+    fn toast_lines() {
+        assert_eq!(toast_line(None, "x", "en"), "x");
+        assert_eq!(toast_line(Some(State::Warning), "x", "ja"), "注意: x");
+        assert_eq!(toast_line(Some(State::Error), "x", "en"), "error: x");
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn announce_toast_resets_on_a_changed_line() {
+        use egui::accesskit::Live;
+        // Read from the pass's tree, not the global record: another test's burst could push these out of its cap.
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let now = std::time::Instant::now();
+        let mut told = Told::default();
+        let mut spoke = Vec::new();
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            spoke.push(announce_toast(ui, &mut told, 1, None, "toast-one-207", "en", now));
+            spoke.push(announce_toast(ui, &mut told, 1, None, "toast-one-207", "en", now));
+            spoke.push(announce_toast(ui, &mut told, 1, Some(State::Error), "toast-two-207", "en", now));
+            spoke.push(announce_toast(ui, &mut told, 2, Some(State::Error), "toast-two-207", "en", now));
+        });
+        let upd = out.platform_output.accesskit_update.clone().expect("an update");
+        out.drop_without_applying_deltas();
+        assert_eq!(spoke, [true, false, true, false]);
+        let mut ours: Vec<(String, Option<Live>)> =
+            upd.nodes.iter().filter_map(|(_, n)| n.value().filter(|v| v.contains("-207")).map(|v| (v.to_owned(), n.live()))).collect();
+        ours.sort_by(|a, b| a.0.cmp(&b.0));
+        // An error interrupts; a toast without a level does not.
+        assert_eq!(ours, [("error: toast-two-207".to_owned(), Some(Live::Assertive)), ("toast-one-207".to_owned(), Some(Live::Polite))]);
     }
 
     const ALL: [State; 14] = [

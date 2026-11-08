@@ -3,6 +3,29 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.274.0] - 2026-11-08
+
+### 修正
+
+- `ito-a11y::announce`: 知らせる文を live region（`Live::Polite`）のノードにした。今まではただのラベルで、スクリーンリーダーは読まなかった（accesskit_windows 0.32 の adapter は、`live` が `Off` でないノードが名前つきで現れたときと名前が変わったときだけ UIA の LiveRegionChanged を出す）（ito#207）。
+
+### 追加
+
+- `ito-a11y::announce_with(ui, 文, Urgency)`: 読み上げの急ぎを選べる。`Urgency::Polite`（既定。読んでいるものを終えてから）と `Urgency::Assertive`（割り込む。見落とせないエラー向け）。
+- `ito-a11y::toast_line(level, text, lang)`: トーストの読み上げの文。重さがあれば言葉で前に付ける（`注意: …`・`error: …`）。
+- `ito-a11y::Told` と `announce_toast(ui, &mut told, raises, level, text, lang, now)`: トーストを出し直し 1 回につき 1 回だけ読む。
+  - 同じトーストの繰り返しは 1 秒に 1 回まで。間引いた分はあとで読まない。
+  - 文か重さが変われば別のトーストとして、すぐ読む。
+  - `State::Error` は割り込みで、ほかは割り込まずに読む。
+  - 時刻は `now` で渡す。
+
+### 使う側がやること
+
+- トーストを積むところ（kura の `App::raise`、yagura の `App::toast`）で、トーストの横に `Told` を持つ。
+- トーストを描くフレームで、`announce_toast` に出し直しの回数（新しいトーストは 1）、`×n` を付けない文、重さ、言語、`Instant::now()` を渡す。
+- `announce` の呼び方は変わらない。
+- `announce_with`・`Urgency`・`announce_toast` は機能 `egui` の後ろ。`Told`・`toast_line` は機能なしでも使える。
+
 ## [0.273.0] - 2026-11-08
 
 ### 追加

@@ -46,7 +46,7 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 | `ito-glossary` | 専門語の表（やさしい言い方・ホバーの説明・日英）、`easy` の表示、表の検査 `check`、点線のホバー（機能 `egui`）。語はアプリの表 | michi、koyomi |
 | `ito-syntax` | コードの色分けの種類（path と行 → トークンの種類のバイト範囲。syntect の純 Rust + two-face、文法は 1 プロセスで 1 回。`Stream` が行をまたぐ状態を持つ） | michi、kura |
 | `ito-guide` | 初回・困りごとのガイド（Problem / Step、OS ごとの `Fix`、開閉の `Guide`、キーを取らない egui のパネル `show`（機能 `egui`）、`Level`） | michi |
-| `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前。予定の仕事の `Waiting`・`Held`・`Skipped`・`Missed`・`NotRun`・`Blocked` も）と、スクリーンリーダー向けの `say`・`announce`、`--keys` が探すテストの ID `test_id`（AccessKit の `author_id`。AccessKit が切れていれば何もしない）（機能 `egui`）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
+| `ito-a11y` | 色だけに頼らない状態の印 `State`（記号・読み上げの名前。予定の仕事の `Waiting`・`Held`・`Skipped`・`Missed`・`NotRun`・`Blocked` も）と、スクリーンリーダー向けの `say`・`announce`（live region。急ぎを選ぶ `announce_with`・`Urgency`）・トーストを出し直し 1 回に 1 回だけ読む `announce_toast`、`--keys` が探すテストの ID `test_id`（AccessKit の `author_id`。AccessKit が切れていれば何もしない）（ここまで機能 `egui`。`announce_toast` が使う `Told`・`toast_line` は機能なしでも）。高コントラストの色は `ito_theme::Colors::high_contrast` | 全アプリ |
 | `ito-graph` | コミットの樹形図を行ごとに並べる（レーン・辺・ブランチの色・曲線）と、egui の描画（機能 `egui`）。Git は知らない | michi |
 | `ito-bugreport` | 不具合の報告（アプリの issue form に、版・OS・アプリが知っていることを埋めた URL。F12 から開く。全アプリで同じ行・同じ順） | 全アプリ |
 | `ito-diff` | 2 つの文字列の行の差分（`diff_lines`・畳む `fold`・`counts`。純 Rust の `similar`。Git は知らない）。`ito-confirm` の `Question::diff` が描く | yagura、kura、koyomi |
