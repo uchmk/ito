@@ -42,6 +42,8 @@ pub enum LineKind {
     Rule,
     /// A place kept for something drawn later: a formula, a diagram.
     Placeholder,
+    /// A line of the front matter at the top, as written: drawn in the quiet colour, without a band.
+    Properties,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -222,7 +224,7 @@ fn marks(doc: &Doc, m: &ito_match::Matcher, from: usize, to: usize) -> Vec<Vec<R
             }
             let whole: String = l.spans.iter().map(|s| s.text.as_str()).collect();
             let body = &whole[skip.min(whole.len())..];
-            if !parts.is_empty() && l.kind != LineKind::Code {
+            if !parts.is_empty() && !matches!(l.kind, LineKind::Code | LineKind::Properties) {
                 let wide = |c: Option<char>| c.is_some_and(|c| cells(c.encode_utf8(&mut [0; 4])) >= 2);
                 if !(wide(joined.chars().next_back()) && wide(body.chars().next())) {
                     joined.push(' ');

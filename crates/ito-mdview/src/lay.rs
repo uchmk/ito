@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, MetadataBlockKind, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, Parser, Tag, TagEnd};
 use unicode_width::UnicodeWidthChar;
 
 use crate::{cells as str_width, Doc, DocLine, LineKind, Palette, Span};
@@ -69,7 +69,7 @@ impl Container {
 
 struct Code {
     text: String,
-    /// The fence's info string (or the metadata block's language), if any.
+    /// The fence's info string, if any.
     info: Option<String>,
     /// Byte of the first line of code.
     src: usize,
@@ -93,6 +93,8 @@ struct Builder {
     body: usize,
     len: usize,
     line_starts: Vec<usize>,
+    /// Where each line that has a line break ends, without it (`\r\n` is one break).
+    line_ends: Vec<usize>,
 
     lines: Vec<DocLine>,
     /// Level and first line of each heading, in order.
@@ -132,6 +134,7 @@ impl Builder {
             body,
             len: text.len(),
             line_starts: std::iter::once(0).chain(text.match_indices('\n').map(|(i, _)| i + 1)).collect(),
+            line_ends: text.match_indices('\n').map(|(i, _)| if text[..i].ends_with('\r') { i - 1 } else { i }).collect(),
             lines: Vec::new(),
             headings: Vec::new(),
             clipped: false,
@@ -167,8 +170,7 @@ impl Builder {
 
     /// Where the line holding `offset` ends, without its line break.
     fn line_end(&self, offset: usize) -> usize {
-        let next = self.line_starts.get(self.src_line(offset) + 1).copied();
-        next.map_or(self.len, |n| n.saturating_sub(1)).max(offset)
+        self.line_ends.get(self.src_line(offset)).copied().unwrap_or(self.len).max(offset)
     }
 
     fn run(&mut self, events: &[(Event<'_>, Range<usize>)]) {
@@ -240,13 +242,9 @@ impl Builder {
                 };
                 self.code = Some(Code { text: String::new(), info, src: first });
             }
-            Tag::MetadataBlock(kind) => {
+            Tag::MetadataBlock(_) => {
                 self.flush(LineKind::Text);
-                let lang = match kind {
-                    MetadataBlockKind::YamlStyle => "yaml",
-                    MetadataBlockKind::PlusesStyle => "toml",
-                };
-                self.code = Some(Code { text: String::new(), info: Some(lang.into()), src: self.next_line(src) });
+                self.code = Some(Code { text: String::new(), info: None, src: self.next_line(src) });
             }
             Tag::HtmlBlock => {
                 self.flush(LineKind::Text);
@@ -309,9 +307,15 @@ impl Builder {
                 self.containers.pop();
                 self.need_blank = true;
             }
-            TagEnd::CodeBlock | TagEnd::MetadataBlock(_) => {
+            TagEnd::CodeBlock => {
                 if let Some(code) = self.code.take() {
                     self.code_block(code);
+                }
+                self.need_blank = true;
+            }
+            TagEnd::MetadataBlock(_) => {
+                if let Some(code) = self.code.take() {
+                    self.properties_block(code);
                 }
                 self.need_blank = true;
             }
@@ -605,16 +609,42 @@ impl Builder {
                     }
                 }
             };
-            for (j, piece) in hard_wrap(&spans, width).into_iter().enumerate() {
-                let mut row = vec![Span { text: " ".into(), ..Default::default() }];
-                row.extend(piece);
-                let before = self.lines.len();
-                self.push_line(row, LineKind::Code, at);
-                if j > 0 && self.lines.len() > before {
-                    self.lines[before].wrap = true;
-                }
+            self.push_cut(&spans, width, LineKind::Code, at);
+            at = self.next_line(at);
+        }
+    }
+
+    /// The front matter, as it is written and quietly: no band and no token colours, so the page still starts with its
+    /// first real block. Nothing is added to a row, so a click on one finds the exact byte.
+    fn properties_block(&mut self, code: Code) {
+        let width = self.avail().max(8);
+        let mut at = code.src;
+        for line in code.text.lines() {
+            if self.clipped {
+                break;
             }
-            at += line.len() + 1;
+            let span = Span { text: clip(line), color: self.pal.dim, ..Default::default() };
+            self.push_cut(&[span], width, LineKind::Properties, at);
+            at = self.next_line(at);
+        }
+    }
+
+    /// One source line of a code-like block, cut to `width`. The rows after the first carry on the one above, and each
+    /// holds the bytes it shows.
+    fn push_cut(&mut self, spans: &[Span], width: usize, kind: LineKind, mut at: usize) {
+        for (j, piece) in hard_wrap(spans, width, kind == LineKind::Properties).into_iter().enumerate() {
+            let taken: usize = piece.iter().map(|s| s.text.len()).sum();
+            let mut row = Vec::new();
+            if kind == LineKind::Code {
+                row.push(Span { text: " ".into(), ..Default::default() });
+            }
+            row.extend(piece);
+            let before = self.lines.len();
+            self.push_line(row, kind, at);
+            if j > 0 && self.lines.len() > before {
+                self.lines[before].wrap = true;
+            }
+            at += taken;
         }
     }
 
@@ -837,8 +867,10 @@ fn wrap(pieces: &[(Span, usize)], width: usize) -> Vec<(Vec<Span>, usize)> {
         .collect()
 }
 
-/// Cut a line of code into `width`-column rows, ignoring word boundaries.
-fn hard_wrap(spans: &[Span], width: usize) -> Vec<Vec<Span>> {
+/// Cut a line into `width`-column rows, ignoring word boundaries. With `prose`, a closing mark does not open a row:
+/// the character before it goes down with it, if they fit on the next row. Nothing is dropped either way, so the rows
+/// still add up to the line.
+fn hard_wrap(spans: &[Span], width: usize, prose: bool) -> Vec<Vec<Span>> {
     let styles: Vec<&Span> = spans.iter().collect();
     let chars = flatten(&styles);
     let mut out = Vec::new();
@@ -846,8 +878,13 @@ fn hard_wrap(spans: &[Span], width: usize) -> Vec<Vec<Span>> {
     for (i, &(c, _)) in chars.iter().enumerate() {
         let w = cw(c);
         if used + w > width && i > start {
-            out.push(regroup(&chars[start..i], &styles));
-            (start, used) = (i, 0);
+            let run = if prose { chars[start + 1..=i].iter().rev().take_while(|&&(c, _)| NO_START.contains(c)).count() } else { 0 };
+            let held: usize = chars[i - run..i].iter().map(|&(c, _)| cw(c)).sum();
+            // A row that is all closing marks has nothing to send down with them, and a run too wide for one row
+            // cannot go down whole: both are cut where the row is full.
+            let (cut, kept) = if i - run > start && held + w <= width { (i - run, held) } else { (i, 0) };
+            out.push(regroup(&chars[start..cut], &styles));
+            (start, used) = (cut, kept);
         }
         used += w;
     }
@@ -1204,12 +1241,114 @@ mod tests {
         let text = "---\ntitle: x\n---\n\ntext\n\n```rust\nfn main() { let x = 1; }\n```\n";
         let d = doc(text, 80);
         let code: Vec<&DocLine> = d.lines.iter().filter(|l| l.kind == LineKind::Code).collect();
-        assert_eq!(code.len(), 2, "{:?}", texts(&d));
-        assert_eq!(code[0].src, 1);
-        assert_eq!(code[1].src, 7);
-        assert_eq!(code[1].bytes.start, text.find("fn main").unwrap());
-        let colors: HashSet<[u8; 3]> = code[1].spans.iter().filter_map(|s| s.color).collect();
-        assert!(colors.len() > 1, "{:?}", code[1].spans);
+        assert_eq!(code.len(), 1, "{:?}", texts(&d));
+        assert_eq!(code[0].src, 7);
+        assert_eq!(code[0].bytes.start, text.find("fn main").unwrap());
+        let colors: HashSet<[u8; 3]> = code[0].spans.iter().filter_map(|s| s.color).collect();
+        assert!(colors.len() > 1, "{:?}", code[0].spans);
+    }
+
+    #[test]
+    fn front_matter_is_quiet_and_keeps_its_bytes() {
+        let text = "---\ntitle: 題名\ntags: [a, b]\n---\n\nbody\n";
+        let d = doc(text, 80);
+        assert_eq!(texts(&d), ["title: 題名", "tags: [a, b]", "", "body"]);
+        let shown: Vec<&DocLine> = d.lines.iter().filter(|l| l.kind == LineKind::Properties).collect();
+        assert_eq!(shown.len(), 2);
+        assert!(shown.iter().all(|l| l.spans.iter().all(|s| s.color == pal().dim)), "{shown:?}");
+        assert!(d.lines.iter().all(|l| l.kind != LineKind::Code), "a band would make it look like the first block");
+        assert_eq!((shown[1].src, shown[1].bytes.start), (2, text.find("tags").unwrap()));
+        assert_eq!(d.byte_at(0, 9), text.find("名").unwrap(), "2 columns for 題");
+        assert_eq!(d.byte_at(1, 6), text.find("[a").unwrap());
+    }
+
+    #[test]
+    fn toml_front_matter_is_the_same_block() {
+        let d = doc("+++\ntitle = \"x\"\n+++\n\nbody\n", 80);
+        assert_eq!(d.lines[0].kind, LineKind::Properties);
+        assert_eq!(line_text(&d.lines[0]), "title = \"x\"");
+    }
+
+    #[test]
+    fn a_long_front_matter_line_is_cut_to_the_pane() {
+        let value = "x".repeat(200);
+        let d = doc(&format!("---\ntitle: {value}\n---\n"), 40);
+        let rows = texts(&d);
+        assert_eq!(rows.concat(), format!("title: {value}"));
+        assert!(rows.len() > 1 && rows.iter().all(|r| str_width(r) <= usize::from(d.body_cols)), "{rows:?}");
+        assert!(!d.lines[0].wrap && d.lines[1..].iter().all(|l| l.wrap));
+        assert!(d.lines.iter().all(|l| l.kind == LineKind::Properties));
+    }
+
+    #[test]
+    fn closing_marks_do_not_open_a_cut_front_matter_row() {
+        let cols = usize::from(doc("x", 40).body_cols);
+        // The key and its colon leave an even number of columns, so the wide characters fill the row to its last cell
+        // and the comma is the one that would spill.
+        let key = "k".repeat(6 + cols % 2);
+        let wide = (cols - key.len() - 2) / 2;
+        let line = format!("{key}: {}」、あと", "あ".repeat(wide - 1));
+        let text = format!("---\n{line}\n---\n");
+        let d = doc(&text, 40);
+        let rows = texts(&d);
+        assert_eq!(rows.concat(), line);
+        assert!(rows[1].starts_with("あ」、"), "{rows:?}");
+        for l in &d.lines {
+            assert_eq!(text[l.bytes.clone()], l.spans.iter().map(|s| s.text.as_str()).collect::<String>());
+        }
+    }
+
+    #[test]
+    fn a_row_of_closing_marks_is_still_cut_where_it_is_full() {
+        let d = doc(&format!("---\nk: {}\n---\n", "。".repeat(100)), 40);
+        let rows = texts(&d);
+        assert!(rows.len() <= 200 / usize::from(d.body_cols) + 2, "{rows:?}");
+        assert!(rows.iter().all(|r| str_width(r) <= usize::from(d.body_cols)), "{rows:?}");
+    }
+
+    #[test]
+    fn closing_marks_too_wide_to_go_down_stay_within_the_pane() {
+        let text = "aあ,,,,,」x";
+        let line = [Span { text: text.into(), ..Default::default() }];
+        let rows: Vec<String> = hard_wrap(&line, 8, true).iter().map(|r| r.iter().map(|s| s.text.as_str()).collect()).collect();
+        assert_eq!(rows.concat(), text);
+        assert!(rows.iter().all(|r| str_width(r) <= 8), "{rows:?}");
+    }
+
+    #[test]
+    fn a_closing_mark_may_open_a_cut_row_of_code() {
+        let line = [Span { text: "abcd,ef".into(), ..Default::default() }];
+        assert_eq!(hard_wrap(&line, 4, false)[1][0].text, ",ef");
+    }
+
+    #[test]
+    fn a_cut_front_matter_line_stays_one_line_to_a_click_and_a_search() {
+        let cols = usize::from(doc("x", 40).body_cols);
+        let text = format!("---\ntitle: {}NEEDLE{}\n---\n", "x".repeat(cols - 10), "y".repeat(10));
+        let d = doc(&text, 40);
+        assert_eq!(d.lines[0].bytes.end, d.lines[1].bytes.start, "{:?}", d.lines);
+        assert_eq!(d.byte_at(1, 1), text.find("NEEDLE").unwrap() + 4);
+        let marks = d.marks(&ito_match::Matcher::new("NEEDLE").unwrap(), 0, d.lines.len());
+        assert_eq!((marks[0].len(), marks[1].len()), (1, 1), "{marks:?}");
+        assert_eq!(marks[0][0], cols - 3..cols, "no space is put in at the cut");
+        assert_eq!(marks[1][0], 0..3);
+    }
+
+    #[test]
+    fn a_blank_line_in_the_front_matter_is_kept() {
+        let text = "---\na: 1\n\nb: 2\n---\n";
+        let d = doc(text, 80);
+        assert_eq!(texts(&d), ["a: 1", "", "b: 2"]);
+        assert_eq!(d.lines[2].bytes.start, text.find("b:").unwrap());
+    }
+
+    #[test]
+    fn crlf_text_keeps_the_bytes_of_every_line() {
+        let text = "---\r\ntitle: x\r\ntags: y\r\n---\r\n\r\n```\r\naa\r\nbb\r\ncc\r\n```\r\n";
+        let d = doc(text, 80);
+        let shown = |kind| d.lines.iter().filter(|l| l.kind == kind).map(|l| &text[l.bytes.clone()]).collect::<Vec<_>>();
+        assert_eq!(shown(LineKind::Properties), ["title: x", "tags: y"]);
+        assert_eq!(shown(LineKind::Code), ["aa", "bb", "cc"]);
     }
 
     #[test]
