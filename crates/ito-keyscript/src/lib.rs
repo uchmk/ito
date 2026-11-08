@@ -2366,7 +2366,7 @@ impl Runner {
             state_unchanged: Some(unchanged),
             requested_frame: shot.requested_frame,
             received_frame: shot.received_frame,
-            env: env_of(&shot.meta),
+            env: review::Env::of(&shot.meta),
         };
         evidence::write_durable(&self.shot_path(a, "json"), shot.meta.to_json_with(&capture).as_bytes())
             .map_err(|e| format!("cannot write shots/{a}.json: {e}"))
@@ -2991,7 +2991,7 @@ impl Runner {
             state_unchanged: None,
             requested_frame,
             received_frame,
-            env: env_of(&meta),
+            env: review::Env::of(&meta),
         };
         evidence::write_durable(&self.shot_path(name, "json"), meta.to_json_with(&capture).as_bytes()).map_err(|e| e.to_string())
     }
@@ -3081,18 +3081,6 @@ fn frozen_meta(info: &review::Meta, name: &str, in_force: (&str, &str), screen: 
         time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         pixels_per_point,
         ..info.clone()
-    }
-}
-
-/// The `env` block of a side JSON.
-fn env_of(meta: &review::Meta) -> review::Env {
-    review::Env {
-        os: std::env::consts::OS.to_owned(),
-        arch: std::env::consts::ARCH.to_owned(),
-        wgpu_backend: None,
-        font_set_sha256: None,
-        theme: meta.theme.clone(),
-        pixels_per_point: meta.pixels_per_point,
     }
 }
 

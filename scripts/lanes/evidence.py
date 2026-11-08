@@ -292,14 +292,28 @@ def spec_gate(path):
     return None
 
 
+def foreign_path(p, name=os.name):
+    """`p` is written for the other OS, so it cannot name a folder here: `C:\\x`, `C:x` or `\\\\host\\x` on POSIX, `/x` on Windows."""
+    if name == "nt":
+        return p.startswith("/") and not p.startswith("//")
+    if p.startswith("/"):
+        return False
+    return "\\" in p or (p[:1].isalpha() and p[1:2] == ":")
+
+
 def cmd_new(a):
     conf = read_conf()
     parent = a.evidence or conf.get("evidence")
     if not parent:
         err("no evidence folder: pass --evidence or set evidence= in scripts/lanes.conf")
         return 2
-    if not a.evidence and not os.path.isabs(parent):
-        parent = os.path.join(os.path.dirname(SCRIPT_DIR), parent)
+    if not a.evidence:
+        if foreign_path(parent):
+            err("evidence=%s in scripts/lanes.conf is a path for another OS: on this machine pass --evidence "
+                "(xrun.sh --evidence-root, keys.ps1 -EvidenceRoot)" % parent)
+            return 2
+        if not os.path.isabs(parent):
+            parent = os.path.join(os.path.dirname(SCRIPT_DIR), parent)
     if a.run_id is not None:
         rid = a.run_id
         if not RUN_ID_RE.match(rid):
@@ -1193,6 +1207,26 @@ def t_new(st):
         ex(rc == 0 and "env=KURA_KEYS_RUN_ID" in out.split("\n"), "env= line (eol %r): %r %s" % (eol, out, e))
         ex(os.path.isdir(os.path.join(st.repo, "ev-rel", "conf-%d" % len(eol))), "relative evidence= is under the repo root")
         ex(not os.path.exists(os.path.join(st.tmp, "ev-rel")), "relative evidence= must not use the cwd")
+    # a lanes.conf path written for the other OS is refused before anything is created; an explicit --evidence is not checked
+    for name, cases in (
+        ("posix", (("C:\\ev", 1), ("C:ev", 1), ("\\\\host\\share\\ev", 1), ("\\ev", 1), ("ev\\sub", 1),
+                   ("/srv/ev", 0), ("//host/ev", 0), ("ev", 0), ("ev/sub", 0), ("./ev", 0))),
+        ("nt", (("/srv/ev", 1), ("//host/share/ev", 0), ("C:\\ev", 0), ("C:/ev", 0), ("\\\\host\\share\\ev", 0), ("ev", 0),
+                ("ev\\sub", 0))),
+    ):
+        for p, want in cases:
+            ex(foreign_path(p, name) == bool(want), "foreign_path(%r, %s) should be %s" % (p, name, bool(want)))
+    # On Windows a rooted path with no drive, inside the temp tree: if the refusal ever breaks, the folder still lands there.
+    foreign = os.path.splitdrive(st.tmp)[1].replace("\\", "/") + "/ev-foreign" if os.name == "nt" else "C:\\ev-foreign"
+    with open(conf, "w", newline="") as f:
+        f.write("evidence=%s\n" % foreign)
+    before = sorted(os.listdir(st.repo))
+    rc, _, e = st.call(["new", "--run-id", "x"])
+    ex(rc == 2 and "another OS" in e, "foreign evidence= is refused: rc %s %s" % (rc, e))
+    ex(sorted(os.listdir(st.repo)) == before and not os.path.exists(foreign), "a foreign evidence= creates nothing")
+    ev3 = os.path.join(st.tmp, "ev-explicit")
+    rc, _, e = st.call(["new", "--evidence", ev3, "--run-id", "x"])
+    ex(rc == 0 and os.path.isdir(os.path.join(ev3, "x")), "explicit --evidence beats a foreign evidence=: rc %s %s" % (rc, e))
     os.remove(conf)
     # .keys-run text equals keys.ps1's when keys.ps1 sits beside the real script
     kp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keys.ps1")

@@ -337,6 +337,7 @@ impl Subject for PaceSubject {
         let mut tr = Trace::default();
         let mut ended = None;
         let mut end_ms = None;
+        let mut quitting = false;
         for tick in &case.ticks {
             let now = at(tick.ms);
             match &tick.shot {
@@ -361,6 +362,10 @@ impl Subject for PaceSubject {
                 }
                 None => {}
             }
+            // A host stops asking once it has told the app to quit.
+            if quitting {
+                continue;
+            }
             let status = tick.writes.as_ref().map(|w| w.status(base));
             let frame = Frame {
                 pass: tick.pass,
@@ -383,7 +388,9 @@ impl Subject for PaceSubject {
                     if acts(&entry, &answer) && pace.act(now) {
                         tr.marks.push((entry.idx, tick.ms));
                     }
-                    if let Some(e) = pace.taken(&frame, answer.taken(&entry)) {
+                    let taken = answer.taken(&entry);
+                    quitting = matches!(taken, Taken::Quit);
+                    if let Some(e) = pace.taken(&frame, taken) {
                         ended = Some(e);
                         end_ms = Some(tick.ms);
                         break;
@@ -866,6 +873,35 @@ pub fn cases() -> Vec<Case> {
         expect: Trace {
             takes: vec![(0, 0, false)],
             tail: Some("quit: yes\nkeys: done\n".to_owned()),
+            end_ms: Some(10),
+            ..Trace::default()
+        },
+    });
+    // A host stops asking once it has told the app to quit, so the frames while the window closes press nothing.
+    out.push(Case {
+        name: "frames_after_a_quit_press_nothing",
+        script: "<Quit>",
+        config: Config::new("app"),
+        ticks: vec![T::t(0, 2), T::t(1, 3), T::t(2, 4)],
+        end: Some((10, Ending::Quit)),
+        expect: Trace {
+            takes: vec![(0, 0, false)],
+            tail: Some("quit: yes\nkeys: done\n".to_owned()),
+            end_ms: Some(10),
+            ..Trace::default()
+        },
+    });
+    out.push(Case {
+        name: "the_step_after_a_quit_is_left_while_the_window_closes",
+        script: "<Quit>a",
+        config: Config::new("app"),
+        ticks: vec![T::t(0, 2), T::t(1, 3), T::t(2, 4), T::t(3, 5), T::t(4, 6)],
+        end: Some((10, Ending::Quit)),
+        expect: Trace {
+            takes: vec![(0, 0, false)],
+            tail: Some("keys: quit\nleft: 1 not pressed\n".to_owned()),
+            left: 1,
+            ended_left: Some(1),
             end_ms: Some(10),
             ..Trace::default()
         },

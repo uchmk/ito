@@ -417,7 +417,7 @@ expect = { color_token = { token = "ok", delta_e_max = 3, min_fraction = 0.95, i
 
 ## 成果物 7 — 証拠の保存形式
 
-置き場所は `<evidence>\<run_id>\`。`<evidence>` は各アプリの `scripts/lanes.conf` の `evidence=`（既定 `C:\dev\<app>-evidence`。kura は今の `[~]` の規則と同じ `C:\dev\filer-evidence`）。 1 回の実行が 1 つの**新しい** folder（使い回さない。[穴の表](#gaps)）。形は全アプリで同じで、ito の検査器が読む。下は kura の例。
+置き場所は `<evidence>\<run_id>\`。`<evidence>` は各アプリの `scripts/lanes.conf` の `evidence=`（既定 `C:\dev\<app>-evidence`。kura は今の `[~]` の規則と同じ `C:\dev\filer-evidence`）。 別の OS 向けのパス（Linux で `C:\…` や `\` を含むもの、Windows で `/…`）は `evidence.py new` が終了コード 2 で断り、何も作らない。その機械では `--evidence`（`xrun.sh --evidence-root`、`keys.ps1 -EvidenceRoot`）で渡す。 1 回の実行が 1 つの**新しい** folder（使い回さない。[穴の表](#gaps)）。形は全アプリで同じで、ito の検査器が読む。下は kura の例。
 
 ```text
 C:\dev\filer-evidence\20261108-101203-41_15-3f9a\

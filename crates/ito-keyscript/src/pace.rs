@@ -203,7 +203,8 @@ pub enum Taken {
     /// The app was asked to write the state JSON of `<State:name>`; the host reports the outcome with
     /// [`Pace::state_saved`] / [`Pace::state_failed`].
     State { name: String },
-    /// The app was told to quit.
+    /// The app was told to quit. From here the host stops calling [`Pace::next`] and ends the run with [`Pace::end`].
+    /// `Pace` does not stop by itself and would hand out the next step.
     Quit,
     /// The step failed.
     Failed(String),

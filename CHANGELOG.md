@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.282.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: `state::sha256_hex`・`evidence::write_durable` を公開。`review::Env::of(&Meta)` を追加（`Runner` を使わず `pace::Pace` で動かすアプリが、`<Snap:>` の付属 JSON を同じ形で書けるように。`Runner` もこれを使う）。
+- 適合表 `pace::conformance` に、`<Quit>` のあとも窓が閉じるまでフレームが来るときの 2 行を足した（`frames_after_a_quit_press_nothing`・`the_step_after_a_quit_is_left_while_the_window_closes`）。`Taken::Quit` を答えたホストは、そのあと `Pace::next` を呼ばない。`Pace` 自身は止まらないので、止めるのはホストの役目（`Runner` と kura は前から止めていて、`PaceSubject` も同じにした）。
+
+### 修正
+
+- `scripts/lanes/evidence.py new` が、別の OS の形のパスの `evidence=` で、思わぬ場所にフォルダーを作っていた（Linux では `C:\…` や `\` を含むパスがリポジトリの下の変な名前のフォルダーになり、Windows では `/…` がドライブの直下にできる）。コード 2 で断り、何も作らない。`--evidence`（`xrun.sh --evidence-root`、`keys.ps1 -EvidenceRoot`）で渡す。
+
+### 使う側がやること
+
+- `scripts/lanes.sh sync` で `evidence.py` の写しを更新する。
+- `pace::conformance` を回しているアプリは、`rev` を上げると新しい 2 行も回る。`Pace` で動かすアプリは、`Taken::Quit` を答えたあと `next` を呼ばない。
+- `review::Capture` は `#[non_exhaustive]` なので、`Default` から欄を埋める。
+
 ## [0.281.0] - 2026-11-08
 
 ### 追加

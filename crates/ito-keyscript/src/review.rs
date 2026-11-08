@@ -162,6 +162,21 @@ pub struct Env {
     pub pixels_per_point: f32,
 }
 
+impl Env {
+    /// The `env` block for a picture taken here. An app that writes its own `<Snap:>` side JSON should call this, so it gets
+    /// `wgpu_backend` and `font_set_sha256` when ito starts filling them.
+    pub fn of(meta: &Meta) -> Env {
+        Env {
+            os: std::env::consts::OS.to_owned(),
+            arch: std::env::consts::ARCH.to_owned(),
+            wgpu_backend: None,
+            font_set_sha256: None,
+            theme: meta.theme.clone(),
+            pixels_per_point: meta.pixels_per_point,
+        }
+    }
+}
+
 fn opt_str(v: &Option<String>) -> String {
     v.as_deref().map_or_else(|| "null".to_owned(), esc)
 }
@@ -347,6 +362,15 @@ mod tests {
             assert!(j.contains(&format!("\"{k}\":")), "{k}");
         }
         assert!(j.contains("\"a\\\"b\"") && j.contains("[800, 600.5]") && j.contains("\"pixels_per_point\": 1.5"));
+    }
+
+    #[test]
+    fn env_of_a_meta_takes_theme_and_scale_from_it() {
+        let meta = Meta { theme: "dark".into(), pixels_per_point: 1.25, ..Default::default() };
+        let env = Env::of(&meta);
+        assert_eq!((env.theme.as_str(), env.pixels_per_point), ("dark", 1.25));
+        assert_eq!((env.os.as_str(), env.arch.as_str()), (std::env::consts::OS, std::env::consts::ARCH));
+        assert!(env.wgpu_backend.is_none() && env.font_set_sha256.is_none());
     }
 
     #[test]

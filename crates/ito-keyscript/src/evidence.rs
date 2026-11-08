@@ -177,7 +177,8 @@ impl Run {
 }
 
 /// `bytes` at `path`, durably: `<path>.part` written and flushed, then renamed over `path`. The `.part` is removed on error.
-pub(crate) fn write_durable(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Public so an app that writes its own `<Snap:>` side JSON saves it the same way.
+pub fn write_durable(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut part = path.as_os_str().to_owned();
     part.push(".part");
     let part = std::path::PathBuf::from(part);
