@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.268.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: `note_copy(text)`（#206 の 1）。egui の `CopyText` を通らずに自分の道でコピーするアプリ（arboard に直接など）が呼ぶと、そのコピーが `<Clipboard:>`・`<ClipboardHas:>` に見える。どのスレッドからでも、`egui::Context` なしで呼べる。記録するのは `observe` のあと（`--keys` の実行か、`observe` を呼ぶアプリ自前のループ）だけで、それ以外は何もしない。記録はプロセスで 1 つ。`mark().copies` と直前の操作のあとの判定は、egui のコピーと `note_copy` を合わせて数え、新しい方を最後のコピーにする。
+  - kura がやること: `exec::set_clipboard` で、CRLF に直す前の LF の文字で `note_copy` を呼ぶ。`<Clipboard:>`・`<ClipboardHas:>` を断るのをやめる。
+
 ## [0.267.0] - 2026-11-08
 
 ### 追加

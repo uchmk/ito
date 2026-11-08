@@ -20,6 +20,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -175,9 +176,10 @@ pub enum Step {
         present: bool,
     },
     /// `<Clipboard:text>`: the last text the app copied after the last action is exactly this. Read from egui's
-    /// output, so no OS clipboard is touched. An action is a step that puts an input in: keys, text, `<Paste>`,
-    /// `<Size:>`, `<Theme:>`, `<Lang:>` and the pointer steps. `<Wait>`, `<Now>`, `<State>`, `<Shot>` and the reading
-    /// steps are not actions. Before the first action, copies since the run began count.
+    /// `CopyText` output, so no OS clipboard is touched; an app that copies by its own path calls [`note_copy`]. An
+    /// action is a step that puts an input in: keys, text, `<Paste>`, `<Size:>`, `<Theme:>`, `<Lang:>` and the pointer
+    /// steps. `<Wait>`, `<Now>`, `<State>`, `<Shot>` and the reading steps are not actions. Before the first action,
+    /// copies since the run began count.
     Clipboard(String),
     /// `<ClipboardHas:text>`: the last text the app copied after the last action contains this (a path or a state inside
     /// a longer line). Actions are as for [`Step::Clipboard`].
@@ -639,8 +641,11 @@ pub struct Item {
 struct Tap {
     items: Vec<Item>,
     /// The last text copied, and how many copies (`CopyText` commands, any viewport) have been seen, this one included.
+    /// [`last_copy`] adds the ones given to [`note_copy`].
     copied: Option<String>,
     copies: u64,
+    /// The stamp of the last copy, to order it against [`note_copy`] (see [`COPY_STAMP`]).
+    copied_stamp: u64,
     /// The tree, one line per named node, indented by depth (see [`tree_text`]).
     tree: Vec<String>,
     /// Counts main-window passes that brought a tree.
@@ -817,6 +822,7 @@ impl egui::Plugin for Tap {
             if let egui::OutputCommand::CopyText(text) = command {
                 self.copied = Some(text.clone());
                 self.copies += 1;
+                self.copied_stamp = next_copy_stamp();
             }
         }
         // `Context::viewport_id` is already the parent's here, so the pass's own viewport is the one `input_hook` saw.
@@ -899,10 +905,49 @@ impl Observation {
     }
 }
 
+/// Copies the app gave to [`note_copy`].
+#[derive(Default)]
+struct Noted {
+    text: Option<String>,
+    count: u64,
+    stamp: u64,
+}
+
+/// Set by [`observe`]; until then [`note_copy`] keeps nothing.
+static NOTING: AtomicBool = AtomicBool::new(false);
+static NOTED: Mutex<Noted> = Mutex::new(Noted { text: None, count: 0, stamp: 0 });
+/// Every recorded copy, from the `Tap` or from [`note_copy`], takes the next number, so the two kinds can be ordered.
+static COPY_STAMP: AtomicU64 = AtomicU64::new(0);
+
+fn next_copy_stamp() -> u64 {
+    COPY_STAMP.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Record that the app copied `text` by its own path (not through egui's `CopyText`, e.g. straight to the OS clipboard),
+/// so `<Clipboard:>` and `<ClipboardHas:>` see it like any other copy. Pass the text as the app means it, before any
+/// change of line endings for the OS. Callable from any thread, with no `egui::Context`. Records only after
+/// [`observe`] was called (a `--keys` run, or an app's own loop that calls it); otherwise it does nothing, so a shipped
+/// app keeps nothing. The record is process-wide: every window's [`mark`] counts it.
+pub fn note_copy(text: &str) {
+    note_copy_when(NOTING.load(Ordering::SeqCst), text);
+}
+
+/// [`note_copy`] with the switch passed in, so a test does not race other tests that call [`observe`].
+fn note_copy_when(noting: bool, text: &str) {
+    if !noting {
+        return;
+    }
+    let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+    noted.text = Some(text.to_owned());
+    noted.count += 1;
+    noted.stamp = next_copy_stamp();
+}
+
 /// Start reading the window's tree and what the app copies, from the next frame on. `Runner` does this
 /// itself when the script needs it; an app with its own frame loop calls it once. Costs nothing
-/// until called (egui builds no tree otherwise).
+/// until called (egui builds no tree otherwise). It also starts recording the copies given to [`note_copy`].
 pub fn observe(ctx: &egui::Context) {
+    NOTING.store(true, Ordering::SeqCst);
     ctx.enable_accesskit();
     ctx.add_plugin(Tap::default());
 }
@@ -1062,15 +1107,16 @@ fn check_is_in(all: &[Item], prop: Prop, text: &str) -> Result<(), String> {
 /// `<Announced:>` look only after it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mark {
-    /// How many copies `observe` had seen.
+    /// How many copies had been recorded (seen by `observe`, or given to [`note_copy`]).
     pub copies: u64,
     /// `ito_a11y::announced_count()`.
     pub announced: u64,
 }
 
-/// The mark as of now: the copies `observe` has seen (0 before it) and `ito_a11y::announced_count()`.
+/// The mark as of now: the copies recorded (seen by `observe` or given to [`note_copy`]; 0 before) and
+/// `ito_a11y::announced_count()`.
 pub fn mark(ctx: &egui::Context) -> Mark {
-    Mark { copies: ctx.with_plugin::<Tap, _>(|t| t.copies).unwrap_or(0), announced: ito_a11y::announced_count() }
+    Mark { copies: last_copy(ctx).1, announced: ito_a11y::announced_count() }
 }
 
 /// `<Announced:text>`, over the kept announcements (the last 200 since the run began).
@@ -1154,9 +1200,14 @@ fn check_in(all: &[Item], text: &str, present: bool) -> Result<(), String> {
     }
 }
 
-/// The last copy and its serial (0 when nothing was copied).
+/// The last copy and how many copies there were (0 when nothing was copied), over the `Tap` and [`note_copy`].
 fn last_copy(ctx: &egui::Context) -> (Option<String>, u64) {
-    ctx.with_plugin::<Tap, _>(|t| (t.copied.clone(), t.copies)).unwrap_or((None, 0))
+    let (tapped, tap_count, tap_stamp) =
+        ctx.with_plugin::<Tap, _>(|t| (t.copied.clone(), t.copies, t.copied_stamp)).unwrap_or((None, 0, 0));
+    let noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+    let count = tap_count + noted.count;
+    let text = if noted.text.is_some() && noted.stamp > tap_stamp { noted.text.clone() } else { tapped };
+    (text, count)
 }
 
 /// What a clipboard check says when there is no newer copy: nothing at all, or only one from before the mark.
@@ -2395,6 +2446,16 @@ mod tests {
 
     use super::*;
 
+    /// Copies are process-wide state (see [`note_copy`]), so the tests that copy or check the clipboard take turns.
+    static COPIES: Mutex<()> = Mutex::new(());
+
+    /// Takes the turn and forgets the copies given to `note_copy` by earlier tests.
+    fn lock_copies() -> std::sync::MutexGuard<'static, ()> {
+        let guard = COPIES.lock().unwrap_or_else(|e| e.into_inner());
+        *NOTED.lock().unwrap_or_else(|e| e.into_inner()) = Noted::default();
+        guard
+    }
+
     fn run_lines(r: &str) -> usize {
         r.lines().filter(|l| l.starts_with("run: ")).count()
     }
@@ -2875,6 +2936,7 @@ mod tests {
     /// not there after the wait.
     #[test]
     fn the_runner_reads_the_window() {
+        let _g = lock_copies();
         let ctx = egui::Context::default();
         let mut clicked = false;
         let pass = |ctx: &egui::Context, raw: egui::RawInput, clicked: &mut bool| {
@@ -2950,6 +3012,7 @@ mod tests {
 
     #[test]
     fn a_wait_or_state_is_not_an_action_for_the_clipboard() {
+        let _g = lock_copies();
         let app = |ui: &mut egui::Ui, _: usize| {
             if typed(ui, "y") {
                 ui.ctx().copy_text("x".into());
@@ -3066,6 +3129,7 @@ mod tests {
 
     #[test]
     fn a_copy_before_the_last_action_does_not_count() {
+        let _g = lock_copies();
         let app = |ui: &mut egui::Ui, _: usize| {
             if typed(ui, "a") {
                 ui.ctx().copy_text("x".into());
@@ -3086,6 +3150,7 @@ mod tests {
 
     #[test]
     fn a_copy_before_any_action_still_counts() {
+        let _g = lock_copies();
         let app = |ui: &mut egui::Ui, i: usize| {
             if i == 0 {
                 ui.ctx().copy_text("x".into());
@@ -3096,6 +3161,7 @@ mod tests {
 
     #[test]
     fn a_click_marks_once_at_its_first_frame() {
+        let _g = lock_copies();
         let app = |ui: &mut egui::Ui, _: usize| {
             let _ = ui.button("Save");
             if ui.input(|i| i.pointer.any_pressed()) {
@@ -3103,6 +3169,56 @@ mod tests {
             }
         };
         assert_eq!(drive("<Click:Save><Clipboard:pressed>", false, app), Some(Do::Done));
+    }
+
+    #[test]
+    fn note_copy_when_off_records_nothing() {
+        let _g = lock_copies();
+        let before = NOTED.lock().unwrap_or_else(|e| e.into_inner()).count;
+        note_copy_when(false, "off");
+        let after = NOTED.lock().unwrap_or_else(|e| e.into_inner()).count;
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn note_copy_is_seen_by_the_checks_from_any_thread() {
+        let _g = lock_copies();
+        let ctx = egui::Context::default();
+        observe(&ctx);
+        let before = mark(&ctx);
+        std::thread::spawn(|| note_copy("n1")).join().unwrap();
+        let after = mark(&ctx);
+        assert_eq!(after.copies, before.copies + 1);
+        assert_eq!(check_clipboard_after(&ctx, before, "n1"), Ok(()));
+        assert_eq!(check_clipboard_has_after(&ctx, before, "n"), Ok(()));
+        let why = check_clipboard_after(&ctx, after, "n1").unwrap_err();
+        assert!(why.contains("nothing copied after the last action"), "{why}");
+    }
+
+    #[test]
+    fn the_later_of_a_tap_copy_and_a_noted_copy_is_the_last() {
+        let _g = lock_copies();
+        let ctx = egui::Context::default();
+        observe(&ctx);
+        let base = mark(&ctx).copies;
+        ctx.run_ui(egui::RawInput::default(), |ui| ui.ctx().copy_text("y".into())).drop_without_applying_deltas();
+        note_copy("z");
+        assert_eq!((last_copy(&ctx), mark(&ctx).copies), ((Some("z".to_string()), base + 2), base + 2));
+        ctx.run_ui(egui::RawInput::default(), |ui| ui.ctx().copy_text("w".into())).drop_without_applying_deltas();
+        assert_eq!((last_copy(&ctx), mark(&ctx).copies), ((Some("w".to_string()), base + 3), base + 3));
+    }
+
+    #[test]
+    fn a_copy_noted_by_the_app_passes_the_clipboard_steps() {
+        let _g = lock_copies();
+        let app = |ui: &mut egui::Ui, _: usize| {
+            let _ = ui.button("Save");
+            if ui.input(|i| i.pointer.any_pressed()) {
+                note_copy("noted");
+            }
+        };
+        assert_eq!(drive("<Click:Save><Clipboard:noted>", false, app), Some(Do::Done));
+        assert_eq!(drive("<Click:Save><ClipboardHas:note>", false, app), Some(Do::Done));
     }
 
     #[test]
@@ -3126,6 +3242,7 @@ mod tests {
 
     #[test]
     fn the_after_checks_use_a_hand_made_mark() {
+        let _g = lock_copies();
         ito_a11y::record_announcements(true);
         let ctx = egui::Context::default();
         assert_eq!(mark(&ctx).copies, 0);

@@ -164,7 +164,7 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 - ito の `Tap` は、AccessKit の更新が無い frame で前の観測をそのまま残す。`<Tree>` は空の木でも通る。`<Assert:>` など空の文字列は何にでも合う。
 - 設定の書き込みは別のスレッドで、待っている仕事を 1 回にまとめて書く。`settled` に入らない。
 - ターミナルを開くキーは、開いていれば焦点を移すだけ（新しい子にならない）。
-- kura のコピーは egui の `CopyText` を通らない（arboard に直接）。
+- kura のコピーは egui の `CopyText` を通らない（arboard に直接）。v0.268.0 から、自分の道でコピーするアプリは `ito_keyscript::note_copy(text)` を呼ぶ（改行を OS に合わせる前の文字で）と、`<Clipboard:>`・`<ClipboardHas:>` に見える（#206 の 1）。
 
 ### ito に作るもの（ito のセッションに頼む）
 
