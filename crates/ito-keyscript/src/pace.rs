@@ -998,6 +998,9 @@ impl Pace {
         }
         self.trace_cut();
         self.finished = true;
+        // Nothing waits any more, so `due` stops asking for frames.
+        self.check_since = None;
+        self.read_has_since = None;
         Some(Ended {
             how: match how {
                 Ending::Closed => How::Closed,
@@ -1054,6 +1057,14 @@ impl Pace {
     /// the pass begins, so a quiet window could stop drawing while a check waits.
     pub fn due(&self) -> Option<Duration> {
         (self.check_since.is_some() || self.read_has_since.is_some()).then_some(Duration::from_millis(16))
+    }
+
+    /// The `now` of the first frame at which the current `<Assert:>`-style check or look came back
+    /// [`Taken::Again`], i.e. when its retry window began. `None` when no check is retrying: before one starts waiting,
+    /// and again once it passes, fails, or any other step is taken. A `<ReadHas:>` retry has its own clock and does
+    /// not show here.
+    pub fn check_since(&self) -> Option<Instant> {
+        self.check_since
     }
 
     /// How far the run has got, for the watchdog.
@@ -1327,6 +1338,42 @@ mod tests {
         assert_eq!(pace.acted_idx(), Some(0));
         assert_eq!(pace.since_action(base + Duration::from_millis(5)), Some(Duration::from_millis(5)));
         assert_eq!(pace.taken(&f, Taken::Input { flight: false, more: vec![] }), None);
+    }
+
+    #[test]
+    fn check_since_is_set_only_while_a_check_retries() {
+        let base = Instant::now();
+        let steps = parse("<Assert:x>").unwrap();
+        let mut pace = Pace::new(Config::new("app"), &steps, base);
+        assert_eq!(pace.check_since(), None);
+        let f = frame(2, base);
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.check_since(), None, "taken out but not yet looked at");
+        assert_eq!(pace.taken(&f, Taken::Again { why: "no".into() }), None);
+        assert_eq!(pace.check_since(), Some(base));
+        let f = frame(3, base + Duration::from_millis(50));
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.taken(&f, Taken::Again { why: "no".into() }), None);
+        assert_eq!(pace.check_since(), Some(base), "the window starts at the first retry");
+        let f = frame(4, base + Duration::from_millis(100));
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.taken(&f, Taken::Done), None);
+        assert_eq!(pace.check_since(), None);
+    }
+
+    #[test]
+    fn a_window_closed_during_a_retry_stops_asking_for_frames() {
+        let base = Instant::now();
+        let steps = parse("<Assert:x>").unwrap();
+        let mut pace = Pace::new(Config::new("app"), &steps, base);
+        let f = frame(2, base);
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.taken(&f, Taken::Again { why: "no".into() }), None);
+        assert!(pace.check_since().is_some());
+        assert!(pace.due().is_some());
+        assert!(pace.end(Ending::Closed, base + Duration::from_millis(50), None).is_some());
+        assert_eq!(pace.check_since(), None);
+        assert_eq!(pace.due(), None);
     }
 
     #[test]

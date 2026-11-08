@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.280.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: `Pace::check_since()`。いま再試行している `<Assert:>` などの確かめが、最初に `Taken::Again` で戻ったフレームの時刻を読む。再試行していなければ `None`。`<ReadHas:>` の再試行は別の時計なので、ここには出ない。
+
+### 修正
+
+- `ito-keyscript`: 最初の `run.json` が書けないとき、`Runner::start_run` が失敗の行を書かないまま `trace.jsonl` を閉じていた。`<run.json>` の失敗の行が残るようになった。
+- `ito-keyscript`: 確かめの再試行の途中で窓が閉じると、実行が終わったあとも `Pace::due()` が次のフレームを頼み続けていた。終わるときに再試行の時計を消す。`Runner` は実行中だけ `due` を読むので、`Runner` を使うアプリには影響がない。
+
 ## [0.279.0] - 2026-11-08
 
 ### 追加

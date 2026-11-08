@@ -2562,8 +2562,10 @@ impl Runner {
         if let Err(err) = self.run.write(&self.dir) {
             let why = format!("cannot write {}: {err}", evidence::FILE);
             if let Some(e) = self.pace.host_failed(evidence::STEP, why) {
-                // There is no folder to write the last one in either.
+                // There is no folder to write the last one in either. A trace that did open still gets the
+                // `Failed` line `host_failed` has just closed before it is dropped.
                 self.run_closed = true;
+                self.flush_trace();
                 self.trace = None;
                 self.keep(e, false);
             }
@@ -5360,6 +5362,30 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(!r.running());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_json_that_cannot_be_written_still_leaves_its_failure_in_the_trace() {
+        let dir = temp("run-bad-trace");
+        // `trace.jsonl` can be created here, but the rename of `run.json.part` over a directory fails.
+        std::fs::create_dir_all(dir.join(evidence::FILE)).unwrap();
+        let mut r = Runner::new(parse("a").unwrap(), Some(dir.join("done")));
+        let ctx = egui::Context::default();
+        r.skip(ms(80));
+        let mut raw = egui::RawInput::default();
+        match r.input(&ctx, &mut raw) {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "<run.json>");
+                assert!(why.contains("cannot write run.json"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        let trace = std::fs::read_to_string(dir.join(evidence::TRACE)).expect("trace.jsonl exists");
+        let failed =
+            trace.lines().find(|l| l.contains("\"label\":\"<run.json>\"")).unwrap_or_else(|| panic!("no <run.json> line in:\n{trace}"));
+        assert!(failed.contains("\"outcome\":\"failed\""), "{failed}");
+        assert!(failed.contains("cannot write run.json"), "{failed}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

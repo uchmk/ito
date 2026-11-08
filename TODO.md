@@ -19,6 +19,6 @@ ito のやること。`【人】` は持ち主の作業。
   - [ ] `env.wgpu_backend` / `env.font_set_sha256` を ito が埋める（今は `null`）。
   - [ ] 基準画像との比較（承認した基準画像と、証拠の鎖の中での置き場所）。
 - [ ] ito-keyscript の小さな直し（kura v0.158.0 が `pace::Pace` に載せ替えたときの指摘）。
-  - [ ] `Runner::start_run`: 最初の `run.json` が書けないとき、失敗の行を `trace.jsonl` に書かないまま trace を捨てている。捨てる前に `flush_trace` する。
-  - [ ] `Pace` に `check_since` を読む口を足す（kura のテストが回り道をしていた）。
+  - [x] `Runner::start_run`: 最初の `run.json` が書けないとき、失敗の行を `trace.jsonl` に書かないまま trace を捨てている。捨てる前に `flush_trace` する。v0.280.0 で済んだ。
+  - [x] `Pace` に `check_since` を読む口を足す（kura のテストが回り道をしていた）。v0.280.0 で済んだ。
   - [ ] テストで `Step` を手で作るときの小さな builder（要るアプリが増えたら）。
