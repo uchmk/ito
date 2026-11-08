@@ -3,6 +3,29 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.271.0] - 2026-11-08
+
+### 追加
+
+- `ito_keyscript::pace`（#204 の 2）: `--keys` の実行の状態機械 `Pace`。窓なし（egui の文脈には触らない。手順は `Press` のまま中を見ずに渡す）。kura の `ScriptRun` の動きをそのまま写した。
+  - `Pace::new(Config, &[Step], now)`・`next(&Frame) -> Next::{Hold, Take, End}`・`act`・`taken(&Frame, Taken)`・`shot_saved`/`shot_failed`・`end(Ending, now, writes)`・`left`・`progress` など。
+    `next` が見る順（16 項目）は `pace` のモジュールの説明と docs/autotest.md の表にある。
+  - 補助: `fresh`（木が最後の操作より新しいか）・`read_has_why`・`state_lines`・`unsettled_lines`、`kind(&Press)`。
+  - `pace::conformance`: 適合テストの表 `cases()`（台本・時計・フレームごとの様子・期待する記録）と、`Subject` を実装して回す `check`。`PaceSubject` が `Pace` 自身。
+- `Progress` を公開（`left`・`at`・`due`・`finished`）。
+
+### 変更
+
+- `<Now>` の説明を 1 つの意味（kura と同じ: 直後の 1 手順を、落ち着きを待たずに送る）に統一した。
+- 画面の名前で探す手順（`<Click:文字>`・`<DClick:文字>`・`<Assert:>`・`<Enabled:>` など）と `<Tree:>` の出力は UI の言語に従うので、台本の先頭に `<Lang:en>` を置く、と `Step` の説明に 1 か所だけ書いた。
+- `scripts/lanes/ito-first.txt` に `arboard` を足した（`ito-clipboard` を使う。kura は v0.154.1 で載せ替え済み）。
+- `GAP`・`FRAME` を `pub(crate)` に。
+
+### 使う側がやること
+
+- 今回は `Runner` はまだ `Pace` に載っていない（次の push）。kura は `pace::conformance::check` を自前の実装で通してから載せ替える。
+- `rev` を上げて `scripts/lanes.sh sync` を流すと、`arboard` に直接依存するアプリは `ito-first.py` で落ちる。`ito-clipboard` の `clipboard!()` に載せ替えるか、`scripts/ito-first.allow` に理由を書く。
+
 ## [0.270.0] - 2026-11-08
 
 ### 追加

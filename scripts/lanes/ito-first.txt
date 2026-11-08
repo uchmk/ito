@@ -48,3 +48,4 @@ fluent           ito-i18n (words by key, language from common.toml)
 fluent-bundle    ito-i18n
 rust-i18n        ito-i18n
 gettext-rs       ito-i18n
+arboard          ito-clipboard (clipboard!().set_text / get_text / last_set; Fake for tests)

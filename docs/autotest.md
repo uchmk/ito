@@ -92,10 +92,13 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 
 ### 1a. Runner と自前の実行役（全アプリで同じ意味にする）
 
+画面の名前で探す手順（`<Click:文字>`・`<Assert:文字>` など）は UI の言語に従うので、台本の先頭に `<Lang:en>`（書いた言語）を置く。
+
 いま `--keys` を回す道は 2 つある。yagura・koyomi・michi・fude は ito の `ito_keyscript::Runner`、kura は自前の `src/script_run.rs`（木とクリップボードの手順は窓の前で断る）。同じ台本が、アプリによって違う意味で通ってはいけない。下の穴は [ito#204](https://github.com/uchmk/ito/issues/204) で頼んだ（行は ito v0.263.0、16dbe90 の `crates/ito-keyscript/src/lib.rs`）。
 
 | 穴（Codex の全アプリ向けのレビュー、2026-11-08。コードで確かめた） | 直し方 |
 |---|---|
+| **`ito_keyscript::pace`（v0.271.0）が実行の状態機械の正本。** 適合テストの表は `pace::conformance::cases()`。`Pace::next` の順: ①終わり／報告なしで空 ②別の viewport ③入力が描かれた（`action_gen`） ④設定の書き込みが答えた ⑤書き込みの失敗 ⑥書き込みの待ち（10 秒） ⑦`DELIVER_WAIT` ⑧`<Wait:N>` の残りを眠る ⑨Shot の待ち（5 秒） ⑩`<Now>` ⑪最初の待ち ⑫準備（続き・`<Now>`・再確認・落ち着き 2 パス） ⑬late ⑭空なら終わり／unsettled ⑮`<Wait:N>` の消化 ⑯取り出し | Pace はできた。`Runner` が載るのは次の push、kura は適合テストを自前の実装で通してから載せ替える |
 | kura の stage 1 のうち、設定の書き込みの待ちと「`<Now>` は直後の 1 手順だけ」は kura の実行役にしか無い（ROOT の確認と `DELIVER_WAIT` は ito v0.263.0 で `Runner` にも入った）。`Runner` には落ち着きの待ちが無く、`<Now>` は `self.next = now` だけ（`lib.rs` 1563 行） | ito に**実行の状態機械**（手順の待ち・`<Now>`・書き込みの待ち・届いたかの確認・終わり方）を置き、`Runner` がそれを使う。kura はそれを呼ぶか写す。どちらにも同じ**適合テスト**（ito に置く台本と期待の表）を通す |
 | 書き込みの待ちは、アプリが「書き込みが残っているか」を答えないと作れない | ito に問い合わせの口（アプリが返す `pending_writes()` のようなもの）を置く。ito-prefs の common.toml の書き込みは ito が答える |
 | `<Theme:>` は効いているテーマを書き換えるので、頼んだテーマと区別できない（`lib.rs` 1579〜1582 行） | 状態に `theme.requested` と `theme.name` を分けて書く |

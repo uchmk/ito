@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod pace;
 pub mod probe;
 pub mod review;
 
@@ -30,13 +31,17 @@ use ito_keys::{self as keys, Code, Key};
 
 /// The pause after each step, so the frame that follows a key has drawn
 /// before the next key goes in.
-const GAP: Duration = Duration::from_millis(60);
+pub(crate) const GAP: Duration = Duration::from_millis(60);
 /// After a resize, before the next step.
 const SETTLE: Duration = Duration::from_millis(400);
 /// Between the frames of a click or a drag.
-const FRAME: Duration = Duration::from_millis(20);
+pub(crate) const FRAME: Duration = Duration::from_millis(20);
 
 /// One step of a script: a key to press, or a pause.
+///
+/// Steps that find a widget by its visible name (`<Click:text>`, `<DClick:text>`, `<Assert:>`, `<Enabled:>` and the
+/// other states) follow the UI language, as does what `<Tree:>` writes: a script that uses them should start with
+/// `<Lang:en>` (or the language it was written for).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
     Key(Key),
@@ -48,20 +53,17 @@ pub enum Step {
     /// that drove the pane filled the gap with harmless keys instead and
     /// guessed how long they took (#93, #119 and five more).
     Wait(Duration),
-    /// `<Now>` applies to the next step that is not a `<Wait:N>`: that step goes
-    /// in without waiting for what came before to settle, and the waits before
-    /// it do not wait for settle either. For the rows that measure something
-    /// halfway: a trash still running (12.14), two keys inside the preview's
-    /// 40 ms debounce (47.2) (Q41).
+    /// `<Now>` lets the next step that is not a `<Wait:N>` go in without waiting for the screen to settle (it still goes
+    /// in after at least one new pass, so what came before has been handed to the app). For the rows that measure
+    /// something halfway: a trash still running (12.14), two keys inside the preview's 40 ms debounce (47.2) (Q41).
     ///
-    /// A timed read is `x<Now><State:a><Now><Wait:150><State:b>`: `a` as soon
-    /// as `x` is drawn, `b` about 150 ms after `a`. Each `<Now>` is spent by
-    /// one step, so in `<Now><State:a><Wait:150><State:b>` the read `b` still
-    /// waits for things to settle. `<Now>` does not skip the check that the
-    /// last input was drawn, nor an app's wait for its config writes, nor the
-    /// rule that a reading of the tree needs a frame drawn after the last
-    /// action. So N is a lower bound, not a promise: [`Runner::since_action`]
-    /// and [`since_action_line`] record when a reading was really taken.
+    /// `<Now>` does not skip the first wait of a run, the check that the last input was drawn, an app's wait for its
+    /// config writes, nor the rule that a reading of the tree needs a frame drawn after the last action. Each `<Now>`
+    /// is spent by one step (`<Shot:>` and `<Quit>` included; several in a row count as one); a `<Wait:N>` keeps it.
+    ///
+    /// A timed read is `x<Now><State:a><Now><Wait:150><State:b>`: `a` as soon as `x` is drawn, `b` about 150 ms after
+    /// `a`. In `<Now><State:a><Wait:150><State:b>` the read `b` still waits for things to settle. So N is a lower
+    /// bound, not a promise: [`Runner::since_action`] and [`since_action_line`] record when a reading was really taken.
     Now,
     /// `<Shot:name@preview>` crops it to the preview pane (the name keeps the
     /// suffix). `<Shot:name>`: the window as it is now, saved as `name.png` beside the
@@ -1815,15 +1817,15 @@ fn pointer_frames(press: &Press, rect: egui::Rect) -> VecDeque<Vec<egui::Event>>
 
 /// How far a [`Runner`] has got, shared with the thread [`Runner::watch`]
 /// starts.
-struct Progress {
+pub struct Progress {
     /// Steps not yet taken.
-    left: usize,
+    pub left: usize,
     /// When the last one was.
-    at: Instant,
+    pub at: Instant,
     /// How long the quiet after it is meant to be (a `<Wait:N>`).
-    due: Duration,
+    pub due: Duration,
     /// The run has ended; the thread can stop.
-    finished: bool,
+    pub finished: bool,
 }
 
 /// [`Runner::watch`]'s thread: nudge the frame loop once a second, and if
