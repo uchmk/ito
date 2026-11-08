@@ -4,6 +4,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 使う側は tsumugi（紬、ターミナル）、kura（蔵、ファイラー。旧 filer）、yagura（櫓、システムモニター。旧 mimamori）。michi（道、Git のクライアント）も使う。fuda（札、TODO）と fude（筆、エディター）も使う予定。
 
 デザインの原則は [docs/design-principles.md](docs/design-principles.md)、撮って確かめる手順は [docs/visual-review.md](docs/visual-review.md)（`ito-keyscript::review`: 撮影の JSON・`compare`・`crop`・`matrix`）。
+実機の自動テストの設計（観測の契約・状態・Test ID・証拠）は [docs/autotest.md](docs/autotest.md)、見た目の行を証拠で合格にする規則は [docs/visual-test.md](docs/visual-test.md)（version 1。アプリの規則のファイルが版で名指しする。判定の規則を変えたら版を上げる）。
 
 **画面を作るときは、先に [docs/design-guide.md](docs/design-guide.md)（「こういうときはこのクレート」の早見表。ボタン・印・空の一覧・確認・Markdown の欄など）を見る。**
 

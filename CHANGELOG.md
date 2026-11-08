@@ -3,6 +3,13 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.264.1] - 2026-11-08
+
+### 追加
+
+- `docs/autotest.md`（自動実機テスト基盤の設計）と `docs/visual-test.md`（視覚テストの設計、version 1）。claude.ai の設計のページから移した。ここが正本で、ページは写し。アプリの規則のファイルは「ito docs/visual-test.md, version 1」のように版で名指しする。
+  - 載せるアプリは kura → yagura・koyomi・michi・fude（4 つの順は kura のパイロットのあとで決める）。2026-11-08 にメンテナンス対象から外した tsumugi・minato は載せない。
+
 ## [0.264.0] - 2026-11-08
 
 ### 追加
