@@ -11,6 +11,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
@@ -35,6 +36,7 @@ pub mod text;
 pub mod update;
 pub mod web;
 pub mod window;
+pub mod writes;
 
 pub use filename::safe_file_name;
 pub use web::{mark_from_web, runs_code};
@@ -726,12 +728,107 @@ impl CommonChange {
 
 /// Make a change to common.toml in `base` -- its text in, the new text out
 /// -- and write it at once. One change at a time across the app, each on
-/// what the last wrote. Call it off the UI thread.
+/// what the last wrote. Call it off the UI thread. Apps that apply the result
+/// in the UI: use [`change_common`], which a `--keys` run can wait for.
 pub fn edit_common(base: &Path, change: impl FnOnce(&str) -> Result<String, String>) -> Result<(), String> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let path = common_path(base);
     read_or_empty(&path).and_then(|text| change(&text)).and_then(|next| write_atomic(&path, next))
+}
+
+/// What became of a [`change_common`].
+#[derive(Debug)]
+pub enum Written {
+    /// common.toml was written, then read back: the new settings and their warnings, or why the read failed.
+    Saved(Result<(Common, Vec<String>), String>),
+    /// The write failed; the file is as it was.
+    Failed(String),
+    /// There is no config folder to write to.
+    NoFolder,
+}
+
+type WriteJob = Box<dyn FnOnce() + Send>;
+
+/// Make `changes` to common.toml in `base`, in order, on one writer thread for the whole app, then read it back.
+/// `back` gets the outcome and a [`writes::Ticket`] from [`writes::ledger`]: send both to the UI, apply the outcome
+/// there, then answer the ticket (`applied()` on `Saved(Ok)`, `failed(..)` otherwise, `NoFolder` included). `back`
+/// runs on the writer thread, or on the caller's before this returns when `base` is `None` or the writer cannot run;
+/// keep it short (send, and wake the UI). No changes: nothing is written, and `back` is not called. `Saved` holds the
+/// file as read just after this write, so a write made right after it by another thread may show there too.
+///
+/// When the UI applied the change before writing (as the scale is), `back` can answer at once:
+///
+/// ```no_run
+/// use ito_common::{change_common, scale_change, Written};
+///
+/// change_common(ito_common::base_dir(), vec![scale_change(1.25)], |written, ticket| match written {
+///     Written::Saved(Ok(_)) => ticket.applied(),
+///     Written::NoFolder => ticket.failed("there is no config folder"),
+///     Written::Saved(Err(e)) | Written::Failed(e) => {
+///         eprintln!("app: {e}");
+///         ticket.failed(e);
+///     }
+/// });
+/// ```
+pub fn change_common(base: Option<PathBuf>, changes: Vec<CommonChange>, back: impl FnOnce(Written, writes::Ticket) + Send + 'static) {
+    change_common_in(&writes::ledger(), base, changes, back);
+}
+
+fn change_common_in(
+    ledger: &writes::Ledger,
+    base: Option<PathBuf>,
+    changes: Vec<CommonChange>,
+    back: impl FnOnce(Written, writes::Ticket) + Send + 'static,
+) {
+    if changes.is_empty() {
+        return;
+    }
+    let ticket = ledger.sent("common.toml");
+    let Some(base) = base else {
+        back(Written::NoFolder, ticket);
+        return;
+    };
+    // The job owns `back` and the ticket; on failure to queue it, they are handed back through this slot.
+    let slot = Arc::new(Mutex::new(Some((back, ticket))));
+    let job_slot = slot.clone();
+    let job: WriteJob = Box::new(move || {
+        let Some((back, ticket)) = job_slot.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+        let done = edit_common(&base, |text| changes.iter().try_fold(text.to_owned(), |t, c| c.apply(&t)));
+        match done {
+            Ok(()) => back(Written::Saved(Common::read(&base)), ticket),
+            Err(e) => back(Written::Failed(e), ticket),
+        }
+    });
+    if let Err(why) = queue_write(job) {
+        let taken = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some((back, ticket)) = taken {
+            back(Written::Failed(format!("the config writer could not run: {why}")), ticket);
+        }
+    }
+}
+
+/// Hand `job` to the one writer thread, starting it the first time.
+fn queue_write(job: WriteJob) -> Result<(), String> {
+    use std::sync::mpsc::{channel, Sender};
+    static WRITER: std::sync::OnceLock<Result<Mutex<Sender<WriteJob>>, String>> = std::sync::OnceLock::new();
+    let writer = WRITER.get_or_init(|| {
+        let (tx, rx) = channel::<WriteJob>();
+        std::thread::Builder::new()
+            .name("ito-common-writer".into())
+            .spawn(move || {
+                for job in rx {
+                    // A panic in one `back` must not stop later writes (its ticket is dropped, which records a failure).
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                }
+            })
+            .map(|_| Mutex::new(tx))
+            .map_err(|e| e.to_string())
+    });
+    match writer {
+        Ok(tx) => tx.lock().unwrap_or_else(|e| e.into_inner()).send(job).map_err(|_| "the writer thread is gone".to_owned()),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// The table at the dotted `path` (`None`: the top), made when it is not
@@ -1501,5 +1598,111 @@ zzz = 1
         assert_eq!(Clock::full(&now, "en"), "Monday, 5 October 2026");
         assert_eq!(Clock::full(&now, "ja"), "2026年10月5日 月曜日");
         assert_eq!(Clock::next_minute(&now), Duration::from_secs(50));
+    }
+
+    mod change_common {
+        use super::super::{change_common_in, common_path, writes, CommonChange, Written};
+        use std::sync::mpsc::{channel, Receiver, TryRecvError};
+        use std::time::Duration;
+
+        fn change(table: Option<&'static str>, key: &'static str, value: &str) -> CommonChange {
+            CommonChange { table, key, value: value.to_owned() }
+        }
+
+        fn run(
+            ledger: &writes::Ledger,
+            base: Option<std::path::PathBuf>,
+            changes: Vec<CommonChange>,
+        ) -> Receiver<(Written, writes::Ticket)> {
+            let (tx, rx) = channel();
+            change_common_in(ledger, base, changes, move |w, t| {
+                let _ = tx.send((w, t));
+            });
+            rx
+        }
+
+        #[test]
+        fn no_changes_write_nothing() {
+            let dir = tempfile::tempdir().unwrap();
+            let l = writes::Ledger::new();
+            let rx = run(&l, Some(dir.path().to_owned()), Vec::new());
+            // `back` was dropped without being called, so its sender is gone.
+            assert!(matches!(rx.try_recv(), Err(TryRecvError::Disconnected)));
+            let s = l.status();
+            assert_eq!((s.pending, s.answers), (0, 0));
+            assert!(!common_path(dir.path()).exists());
+        }
+
+        #[test]
+        fn no_folder_answers_on_the_callers_thread() {
+            let l = writes::Ledger::new();
+            let rx = run(&l, None, vec![change(None, "theme", "\"dark\"")]);
+            let (w, t) = rx.try_recv().expect("back ran before return");
+            assert!(matches!(w, Written::NoFolder));
+            assert_eq!(t.seq(), Some(1));
+            assert_eq!(l.status().pending, 1);
+            t.failed("no folder");
+            assert_eq!(l.status().pending, 0);
+        }
+
+        #[test]
+        fn two_changes_in_one_call_both_land() {
+            let dir = tempfile::tempdir().unwrap();
+            let l = writes::Ledger::new();
+            let rx = run(&l, Some(dir.path().to_owned()), vec![change(None, "theme", "\"nord\""), change(None, "language", "\"ja\"")]);
+            let (w, t) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let Written::Saved(Ok((c, _warnings))) = w else { panic!("not saved: {w:?}") };
+            assert_eq!(c.theme.as_deref(), Some("nord"));
+            assert_eq!(c.language.as_deref(), Some("ja"));
+            let text = std::fs::read_to_string(common_path(dir.path())).unwrap();
+            assert!(text.contains("theme") && text.contains("language"));
+            assert_eq!(l.status().pending, 1);
+            t.applied();
+            let s = l.status();
+            assert_eq!((s.pending, s.answers), (0, 1));
+        }
+
+        #[test]
+        fn writes_come_back_in_the_order_sent() {
+            let dir = tempfile::tempdir().unwrap();
+            let l = writes::Ledger::new();
+            let (tx, rx) = channel();
+            for i in 0..20 {
+                let tx = tx.clone();
+                let changes = vec![change(None, "theme", &format!("\"t{i}\""))];
+                change_common_in(&l, Some(dir.path().to_owned()), changes, move |w, t| {
+                    // What the file said right after this write: each job sees its own value.
+                    let Written::Saved(Ok((c, _))) = &w else { panic!("not saved: {w:?}") };
+                    let _ = tx.send((i, c.theme.clone(), t));
+                });
+            }
+            let mut seqs = Vec::new();
+            for want in 0..20 {
+                let (i, theme, t) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(i, want, "back calls came out of order");
+                assert_eq!(theme.as_deref(), Some(format!("t{i}").as_str()));
+                seqs.push(t.seq().unwrap());
+                t.applied();
+            }
+            assert_eq!(seqs, (1..=20).collect::<Vec<u64>>());
+            let text = std::fs::read_to_string(common_path(dir.path())).unwrap();
+            assert!(text.contains("\"t19\""));
+            assert_eq!(l.status().answers, 20);
+        }
+
+        #[test]
+        fn a_failed_write_leaves_the_file_and_is_recorded() {
+            let dir = tempfile::tempdir().unwrap();
+            let bad = "this is = = not toml\n";
+            std::fs::write(common_path(dir.path()), bad).unwrap();
+            let l = writes::Ledger::new();
+            let rx = run(&l, Some(dir.path().to_owned()), vec![change(None, "theme", "\"dark\"")]);
+            let (w, t) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let Written::Failed(e) = w else { panic!("not failed: {w:?}") };
+            assert!(e.contains("does not read as TOML"), "{e}");
+            assert_eq!(std::fs::read_to_string(common_path(dir.path())).unwrap(), bad);
+            t.failed(e);
+            assert!(l.status().failed.is_some());
+        }
     }
 }

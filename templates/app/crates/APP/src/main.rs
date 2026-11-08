@@ -127,14 +127,15 @@ impl App {
         ctx.set_zoom_factor(next);
         ito_statusbar::scale_changed(ctx, next);
         self.scale_note = Some(ito_common::scale_text(next, &self.lang));
-        if let Some(base) = ito_common::base_dir() {
-            std::thread::spawn(move || {
-                let change = ito_common::scale_change(next);
-                if let Err(e) = ito_common::edit_common(&base, |text| change.apply(text)) {
-                    eprintln!("{{app}}: {e}");
-                }
-            });
-        }
+        // The scale is applied above, so the write's ticket is answered once it is on disk.
+        ito_common::change_common(ito_common::base_dir(), vec![ito_common::scale_change(next)], |written, ticket| match written {
+            ito_common::Written::Saved(Ok(_)) => ticket.applied(),
+            ito_common::Written::NoFolder => ticket.failed("there is no config folder"),
+            ito_common::Written::Saved(Err(e)) | ito_common::Written::Failed(e) => {
+                eprintln!("{{app}}: {e}");
+                ticket.failed(e);
+            }
+        });
     }
 
     /// The bottom bar: the app's items on the left (add yours here), the clock

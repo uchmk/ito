@@ -3,6 +3,23 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.269.0] - 2026-11-08
+
+### 追加
+
+- `ito-common`: 設定の書き込みの台帳 `writes`（#204 の 1）。`--keys` の実行が、アプリが設定のファイルを書いて当て終わるまで次の手順・読み取り・終わりに進まないための数。
+  - `ledger()` はプロセスで 1 つの台帳。`watch()` を呼ぶまで何も記録しない（ふつうに動くアプリは何も持たない）。ON にするのは `--keys` の実行で、それは #204 の後の push で入る。`Ledger::new()` は最初から記録する自分の台帳（テスト用）。
+  - 書き始めに `sent(file) -> Ticket`、UI で結果を当てたあとに `Ticket::applied()`、書けなかった・当てられなかったら `failed(why)`。答えずに落とした券は失敗（`"{file}: write #{seq} was dropped without an answer"`）。
+  - `status() -> Status { pending, oldest, answers, failed }`。`failed` は最初の失敗が残る。記録していないときの券は何もしない（`Ticket::inert()` も同じ）。
+- `ito-common`: common.toml の共通の書き手 `change_common(base, changes, back)` と `Written::{Saved, Failed, NoFolder}`。アプリで 1 本の書き手のスレッド（`ito-common-writer`）が、頼まれた順に `CommonChange` を全部当てて書き、読み直して `back(Written, Ticket)` を呼ぶ。`back` は UI へ送って起こすだけにし、UI が当てたあとに券に答える。`changes` が空なら何もしない。`base` が `None` なら `NoFolder` を、書き手が動かせないときは `Failed` を、呼んだスレッドで返す。`back` の中の panic で書き手は止まらない。`edit_common` は今までどおり。
+- 雛形（`templates/app`）: 拡大率の保存を `change_common` にした（拡大率は先に UI で当てるので、`back` ですぐ答える）。変えるたびにスレッドを立てていたので、続けて変えたとき書く順が入れ替わることがあった。
+
+### 使う側がやること
+
+- yagura・koyomi・michi・fude: `prefs.rs` の `common_change`（変更ごとにスレッドを立てて `edit_common` と `Common::read` をし、`Reload::Common` / `Reload::Failed` を送るもの）を `change_common` に置き換える。`Reload` に `Written` と `Ticket` を載せ、`pump` で当てたあとに答える（`Saved(Ok)` は `applied()`、`NoFolder` も含めてほかは `failed(..)`）。拡大率も雛形と同じく `change_common` で書く（続けて変えても、1 本の書き手が頼まれた順に書く）。`change_common` を通らない書き込み（アプリ自身のファイル（keymap など）や、自分で `edit_common` を呼ぶところ）は、`ito_common::writes::ledger().sent("<file>")` の券を書き始めに取り、同じように答える。
+- kura: 今は自分の `config_writes.rs` のまま。Runner と kura の実行の状態機械をそろえる push（#204）で載せ替える。
+- 今はまだ誰も `watch()` を呼ばないので、置き換えなくても動きは変わらない。
+
 ## [0.268.0] - 2026-11-08
 
 ### 追加
