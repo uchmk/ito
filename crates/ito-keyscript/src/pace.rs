@@ -180,6 +180,9 @@ pub enum Taken {
     Input { flight: bool, more: Vec<More> },
     /// Done, nothing in flight (a report written, a check passed, a click found nothing to wait for).
     Done,
+    /// The window was changed without events going in (a resize, a theme, a language). Like `Input { flight: true, .. }`,
+    /// it must be drawn in a later pass, but a frame of another viewport at the same pass does not fail it.
+    Changed { more: Vec<More> },
     /// A check, look or poll did not find what it looks for yet; `why` is the failure if it never does.
     Again { why: String },
     /// A picture was asked for; it is to be saved at `path`.
@@ -223,6 +226,10 @@ pub struct Ended {
     pub say: Option<String>,
     /// The run has failed (sticky: the host's process flag).
     pub failed: bool,
+    /// The number of steps not carried out that went into `tail`: the `left` of a failure, `0` for a run that reached
+    /// its end ([`How::Done`], [`How::Unsettled`]), the `left` of [`Pace::end`] for [`How::Closed`] and [`How::Quit`].
+    /// A failure clears the queue, so [`Pace::left`] is `0` afterwards; a host that writes its own report uses this.
+    pub left: usize,
 }
 
 #[derive(Debug)]
@@ -230,6 +237,9 @@ struct Flight {
     pass: u64,
     at: Instant,
     idx: usize,
+    /// Whether the input put events into the window. A change without events (a resize, a theme, a language) is not
+    /// lost when a frame of another viewport meets it at the same pass.
+    events: bool,
 }
 
 #[derive(Debug)]
@@ -347,6 +357,7 @@ impl Pace {
             tail: failed_report(label, &why, left),
             say: Some(format!("failed: step {label}: {why}")),
             failed: true,
+            left,
         }
     }
 
@@ -374,7 +385,7 @@ impl Pace {
         // Another window's frame is not the main window's: nothing goes in on it. An input waiting to be drawn that
         // meets one at the same pass went to a window that was not drawn.
         if let Some(id) = f.viewport {
-            if let Some(fl) = self.flight.as_ref().filter(|fl| fl.pass == f.pass) {
+            if let Some(fl) = self.flight.as_ref().filter(|fl| fl.events && fl.pass == f.pass) {
                 let idx = fl.idx;
                 let why = format!("the input went to viewport {id} while the main window was not drawn");
                 return Next::End(self.fail_at(idx, why));
@@ -501,6 +512,7 @@ impl Pace {
             tail: lines.clone().unwrap_or_else(|| "keys: done\n".to_owned()),
             say: lines.map(|l| l.lines().collect::<Vec<_>>().join("; ")),
             failed: self.failed,
+            left: 0,
         }
     }
 
@@ -547,19 +559,8 @@ impl Pace {
         self.check_since = None;
         self.read_has_since = None;
         match t {
-            Taken::Input { flight, more } => {
-                self.at = (f.pass, f.now);
-                if flight {
-                    self.flight = Some(Flight { pass: f.pass, at: f.now, idx });
-                }
-                for m in more.into_iter().rev() {
-                    let e = match m {
-                        More::Step(p) => Entry { idx, kind: kind(&p), press: p },
-                        More::Then(p) => Entry { idx, kind: Kind::Then, press: p },
-                    };
-                    self.queue.push_front(e);
-                }
-            }
+            Taken::Input { flight, more } => self.put_in(f, idx, flight, true, more),
+            Taken::Changed { more } => self.put_in(f, idx, true, false, more),
             Taken::Done | Taken::Quit => self.at = (f.pass, f.now),
             Taken::Shot { path } => {
                 let name = match &entry.press {
@@ -579,6 +580,20 @@ impl Pace {
         self.progress_at = f.now;
         self.begun = true;
         None
+    }
+
+    fn put_in(&mut self, f: &Frame, idx: usize, flight: bool, events: bool, more: Vec<More>) {
+        self.at = (f.pass, f.now);
+        if flight {
+            self.flight = Some(Flight { pass: f.pass, at: f.now, idx, events });
+        }
+        for m in more.into_iter().rev() {
+            let e = match m {
+                More::Step(p) => Entry { idx, kind: kind(&p), press: p },
+                More::Then(p) => Entry { idx, kind: Kind::Then, press: p },
+            };
+            self.queue.push_front(e);
+        }
     }
 
     /// The picture was saved.
@@ -641,6 +656,7 @@ impl Pace {
             tail,
             say: lines.map(|l| l.lines().collect::<Vec<_>>().join("; ")),
             failed: self.failed,
+            left,
         })
     }
 
@@ -662,6 +678,11 @@ impl Pace {
     /// The tree generation a reading must be newer than: it moves when an input was drawn or a config write answered.
     pub fn action_gen(&self) -> u64 {
         self.action_gen
+    }
+
+    /// An input or a change is out and has not been drawn yet.
+    pub fn in_flight(&self) -> bool {
+        self.flight.is_some()
     }
 
     /// How long ago the last action began, for the `<State:>` line.
@@ -908,6 +929,40 @@ mod tests {
         assert_eq!(pace.due(), None);
         let p = pace.progress();
         assert_eq!((p.left, p.finished, p.due), (1, false, Duration::ZERO));
+    }
+
+    #[test]
+    fn a_check_that_looks_again_does_not_move_the_watch() {
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let steps = parse("<Assert:ok>").unwrap();
+        let mut pace = Pace::new(Config::new("app"), &steps, base);
+        for (pass, ms) in [(2, 100), (3, 200)] {
+            let f = frame(pass, at(ms));
+            assert!(matches!(pace.next(&f), Next::Take(_)), "pass {pass}");
+            assert_eq!(pace.taken(&f, Taken::Again { why: "not yet".into() }), None);
+        }
+        assert_eq!(pace.progress().at, base, "a look that finds nothing is not progress");
+        assert!(pace.due().is_some(), "a check that waits asks for frames");
+        let f = frame(4, at(300));
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.taken(&f, Taken::Done), None);
+        assert_eq!(pace.progress().at, at(300));
+        assert_eq!(pace.due(), None);
+    }
+
+    #[test]
+    fn the_watch_sees_a_wait_as_due() {
+        let base = Instant::now();
+        let steps = parse("a<Wait:5000>b").unwrap();
+        let mut pace = Pace::new(Config::new("app"), &steps, base);
+        let f = frame(2, base);
+        assert!(matches!(pace.next(&f), Next::Take(_)));
+        assert_eq!(pace.taken(&f, Taken::Input { flight: true, more: Vec::new() }), None);
+        // Drawn and settled: the rest of the wait is slept out, and the watch allows for it.
+        let f = frame(4, base + Duration::from_millis(100));
+        assert!(matches!(pace.next(&f), Next::Hold { wake: Some(d) } if d == Duration::from_millis(4900)));
+        assert_eq!(pace.progress().due, Duration::from_secs(5));
     }
 
     #[test]

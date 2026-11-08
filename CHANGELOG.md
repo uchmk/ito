@@ -3,6 +3,36 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.272.0] - 2026-11-08
+
+### 変更
+
+- `ito_keyscript::Runner` を `pace::Pace` の薄い宿主にした（#204 の 3）。待ち・落ち着き・再確認・設定の書き込み・画像の待ちの数え方は Pace に一本化。適合テストの表を `Runner` でも通す。
+  - 追加: `Do::Unsettled(String)`（落ち着かないまま終わった。中身は done ファイルの tail）・`Runner::end(Ending) -> Option<Ended>`・`Runner::report() -> Option<&str>`。
+  - 非推奨: `Runner::finish()`（`end(Ending::Closed)` を使う）。
+  - `left()` は終わったあと、終わりの報告に入れた `left` を返す。`running()` は `end` が返ったあと（終わりの報告を渡したあと）か `Quit` を渡したあとは false。
+- 動きが変わる 9 点（どれもテストで固定）:
+  1. `<Size:>` のあと、約 400 ms + 60 ms 置く。
+  2. `<Wait:N>` は前の手順の入力から数える。先頭の `<Wait>` も最初の 500 ms を守る。
+  3. `<Now>` は Pace が受け、続く `<Wait>` をまたぐ。
+  4. ポインターの手順は、最初のフレームを取った回に入れ、印は 1 つ。最後のフレームの次は 2 パスと GAP 待つ。
+  5. 確認（Assert など）と Poll は毎パス再確認。Look は通常の準備で再確認。期限（TEXT_WAIT・READ_WAIT）は変わらない。
+  6. `left` は失敗した手順も数える（最後の確認が失敗すると `left: 1`）。
+  7. Shot: 保存の失敗は実行の失敗、画像が来なければ期限後に失敗、画像が出ている間に閉じると失敗。
+  8. 設定の書き込み: 答えが来るまで止まり、失敗か CONFIG_WAIT（10 秒）で失敗。
+  9. `watch`: `Progress.at` は再確認（Again）では動かず、手順が進んだとき（押した・描いた・待ちが明けた・画像を保存した・設定の答えが来た）に動く。`Progress.due` は残りの `<Wait>`。
+- 公開を足した: `pace::Taken::Changed { more }`（入力でない変化。Size・Theme・Lang）・`pace::Ended.left`・`Pace::in_flight()`。
+  `pace::conformance` の `acts`・`acts_taken`・`Need`・`Case::needs`・`Subject::skips`・`skipped`・`Answer::Changed`・`PaceSubject`（`Runner` の適合テストが使う）。
+
+### アプリがやること
+
+1. `Do::Unsettled(tail)` を扱う: 状態の報告のあとに tail を書き、`say` し、`FAILED_EXIT` で終わる。
+2. 窓が閉じたとき、`script.finish()` と `closed_report` の代わりに `script.end(Ending::Closed)`: `e.tail` を書き、`e.say` を出し、`e.failed` なら `FAILED_EXIT`。
+3. `Do::Quit` のあと、`quit_report(script.left())` の代わりに `script.end(Ending::Quit)` の tail を書く。
+4. `Ended` を作る・分解するコードは `left` を足す。`Taken` の網羅的な `match` は `Changed` を足す。自前の Subject は、Look が「見つけて押した」ときだけ動作にする（`conformance::acts`）。
+5. `finish` は非推奨。
+6. `left` は失敗した手順も数える。
+
 ## [0.271.0] - 2026-11-08
 
 ### 追加

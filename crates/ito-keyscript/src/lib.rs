@@ -17,6 +17,9 @@
 //! shared too; the writer adds one `run: <id>` line to each ([`run_id`], [`with_run`]; ito's own stall and panic writers
 //! do it themselves); a [`Runner`] says how many steps are left
 //! for them ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
+//!
+//! The pacing lives in [`pace`] (a state machine without a window); [`Runner`] is its egui host. A run ends with a [`Do`] out of
+//! [`Runner::input`], or [`Runner::end`] when the window closes; [`Runner::report`] has the tail of the done file.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -1763,6 +1766,9 @@ pub enum Do {
         step: String,
         why: String,
     },
+    /// The run ended unsettled (a step was left, or a config write or a picture): write the whole tail after the state
+    /// report, print it, and end with [`FAILED_EXIT`].
+    Unsettled(String),
     /// The last step has gone in.
     Done,
 }
@@ -1861,33 +1867,22 @@ fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: Pat
     }
 }
 
-/// An input the runner put in that no main-window pass has drawn yet.
-#[derive(Clone, Debug)]
-struct Flight {
-    /// `cumulative_pass_nr_for(ROOT)` when it went in.
-    pass: u64,
-    at: Instant,
-    /// The label of the step it came from.
-    step: String,
-    /// Whether events went into the raw input (`<Size:>`, `<Theme:>` and `<Lang:>` put none in, but still wait for a
-    /// main-window pass).
-    events: bool,
-}
-
-/// A script being played.
+/// A script being played, on [`pace::Pace`]: every decision about when a step goes in, when a check looks again, how a run
+/// fails and what the done file ends with comes from there ([`pace`] and its conformance table); the Runner only maps
+/// what Pace hands out to egui input, reads the window for the checks, and answers.
 ///
 /// A reading step (`<Assert:>`, `<Assert:!>`, the states, `<Tree:>`, `<Click:text>`, `<DClick:text>`) judges only an
 /// observation made after the last input was drawn by the main window. A negative step (`<Assert:!x>`) passes on
 /// the first such observation without `x` (waiting up to [`TEXT_WAIT`] for it to go); once it has passed, it does
 /// not watch for `x` appearing later. `<Clipboard:>`, `<ClipboardHas:>` and `<Announced:>` look only at copies and
 /// announcements made after the last input went in (see [`Mark`]).
+///
+/// The end of a run comes out of [`Runner::input`] as a [`Do`] (`Done`, `Unsettled`, `Failed`, `Quit`), or out of
+/// [`Runner::end`] when the window closes or the app quits by itself; [`Runner::report`] has the tail of the done file.
 pub struct Runner {
-    steps: VecDeque<Step>,
-    next: Instant,
+    pace: pace::Pace,
     /// The picture asked for, and whether the request has gone out.
     shot: Option<(String, bool)>,
-    /// The frames of a click or a drag still to go in.
-    pointer: VecDeque<Vec<egui::Event>>,
     /// Where `<Shot:>` and `<State:>` write.
     pub dir: PathBuf,
     /// What the app says about its shots (`app`, `version`, `component`, `state`, `zoom`); `<Theme:>` and
@@ -1897,26 +1892,40 @@ pub struct Runner {
     pub done: Option<PathBuf>,
     /// The clipboard's text for `<Paste>` and `<C-v>`.
     pub clipboard: fn() -> String,
-    finished: bool,
+    labels: Vec<String>,
     progress: Option<Arc<Mutex<Progress>>>,
     /// Some step reads the window's tree or the last copy.
     reads_window: bool,
-    /// Until when a step that reads the window keeps looking.
-    deadline: Option<Instant>,
-    /// An input put in, not yet seen drawn by a main-window pass.
-    flight: Option<Flight>,
-    /// The generation as of the pass that drew the last input; a reading step needs a newer one.
-    action_gen: u64,
-    /// The label of the step that made the frames in `pointer`.
-    pointer_step: String,
-    /// The frames in `pointer` are a step's first: the next one to go in takes the mark.
-    pointer_new: bool,
     /// What the last `<ReadHas:>` read, while it waits.
     last_read: Option<String>,
     /// Where the copies and announcements stood when the last action's first input went in (`None` before the first action).
     since: Option<Mark>,
-    /// When the last action's first input went in (`None` before the first action).
-    acted: Option<Instant>,
+    /// How the run ended, once it has.
+    ended: Option<pace::Ended>,
+    /// The end has gone out as a [`Do`] or an [`Ended`](pace::Ended) the app has.
+    delivered: bool,
+    /// A `<Quit>` has been handed out.
+    quitting: bool,
+    /// When Pace wants the next frame.
+    wake: Option<Instant>,
+    /// Added to the clock by the tests.
+    #[cfg(test)]
+    skew: Duration,
+}
+
+/// What [`Runner::decide`] came to for a frame.
+enum Decided {
+    Hold,
+    Take(pace::Entry),
+    Out(Do),
+}
+
+fn do_of(e: &pace::Ended) -> Do {
+    match &e.how {
+        pace::How::Unsettled => Do::Unsettled(e.tail.clone()),
+        pace::How::Failed { step, why } => Do::Failed { step: step.clone(), why: why.clone() },
+        pace::How::Done | pace::How::Closed | pace::How::Quit => Do::Done,
+    }
 }
 
 /// The `<State:>` line that says when a reading was really taken, ending in a newline:
@@ -1950,62 +1959,119 @@ impl Runner {
     pub fn new(steps: Vec<Step>, done: Option<PathBuf>) -> Self {
         // A script may switch the theme or language, which writes `common.toml`.
         ito_common::scripted_run();
-        let dir = done
+        if steps.iter().any(|s| matches!(s, Step::Announced(_) | Step::Tree(_))) {
+            ito_a11y::record_announcements(true);
+        }
+        // The first frames lay the window out; a key before them can land before the panes exist.
+        let config = pace::Config { first_wait: Duration::from_millis(500), ..pace::Config::new("the app") };
+        let mut this = Self::with_pace(config, steps, Instant::now());
+        this.dir = done
             .as_ref()
             .and_then(|d| d.parent().map(PathBuf::from))
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or_else(|| PathBuf::from("."));
-        // The first frames lay the window out; a key before them can land
-        // before the panes exist.
+        this.done = done;
+        this
+    }
+
+    /// A runner over `steps` with its own [`pace::Config`] and clock, touching no environment (the conformance test).
+    pub(crate) fn with_pace(config: pace::Config, steps: Vec<Step>, now: Instant) -> Self {
         let reads_window = steps.iter().any(|s| {
             matches!(s, Step::ClickText { .. } | Step::DClickText(_) | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_))
                 || matches!(s, Step::Is { .. } | Step::Tree(_) | Step::Announced(_) | Step::ClickId(_) | Step::IdCheck(_))
         });
-        if steps.iter().any(|s| matches!(s, Step::Announced(_) | Step::Tree(_))) {
-            ito_a11y::record_announcements(true);
-        }
+        let wake = Some(now + config.first_wait);
         Self {
+            labels: steps.iter().map(label).collect(),
+            pace: pace::Pace::new(config, &steps, now),
+            shot: None,
+            dir: PathBuf::from("."),
+            info: review::Meta { zoom: 1.0, component: "window".into(), ..Default::default() },
+            done: None,
+            clipboard: String::new,
+            progress: None,
             reads_window,
-            deadline: None,
-            flight: None,
-            action_gen: 0,
-            pointer_step: String::new(),
             last_read: None,
             since: None,
-            acted: None,
-            pointer_new: false,
-            steps: steps.into(),
-            next: Instant::now() + Duration::from_millis(500),
-            shot: None,
-            pointer: VecDeque::new(),
-            dir,
-            info: review::Meta { zoom: 1.0, component: "window".into(), ..Default::default() },
-            done,
-            clipboard: String::new,
-            finished: false,
-            progress: None,
+            ended: None,
+            delivered: false,
+            quitting: false,
+            wake,
+            #[cfg(test)]
+            skew: Duration::ZERO,
         }
     }
 
-    /// Steps not yet taken: for [`quit_report`] and [`closed_report`] when
-    /// the window closes while the script runs.
+    /// The only clock the runner reads.
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        return Instant::now() + self.skew;
+        #[cfg(not(test))]
+        Instant::now()
+    }
+
+    /// Move the test clock on.
+    #[cfg(test)]
+    fn skip(&mut self, d: Duration) {
+        self.skew += d;
+    }
+
+    /// Steps not carried out, for [`quit_report`] and [`closed_report`] when the window closes while the script runs.
+    /// Once the run has ended, the count that went into its report: a step that failed counts as left.
     pub fn left(&self) -> usize {
-        self.steps.len()
+        self.ended.as_ref().map_or_else(|| self.pace.left(), |e| e.left)
     }
 
-    /// Whether the script is still being played: not past its last step,
-    /// nor [`finish`](Self::finish)ed.
+    /// Whether the script is still being played: not ended (and the end gone out), nor handed a `<Quit>`.
     pub fn running(&self) -> bool {
-        !self.finished
+        !self.quitting && !(self.ended.is_some() && self.delivered)
     }
 
-    /// The run has ended some other way than its last step (the window
-    /// closed while it ran): no more steps, and the watch stops. Called
-    /// before the app writes [`closed_report`], so a stall report cannot
-    /// land over it. A `<Quit>` finishes the run by itself.
+    /// The tail of the done file once the run has ended (what [`pace::Ended::tail`] says): write it after the state
+    /// report. `None` while it runs.
+    pub fn report(&self) -> Option<&str> {
+        self.ended.as_ref().map(|e| e.tail.as_str())
+    }
+
+    /// The run ends some other way than by its last step: the window closed ([`pace::Ending::Closed`]), or the app
+    /// quits after a `<Quit>` ([`pace::Ending::Quit`]). The app writes the [`pace::Ended::tail`], prints
+    /// [`pace::Ended::say`], and exits with [`FAILED_EXIT`] if [`pace::Ended::failed`]. Call it before writing anything,
+    /// so a stall report cannot land over it. `None` when the run has ended already.
+    ///
+    /// A close while a picture is out, or while a config write is unanswered, is a failure (and says so).
+    pub fn end(&mut self, how: pace::Ending) -> Option<pace::Ended> {
+        let writes = ito_common::writes::ledger().status();
+        let now = self.now();
+        self.end_at(how, now, Some(&writes))
+    }
+
+    pub(crate) fn end_at(&mut self, how: pace::Ending, now: Instant, writes: Option<&ito_common::writes::Status>) -> Option<pace::Ended> {
+        let got = match self.pace.end(how, now, writes) {
+            Some(e) => {
+                self.keep(e.clone(), true);
+                Some(e)
+            }
+            // A failure that has not gone out as a `Do` yet (a picture that could not be saved): the app writes it now.
+            None if !self.delivered => self.ended.clone().inspect(|_| self.delivered = true),
+            None => None,
+        };
+        self.note();
+        got
+    }
+
+    /// The run ends some other way than by its last step (the window closed while it ran).
+    ///
+    /// An app that has not moved to [`end`](Self::end) writes `closed_report(left)` itself, so a close during a picture
+    /// or a config write is still written as `keys: closed`. Moving to `end` is required to get those as failures.
+    #[deprecated(note = "use Runner::end(Ending::Closed)")]
     pub fn finish(&mut self) {
-        self.finished = true;
-        self.note(Instant::now());
+        let _ = self.end(pace::Ending::Closed);
+    }
+
+    fn keep(&mut self, e: pace::Ended, delivered: bool) {
+        self.shot = None;
+        self.ended = Some(e);
+        self.delivered = delivered;
     }
 
     /// For a run that writes the done file: a thread nudges the frame loop
@@ -2020,22 +2086,22 @@ impl Runner {
         if self.progress.is_some() {
             return;
         }
-        let labels = self.steps.iter().map(label).collect();
-        let now = Instant::now();
-        let progress = Progress { left: self.steps.len(), at: now, due: self.next.saturating_duration_since(now), finished: self.finished };
-        let progress = Arc::new(Mutex::new(progress));
+        let progress = Arc::new(Mutex::new(self.pace.progress()));
         self.progress = Some(progress.clone());
+        let labels = self.labels.clone();
         let _ = std::thread::Builder::new().name("keys-watch".into()).spawn(move || watch_progress(progress, labels, done, ctx));
+        self.note();
     }
 
     /// Tell the watch the script has moved.
-    fn note(&self, now: Instant) {
+    fn note(&self) {
         let Some(progress) = &self.progress else { return };
         if let Ok(mut p) = progress.lock() {
-            p.left = self.steps.len();
-            p.at = now;
-            p.due = self.next.saturating_duration_since(now);
-            p.finished = self.finished;
+            let q = self.pace.progress();
+            p.left = self.left();
+            p.at = q.at;
+            p.due = q.due;
+            p.finished = q.finished || !self.running();
         }
     }
 
@@ -2048,297 +2114,265 @@ impl Runner {
     /// [`input`](Self::input) for an app that reads something for `<ReadHas:>`: `reader` is asked in the frames that
     /// step takes and is not kept.
     pub fn input_with(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, reader: &mut dyn Reader) -> Option<Do> {
-        if self.finished || self.shot.is_some() {
-            return None;
-        }
         if self.reads_window {
             observe(ctx);
         }
-        let now = Instant::now();
-        let root_passes = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
-        if raw.viewport_id != egui::ViewportId::ROOT {
-            // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the
-            // input would land here.
-            if let Some(f) = self.flight.clone().filter(|f| f.events && root_passes == f.pass) {
-                self.finished = true;
-                self.note(now);
-                let why = format!("the input went to viewport {:?} while the main window was not drawn", raw.viewport_id);
-                return Some(Do::Failed { step: f.step, why });
-            }
-            return None;
-        }
-        if let Some(f) = self.flight.clone() {
-            if root_passes > f.pass {
-                self.flight = None;
-                self.action_gen = generation(ctx);
-                self.note(now);
-            } else if now.saturating_duration_since(f.at) >= DELIVER_WAIT {
-                self.finished = true;
-                self.note(now);
-                let why = "the input was not drawn within 10 s (the window may be hidden, minimized or covered)".to_owned();
-                return Some(Do::Failed { step: f.step, why });
-            } else {
-                return None;
-            }
-        }
-        if now < self.next {
-            return None;
-        }
-        if let Some(frame) = self.pointer.pop_front() {
-            raw.events.extend(frame);
-            // The step's first frame is the action: a copy made by the press still counts after the release.
-            if std::mem::take(&mut self.pointer_new) {
-                self.act(ctx, now);
-            }
-            self.next = now + FRAME;
-            self.fly(ctx, now, self.pointer_step.clone(), true);
-            self.note(now);
-            return None;
-        }
-        let Some(step) = self.steps.pop_front() else {
-            self.finished = true;
-            self.note(now);
-            return Some(Do::Done);
+        let now = self.now();
+        let writes = ito_common::writes::ledger().status();
+        // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the input
+        // would land in another viewport's frame, which Pace sees as one.
+        let viewport = (raw.viewport_id != egui::ViewportId::ROOT).then(|| format!("{:?}", raw.viewport_id));
+        let frame = pace::Frame {
+            pass: ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT),
+            now,
+            viewport: viewport.as_deref(),
+            settled: None,
+            writes: Some(&writes),
+            generation: generation(ctx),
         };
-        self.next = now + GAP;
-        let did = self.take(&step, ctx, raw, now, reader);
-        self.note(now);
+        let did = match self.decide(&frame) {
+            Decided::Hold => None,
+            Decided::Out(d) => Some(d),
+            Decided::Take(entry) => {
+                let (taken, out) = self.host(ctx, raw, reader, &entry);
+                self.act_rule(&entry, &taken, now, || mark(ctx));
+                self.answer(&frame, taken, out)
+            }
+        };
+        self.note();
         did
+    }
+
+    /// What Pace says for this frame.
+    fn decide(&mut self, f: &pace::Frame) -> Decided {
+        if let Some(e) = &self.ended {
+            if self.delivered {
+                return Decided::Hold;
+            }
+            self.delivered = true;
+            return Decided::Out(do_of(e));
+        }
+        if self.quitting {
+            return Decided::Hold;
+        }
+        match self.pace.next(f) {
+            pace::Next::Hold { wake } => {
+                if let Some(d) = wake {
+                    self.wake = Some(f.now + d);
+                }
+                Decided::Hold
+            }
+            pace::Next::Take(e) => Decided::Take(e),
+            pace::Next::End(e) => {
+                let out = do_of(&e);
+                self.keep(e, true);
+                Decided::Out(out)
+            }
+        }
+    }
+
+    /// The last action's first input goes in now: Pace notes the time, the runner the copies and announcements.
+    fn act_rule(&mut self, entry: &pace::Entry, taken: &pace::Taken, now: Instant, mark: impl FnOnce() -> Mark) {
+        if pace::conformance::acts_taken(entry, taken) && self.pace.act(now) {
+            self.since = Some(mark());
+        }
+    }
+
+    /// Tell Pace what was done with the step it handed out; the [`Do`] the app is to see.
+    fn answer(&mut self, f: &pace::Frame, taken: pace::Taken, out: Option<Do>) -> Option<Do> {
+        let quit = matches!(taken, pace::Taken::Quit);
+        let ended = self.pace.taken(f, taken);
+        self.wake = Some(f.now);
+        if let Some(e) = ended {
+            let out = do_of(&e);
+            self.keep(e, true);
+            return Some(out);
+        }
+        if quit {
+            self.quitting = true;
+            return Some(Do::Quit);
+        }
+        out
     }
 
     /// How long ago the last action's first input went in (`None` before the first action). Read it in the frame
     /// that got `Do::State` (when the state is taken), not later when a file is written.
     pub fn since_action(&self) -> Option<Duration> {
-        self.acted.map(|t| t.elapsed())
+        self.pace.since_action(self.now())
     }
 
-    /// The last action's first input goes in now: remember the copies and announcements, and the time.
-    fn act(&mut self, ctx: &egui::Context, now: Instant) {
-        self.since = Some(mark(ctx));
-        self.acted = Some(now);
-    }
-
-    /// An input has gone in (`events`: into the raw input): wait for the main window to draw it.
-    fn fly(&mut self, ctx: &egui::Context, now: Instant, step: String, events: bool) {
-        self.flight = Some(Flight { pass: ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT), at: now, step, events });
-    }
-
-    /// The window as a reading step may judge it: seen after the last input was drawn, in the main window,
-    /// and not minimized.
+    /// The window as a reading step may judge it: seen after the last input was drawn by the main window, and not
+    /// minimized.
     fn fresh(&self, ctx: &egui::Context) -> Result<Observation, String> {
-        match observation(ctx) {
-            Some(o) if o.generation > self.action_gen && o.viewport == egui::ViewportId::ROOT => {
-                if o.minimized == Some(true) {
-                    Err("the window is minimized".into())
-                } else {
-                    Ok(o)
-                }
-            }
-            _ => Err("the window's tree was not updated after the last action (the window may be hidden, minimized or covered)".into()),
+        let o = observation(ctx).ok_or_else(|| pace::fresh(0, 0, false, None).unwrap_err())?;
+        pace::fresh(o.generation, self.pace.action_gen(), o.viewport == egui::ViewportId::ROOT, o.minimized)?;
+        Ok(o)
+    }
+
+    /// The frames of a pointer step: the first goes in now, the rest follow as continuations.
+    fn pointer_input(raw: &mut egui::RawInput, mut frames: VecDeque<Vec<egui::Event>>) -> pace::Taken {
+        if let Some(first) = frames.pop_front() {
+            raw.events.extend(first);
+        }
+        let more = frames.into_iter().map(|f| pace::More::Then(Press::Events(f))).collect();
+        pace::Taken::Input { flight: true, more }
+    }
+
+    /// A look: found, it presses (frames of pointer events); not found, it looks again.
+    fn pressed(raw: &mut egui::RawInput, found: Result<VecDeque<Vec<egui::Event>>, String>) -> (pace::Taken, Option<Do>) {
+        match found {
+            Ok(frames) => (Self::pointer_input(raw, frames), None),
+            Err(why) => (pace::Taken::Again { why }, None),
         }
     }
 
-    /// One step into this frame's input.
-    fn take(&mut self, step: &Step, ctx: &egui::Context, raw: &mut egui::RawInput, now: Instant, reader: &mut dyn Reader) -> Option<Do> {
-        // A key no keyboard has is skipped, as `--keys` refuses it up front.
-        match press(step)? {
+    /// A check: it passed (`Done`) or looks again.
+    fn judged(r: Result<(), String>) -> (pace::Taken, Option<Do>) {
+        match r {
+            Ok(()) => (pace::Taken::Done, None),
+            Err(why) => (pace::Taken::Again { why }, None),
+        }
+    }
+
+    /// Carry out the step Pace handed out: egui input for the inputs, a look at the window for the checks.
+    fn host(
+        &mut self,
+        ctx: &egui::Context,
+        raw: &mut egui::RawInput,
+        reader: &mut dyn Reader,
+        entry: &pace::Entry,
+    ) -> (pace::Taken, Option<Do>) {
+        let input = || pace::Taken::Input { flight: true, more: Vec::new() };
+        match &entry.press {
             Press::Events(events) => {
-                raw.events.extend(events);
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), true);
+                raw.events.extend(events.iter().cloned());
+                (input(), None)
             }
-            Press::Wait(d) => self.next = now + d,
-            // This runner has no settling to skip. Its pacing (`GAP`) is unchanged, so a timed read here
-            // (`<Now><Wait:N>`) is about `GAP` later than N (ito#204 shares the pacing).
-            Press::Now => self.next = now,
-            Press::Shot(name) => self.shot = Some((name, false)),
-            Press::State(name) => return Some(Do::State(name)),
-            Press::Read { tag, name } => return Some(Do::Read { tag, name }),
-            Press::Quit => {
-                // The window closes; no later step is taken, nor a stall
-                // reported over the app's quit report.
-                self.finished = true;
-                return Some(Do::Quit);
+            Press::Paste => {
+                raw.events.push(egui::Event::Paste((self.clipboard)()));
+                (input(), None)
+            }
+            Press::PasteText(text) => {
+                raw.events.push(paste_text_event(text));
+                (input(), None)
+            }
+            p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
+                let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
+                (Self::pointer_input(raw, pointer_frames(p, rect)), None)
             }
             Press::Size { w, h } => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(f32::from(*w), f32::from(*h))));
                 // The window lays out again at the new size before the next step.
-                self.next = now + SETTLE;
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), false);
+                (pace::Taken::Changed { more: vec![pace::More::Step(Press::Wait(SETTLE))] }, None)
             }
             Press::Theme(name) => {
                 self.info.theme = name.clone();
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), false);
-                return Some(Do::Theme(name));
+                (pace::Taken::Changed { more: Vec::new() }, Some(Do::Theme(name.clone())))
             }
             Press::Lang(code) => {
                 self.info.lang = code.clone();
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), false);
-                return Some(Do::Lang(code));
+                (pace::Taken::Changed { more: Vec::new() }, Some(Do::Lang(code.clone())))
             }
-            Press::ClickText { right, text } => match self.fresh(ctx).and_then(|o| locate_in(&o.items, &text)) {
-                Ok(pos) => {
-                    self.deadline = None;
-                    self.pointer = click_frames(pos, right);
-                    self.pointer_step = label(step);
-                    self.pointer_new = true;
-                    self.next = now;
-                }
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::DClickText(text) => match self.fresh(ctx).and_then(|o| locate_in(&o.items, &text)) {
-                Ok(pos) => {
-                    self.deadline = None;
-                    self.pointer = dclick_frames(pos);
-                    self.pointer_step = label(step);
-                    self.pointer_new = true;
-                    self.next = now;
-                }
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::Assert { text, present } => match self.fresh(ctx).and_then(|o| check_in(&o.items, &text, present)) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::Clipboard(text) => match check_clipboard_after(ctx, self.since.unwrap_or_default(), &text) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::ClipboardHas(text) => match check_clipboard_has_after(ctx, self.since.unwrap_or_default(), &text) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::Is { prop, text } => match self.fresh(ctx).and_then(|o| check_is_in(&o.items, prop, &text)) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::Announced(text) => match self.since.map_or_else(|| check_announced(&text), |m| check_announced_after(m, &text)) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::ClickId(name) => match self.fresh(ctx).and_then(|o| match o.id(&name)? {
-                Some(node) => node.click_at.clone(),
-                None => Err(format!("no widget has the test ID `{name}`")),
-            }) {
-                Ok(pos) => {
-                    self.deadline = None;
-                    self.pointer = click_frames(pos, false);
-                    self.pointer_step = label(step);
-                    self.pointer_new = true;
-                    self.next = now;
-                }
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::IdCheck(check) => match self.fresh(ctx).and_then(|o| check.check(&o)) {
-                Ok(()) => self.deadline = None,
-                Err(why) => return self.retry(step, why, now),
-            },
-            Press::ReadHas { tag, text } => return self.read_has(step, &tag, &text, now, ctx, reader),
+            Press::ClickText { right, text } => {
+                let found = self.fresh(ctx).and_then(|o| locate_in(&o.items, text)).map(|pos| click_frames(pos, *right));
+                Self::pressed(raw, found)
+            }
+            Press::DClickText(text) => {
+                let found = self.fresh(ctx).and_then(|o| locate_in(&o.items, text)).map(dclick_frames);
+                Self::pressed(raw, found)
+            }
+            Press::ClickId(name) => {
+                let found = self
+                    .fresh(ctx)
+                    .and_then(|o| match o.id(name)? {
+                        Some(node) => node.click_at.clone(),
+                        None => Err(format!("no widget has the test ID `{name}`")),
+                    })
+                    .map(|pos| click_frames(pos, false));
+                Self::pressed(raw, found)
+            }
             Press::Tree(name) => {
                 let obs = match self.fresh(ctx) {
                     Ok(o) if o.tree.is_empty() => Err("the window's tree was empty".to_owned()),
                     other => other,
                 };
-                let obs = match obs {
-                    Ok(o) => o,
-                    Err(why) => return self.retry(step, why, now),
-                };
-                self.deadline = None;
-                let path = self.dir.join(format!("{name}.txt"));
-                if let Err(e) = std::fs::write(&path, tree_file(&obs.tree)) {
-                    self.finished = true;
-                    return Some(Do::Failed { step: label(step), why: format!("cannot write {}: {e}", path.display()) });
-                }
-            }
-            Press::Paste => {
-                raw.events.push(egui::Event::Paste((self.clipboard)()));
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), true);
-            }
-            Press::PasteText(text) => {
-                raw.events.push(paste_text_event(&text));
-                self.act(ctx, now);
-                self.fly(ctx, now, label(step), true);
-            }
-            p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
-                let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
-                self.pointer = pointer_frames(&p, rect);
-                self.pointer_step = label(step);
-                self.pointer_new = true;
-                self.next = now;
-            }
-        }
-        None
-    }
-
-    /// `<ReadHas:>`: read, and wait up to [`READ_WAIT`] for the text. Not an operation: no input goes in, so nothing
-    /// is in flight and the observation generation stays.
-    fn read_has(&mut self, step: &Step, tag: &str, text: &str, now: Instant, ctx: &egui::Context, reader: &mut dyn Reader) -> Option<Do> {
-        let read = reader.read(tag);
-        let fail = |this: &mut Self, why: String| {
-            this.deadline = None;
-            this.last_read = None;
-            this.finished = true;
-            Some(Do::Failed { step: label(step), why })
-        };
-        match read {
-            Err(e) => return fail(self, e),
-            Ok(Some(t)) if t.contains(text) => {
-                self.deadline = None;
-                self.last_read = None;
-                return None;
-            }
-            Ok(Some(t)) => self.last_read = Some(t),
-            Ok(None) => self.last_read = None,
-        }
-        let deadline = *self.deadline.get_or_insert(now + READ_WAIT);
-        if now >= deadline {
-            let why = match &self.last_read {
-                Some(t) => {
-                    let n = t.chars().count();
-                    if n > 200 {
-                        format!("\u{2026}{}", t.chars().skip(n - 200).collect::<String>())
-                    } else {
-                        t.clone()
+                match obs {
+                    Err(why) => (pace::Taken::Again { why }, None),
+                    Ok(o) => {
+                        let path = self.dir.join(format!("{name}.txt"));
+                        match std::fs::write(&path, tree_file(&o.tree)) {
+                            Ok(()) => (pace::Taken::Done, None),
+                            Err(e) => (pace::Taken::Failed(format!("cannot write {}: {e}", path.display())), None),
+                        }
                     }
                 }
-                None => "nothing to read (no pane)".to_owned(),
-            };
-            return fail(self, why);
+            }
+            Press::Assert { text, present } => Self::judged(self.fresh(ctx).and_then(|o| check_in(&o.items, text, *present))),
+            Press::Is { prop, text } => Self::judged(self.fresh(ctx).and_then(|o| check_is_in(&o.items, *prop, text))),
+            Press::IdCheck(check) => Self::judged(self.fresh(ctx).and_then(|o| check.check(&o))),
+            Press::Clipboard(text) => Self::judged(check_clipboard_after(ctx, self.since.unwrap_or_default(), text)),
+            Press::ClipboardHas(text) => Self::judged(check_clipboard_has_after(ctx, self.since.unwrap_or_default(), text)),
+            Press::Announced(text) => Self::judged(self.since.map_or_else(|| check_announced(text), |m| check_announced_after(m, text))),
+            Press::ReadHas { tag, text } => (self.read_has(tag, text, reader), None),
+            Press::State(name) => (pace::Taken::Done, Some(Do::State(name.clone()))),
+            Press::Read { tag, name } => (pace::Taken::Done, Some(Do::Read { tag: tag.clone(), name: name.clone() })),
+            Press::Shot(name) => {
+                self.shot = Some((name.clone(), false));
+                (pace::Taken::Shot { path: self.dir.join(format!("{name}.png")).to_string_lossy().into_owned() }, None)
+            }
+            Press::Quit => (pace::Taken::Quit, None),
+            Press::Wait(_) | Press::Now => {
+                debug_assert!(false, "Pace spends waits itself");
+                (pace::Taken::Done, None)
+            }
         }
-        self.steps.push_front(step.clone());
-        self.next = now + FRAME;
-        ctx.request_repaint();
-        None
     }
 
-    /// A step that reads the window did not find what it looked for: look again next frame, until
-    /// [`TEXT_WAIT`] has passed, then fail the run.
-    fn retry(&mut self, step: &Step, why: String, now: Instant) -> Option<Do> {
-        let deadline = *self.deadline.get_or_insert(now + TEXT_WAIT);
-        if now >= deadline {
-            self.deadline = None;
-            self.finished = true;
-            return Some(Do::Failed { step: label(step), why });
+    /// `<ReadHas:>`: read, and wait (Pace counts [`READ_WAIT`]) for the text. Not an operation: no input goes in, so
+    /// nothing is in flight and the observation generation stays.
+    fn read_has(&mut self, tag: &str, text: &str, reader: &mut dyn Reader) -> pace::Taken {
+        match reader.read(tag) {
+            Err(e) => {
+                self.last_read = None;
+                pace::Taken::Failed(e)
+            }
+            Ok(Some(t)) if t.contains(text) => {
+                self.last_read = None;
+                pace::Taken::Done
+            }
+            Ok(read) => {
+                let why = match &read {
+                    Some(t) => {
+                        let n = t.chars().count();
+                        if n > 200 {
+                            format!("\u{2026}{}", t.chars().skip(n - 200).collect::<String>())
+                        } else {
+                            t.clone()
+                        }
+                    }
+                    None => "nothing to read (no pane)".to_owned(),
+                };
+                self.last_read = read;
+                pace::Taken::Again { why }
+            }
         }
-        self.steps.push_front(step.clone());
-        self.next = now + FRAME;
-        None
     }
 
-    /// When the next frame is wanted for the script: a repaint asked for in
-    /// `raw_input_hook` is forgotten when the frame begins, so the frame asks. While an input waits to be drawn, no
-    /// sooner than [`FRAME`], so a window that is not drawn is not asked for frames back to back.
+    /// When the next frame is wanted for the script: a repaint asked for in `raw_input_hook` is forgotten when the
+    /// frame begins, so the frame asks. Never sooner than [`FRAME`], so a window that is not drawn is not asked for
+    /// frames back to back. `None` once the run has ended and the end has gone out.
     pub fn due(&self) -> Option<Duration> {
-        match () {
-            _ if self.finished => None,
-            _ if self.shot.is_some() => Some(Duration::ZERO),
-            _ if self.flight.is_some() => Some(self.next.saturating_duration_since(Instant::now()).max(FRAME)),
-            _ => Some(self.next.saturating_duration_since(Instant::now())),
+        if !self.running() {
+            return None;
         }
+        if self.ended.is_some() {
+            return Some(Duration::ZERO);
+        }
+        let mut d = self.wake.map_or(FRAME, |w| w.saturating_duration_since(self.now()));
+        if let Some(p) = self.pace.due() {
+            d = d.min(p);
+        }
+        Some(d.max(FRAME))
     }
 
     /// `<Shot:name>`, once per frame: ask for the picture, then save it when
@@ -2359,26 +2393,51 @@ impl Runner {
                 }
                 _ => None,
             })
-        });
-        let image = image?;
-        self.shot = None;
-        let now = Instant::now();
-        self.next = now + GAP;
-        self.note(now);
-        let path = self.dir.join(format!("{name}.png"));
-        if let Err(e) = save_png(&path, &image) {
-            return Some(format!("Shot {name}: {e}"));
-        }
+        })?;
         let screen = ctx.content_rect().size();
+        let saved = self.save_shot(&name, &image, screen, ctx.pixels_per_point());
+        let now = self.now();
+        self.shot_result(&name, saved, now)
+    }
+
+    /// The picture and its `<name>.json`.
+    pub(crate) fn save_shot(&self, name: &str, image: &egui::ColorImage, screen: egui::Vec2, pixels_per_point: f32) -> Result<(), String> {
+        save_png(&self.dir.join(format!("{name}.png")), image)?;
         let meta = review::Meta {
-            name: name.clone(),
+            name: name.to_owned(),
             size: [screen.x, screen.y],
             rect: [0.0, 0.0, screen.x, screen.y],
             time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
-            pixels_per_point: ctx.pixels_per_point(),
+            pixels_per_point,
             ..self.info.clone()
         };
-        std::fs::write(self.dir.join(format!("{name}.json")), meta.to_json()).err().map(|e| format!("Shot {name}: {e}"))
+        std::fs::write(self.dir.join(format!("{name}.json")), meta.to_json()).map_err(|e| e.to_string())
+    }
+
+    /// The picture was saved or could not be: tell Pace. A failure ends the run (its [`Do::Failed`] goes out at the
+    /// next [`input`](Self::input)) and is returned for a toast as well.
+    pub(crate) fn shot_result(&mut self, name: &str, saved: Result<(), String>, now: Instant) -> Option<String> {
+        self.shot = None;
+        self.wake = Some(now);
+        let toast = match saved {
+            Ok(()) => {
+                self.pace.shot_saved(now);
+                None
+            }
+            Err(e) => {
+                self.shot_failed(format!("cannot save the picture of <Shot:{name}>: {e}"));
+                Some(format!("Shot {name}: {e}"))
+            }
+        };
+        self.note();
+        toast
+    }
+
+    /// Pace fails the run for `why`; the [`Do::Failed`] goes out at the next input.
+    pub(crate) fn shot_failed(&mut self, why: String) {
+        if let Some(ended) = self.pace.shot_failed(why) {
+            self.keep(ended, false);
+        }
     }
 }
 
@@ -2856,17 +2915,21 @@ mod tests {
         let mut r = Runner::new(parse("j<Quit>kl").unwrap(), None);
         // The main window draws a pass after each input, as a real frame loop does.
         let step = |r: &mut Runner| {
-            r.next = Instant::now();
-            let did = r.input(&ctx, &mut egui::RawInput::default());
-            ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
-            did
+            for _ in 0..50 {
+                hurry(r);
+                let did = r.input(&ctx, &mut egui::RawInput::default());
+                ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
+                if did.is_some() {
+                    return did;
+                }
+            }
+            None
         };
         assert_eq!((r.left(), r.running()), (4, true));
-        assert_eq!(step(&mut r), None);
         assert_eq!(step(&mut r), Some(Do::Quit));
         assert_eq!((r.left(), r.running(), step(&mut r)), (2, false, None));
         let mut r = Runner::new(parse("j").unwrap(), None);
-        assert_eq!((step(&mut r), step(&mut r), r.running()), (None, Some(Do::Done), false));
+        assert_eq!((step(&mut r), r.running()), (Some(Do::Done), false));
     }
 
     #[test]
@@ -2919,7 +2982,7 @@ mod tests {
         let mut r = Runner::new(parse("<Assert:Save><Click:Save><Assert:Saved!><Assert:!Nope><Clipboard:copied>").unwrap(), None);
         let mut out = None;
         for _ in 0..200 {
-            r.next = Instant::now();
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             if let Some(d) = r.input(&ctx, &mut raw) {
                 out = Some(d);
@@ -2933,15 +2996,15 @@ mod tests {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse("<Assert:Missing>").unwrap(), None);
         let mut out = None;
-        for _ in 0..4 {
-            r.next = Instant::now();
+        for _ in 0..40 {
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             if let Some(d) = r.input(&ctx, &mut raw) {
                 out = Some(d);
                 break;
             }
             pass(&ctx, raw, &mut false);
-            r.deadline = Some(Instant::now());
+            expire(&mut r);
         }
         match out {
             Some(Do::Failed { step, why }) => {
@@ -2953,19 +3016,29 @@ mod tests {
         assert!(failed_report("<Assert:x>", "a\nb", 2).starts_with("keys: failed\nstep: <Assert:x>\nwhy: a / b\n"));
     }
 
+    /// Move the runner's clock on a little each frame, as a real window's frames take time.
+    fn hurry(r: &mut Runner) {
+        r.skip(Duration::from_millis(80));
+    }
+
+    /// Make a check that has begun to look count as out of time.
+    fn expire(r: &mut Runner) {
+        r.skip(TEXT_WAIT + Duration::from_millis(100));
+    }
+
     /// Plays `script` against `app` (called once per pass with the pass number). `quick`: a failing step fails at once.
     fn drive(script: &str, quick: bool, mut app: impl FnMut(&mut egui::Ui, usize)) -> Option<Do> {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse(script).unwrap(), None);
         for i in 0..400 {
-            r.next = Instant::now();
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             if let Some(d) = r.input(&ctx, &mut raw) {
                 return Some(d);
             }
             ctx.run_ui(raw, |ui| app(ui, i)).drop_without_applying_deltas();
             if quick {
-                r.deadline = Some(Instant::now());
+                expire(&mut r);
             }
         }
         None
@@ -2989,7 +3062,7 @@ mod tests {
         let mut r = Runner::new(parse("y<State:s><Clipboard:x>").unwrap(), None);
         let mut out = None;
         for _ in 0..100 {
-            r.next = Instant::now();
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             match r.input(&ctx, &mut raw) {
                 Some(Do::State(_)) => states += 1,
@@ -3008,7 +3081,7 @@ mod tests {
     fn play(script: &str, mut trace: impl FnMut(&Runner, &Option<Do>)) {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse(script).unwrap(), None);
-        r.next = Instant::now();
+        r.skip(Duration::from_millis(600));
         let end = Instant::now() + Duration::from_secs(20);
         while Instant::now() < end {
             let mut raw = egui::RawInput::default();
@@ -3033,13 +3106,13 @@ mod tests {
     #[test]
     fn since_action_starts_at_the_first_action_and_only_actions_move_it() {
         let mut trail = Vec::new();
-        play("<State:a>x<Now><Wait:10><State:b>", |r, did| trail.push((state_of(did), r.acted)));
+        play("<State:a>x<Now><Wait:10><State:b>", |r, did| trail.push((state_of(did), r.since_action().is_some())));
         let first = trail.iter().position(|(d, _)| d.as_deref() == Some("a")).unwrap();
-        assert_eq!(trail[first].1, None, "no action before the first state");
-        assert!(trail.iter().take(first + 1).all(|(_, a)| a.is_none()));
-        let acted = trail.last().unwrap().1.expect("the key is an action");
-        let set_at = trail.iter().position(|(_, a)| a.is_some()).unwrap();
-        assert!(trail[set_at..].iter().all(|(_, a)| *a == Some(acted)), "a wait, state or <Now> never moves it");
+        assert!(!trail[first].1, "no action before the first state");
+        assert!(trail.iter().take(first + 1).all(|(_, a)| !*a));
+        assert!(trail.last().unwrap().1, "the key is an action");
+        let set_at = trail.iter().position(|(_, a)| *a).unwrap();
+        assert!(trail[set_at..].iter().all(|(_, a)| *a), "a wait, state or <Now> never clears it");
         let b = trail.iter().position(|(d, _)| d.as_deref() == Some("b")).unwrap();
         assert!(b > set_at);
     }
@@ -3048,12 +3121,15 @@ mod tests {
     fn a_pointer_step_marks_the_time_at_its_first_frame_only() {
         for script in ["<Click:0.5,0.5>", "<Drag:0.1,0.1-0.9,0.9>"] {
             let mut trail = Vec::new();
-            play(script, |r, did| trail.push((state_of(did), r.acted, r.pointer.len())));
-            let first = trail.iter().position(|(_, a, _)| a.is_some()).expect(script);
-            let acted = trail[first].1;
-            // The first frame has gone in; frames of the same step are still to come.
-            assert!(trail[first].2 > 0, "{script}: the step has later frames");
-            assert!(trail[first..].iter().all(|(_, a, _)| *a == acted), "{script}");
+            play(script, |r, _| trail.push(r.since_action()));
+            let first = trail.iter().position(|a| a.is_some()).expect(script);
+            // The mark is the first frame's: later frames of the step never move it back to zero.
+            let mut last = Duration::ZERO;
+            for a in &trail[first..] {
+                let a = a.expect(script);
+                assert!(a >= last, "{script}: {a:?} < {last:?}");
+                last = a;
+            }
         }
     }
 
@@ -3061,7 +3137,7 @@ mod tests {
     fn a_timed_read_waits_its_time_between_the_two_readings() {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse("x<Now><State:a><Now><Wait:150><State:b>").unwrap(), None);
-        r.next = Instant::now();
+        r.skip(Duration::from_millis(600));
         let (mut at_a, mut at_b, mut seen_due) = (None, None, false);
         let mut order = Vec::new();
         let end = Instant::now() + Duration::from_secs(20);
@@ -3080,15 +3156,15 @@ mod tests {
                 Some(d) => panic!("{d:?}"),
                 None => {}
             }
-            // The Wait step gave the watchdog its due: `note` reports `next`.
-            if at_a.is_some() && r.next > Instant::now() + Duration::from_millis(100) {
+            // The Wait step gave the frame loop its due.
+            if at_a.is_some() && r.due().is_some_and(|d| d > Duration::from_millis(60)) {
                 seen_due = true;
             }
             ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(order, ["a", "b"]);
-        assert!(seen_due, "next is about 150 ms ahead after the wait");
+        assert!(seen_due, "due is ahead after the wait");
         assert!(at_b.unwrap() - at_a.unwrap() >= Duration::from_millis(150));
     }
 
@@ -3295,7 +3371,7 @@ mod tests {
         let mut r = Runner::new(steps, Some(dir.join("done")));
         let mut out = None;
         for i in 0..400 {
-            r.next = Instant::now();
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             if let Some(d) = r.input(&ctx, &mut raw) {
                 out = Some(d);
@@ -3327,8 +3403,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse("<Checked:Beep>").unwrap(), None);
         let mut out = None;
-        for _ in 0..4 {
-            r.next = Instant::now();
+        for _ in 0..40 {
+            hurry(&mut r);
             let mut raw = egui::RawInput::default();
             if let Some(d) = r.input(&ctx, &mut raw) {
                 out = Some(d);
@@ -3338,7 +3414,7 @@ mod tests {
                 ui.checkbox(&mut false, "Beep");
             })
             .drop_without_applying_deltas();
-            r.deadline = Some(Instant::now());
+            expire(&mut r);
         }
         match out {
             Some(Do::Failed { step, why }) => {
@@ -3360,8 +3436,18 @@ mod tests {
             let done = dir.join(name);
             let mut r = Runner::new(parse("j<Wait:2000>k").unwrap(), Some(done.clone()));
             r.watch(egui::Context::default());
-            r.steps.drain(..2);
-            r.note(Instant::now());
+            // Press `j` and go into the wait.
+            let ctx = egui::Context::default();
+            for _ in 0..200 {
+                hurry(&mut r);
+                let mut raw = egui::RawInput::default();
+                assert_eq!(r.input(&ctx, &mut raw), None);
+                ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+                if r.left() == 1 {
+                    break;
+                }
+            }
+            assert_eq!(r.left(), 1);
             {
                 let mut p = r.progress.as_ref().unwrap().lock().unwrap();
                 p.at = Instant::now().checked_sub(STALL + Duration::from_secs(5)).unwrap();
@@ -3372,7 +3458,7 @@ mod tests {
             while Instant::now() < until && !(due.is_zero() && done.exists()) {
                 std::thread::sleep(Duration::from_millis(50));
             }
-            r.finish();
+            let _ = r.end(pace::Ending::Closed);
             std::fs::read_to_string(done).ok()
         };
         let said = watched(Duration::ZERO, "stuck.done").expect("a report");
@@ -3391,17 +3477,27 @@ mod tests {
     /// `logic_only` runs no pass and puts the prepared input back.
     struct Frames {
         pending: egui::RawInput,
+        primed: bool,
     }
 
     impl Frames {
         fn new() -> Self {
-            Self { pending: egui::RawInput::default() }
+            Self { pending: egui::RawInput::default(), primed: false }
         }
 
         fn prepare(&mut self, r: &mut Runner, ctx: &egui::Context, new: egui::RawInput) -> (egui::RawInput, Option<Do>) {
             let mut raw = std::mem::take(&mut self.pending);
             raw.append(new);
-            r.next = Instant::now();
+            // The first wait is over before the first frame; a frame later takes a little time.
+            if std::mem::replace(&mut self.primed, true) {
+                r.skip(Duration::from_millis(80));
+            } else {
+                // A real window has drawn a few passes by then.
+                for _ in 0..2 {
+                    draw(ctx, egui::RawInput::default(), |_| {});
+                }
+                r.skip(Duration::from_millis(600));
+            }
             let did = r.input(ctx, &mut raw);
             (raw, did)
         }
@@ -3453,7 +3549,12 @@ mod tests {
         assert_eq!(seen, 1, "the pass saw `a` exactly once");
         // The hook after the delivering pass delivers, and only then puts `b` in.
         let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
-        assert_eq!((did, texts_in(&raw, "a"), texts_in(&raw, "b"), r.left()), (None, 0, 1, 0));
+        assert_eq!((did, texts_in(&raw, "a"), texts_in(&raw, "b"), r.left()), (None, 0, 0, 1), "`b` waits two passes");
+        for _ in 0..2 {
+            draw(&ctx, raw.clone(), |_| {});
+        }
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!((did, texts_in(&raw, "b"), r.left()), (None, 1, 0));
     }
 
     /// eframe gives what is left over to the next window; the runner puts nothing into a child hook, and fails the
@@ -3503,10 +3604,9 @@ mod tests {
         assert_eq!(did, None);
         f.logic_only(raw);
         // Waiting for the draw asks for frames no faster than `FRAME`.
-        r.next = Instant::now();
+        assert!(r.pace.in_flight());
         assert_eq!(r.due(), Some(FRAME));
-        let flight = r.flight.as_mut().expect("in flight");
-        flight.at = flight.at.checked_sub(DELIVER_WAIT).unwrap();
+        r.skip(DELIVER_WAIT);
         let (_, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
         match did {
             Some(Do::Failed { why, .. }) => assert!(why.contains("not drawn within"), "{why}"),
@@ -3518,7 +3618,7 @@ mod tests {
     /// The pass that draws the input is not the window the next reading step may judge.
     #[test]
     fn the_delivering_pass_does_not_count_for_a_reading_step() {
-        let run = |script: &str, expire: bool| {
+        let run = |script: &str, expiring: bool| {
             let ctx = egui::Context::default();
             let mut r = Runner::new(parse(script).unwrap(), None);
             let mut f = Frames::new();
@@ -3537,8 +3637,8 @@ mod tests {
                         ui.label("Kept");
                     }
                 });
-                if expire && i >= 6 {
-                    r.deadline = Some(Instant::now());
+                if expiring && i >= 6 {
+                    expire(&mut r);
                 }
             }
             None
@@ -3593,28 +3693,12 @@ mod tests {
     /// A reading step with no newer observation, or in a minimized window, retries and then says why.
     #[test]
     fn a_reading_step_says_why_it_could_not_judge() {
-        let ctx = egui::Context::default();
-        let mut r = Runner::new(parse("j<Assert:Kept>").unwrap(), None);
-        let mut f = Frames::new();
-        let mut out = None;
-        for _ in 0..10 {
-            let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
-            if did.is_some() {
-                out = did;
-                break;
-            }
-            // Only the pass that draws the key happens; the delivery is then confirmed but no newer tree comes.
-            if r.flight.is_some() {
-                draw(&ctx, raw, |ui| {
-                    ui.label("Kept");
-                });
-            }
-            r.deadline = Some(Instant::now());
-        }
-        match out {
-            Some(Do::Failed { why, .. }) => assert!(why.contains("not updated after the last action"), "{why}"),
-            other => panic!("{other:?}"),
-        }
+        // A tree no newer than the last action cannot be judged; the runner also says so with no tree at all.
+        let why = pace::fresh(3, 3, true, None).unwrap_err();
+        assert!(why.contains("not updated after the last action"), "{why}");
+        let r = Runner::new(parse("j<Assert:Kept>").unwrap(), None);
+        let Err(why) = r.fresh(&egui::Context::default()) else { panic!("no tree yet") };
+        assert!(why.contains("not updated after the last action"), "{why}");
 
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse("<Assert:Kept>").unwrap(), None);
@@ -3630,7 +3714,7 @@ mod tests {
             draw(&ctx, raw, |ui| {
                 ui.label("Kept");
             });
-            r.deadline = Some(Instant::now());
+            expire(&mut r);
         }
         match out {
             Some(Do::Failed { why, .. }) => assert!(why.contains("minimized"), "{why}"),
@@ -3904,9 +3988,7 @@ mod tests {
             draw(&ctx, raw, |ui| {
                 ui.label("nothing");
             });
-            if r.deadline.is_some() {
-                r.deadline = Some(Instant::now());
-            }
+            expire(&mut r);
         }
         match out {
             Some(Do::Failed { why, .. }) => assert!(why.contains("no widget has the test ID `missing`"), "{why}"),
@@ -3935,14 +4017,15 @@ mod tests {
         let mut out = None;
         for i in 0..40 {
             let mut raw = egui::RawInput::default();
-            r.next = Instant::now();
+            hurry(&mut r);
             let did = r.input_with(&ctx, &mut raw, &mut reader);
             if did.is_some() {
                 out = did;
                 break;
             }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
             if expire_at.is_some_and(|k| i >= k) {
-                r.deadline = Some(Instant::now());
+                r.skip(READ_WAIT + Duration::from_secs(1));
             }
         }
         (out, r)
@@ -3952,8 +4035,8 @@ mod tests {
     fn read_has_waits_for_the_text() {
         let (out, r) = read_run(vec![Ok(None), Ok(None), Ok(Some("all ok here".into()))], None);
         assert_eq!(out, Some(Do::Done));
-        assert_eq!(r.action_gen, 0, "reading is not an operation");
-        assert!(r.flight.is_none());
+        assert_eq!(r.pace.action_gen(), 0, "reading is not an operation");
+        assert!(!r.pace.in_flight());
 
         let (out, _) = read_run(vec![Err("gone".into())], None);
         assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why == "gone"), "{out:?}");
@@ -3976,9 +4059,360 @@ mod tests {
     fn input_without_a_reader_fails_a_read_has() {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse_with("<ReadHas:PaneText=ok>", &PANE).unwrap(), None);
-        let mut raw = egui::RawInput::default();
-        r.next = Instant::now();
-        let out = r.input(&ctx, &mut raw);
+        let mut out = None;
+        for _ in 0..40 {
+            let mut raw = egui::RawInput::default();
+            hurry(&mut r);
+            out = r.input(&ctx, &mut raw);
+            if out.is_some() {
+                break;
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
         assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why == "this app does not read PaneText"), "{out:?}");
+    }
+
+    /// The Runner as a subject of the shared table: Pace's own table, run through the Runner's glue.
+    struct RunnerSubject;
+
+    impl pace::conformance::Subject for RunnerSubject {
+        fn run(&mut self, case: &pace::conformance::Case) -> pace::conformance::Trace {
+            use pace::conformance::{ShotEvent, Trace};
+            let base = Instant::now();
+            let at = |ms: u64| base + Duration::from_millis(ms);
+            let steps = parse_with(case.script, &pace::conformance::dialect()).unwrap_or_else(|e| panic!("{}: {e}", case.name));
+            let mut r = Runner::with_pace(case.config.clone(), steps, base);
+            let mut tr = Trace::default();
+            let mut end_ms = None;
+            for tick in &case.ticks {
+                let now = at(tick.ms);
+                match &tick.shot {
+                    Some(ShotEvent::Saved) => {
+                        r.shot_result("s", Ok(()), now);
+                    }
+                    Some(ShotEvent::Failed(why)) => {
+                        r.shot_failed((*why).to_owned());
+                        if r.ended.is_some() {
+                            // The app would get the failure as a `Do` at its next input; the table ends here.
+                            r.delivered = true;
+                            end_ms = Some(tick.ms);
+                            break;
+                        }
+                    }
+                    None => {}
+                }
+                let status = tick.writes.as_ref().map(|w| w.status(base));
+                let frame = pace::Frame {
+                    pass: tick.pass,
+                    now,
+                    viewport: tick.viewport,
+                    settled: tick.settled,
+                    writes: status.as_ref(),
+                    generation: tick.generation,
+                };
+                match r.decide(&frame) {
+                    Decided::Hold => {}
+                    Decided::Out(_) => {
+                        end_ms = Some(tick.ms);
+                        break;
+                    }
+                    Decided::Take(entry) => {
+                        tr.takes.push((entry.idx, tick.ms, entry.kind == pace::Kind::Then));
+                        let taken = tick.answer.clone().unwrap_or_else(|| pace::conformance::Answer::default_for(&entry)).taken();
+                        let mut marked = false;
+                        r.act_rule(&entry, &taken, now, || {
+                            marked = true;
+                            Mark::default()
+                        });
+                        if marked {
+                            tr.marks.push((entry.idx, tick.ms));
+                        }
+                        r.answer(&frame, taken, None);
+                        if r.ended.is_some() {
+                            end_ms = Some(tick.ms);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some((ms, how)) = case.end {
+                let closed = r.end_at(how, at(ms), None);
+                if end_ms.is_none() && closed.is_some() {
+                    end_ms = Some(ms);
+                }
+                if end_ms.is_some()
+                    && closed.is_some()
+                    && r.ended.as_ref().is_some_and(|e| Some(e.tail.as_str()) != closed.as_ref().map(|c| c.tail.as_str()))
+                {
+                    tr.why = Some("end returned a different Ended".to_owned());
+                }
+                if r.end_at(how, at(ms), None).is_some() {
+                    tr.why = Some("a second end returned Some".to_owned());
+                }
+            }
+            if let Some(e) = &r.ended {
+                tr.tail = Some(e.tail.clone());
+                if let pace::How::Failed { why, .. } = &e.how {
+                    tr.why = Some(why.clone());
+                }
+                tr.ended_left = Some(e.left);
+            }
+            tr.failed = r.pace.failed();
+            tr.left = r.pace.left();
+            tr.unsettled = r.pace.unsettled().to_vec();
+            tr.end_ms = end_ms;
+            tr.action_gen = r.pace.action_gen();
+            tr
+        }
+    }
+
+    #[test]
+    fn the_runner_meets_the_conformance_table() {
+        let mut subject = RunnerSubject;
+        assert!(pace::conformance::Subject::skips(&subject).is_empty());
+        pace::conformance::check(&mut subject, &pace::conformance::cases()).unwrap();
+    }
+
+    /// Plays `script` with a clock that moves `step` per frame. Returns the runner, the `Do`s in order with the skew they came at,
+    /// and the skew at which each `Text` event went in.
+    #[allow(clippy::type_complexity)]
+    fn play_with(
+        script: &str,
+        step: Duration,
+        frames: usize,
+        mut app: impl FnMut(&mut egui::Ui, usize),
+    ) -> (Runner, Vec<(Do, Duration)>, Vec<(String, Duration)>) {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse(script).unwrap(), None);
+        let (mut dos, mut typed_at) = (Vec::new(), Vec::new());
+        for i in 0..frames {
+            r.skip(step);
+            let mut raw = egui::RawInput::default();
+            let d = r.input(&ctx, &mut raw);
+            for e in &raw.events {
+                if let egui::Event::Text(t) = e {
+                    typed_at.push((t.clone(), r.skew));
+                }
+            }
+            if let Some(d) = d {
+                let end = !matches!(d, Do::State(_) | Do::Theme(_) | Do::Lang(_) | Do::Read { .. });
+                dos.push((d, r.skew));
+                if end {
+                    break;
+                }
+            }
+            ctx.run_ui(raw, |ui| app(ui, i)).drop_without_applying_deltas();
+        }
+        (r, dos, typed_at)
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn due_is_the_first_wait_then_never_none_until_the_end_has_gone_out() {
+        let r = Runner::new(parse("a").unwrap(), None);
+        let d = r.due().unwrap();
+        assert!(d > ms(300) && d <= ms(500), "{d:?}");
+
+        // In a Wait the runner still asks for frames.
+        let (r, dos, _) = play_with("a<Wait:60000>b", ms(80), 40, |_, _| {});
+        assert!(dos.is_empty());
+        assert!(r.running() && r.due().is_some());
+
+        // Done: nothing more to ask for.
+        let (r, dos, _) = play_with("a", ms(80), 40, |_, _| {});
+        assert_eq!(dos.first().map(|d| &d.0), Some(&Do::Done));
+        assert!(!r.running());
+        assert_eq!(r.due(), None);
+    }
+
+    #[test]
+    fn a_picture_out_keeps_asking_for_frames_and_a_failure_asks_at_once() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Shot:s>").unwrap(), None);
+        for _ in 0..30 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            assert_eq!(r.input(&ctx, &mut raw), None);
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+            if r.shot.is_some() {
+                break;
+            }
+        }
+        assert!(r.shot.is_some());
+        assert!(r.due().is_some());
+        // The picture could not be saved: the run has failed, and the app is asked for a frame at once.
+        let now = r.now();
+        let toast = r.shot_result("s", Err("disk full".into()), now);
+        assert!(toast.is_some());
+        assert_eq!(r.due(), Some(Duration::ZERO));
+        assert!(r.running());
+        assert!(r.report().unwrap().starts_with("keys: failed\nstep: <Shot:s>\nwhy: cannot save the picture of <Shot:s>: disk full\n"));
+        r.skip(ms(80));
+        let mut raw = egui::RawInput::default();
+        assert!(matches!(r.input(&ctx, &mut raw), Some(Do::Failed { .. })));
+        assert!(!r.running());
+        assert_eq!(r.due(), None);
+    }
+
+    #[test]
+    fn a_picture_that_never_arrives_fails_after_the_deadline() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Shot:s>").unwrap(), None);
+        let mut out = None;
+        for _ in 0..40 {
+            r.skip(Duration::from_secs(60));
+            let mut raw = egui::RawInput::default();
+            out = r.input(&ctx, &mut raw);
+            if out.is_some() {
+                break;
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why.contains("no picture arrived")), "{out:?}");
+    }
+
+    #[test]
+    fn closing_mid_run_reports_what_was_left_and_a_picture_out_is_a_failure() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("a<Wait:60000>b").unwrap(), None);
+        for _ in 0..30 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            assert_eq!(r.input(&ctx, &mut raw), None);
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        let left = r.left();
+        assert!(left >= 1);
+        let e = r.end(pace::Ending::Closed).unwrap();
+        assert_eq!(e.tail, format!("keys: closed\nleft: {left} not pressed\n"));
+        assert!(!e.failed);
+        assert_eq!(r.report(), Some(e.tail.as_str()));
+        assert!(!r.running());
+        assert!(r.end(pace::Ending::Closed).is_none());
+
+        let mut r = Runner::new(parse("<Shot:s>").unwrap(), None);
+        for _ in 0..30 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            let _ = r.input(&ctx, &mut raw);
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+            if r.shot.is_some() {
+                break;
+            }
+        }
+        let e = r.end(pace::Ending::Closed).unwrap();
+        assert!(e.failed && e.tail.starts_with("keys: failed\n"), "{}", e.tail);
+    }
+
+    #[test]
+    fn after_a_quit_the_runner_is_not_running_and_the_quit_report_comes_from_end() {
+        let (mut r, dos, _) = play_with("a<Quit>", ms(80), 60, |_, _| {});
+        assert_eq!(dos.first().map(|d| &d.0), Some(&Do::Quit));
+        assert!(!r.running());
+        assert_eq!(r.due(), None);
+        let e = r.end(pace::Ending::Quit).unwrap();
+        assert!(!e.failed);
+        assert_eq!(
+            e.tail,
+            "quit: yes
+keys: done
+"
+        );
+        assert!(r.end(pace::Ending::Quit).is_none());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_deprecated_finish_still_ends_the_run() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("a<Wait:60000>b").unwrap(), None);
+        for _ in 0..30 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            let _ = r.input(&ctx, &mut raw);
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        let left = r.left();
+        r.finish();
+        assert!(!r.running());
+        assert_eq!(r.left(), left);
+    }
+
+    #[test]
+    fn a_failure_counts_the_failed_step_as_left() {
+        let (r, dos, _) = play_with("<Assert:Missing>", ms(80), 400, |_, _| {});
+        assert!(matches!(dos.first(), Some((Do::Failed { .. }, _))), "{dos:?}");
+        assert_eq!(r.left(), 1);
+        assert!(r.report().unwrap().ends_with("left: 1 not pressed\n"), "{:?}", r.report());
+    }
+
+    #[test]
+    fn steps_are_spaced_by_their_waits_and_by_the_size() {
+        // Size is followed by a settle, a Wait counts from the previous step's input.
+        let (_, dos, typed) = play_with("a<Size:300x200>b<Wait:1000><Wait:1000>c", ms(20), 600, |_, _| {});
+        assert_eq!(dos.first().map(|d| &d.0), Some(&Do::Done), "{dos:?}");
+        let at = |k: &str| typed.iter().find(|(t, _)| t == k).unwrap_or_else(|| panic!("{k} not typed: {typed:?}")).1;
+        assert!(at("b") >= at("a") + ms(400), "{typed:?}");
+        assert!(at("c") >= at("b") + ms(2000), "{typed:?}");
+    }
+
+    #[test]
+    fn a_leading_wait_respects_the_first_wait_and_a_leading_now_too() {
+        for script in ["<Wait:100>a", "<Now>a"] {
+            let (_, _, typed) = play_with(script, ms(20), 200, |_, _| {});
+            assert!(typed[0].1 >= ms(500), "{script}: {typed:?}");
+        }
+    }
+
+    #[test]
+    fn a_check_looks_again_every_pass_and_passes_when_the_text_comes() {
+        let app = |ui: &mut egui::Ui, i: usize| {
+            if i >= 6 {
+                ui.label("Late");
+            }
+        };
+        assert_eq!(drive("<Assert:Late>", false, app), Some(Do::Done));
+    }
+
+    #[test]
+    fn a_check_found_just_before_the_text_wait_passes() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Assert:Late>").unwrap(), None);
+        let mut out = None;
+        for i in 0..400 {
+            r.skip(ms(20));
+            let mut raw = egui::RawInput::default();
+            out = r.input(&ctx, &mut raw);
+            if out.is_some() {
+                break;
+            }
+            // The text appears after about 2.5 s of looking.
+            ctx.run_ui(raw, |ui| {
+                if i > 125 {
+                    ui.label("Late");
+                }
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(out, Some(Do::Done));
+    }
+
+    #[test]
+    fn a_theme_change_is_a_flight_without_events() {
+        let (_, dos, typed) = play_with("<Theme:dark>a", ms(20), 200, |_, _| {});
+        assert!(matches!(dos.first(), Some((Do::Theme(t), _)) if t == "dark"), "{dos:?}");
+        assert_eq!(dos.last().map(|d| &d.0), Some(&Do::Done));
+        assert_eq!(typed.len(), 1);
+    }
+
+    #[test]
+    fn freshness_is_judged_from_the_action_and_the_window() {
+        assert!(pace::fresh(3, 3, true, None).unwrap_err().starts_with("the window's tree was not updated after the last action"));
+        let ctx = egui::Context::default();
+        let r = Runner::new(parse("<Assert:x>").unwrap(), None);
+        assert!(r.fresh(&ctx).is_err());
     }
 }
