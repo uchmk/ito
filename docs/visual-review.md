@@ -5,13 +5,14 @@
 
 ## 1. 撮る
 
-台本の `<Shot:名前>` が `名前.png` を、`<Theme:>`・`<Lang:>`・`<Size:WxH>` を使って決まった条件で撮る。
-`Runner` は `名前.json` も隣に書く:
+台本の `<Shot:名前>` が `shots/名前.png` を、`<Theme:>`・`<Lang:>`・`<Size:WxH>` を使って決まった条件で撮る。
+`Runner` は `shots/名前.json` も隣に書く（フォルダーは完了ファイルの隣。`state/` の `<State:>` と混ざらない）:
 
 | キー | 中身 |
 |---|---|
 | `name` `app` `version` | 撮った名前、アプリ、版 |
-| `theme` `lang` | 直前の `<Theme:>` `<Lang:>` |
+| `theme` `lang` | 撮ると頼んだ時点で効いていたテーマ（`ito_theme::name`）と言語（`ito_i18n::in_force`）。分からなければ空 |
+| `theme_requested` `lang_requested` | 直前の `<Theme:>` `<Lang:>` が頼んだ値（`dark`・`system` など。頼んでいなければ空）。効いている名前（`tsumugi Dark` など）とは比べず、食い違っても失敗にしない |
 | `size` | 窓の大きさ（点） |
 | `zoom` | 文字の倍率 |
 | `state` `component` | 画面の状態（`empty`・`error` など）、写っている部分（`window`、切り出しなら `preview` など） |
@@ -19,7 +20,7 @@
 | `pixels_per_point` | PNG の画素と `rect` を結ぶ倍率 |
 | `time` | UNIX 秒 |
 
-アプリは `Runner::info`（`review::Meta`）の `app`・`version`・`zoom` を作るときに入れ、状態が変わる所で `state`（切り出しなら `component`）を書き換える。
+アプリは `Runner::new(..).app(名前, 版)` と、`Runner::info`（`review::Meta`）の `zoom` を作るときに入れ、効いているテーマと言語は `ito_theme::set_theme(&theme)`・`ito_i18n::set_in_force(&code)` で知らせ、状態が変わる所で `state`（切り出しなら `component`）を書き換える。
 
 **全テーマ × 状態**は台本を手で書かず、`review::matrix(themes, states, enter, leave)` で作る。
 アプリが渡すのはテーマと状態の一覧と、状態に入る・出るキーだけ。名前は `状態-テーマ`。

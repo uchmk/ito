@@ -74,6 +74,8 @@ impl App {
         };
         let lang = i18n::resolve(common.language.as_deref());
         let (table, errors) = i18n::table(&lang);
+        // What is in force, for `--keys` shots to record (`shots/<name>.json`).
+        ito_i18n::set_in_force(&lang);
         warnings.extend(errors);
         for w in warnings {
             eprintln!("{{app}}: {w}");
@@ -82,7 +84,7 @@ impl App {
         // No theme of the app's own: `theme_choice(None)` gives the common defaults (themes that exist).
         let (choice, dark, light) = common.theme_choice(None);
         if let Ok(theme) = ito_theme::pick(&themes, &choice, &dark, &light, false) {
-            ito_theme::set(theme.colors);
+            ito_theme::set_theme(theme);
         }
         cc.egui_ctx.set_visuals(ito_theme::colors().visuals());
         // The scale is common.toml's, so egui's own Ctrl+= / Ctrl+- stay out of it.

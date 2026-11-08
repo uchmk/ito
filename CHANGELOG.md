@@ -3,6 +3,26 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.273.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript::evidence`: `Runner` が実行の記録 `run.json`（スキーマ・app・ito の版と rev・run_id・OS・steps・開始と終了・status・失敗した手順と理由・残り）を、最初のフレームで `running` として、終わりに 1 度だけ書く（`.part` に書いて flush してから名前替え）。書けなければ手順 `<run.json>` で失敗にする（終わりの記録が書けなければ、`keys: done` で終わるはずの実行（残りの無い quit・close も）をその失敗にし、ファイルは `running` のまま残る）。`Runner::app(名前, 版)` で app を渡す（ito#204 の 8）。
+- `ito-keyscript` の `build.rs`: ito の rev を `ITO_BUILD_REV`、無ければ cargo の git checkout の道から入れる（どちらも無ければ unknown）。
+- `ito-theme::set_theme` / `name`、`ito-i18n::set_in_force` / `in_force`: いま効いているテーマと言語の名前を覚える。
+
+### 変更
+
+- Shot の付属 JSON の `theme`・`lang` は、撮ると頼んだ時点で効いていた値になった。`<Theme:>`・`<Lang:>` が頼んだ値は新しい欄 `theme_requested`・`lang_requested` に分けた（ito#204 の 4）。
+- Shot の PNG と JSON は `<dir>/shots/` に書く（ito#204 の 6）。`keys.ps1`・`xrun.sh` は `shots/`・`state/`・`run.json.part` も片付ける（リンク（中にあるものも）や非フォルダーなら止まる）。
+- `ito-keyscript` が `ito-theme`・`ito-i18n` に依る。
+
+### 使う側がやること
+
+- `Runner::new(..)` に `.app("名前", env!("CARGO_PKG_VERSION"))` を足す（足さなくても動くが、`run.json` の app が空になる）。
+- テーマを適用するところで `ito_theme::set(colors)` の代わりに `ito_theme::set_theme(&theme)` を、言語を決めるところで `ito_i18n::set_in_force(&lang)` を呼ぶ（呼ばなければ Shot の `theme`・`lang` は空）。
+- Shot を読む側は `<dir>/shots/<名前>.png`・`.json` を見る。
+
 ## [0.272.1] - 2026-11-08
 
 ### 変更

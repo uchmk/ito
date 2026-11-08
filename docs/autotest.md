@@ -188,7 +188,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 
 ### ほかのアプリが載せるとき
 
-1. **ito の rev**: v0.272.0 以降（ito#203 は閉じた。ito#204 の 3 が入った rev）にそろえる（Runner のアプリはこれだけで観測の世代・ID の手順・run の行が入る）。ito#204 の残りが入ったら、その rev に上げる。
+1. **ito の rev**: v0.273.0 以降（ito#203 は閉じた。ito#204 の 1〜4・6・8 が入った rev）にそろえる（Runner のアプリはこれだけで観測の世代・ID の手順・run の行が入る）。ito#204 の残り（5・7）が入ったら、その rev に上げる。
 2. **`scripts/lanes.conf`**: `evidence=`（既定 `C:\dev\<app>-evidence`。kura は今の `C:\dev\filer-evidence`）と `visual_specs=`（既定 `tests/visual`）。
 3. **状態のアダプター**: `screen`・`overlay` の名前、`app`、`app_state` の中身、書き込みの待ちに答える口。
 4. **Test ID**: 自分の画面の部品に `<画面>.<部品>`。ito の部品（設定の画面・パレット・トースト）の ID は ito が付ける。
@@ -412,10 +412,10 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 - 実行の状態機械と適合テストを別の Issue uchmk/ito#204 にした（③ のあと）。2 つの設計を ito の docs/autotest.md・docs/visual-test.md に移すよう、ito のセッション（ito-d4）に頼んだ。
 
 【次にやること】
-1. ito のセッションの push を待つ: ito#204 の残り（4・6・8）と ito#205（状態 JSON v1・Snap・矩形つきの Tree。ito#203 は閉じ、ito#204 の 1〜3 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
+1. ito のセッションの push を待つ: ito#204 の残り（5・7）と ito#205（状態 JSON v1・Snap・矩形つきの Tree。ito#203 は閉じ、ito#204 の 1〜4・6・8 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
 2. ito の docs/visual-test.md（版 1）が push されたら、kura に変更 1 を入れる（視覚テストのページの #rule: docs/claude/lanes.md の 105 行の下に 1 項目と 113〜114 行の置き換え、.claude/windows-role.md 147 行、docs/claude/wintest-measure.md に矩形と画素の測り方、.claude/agents/wintest.md に機械の測定の証拠）→ PATCH の版・CHANGELOG・verify・scripts/push-main.sh。変更 2 の文は影運用の基準を満たしてから。
 3. kura の残りの分（ID の手順・run の行・確かめ役は v0.153.0〜v0.154.0 で入った。ハーネス scripts/check-term-settings.sh と壊し方の自己テストは作業中で、まず State に `term args`・`term env names`・`terminal` の行）を Sonnet の subagent に仕様ファイルで渡す → audit → verify → main がコミット・push。
-4. ito#204（状態機械と適合テスト）は 1〜3 が v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4・6・8。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1 のスキーマ・矩形つきの Tree・Snap・検査器・証拠のフォルダは ito#205。見た目のパイロットの前に要る。
+4. ito#204（状態機械と適合テスト）は 1〜3 が v0.269.0・v0.271.0・v0.272.0、4・6・8 が v0.273.0（Shot は `shots/` に書き、`theme`・`lang` は効いていた値で頼んだ値は `*_requested`、`run.json` を Runner が書く）で入り、残りは 5・7。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1 のスキーマ・矩形つきの Tree・Snap・検査器・証拠のフォルダは ito#205。見た目のパイロットの前に要る。
 5. kura のパイロットが通ったら、yagura・koyomi・michi・fude のアダプター（lanes.conf の evidence= と visual_specs=、状態の中身、Test ID、ハーネス）と規則のファイル（成果物 5 の雛形）を、それぞれのセッションに頼む（順はパイロットのあとで決める）。これから作るアプリも同じ形で載せる。tsumugi・minato には頼まない（メンテナンス対象から外した）。
 6. Codex は haiku の包みの subagent で回す。UAC を避けるフラグ（-c mcp_servers.node_repl.enabled=false --disable plugins -c 'notify=[]'）は、効くと示せていないので、持ち主が決めるまで既定にしない。
 

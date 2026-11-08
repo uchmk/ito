@@ -1,4 +1,4 @@
-//! Visual review without a window: what a shot was (a JSON beside the PNG), how a
+//! Visual review without a window: what a shot was (`shots/<name>.json` beside `shots/<name>.png`), how a
 //! re-shot differs from the last one, a crop, and a generated theme x state script.
 //!
 //! Everything here works on PNG files and strings, so it is tested without egui and can
@@ -6,14 +6,20 @@
 
 use std::path::Path;
 
-/// What a shot was taken of. Written as `<name>.json` beside `<name>.png`.
+/// What a shot was taken of. Written as `shots/<name>.json` beside `shots/<name>.png`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Meta {
     pub name: String,
     pub app: String,
     pub version: String,
+    /// The theme in force when the picture was taken (`ito_theme::name`); empty when unknown.
     pub theme: String,
+    /// The theme the script asked for with `<Theme:>`; empty when it asked for none.
+    pub theme_requested: String,
+    /// The language in force when the picture was taken (`ito_i18n::in_force`); empty when unknown.
     pub lang: String,
+    /// The language the script asked for with `<Lang:>`; empty when it asked for none.
+    pub lang_requested: String,
     /// The window in points.
     pub size: [f32; 2],
     /// The text zoom, 1.0 when the app has none.
@@ -30,7 +36,7 @@ pub struct Meta {
     pub pixels_per_point: f32,
 }
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     let mut o = String::with_capacity(s.len() + 2);
     o.push('"');
     for c in s.chars() {
@@ -53,12 +59,14 @@ impl Meta {
         let [w, h] = self.size;
         let [x, y, rw, rh] = self.rect;
         format!(
-            "{{\n  \"name\": {},\n  \"app\": {},\n  \"version\": {},\n  \"theme\": {},\n  \"lang\": {},\n  \"size\": [{}, {}],\n  \"zoom\": {},\n  \"state\": {},\n  \"component\": {},\n  \"rect\": [{}, {}, {}, {}],\n  \"time\": {},\n  \"pixels_per_point\": {}\n}}\n",
+            "{{\n  \"name\": {},\n  \"app\": {},\n  \"version\": {},\n  \"theme\": {},\n  \"theme_requested\": {},\n  \"lang\": {},\n  \"lang_requested\": {},\n  \"size\": [{}, {}],\n  \"zoom\": {},\n  \"state\": {},\n  \"component\": {},\n  \"rect\": [{}, {}, {}, {}],\n  \"time\": {},\n  \"pixels_per_point\": {}\n}}\n",
             esc(&self.name),
             esc(&self.app),
             esc(&self.version),
             esc(&self.theme),
+            esc(&self.theme_requested),
             esc(&self.lang),
+            esc(&self.lang_requested),
             n(w),
             n(h),
             n(self.zoom),
@@ -222,7 +230,22 @@ mod tests {
         let m =
             Meta { name: "a\"b".into(), app: "weft".into(), size: [800.0, 600.5], zoom: 1.0, pixels_per_point: 1.5, ..Default::default() };
         let j = m.to_json();
-        for k in ["name", "app", "version", "theme", "lang", "size", "zoom", "state", "component", "rect", "time", "pixels_per_point"] {
+        for k in [
+            "name",
+            "app",
+            "version",
+            "theme",
+            "theme_requested",
+            "lang",
+            "lang_requested",
+            "size",
+            "zoom",
+            "state",
+            "component",
+            "rect",
+            "time",
+            "pixels_per_point",
+        ] {
             assert!(j.contains(&format!("\"{k}\":")), "{k}");
         }
         assert!(j.contains("\"a\\\"b\"") && j.contains("[800, 600.5]") && j.contains("\"pixels_per_point\": 1.5"));

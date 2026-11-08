@@ -36,8 +36,10 @@
 #                code if it had exited by itself, else 1
 #
 # A reused OUTDIR is first emptied of the last run's files (keys.done, `*.txt`,
-# `*.png`, `*.json`, `*.log`): a `<State:>` or `<Shot:>` this run never wrote was
-# read as this run's. A folder this script did not make (no `.keys-run`, no
+# `*.png`, `*.json` (run.json too), `*.log`) and of its `shots/` and `state/`
+# folders (the shots' PNG and JSON): a `<State:>` or `<Shot:>` this run never
+# wrote was read as this run's. A `shots` or `state` that is a link or not a
+# folder stops the run (exit 2). A folder this script did not make (no `.keys-run`, no
 # keys.done and no shot.png in it) is refused, so nothing of anyone else's is deleted.
 #
 # The clipboard is armed with XRUN-SENTINEL first, so an unchanged clipboard
@@ -56,6 +58,14 @@ mkdir -p -- "$out"
 printf "an xrun.sh run folder: each run empties it of the last run's files\n" >"$out/.keys-run"
 find "$out" -maxdepth 1 -type f \( -name 'keys.done*' -o -name '*.txt' -o -name '*.png' -o -name '*.json' -o -name '*.log' \) -delete \
     || { echo "xrun: could not empty $out of the last run's files" >&2; exit 2; }
+for sub in shots state; do
+    if [ -L "$out/$sub" ] || { [ -e "$out/$sub" ] && [ ! -d "$out/$sub" ]; }; then
+        echo "xrun: $out/$sub is a link or not a folder; remove it, or pass a new folder" >&2
+        exit 2
+    fi
+    rm -rf -- "$out/$sub" || { echo "xrun: could not empty $out/$sub" >&2; exit 2; }
+done
+rm -f -- "$out/run.json.part"
 conf() { sed -n "s/^$1=//p" "$(dirname "$0")/lanes.conf"; }
 name=$(conf bin)
 keys_env=$(conf keys_env)

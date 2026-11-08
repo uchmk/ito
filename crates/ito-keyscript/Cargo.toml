@@ -12,7 +12,9 @@ egui = "0.36"
 ito-a11y = { path = "../ito-a11y", features = ["egui"] }
 ito-clipboard = { path = "../ito-clipboard", default-features = false }
 ito-common = { path = "../ito-common" }
+ito-i18n = { path = "../ito-i18n" }
 ito-keys = { path = "../ito-keys", features = ["egui"] }
+ito-theme = { path = "../ito-theme" }
 png = "0.18"
 
 [dev-dependencies]

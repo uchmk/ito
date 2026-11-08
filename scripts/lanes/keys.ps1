@@ -121,8 +121,22 @@ if ((Test-Path -LiteralPath $Out) -and -not (Test-Path -LiteralPath $marker) -an
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 Set-Content -LiteralPath $marker -Value "a keys.ps1 run folder: each run empties it of the last run's files" -Encoding utf8
 # A file that cannot be removed stops the run (ErrorActionPreference): it would be read as this run's.
-Get-ChildItem -LiteralPath $Out -File | Where-Object { $_.Name -like 'keys.done*' -or $_.Extension -in '.txt', '.png', '.json' } |
+Get-ChildItem -LiteralPath $Out -File | Where-Object { $_.Name -like 'keys.done*' -or $_.Name -eq 'run.json.part' -or $_.Extension -in '.txt', '.png', '.json' } |
     Remove-Item -Force
+# The shots (`shots\<name>.png` and `.json`) and the `<State:>` files live in subfolders: empty them too. Something else
+# there (a link, a file) is not ours to delete, and is not a folder this run can write into: stop.
+foreach ($sub in 'shots', 'state') {
+    $p = Join-Path $Out $sub
+    $item = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+    if (-not $item) { continue }
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "keys.ps1: $p is a link or not a folder; remove it, or pass a new -Out"
+    }
+    # A link further down (a junction) could lead a recursive delete out of the folder: refuse it too.
+    $link = Get-ChildItem -LiteralPath $p -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop | Select-Object -First 1
+    if ($link) { throw "keys.ps1: $($link.FullName) is a link inside $p; remove it, or pass a new -Out" }
+    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop
+}
 if (Test-Path -LiteralPath (Join-Path $Out 'isolate')) { Remove-Item -LiteralPath (Join-Path $Out 'isolate') -Recurse -Force }
 [Environment]::SetEnvironmentVariable($conf['keys_env'], $done)
 if ($Isolate) {

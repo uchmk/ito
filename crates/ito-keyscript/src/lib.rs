@@ -26,8 +26,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod evidence;
 pub mod pace;
 pub mod probe;
+#[cfg(test)]
+mod rev;
 pub mod review;
 
 use ito_keys::{self as keys, Code, Key};
@@ -1879,15 +1882,27 @@ fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: Pat
 ///
 /// The end of a run comes out of [`Runner::input`] as a [`Do`] (`Done`, `Unsettled`, `Failed`, `Quit`), or out of
 /// [`Runner::end`] when the window closes or the app quits by itself; [`Runner::report`] has the tail of the done file.
+///
+/// A run with a done file also writes `run.json` ([`evidence`]) into [`dir`](Self::dir): `running` at the first frame, the
+/// way it ended when it ends. One that never ends (a crash, a kill) leaves `running`.
 pub struct Runner {
     pace: pace::Pace,
-    /// The picture asked for, and whether the request has gone out.
-    shot: Option<(String, bool)>,
-    /// Where `<Shot:>` and `<State:>` write.
+    /// The picture asked for.
+    shot: Option<PendingShot>,
+    /// The run's folder: the app writes its `<State:>` files ([`Do::State`]) here, and `shots/` and `run.json` go in it.
     pub dir: PathBuf,
-    /// What the app says about its shots (`app`, `version`, `component`, `state`, `zoom`); `<Theme:>` and
-    /// `<Lang:>` keep `theme` and `lang`. [`Runner::shot`] writes it, with the size and time, to `<name>.json`.
+    /// What the app says about its shots (`app`, `version`, `component`, `state`, `zoom`; see [`Runner::app`]).
+    /// `<Theme:>` and `<Lang:>` fill `theme_requested` and `lang_requested`. [`Runner::shot`] writes it, with the size, the
+    /// time and the theme and language in force when the picture was asked for (`ito_theme::name`, `ito_i18n::in_force`),
+    /// to `shots/<name>.json`. No step fails when the request and what was in force differ: `dark`, `light` and `system`
+    /// become concrete names such as `tsumugi Dark`, so the two are not compared here.
     pub info: review::Meta,
+    /// The record `run.json` is written from.
+    run: evidence::Run,
+    /// The first `run.json` has been written (or the run has ended, which wrote the last).
+    run_started: bool,
+    /// The last `run.json` has been written.
+    run_closed: bool,
     /// The app's `<APP>_KEYS_DONE`.
     pub done: Option<PathBuf>,
     /// The clipboard's text for `<Paste>` and `<C-v>`.
@@ -1911,6 +1926,16 @@ pub struct Runner {
     /// Added to the clock by the tests.
     #[cfg(test)]
     skew: Duration,
+}
+
+/// A picture asked for with `<Shot:>`.
+struct PendingShot {
+    name: String,
+    /// The request has gone out.
+    sent: bool,
+    /// The theme and language in force when the request went out (the frame the picture is of); empty when unknown.
+    theme: String,
+    lang: String,
 }
 
 /// What [`Runner::decide`] came to for a frame.
@@ -1987,6 +2012,9 @@ impl Runner {
             shot: None,
             dir: PathBuf::from("."),
             info: review::Meta { zoom: 1.0, component: "window".into(), ..Default::default() },
+            run: evidence::Run::new(evidence::RUNNER, steps.len()),
+            run_started: false,
+            run_closed: false,
             done: None,
             clipboard: String::new,
             progress: None,
@@ -2000,6 +2028,17 @@ impl Runner {
             #[cfg(test)]
             skew: Duration::ZERO,
         }
+    }
+
+    /// The app's name and version, for the shots' JSON and `run.json`. Call it after [`new`](Self::new):
+    /// `Runner::new(steps, done).app(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))`.
+    #[must_use]
+    pub fn app(mut self, name: &str, version: &str) -> Self {
+        self.info.app = name.to_owned();
+        self.info.version = version.to_owned();
+        self.run.app = name.to_owned();
+        self.run.app_version = version.to_owned();
+        self
     }
 
     /// The only clock the runner reads.
@@ -2036,7 +2075,8 @@ impl Runner {
     /// The run ends some other way than by its last step: the window closed ([`pace::Ending::Closed`]), or the app
     /// quits after a `<Quit>` ([`pace::Ending::Quit`]). The app writes the [`pace::Ended::tail`], prints
     /// [`pace::Ended::say`], and exits with [`FAILED_EXIT`] if [`pace::Ended::failed`]. Call it before writing anything,
-    /// so a stall report cannot land over it. `None` when the run has ended already.
+    /// so a stall report cannot land over it. `None` when the run has ended already. A run with a done file writes its
+    /// final `run.json` here (or when the script ends by itself).
     ///
     /// A close while a picture is out, or while a config write is unanswered, is a failure (and says so).
     pub fn end(&mut self, how: pace::Ending) -> Option<pace::Ended> {
@@ -2047,10 +2087,7 @@ impl Runner {
 
     pub(crate) fn end_at(&mut self, how: pace::Ending, now: Instant, writes: Option<&ito_common::writes::Status>) -> Option<pace::Ended> {
         let got = match self.pace.end(how, now, writes) {
-            Some(e) => {
-                self.keep(e.clone(), true);
-                Some(e)
-            }
+            Some(e) => Some(self.keep(e, true)),
             // A failure that has not gone out as a `Do` yet (a picture that could not be saved): the app writes it now.
             None if !self.delivered => self.ended.clone().inspect(|_| self.delivered = true),
             None => None,
@@ -2068,10 +2105,57 @@ impl Runner {
         let _ = self.end(pace::Ending::Closed);
     }
 
-    fn keep(&mut self, e: pace::Ended, delivered: bool) {
+    /// The run has ended as `e`: write the last `run.json` (a failure to is a failure of the run), keep the end, and
+    /// hand back what was kept.
+    fn keep(&mut self, mut e: pace::Ended, delivered: bool) -> pace::Ended {
         self.shot = None;
-        self.ended = Some(e);
+        if !self.run_closed && self.done.is_some() {
+            self.run_closed = true;
+            self.run_started = true;
+            self.run.run_id = current_run_id().map(str::to_owned);
+            self.run.end(&e, evidence::now_ms());
+            if let Err(err) = self.run.write(&self.dir) {
+                let why = format!("cannot write {}: {err}", evidence::FILE);
+                {
+                    use std::io::Write;
+                    let _ = writeln!(std::io::stderr(), "keys: {why}");
+                }
+                self.pace.write_failed();
+                e.failed = true;
+                e.say = Some(match e.say.take() {
+                    Some(old) => format!("{old}; {why}"),
+                    None => why.clone(),
+                });
+                // An ending that reads as a success (`keys: done`, also a quit or a close with nothing left) becomes a
+                // failure at `<run.json>`. One that already fails (unsettled, or closed or quit with steps left) keeps its
+                // tail and carries the reason in `say`. The file on disk stays at its `running` record.
+                if matches!(e.how, pace::How::Done) || e.tail.ends_with("keys: done\n") {
+                    e.tail = failed_report(evidence::STEP, &why, e.left);
+                    e.how = pace::How::Failed { step: evidence::STEP.to_owned(), why };
+                }
+            }
+        }
+        self.ended = Some(e.clone());
         self.delivered = delivered;
+        e
+    }
+
+    /// The first `run.json`, `running`, at the first frame (the app may have changed [`dir`](Self::dir) since
+    /// [`new`](Self::new)). A failure to write it fails the run at [`evidence::STEP`].
+    fn start_run(&mut self) {
+        if self.run_started || self.run_closed || self.done.is_none() {
+            return;
+        }
+        self.run_started = true;
+        self.run.run_id = current_run_id().map(str::to_owned);
+        if let Err(err) = self.run.write(&self.dir) {
+            let why = format!("cannot write {}: {err}", evidence::FILE);
+            if let Some(e) = self.pace.host_failed(evidence::STEP, why) {
+                // There is no folder to write the last one in either.
+                self.run_closed = true;
+                self.keep(e, false);
+            }
+        }
     }
 
     /// For a run that writes the done file: a thread nudges the frame loop
@@ -2117,6 +2201,7 @@ impl Runner {
         if self.reads_window {
             observe(ctx);
         }
+        self.start_run();
         let now = self.now();
         let writes = ito_common::writes::ledger().status();
         // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the input
@@ -2164,9 +2249,8 @@ impl Runner {
             }
             pace::Next::Take(e) => Decided::Take(e),
             pace::Next::End(e) => {
-                let out = do_of(&e);
-                self.keep(e, true);
-                Decided::Out(out)
+                let e = self.keep(e, true);
+                Decided::Out(do_of(&e))
             }
         }
     }
@@ -2184,9 +2268,8 @@ impl Runner {
         let ended = self.pace.taken(f, taken);
         self.wake = Some(f.now);
         if let Some(e) = ended {
-            let out = do_of(&e);
-            self.keep(e, true);
-            return Some(out);
+            let e = self.keep(e, true);
+            return Some(do_of(&e));
         }
         if quit {
             self.quitting = true;
@@ -2266,11 +2349,11 @@ impl Runner {
                 (pace::Taken::Changed { more: vec![pace::More::Step(Press::Wait(SETTLE))] }, None)
             }
             Press::Theme(name) => {
-                self.info.theme = name.clone();
+                self.info.theme_requested = name.clone();
                 (pace::Taken::Changed { more: Vec::new() }, Some(Do::Theme(name.clone())))
             }
             Press::Lang(code) => {
-                self.info.lang = code.clone();
+                self.info.lang_requested = code.clone();
                 (pace::Taken::Changed { more: Vec::new() }, Some(Do::Lang(code.clone())))
             }
             Press::ClickText { right, text } => {
@@ -2317,8 +2400,8 @@ impl Runner {
             Press::State(name) => (pace::Taken::Done, Some(Do::State(name.clone()))),
             Press::Read { tag, name } => (pace::Taken::Done, Some(Do::Read { tag: tag.clone(), name: name.clone() })),
             Press::Shot(name) => {
-                self.shot = Some((name.clone(), false));
-                (pace::Taken::Shot { path: self.dir.join(format!("{name}.png")).to_string_lossy().into_owned() }, None)
+                self.shot = Some(PendingShot { name: name.clone(), sent: false, theme: String::new(), lang: String::new() });
+                (pace::Taken::Shot { path: self.shot_path(name, "png").to_string_lossy().into_owned() }, None)
             }
             Press::Quit => (pace::Taken::Quit, None),
             Press::Wait(_) | Press::Now => {
@@ -2378,12 +2461,17 @@ impl Runner {
     /// `<Shot:name>`, once per frame: ask for the picture, then save it when
     /// it arrives. An error is returned for a toast.
     pub fn shot(&mut self, ctx: &egui::Context) -> Option<String> {
-        let (name, sent) = self.shot.clone()?;
-        if !sent {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(name.clone())));
-            self.shot = Some((name, true));
+        let pending = self.shot.as_mut()?;
+        let name = pending.name.clone();
+        if !pending.sent {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(name)));
+            // What is in force now is what the picture shows; the image arrives a frame or more later.
+            pending.sent = true;
+            pending.theme = ito_theme::name().unwrap_or_default();
+            pending.lang = ito_i18n::in_force().unwrap_or_default();
             return None;
         }
+        let (theme, lang) = (pending.theme.clone(), pending.lang.clone());
         let image = ctx.input(|i| {
             i.raw.events.iter().find_map(|e| match e {
                 egui::Event::Screenshot { user_data, image, .. }
@@ -2395,23 +2483,39 @@ impl Runner {
             })
         })?;
         let screen = ctx.content_rect().size();
-        let saved = self.save_shot(&name, &image, screen, ctx.pixels_per_point());
+        let saved = self.save_shot(&name, (&theme, &lang), &image, screen, ctx.pixels_per_point());
         let now = self.now();
         self.shot_result(&name, saved, now)
     }
 
-    /// The picture and its `<name>.json`.
-    pub(crate) fn save_shot(&self, name: &str, image: &egui::ColorImage, screen: egui::Vec2, pixels_per_point: f32) -> Result<(), String> {
-        save_png(&self.dir.join(format!("{name}.png")), image)?;
+    /// `<dir>/shots/<name>.<ext>`: where a shot's picture (`png`) and sidecar (`json`) go.
+    fn shot_path(&self, name: &str, ext: &str) -> PathBuf {
+        self.dir.join("shots").join(format!("{name}.{ext}"))
+    }
+
+    /// The picture and its `shots/<name>.json`; `in_force` is the theme and language that were in force when the picture
+    /// was asked for.
+    pub(crate) fn save_shot(
+        &self,
+        name: &str,
+        in_force: (&str, &str),
+        image: &egui::ColorImage,
+        screen: egui::Vec2,
+        pixels_per_point: f32,
+    ) -> Result<(), String> {
+        std::fs::create_dir_all(self.dir.join("shots")).map_err(|e| e.to_string())?;
+        save_png(&self.shot_path(name, "png"), image)?;
         let meta = review::Meta {
             name: name.to_owned(),
+            theme: in_force.0.to_owned(),
+            lang: in_force.1.to_owned(),
             size: [screen.x, screen.y],
             rect: [0.0, 0.0, screen.x, screen.y],
             time: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
             pixels_per_point,
             ..self.info.clone()
         };
-        std::fs::write(self.dir.join(format!("{name}.json")), meta.to_json()).map_err(|e| e.to_string())
+        std::fs::write(self.shot_path(name, "json"), meta.to_json()).map_err(|e| e.to_string())
     }
 
     /// The picture was saved or could not be: tell Pace. A failure ends the run (its [`Do::Failed`] goes out at the
@@ -2436,7 +2540,7 @@ impl Runner {
     /// Pace fails the run for `why`; the [`Do::Failed`] goes out at the next input.
     pub(crate) fn shot_failed(&mut self, why: String) {
         if let Some(ended) = self.pace.shot_failed(why) {
-            self.keep(ended, false);
+            let _ = self.keep(ended, false);
         }
     }
 }
@@ -4255,6 +4359,201 @@ mod tests {
         assert!(matches!(r.input(&ctx, &mut raw), Some(Do::Failed { .. })));
         assert!(!r.running());
         assert_eq!(r.due(), None);
+    }
+
+    /// `ito_theme` and `ito_i18n` hold process-wide state; the tests that write it take turns.
+    static GLOBALS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ito-keyscript-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Runs `r` frame by frame until `stop` says so; returns what `input` ended with.
+    fn run_until(r: &mut Runner, ctx: &egui::Context, mut stop: impl FnMut(&Runner) -> bool) -> Option<Do> {
+        for _ in 0..200 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(ctx, &mut raw) {
+                return Some(d);
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+            if stop(r) {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn run_json(dir: &std::path::Path) -> String {
+        std::fs::read_to_string(dir.join("run.json")).unwrap()
+    }
+
+    #[test]
+    fn a_shot_goes_to_the_shots_folder_with_the_theme_and_language_in_force() {
+        let dir = temp("shots");
+        let r = Runner::new(Vec::new(), Some(dir.join("done"))).app("demo", "1.2.3");
+        let image = egui::ColorImage::filled([4, 3], egui::Color32::RED);
+        r.save_shot("main", ("tsumugi Dark", "ja"), &image, egui::vec2(4.0, 3.0), 1.0).unwrap();
+        assert!(dir.join("shots").join("main.png").is_file());
+        assert!(!dir.join("main.png").exists() && !dir.join("main.json").exists());
+        let j = std::fs::read_to_string(dir.join("shots").join("main.json")).unwrap();
+        assert!(j.contains("\"app\": \"demo\"") && j.contains("\"version\": \"1.2.3\""), "{j}");
+        assert!(j.contains("\"theme\": \"tsumugi Dark\"") && j.contains("\"theme_requested\": \"\""), "{j}");
+        assert!(j.contains("\"lang\": \"ja\"") && j.contains("\"lang_requested\": \"\""), "{j}");
+
+        // A file called `shots` is an error, not a reason to write elsewhere.
+        let other = temp("shots-file");
+        std::fs::write(other.join("shots"), "x").unwrap();
+        let r = Runner::new(Vec::new(), Some(other.join("done")));
+        assert!(r.save_shot("main", ("", ""), &image, egui::vec2(4.0, 3.0), 1.0).is_err());
+        assert!(!other.join("main.png").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn theme_and_language_requests_are_recorded_apart_from_what_is_in_force() {
+        let mut r = Runner::new(parse("<Theme:dark><Lang:ja>").unwrap(), None);
+        let ctx = egui::Context::default();
+        let mut seen = Vec::new();
+        for _ in 0..30 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                let done = matches!(d, Do::Done);
+                seen.push(d);
+                if done {
+                    break;
+                }
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        assert!(seen.contains(&Do::Theme("dark".into())) && seen.contains(&Do::Lang("ja".into())), "{seen:?}");
+        assert_eq!((r.info.theme_requested.as_str(), r.info.lang_requested.as_str()), ("dark", "ja"));
+        assert_eq!((r.info.theme.as_str(), r.info.lang.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn the_shot_takes_the_theme_and_language_in_force_when_the_request_goes_out() {
+        let _g = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        let themes = ito_theme::builtin();
+        ito_theme::set_theme(&themes[0]);
+        ito_i18n::set_in_force("ja");
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Shot:s>").unwrap(), None);
+        assert_eq!(run_until(&mut r, &ctx, |r| r.shot.is_some()), None);
+        // The app asks for the picture once it has drawn the frame.
+        assert_eq!(r.shot(&ctx), None);
+        assert!(r.shot.as_ref().is_some_and(|p| p.sent));
+        // Changing them after the request does not change what the picture is of.
+        ito_theme::set_theme(&themes[1]);
+        ito_i18n::set_in_force("en");
+        let p = r.shot.as_ref().unwrap();
+        assert_eq!((p.theme.as_str(), p.lang.as_str()), (themes[0].name.as_str(), "ja"));
+    }
+
+    #[test]
+    fn run_json_is_running_after_the_first_frame_and_written_once_at_the_end() {
+        let dir = temp("run-done");
+        let mut r = Runner::new(parse("a").unwrap(), Some(dir.join("done"))).app("demo", "1.2.3");
+        let ctx = egui::Context::default();
+        r.skip(ms(80));
+        let mut raw = egui::RawInput::default();
+        let _ = r.input(&ctx, &mut raw);
+        let j = run_json(&dir);
+        assert!(j.contains("\"status\": \"running\"") && j.contains("\"ended_ms\": null") && j.contains("\"steps\": 1"), "{j}");
+        assert!(j.contains("\"app\": { \"name\": \"demo\", \"version\": \"1.2.3\" }"), "{j}");
+        assert!(j.contains("\"runner\": \"ito_keyscript::Runner\""), "{j}");
+        assert!(!dir.join("run.json.part").exists());
+        assert_eq!(run_until(&mut r, &ctx, |_| false), Some(Do::Done));
+        let j = run_json(&dir);
+        assert!(j.contains("\"status\": \"done\"") && j.contains("\"failed\": false") && j.contains("\"left\": 0"), "{j}");
+        assert!(!j.contains("\"ended_ms\": null"), "{j}");
+        // The end is final: later calls do not rewrite it.
+        std::fs::write(dir.join("run.json"), "kept").unwrap();
+        assert!(r.end(pace::Ending::Closed).is_none());
+        let mut raw = egui::RawInput::default();
+        let _ = r.input(&ctx, &mut raw);
+        assert_eq!(run_json(&dir), "kept");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_json_says_which_step_a_failed_shot_failed_at() {
+        let dir = temp("run-shot");
+        let mut r = Runner::new(parse("<Shot:s>").unwrap(), Some(dir.join("done")));
+        let ctx = egui::Context::default();
+        assert_eq!(run_until(&mut r, &ctx, |r| r.shot.is_some()), None);
+        let now = r.now();
+        let _ = r.shot_result("s", Err("disk full".into()), now);
+        r.skip(ms(80));
+        let mut raw = egui::RawInput::default();
+        assert!(matches!(r.input(&ctx, &mut raw), Some(Do::Failed { .. })));
+        let j = run_json(&dir);
+        assert!(j.contains("\"status\": \"failed\"") && j.contains("\"step\": \"<Shot:s>\"") && j.contains("disk full"), "{j}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_json_records_a_window_closed_mid_run() {
+        let dir = temp("run-closed");
+        let mut r = Runner::new(parse("a<Wait:60000>b").unwrap(), Some(dir.join("done")));
+        let ctx = egui::Context::default();
+        assert_eq!(run_until(&mut r, &ctx, |r| r.left() < 3), None);
+        let e = r.end(pace::Ending::Closed).unwrap();
+        let j = run_json(&dir);
+        assert!(j.contains("\"status\": \"closed\"") && j.contains(&format!("\"left\": {}", e.left)), "{j}");
+        assert!(!j.contains("\"ended_ms\": null"), "{j}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_json_that_cannot_be_written_fails_the_run_at_its_own_step() {
+        let dir = temp("run-bad");
+        let file = dir.join("not-a-folder");
+        std::fs::write(&file, "x").unwrap();
+        let mut r = Runner::new(parse("a").unwrap(), Some(file.join("done")));
+        let ctx = egui::Context::default();
+        r.skip(ms(80));
+        let mut raw = egui::RawInput::default();
+        match r.input(&ctx, &mut raw) {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "<run.json>");
+                assert!(why.contains("cannot write run.json"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!r.running());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_quit_with_nothing_left_whose_last_run_json_cannot_be_written_is_a_failure() {
+        let dir = temp("run-bad-quit");
+        let mut r = Runner::new(parse("a<Quit>").unwrap(), Some(dir.join("done")));
+        let ctx = egui::Context::default();
+        let mut quit = false;
+        for _ in 0..60 {
+            r.skip(ms(80));
+            let mut raw = egui::RawInput::default();
+            if r.input(&ctx, &mut raw) == Some(Do::Quit) {
+                quit = true;
+                break;
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        assert!(quit);
+        // A folder in the way of the last write.
+        std::fs::remove_file(dir.join("run.json")).unwrap();
+        std::fs::create_dir_all(dir.join("run.json").join("in-the-way")).unwrap();
+        let e = r.end(pace::Ending::Quit).unwrap();
+        assert!(e.failed, "{e:?}");
+        assert!(matches!(&e.how, pace::How::Failed { step, .. } if step == "<run.json>"), "{e:?}");
+        assert!(e.tail.starts_with("keys: failed\nstep: <run.json>\n"), "{}", e.tail);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

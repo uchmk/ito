@@ -608,6 +608,15 @@ impl Pace {
         Some(self.fail_at(idx, why))
     }
 
+    /// The host failed outside the steps (it could not write its evidence): the run fails at `label`. `None` once the run has ended.
+    pub fn host_failed(&mut self, label: &str, why: String) -> Option<Ended> {
+        if self.finished {
+            return None;
+        }
+        let left = self.left_with(None);
+        Some(self.fail_as(label, left, why))
+    }
+
     /// The window closed or the app quit. `None` when there is nothing to write (no report, or the run has ended).
     pub fn end(&mut self, how: Ending, _now: Instant, writes: Option<&Status>) -> Option<Ended> {
         let what = match how {

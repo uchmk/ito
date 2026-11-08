@@ -16,6 +16,21 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::RwLock;
+
+/// The language the app has applied, as a record.
+static IN_FORCE: RwLock<Option<String>> = RwLock::new(None);
+
+/// Record `code` as the language the app has applied (what its screen shows now). It is a record for the evidence of a
+/// `--keys` run (`ito-keyscript`'s shot sidecar); lookups never read it.
+pub fn set_in_force(code: &str) {
+    *IN_FORCE.write().unwrap_or_else(|e| e.into_inner()) = Some(code.to_owned());
+}
+
+/// The language recorded by [`set_in_force`], `None` until it is set.
+pub fn in_force() -> Option<String> {
+    IN_FORCE.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 /// The values `language` takes in common.toml, with their names as a
 /// settings screen lists them (each in its own language).
@@ -252,6 +267,14 @@ mod tests {
     const EN: &str = "[status]\npaused = \"paused\"\nleft = \"{0} left\"\nonly = \"English only\"\n";
     const JA: &str = "[status]\npaused = \"一時停止\"\nleft = \"残り {0}\"\n\n[keydesc]\n\"Quit\" = \"終了\"\n";
     const TABLES: &[(&str, &str)] = &[("en", EN), ("ja", JA)];
+
+    #[test]
+    fn the_language_in_force_is_a_record() {
+        set_in_force("ja");
+        assert_eq!(in_force().as_deref(), Some("ja"));
+        let (t, _) = Table::new(TABLES, "en");
+        assert_eq!(t.tr("status.paused"), "paused", "lookups never read it");
+    }
 
     #[test]
     fn a_translation_lies_over_english() {

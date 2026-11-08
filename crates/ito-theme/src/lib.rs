@@ -525,17 +525,38 @@ pub fn load_dir(dir: &Path) -> (Vec<Theme>, Vec<String>) {
     (out, bad)
 }
 
+/// The theme in force: its colours and, when the app said which one it is, its name (they change together).
+struct InForce {
+    colors: Colors,
+    name: Option<String>,
+}
+
 /// The theme in force, which the drawing code reads.
-static CURRENT: LazyLock<RwLock<Colors>> = LazyLock::new(|| RwLock::new(builtin()[0].colors));
+static CURRENT: LazyLock<RwLock<InForce>> = LazyLock::new(|| RwLock::new(InForce { colors: builtin()[0].colors, name: None }));
 
 /// The colours in force.
 pub fn colors() -> Colors {
-    *CURRENT.read().unwrap_or_else(|e| e.into_inner())
+    CURRENT.read().unwrap_or_else(|e| e.into_inner()).colors
 }
 
-/// Put `c` in force; the next frame draws in it.
+/// Put `c` in force; the next frame draws in it. The name of the theme in force becomes unknown ([`name`] is `None`):
+/// an app that knows which theme it applies uses [`set_theme`].
 pub fn set(c: Colors) {
-    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = c;
+    let mut g = CURRENT.write().unwrap_or_else(|e| e.into_inner());
+    g.colors = c;
+    g.name = None;
+}
+
+/// Put `t` in force, colours and name together; the next frame draws in it.
+pub fn set_theme(t: &Theme) {
+    let mut g = CURRENT.write().unwrap_or_else(|e| e.into_inner());
+    g.colors = t.colors;
+    g.name = Some(t.name.clone());
+}
+
+/// The name of the theme in force, `None` when unknown (never set, or the last write was [`set`]).
+pub fn name() -> Option<String> {
+    CURRENT.read().unwrap_or_else(|e| e.into_inner()).name.clone()
 }
 
 /// The key the letters' zoom is kept under in egui's context.
@@ -701,6 +722,18 @@ pub fn stylesheet(themes: &[Theme], choice: &str, dark: &str, light: &str, high_
 
 #[cfg(test)]
 mod tests {
+    /// The theme in force is a process global: this test is the only one that writes it.
+    #[test]
+    fn set_theme_keeps_the_name_and_set_forgets_it() {
+        let all = builtin();
+        set_theme(&all[1]);
+        assert_eq!(name().as_deref(), Some(all[1].name.as_str()));
+        assert_eq!(colors(), all[1].colors);
+        set(all[2].colors);
+        assert_eq!(name(), None);
+        assert_eq!(colors(), all[2].colors);
+    }
+
     #[test]
     fn letters_zoom_with_the_value_set() {
         let ctx = egui::Context::default();
