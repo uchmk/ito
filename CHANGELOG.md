@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.283.0] - 2026-11-08
+
+### 追加
+
+- `ito-proc`: `git_program()` を追加（#208）。Windows で git の実体（`git --exec-path` の下の `git.exe`）を返す。`Git\cmd\git.exe`（ラッパー）を通すと、起動のフラグが何でも `conhost.exe` が 1 つできる。実体を `DETACHED_PROCESS` で起動すれば、できない。`--exec-path` を動かすのはプロセスで最初の 1 回だけで、止まるのでワーカーから呼ぶ。Windows 以外と、実体が見つからないときは `"git"`。
+
+### 使う側がやること
+
+- git を起動するアプリは、`Command::new("git")` を `Command::new(ito_proc::git_program())` にできる。conhost を 0 にするには `DETACHED_PROCESS` で起動する（`CREATE_NO_WINDOW` のままだと、1 回ごとに 1 つできる）。ラッパーを飛ばしても、フック・alias・Git LFS・資格情報マネージャーは同じように動く（Git for Windows 2.52.0 で実測）。読み取りの呼び出しに限らない。違うのは、子の `PATH` で `%HOME%\bin` が `mingw64\bin`・`usr\bin` より前に来ることだけ。
+
 ## [0.282.0] - 2026-11-08
 
 ### 追加

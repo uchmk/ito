@@ -17,6 +17,8 @@
 //! What the lines mean stays with the caller.
 
 mod event;
+mod git;
+pub use git::git_program;
 mod signal;
 pub use signal::stop_requested;
 #[cfg(windows)]
