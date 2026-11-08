@@ -167,10 +167,12 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 
 ### 足すもの（案。どれもフェーズ 2 以降。自動テストの設計の判断 3〜5 は 2026-11-08 に決まった）
 
-**いまの状態（v0.279.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
+**いまの状態（v0.281.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
 v0.277.0 で、検査（`visual-check.py`）、実行の folder・manifest・verdict（`evidence.py`）、全部の JSON の schema（`docs/schemas/*.v1.json`）が入った。
 v0.279.0 で、keys.ps1 の `-Evidence` と xrun.sh の `--evidence` が folder と manifest を自動で作るようになった。
-まだ無いもの: merge-lanes.py の `[x]` の門番、Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
+v0.281.0 で、merge-lanes.py が門番になった。PR のベースのブランチに `tests/visual/<row>.toml` がある行の新しい `[x]` は、仕様が正しくて `tier = 1` で、PR に `<row> tier1 [x] <…\verdict-<row>.json>` の行があるときだけマージする。
+門番の限界: 証拠はレーンの機械にあるので、GitHub Actions からは verdict の中身もハッシュも読めない（宣言の行だけを見る。本当に `auto-pass-candidate` だったかは、レーンの規則のまま）。仕様を持たない見た目の行も見分けられない。
+まだ無いもの: Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
 
 | もの | どこ | 中身 |
 |---|---|---|

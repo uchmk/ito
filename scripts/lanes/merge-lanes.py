@@ -14,7 +14,10 @@ a merge commit pinned to its head, and only when all of these hold:
      from `[ ]` to a mark that lane may set;
   3. every new mark has its evidence: a line naming the row (or the key) in
      the pull request body -- in tsumugi the new report counts too -- and a
-     `[~]` names its picture;
+     `[~]` names its picture; a new `[x]` on a row with
+     tests/visual/<row>.toml on the base branch needs its Tier 1 verdict line
+     (`<row> tier1 [x] <folder>/verdict-<row>.json`), and only a Tier 1 spec
+     may be ticked `[x]`;
   4. kura: TODO.md's "マージで止めている実機の PR" does not hold it;
   5. every check run on its head has finished, none failed, and the
      checklist job is among them;
@@ -77,6 +80,7 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -325,6 +329,54 @@ def missing_evidence(ticks, text):
         elif mark == "~" and not any(PICTURE.search(ln) or shots & set(re.findall(r"`([^`\s]+)`", ln))
                                      for ln in found):
             out.append(f"{rid} [~] ({path}): no picture named on its evidence line")
+    return out
+
+
+def spec_tier(text, row):
+    """The tier of a valid check spec (spec 1, this row, tier 1-3), else None."""
+    try:
+        d = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, AttributeError, TypeError, ValueError):
+        return None
+    tier = d.get("tier")
+    if type(d.get("spec")) is not int or d["spec"] != 1 or d.get("row") != row:
+        return None
+    return tier if type(tier) is int and tier in (1, 2, 3) else None
+
+
+def has_verdict_line(lines, row):
+    """Whether a line is exactly `[- ]<row> tier1 [x] <folder>/verdict-<row>.json`."""
+    pat = re.compile(r"\s*(?:[-*] )?`?" + re.escape(row) + r"`?\s+tier1\s+\[x\]\s+(.+?)\s*")
+    for ln in lines:
+        m = pat.fullmatch(ln)
+        if not m:
+            continue
+        path = m.group(1)
+        if len(path) > 1 and path[0] == path[-1] == "`":
+            path = path[1:-1]
+        parts = re.split(r"[\\/]", path)
+        if len(parts) >= 2 and any(parts[:-1]) and parts[-1] == f"verdict-{row}.json":
+            return True
+    return False
+
+
+def missing_verdicts(ticks, text, specs):
+    """The new `[x]` ticks on visual rows that lack a Tier 1 spec or its verdict line.
+
+    `ticks` is [(path, mark, id)]; `specs` is {row: tier or None} for the rows
+    with a spec on the base (None: the spec is not valid)."""
+    lines = text.split("\n")
+    out = []
+    for path, mark, rid in ticks:
+        if mark != "x" or rid not in specs:
+            continue
+        tier = specs[rid]
+        if tier is None:
+            out.append(f"{rid} [x] ({path}): tests/visual/{rid}.toml on the base is not a valid check spec")
+        elif tier != 1:
+            out.append(f"{rid} [x] ({path}): its check spec is tier {tier}; only a tier 1 spec may be ticked [x] here")
+        elif not has_verdict_line(lines, rid):
+            out.append(f"{rid} [x] ({path}): no verdict line; add `{rid} tier1 [x] <folder>\\verdict-{rid}.json`")
     return out
 
 
@@ -714,7 +766,10 @@ def comment_once(pr, kind, sha, text, lead=None):
 
 
 def git(*args, check=True):
-    p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+    try:
+        p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+    except UnicodeDecodeError as e:  # RuntimeError: main reports this pull request and goes on to the next
+        raise RuntimeError(f"git {' '.join(args)}: the output is not UTF-8") from e
     if check and p.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)}: {p.stderr.strip() or p.stdout.strip()}")
     return p.stdout if check else p
@@ -736,6 +791,22 @@ def write(path, text):
 def checkout_base(base):
     git("fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     git("checkout", "-q", "--force", "--detach", f"origin/{base}")
+
+
+def visual_specs(base, rows):
+    """{row: tier or None} for those of `rows` with tests/visual/<row>.toml on the base."""
+    if not rows:
+        return {}
+    git("fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    # the trailing slash makes git list the folder's children; without it git
+    # prints the one line `tests/visual` and every spec would be missed
+    names = git("ls-tree", "-z", "--name-only", f"origin/{base}", "--", "tests/visual/").split("\0")
+    listed = {}
+    for n in names:
+        rest = n[len("tests/visual/"):] if n.startswith("tests/visual/") else ""
+        if rest.endswith(".toml") and "/" not in rest:
+            listed[rest[:-5]] = n
+    return {r: spec_tier(git("show", f"origin/{base}:{listed[r]}"), r) for r in rows if r in listed}
 
 
 def staged_problems(base, allowed_marks):
@@ -829,6 +900,8 @@ def rule_problems(pr, rules, allowed_marks, head):
         if rules["evidence_in_report"]:
             text += "\n" + "\n".join(raw_file(r, head) for r in reports if r.endswith(".md"))
         problems += missing_evidence([t[:3] for t in ticks], text)
+        x_rows = sorted({t[2] for t in ticks if t[1] == "x"})
+        problems += missing_verdicts([t[:3] for t in ticks], text, visual_specs(pr["base"]["ref"], x_rows))
     return problems, ticks
 
 
@@ -857,8 +930,8 @@ def handle(pr, rules, allowed_marks, held, own_checks):
         comment_once(pr, "red", head, f"- {verdict}")
         return verdict
     fresh = mergeable(n)
-    if fresh["head"]["sha"] != head:
-        return "head moved while checking; next time"
+    if fresh["head"]["sha"] != head or fresh["base"]["ref"] != pr["base"]["ref"]:
+        return "head or base moved while checking; next time"
     if fresh["mergeable"] is None:
         return "GitHub has not worked out mergeability yet; next time"
     if not fresh["mergeable"]:
@@ -1269,6 +1342,50 @@ def self_test():
              ("TESTING-CHECKS.md", "~", "2.75")]
     miss = missing_evidence(ticks, report)
     assert [m.split(" ")[0] for m in miss] == ["2.74", "2.75"], miss
+
+    specs = {"41.15": 1, "41.16": 3, "41.17": 2, "41.18": None}
+    ok = ["41.15 tier1 [x] C:\\e\\run\\verdict-41.15.json", "41.15 tier1 [x] C:/e/run/verdict-41.15.json",
+          "- 41.15 tier1 [x] C:\\e\\verdict-41.15.json", "`41.15` tier1 [x] `C:\\e\\verdict-41.15.json`",
+          "41.15 tier1 [x] C:\\my evidence\\verdict-41.15.json", "41.15 tier1 [x] C:\\e\\verdict-41.15.json  \r"]
+    for ln in ok:
+        assert not missing_verdicts([("T.md", "x", "41.15")], "prose\n" + ln + "\nmore", specs), ln
+    bad = ["", "41.14-41.16 tier1 [x] C:\\e\\verdict-41.15.json", "41.15 tier1 [x] C:\\e\\verdict-41.1.json",
+           "41.15 tier1 [x] C:\\e\\verdict-41.15.json.txt", "41.15 tier1 [x] verdict-41.15.json",
+           "41.15 tier2 [x] C:\\e\\verdict-41.15.json", "41.15 tier1 [~] C:\\e\\verdict-41.15.json",
+           "41.15 tier1 [x] C:\\e\\verdict-41.15.json is fine", "41.14 tier1 [x] C:\\e\\verdict-41.15.json"]
+    for ln in bad:
+        assert missing_verdicts([("T.md", "x", "41.15")], ln, specs), ln
+    line = "{0} tier1 [x] C:\\e\\verdict-{0}.json"
+    for rid in ("41.16", "41.17", "41.18"):
+        assert missing_verdicts([("T.md", "x", rid)], line.format(rid), specs), rid
+    assert not missing_verdicts([("T.md", "~", "41.15"), ("T.md", "x", "99.1"), ("TESTING-KEYS.md", "x", "<Esc>")], "", specs)
+    mv = missing_verdicts([("T.md", "x", "41.17"), ("T.md", "x", "99.1"), ("T.md", "x", "41.15"), ("T.md", "x", "41.18")], "", specs)
+    assert [m.split(" ")[0] for m in mv] == ["41.17", "41.15", "41.18"], mv
+
+    good = 'spec = 1\nrow = "41.15"\ntier = {}\n'
+    assert [spec_tier(good.format(t), "41.15") for t in (1, 2, 3)] == [1, 2, 3]
+    assert spec_tier(good.format(1).replace("spec = 1", "spec = 2"), "41.15") is None
+    assert spec_tier(good.format(1).replace("spec = 1", "spec = true"), "41.15") is None
+    assert spec_tier(good.format(1), "41.16") is None
+    assert spec_tier(good.format(4), "41.15") is None
+    assert spec_tier(good.format("true"), "41.15") is None
+    assert spec_tier('spec = 1\nrow = "41.15"\n', "41.15") is None
+    assert spec_tier("spec = [", "41.15") is None
+    assert spec_tier(None, "41.15") is None
+
+    real_run = subprocess.run
+
+    def undecodable(*_args, **_kwargs):
+        raise UnicodeDecodeError("utf-8", b"\x93", 0, 1, "invalid start byte")
+
+    subprocess.run = undecodable
+    try:
+        git("show", "x")
+        raise AssertionError("git() let a UnicodeDecodeError through")
+    except RuntimeError as e:
+        assert "not UTF-8" in str(e), e
+    finally:
+        subprocess.run = real_run
 
     todo = ("## A\n- #12 not this\n## マージで止めている実機の PR\n\n説明（#3 の例）\n\n"
             "- #311: 32.20 を…\n  - 持ち主の答え: #312 と同じ\n## B\n- #400\n")

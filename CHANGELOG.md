@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.281.0] - 2026-11-08
+
+### 追加
+
+- `scripts/lanes/merge-lanes.py`: 見た目の行の `[x]` の門番（ito#205 の続き）。PR のベースのブランチに `tests/visual/<row>.toml` がある行に新しく `[x]` を付けるとき、次のどれかなら PR をマージしない。
+  - 検査の仕様が読めない・正しくない。`tier` が 1 でない（Tier 2 はまだ無く、Tier 3 は持ち主のもの）。
+  - PR の本文（`evidence_in_report` のアプリは報告も）に、`<row> tier1 [x] <verdict のパス>` の行が無い。行は `41.15 tier1 [x] C:\dev\filer-evidence\20261107-101203-41.15\verdict-41.15.json` の形で、行の ID は完全一致（範囲は通らない）、パスの最後は `verdict-<row>.json`。
+  - `[~]`・`[-]`、仕様の無い行は今までどおり。`tests/visual` が無いアプリでは断る行が出ない（新しい `[x]` のある PR ごとに、ベースの fetch と `git ls-tree` を 1 回ずつ走らせるだけ。それが失敗すれば、その PR はエラーでマージしない）。設定は要らない。
+  - 限界: 証拠はレーンの機械にあるので、GitHub Actions からは verdict の中身もハッシュも読めない。見るのは宣言の行だけで、本当に `auto-pass-candidate` だったかは確かめない。仕様を持たない見た目の行も見分けられない（これはレーンの規則のまま）。
+
+### 変更
+
+- `merge-lanes.py`: 確かめている間に PR のベースが変わったら、頭が動いたときと同じくマージせず次回に回す。
+- `merge-lanes.py`: `git` の出力が UTF-8 でないとき、実行全体が止まっていた。その PR だけのエラーにして、次の PR に進む。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す。`tests/visual/` が無いアプリは、ほかに何もしなくてよい。
+
 ## [0.280.0] - 2026-11-08
 
 ### 追加
