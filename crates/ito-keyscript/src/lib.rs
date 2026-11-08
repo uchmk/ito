@@ -17,7 +17,7 @@
 //! shared too; a [`Runner`] says how many steps are left for them
 //! ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -176,6 +176,83 @@ pub enum Step {
     Tree(String),
     /// `<Announced:text>`: a message `ito_a11y::announce`d since the run began contains the text. Waits like `<Assert:>`.
     Announced(String),
+    /// `<ClickId:name>`: press at the centre of the widget with that test ID (see `ito_a11y::test_id`), once it can
+    /// be clicked (shown, enabled, not covered, not behind a modal). This guarantees only that the press lands on that
+    /// point of that layer; it does not prove the widget took it. A script therefore has to follow it with a check of
+    /// what the click did (`<FocusedId:>`, `<ValueId:>`, `<Id:>` or `<Id:!>`), which the parser enforces. A
+    /// postcondition that was already true before the click proves nothing -- pick one the click changes.
+    ClickId(String),
+    /// `<Id:name>`, `<Id:!name>`, `<FocusedId:name>`, `<EnabledId:name>`, `<DisabledId:name>`, `<ValueId:name=text>`:
+    /// a check on the widget with that test ID. Waits a few seconds, like `<Assert:>`.
+    IdCheck(IdCheck),
+    /// `<ReadHas:NAME=TEXT>`: what the app reads under NAME (a tag of its [`Dialect::reads`]) contains the text. Waits
+    /// up to [`READ_WAIT`]. Not an operation: it needs no AccessKit tree and does not move the observation generation.
+    ReadHas {
+        tag: String,
+        text: String,
+    },
+}
+
+/// A check on a widget found by its test ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IdCheck {
+    /// `<Id:name>`: the widget is in the window and not hidden.
+    Present(String),
+    /// `<Id:!name>`: no widget has the ID (a hidden one is still there).
+    Absent(String),
+    /// `<FocusedId:name>`
+    Focused(String),
+    /// `<EnabledId:name>`
+    Enabled(String),
+    /// `<DisabledId:name>`
+    Disabled(String),
+    /// `<ValueId:name=text>`: the widget's value is exactly the text. `<ValueId:name=>` passes for an empty value and
+    /// for a widget with no value at all.
+    Value { name: String, text: String },
+}
+
+impl IdCheck {
+    /// The test ID the check is about.
+    pub fn name(&self) -> &str {
+        match self {
+            IdCheck::Present(n) | IdCheck::Absent(n) | IdCheck::Focused(n) | IdCheck::Enabled(n) | IdCheck::Disabled(n) => n,
+            IdCheck::Value { name, .. } => name,
+        }
+    }
+
+    /// Whether `obs` shows what the step expects: `Ok(())`, or why not (the runner retries until [`TEXT_WAIT`]).
+    /// A name with a problem (a duplicate, two names on one widget) fails every kind, `Absent` included.
+    pub fn check(&self, obs: &Observation) -> Result<(), String> {
+        let name = self.name();
+        let found = obs.id(name)?;
+        if let IdCheck::Absent(_) = self {
+            return if found.is_some() { Err(format!("`{name}` is still there")) } else { Ok(()) };
+        }
+        let Some(node) = found else { return Err(format!("no widget has the test ID `{name}`")) };
+        match self {
+            IdCheck::Present(_) if node.hidden => Err(format!("`{name}` is hidden")),
+            IdCheck::Present(_) | IdCheck::Absent(_) => Ok(()),
+            IdCheck::Focused(_) if node.focused => Ok(()),
+            IdCheck::Focused(_) => Err(format!("`{name}` is not focused")),
+            IdCheck::Enabled(_) if node.enabled => Ok(()),
+            IdCheck::Enabled(_) => Err(format!("`{name}` is disabled")),
+            IdCheck::Disabled(_) if !node.enabled => Ok(()),
+            IdCheck::Disabled(_) => Err(format!("`{name}` is enabled")),
+            IdCheck::Value { text, .. } if node.value.as_deref().unwrap_or("") == text => Ok(()),
+            IdCheck::Value { text, .. } => Err(format!("`{name}` holds `{}`, not `{text}`", node.value.as_deref().unwrap_or("(no value)"))),
+        }
+    }
+
+    fn token(&self) -> String {
+        match self {
+            IdCheck::Present(n) => format!("<Id:{n}>"),
+            IdCheck::Absent(n) => format!("<Id:!{n}>"),
+            IdCheck::Focused(n) => format!("<FocusedId:{n}>"),
+            IdCheck::Enabled(n) => format!("<EnabledId:{n}>"),
+            IdCheck::Disabled(n) => format!("<DisabledId:{n}>"),
+            IdCheck::Value { name, text } => format!("<ValueId:{name}={}>", paste_text_escape(text)),
+        }
+    }
 }
 
 /// What `<Enabled:>` and its kin ask about a thing.
@@ -272,6 +349,12 @@ pub enum Press {
     },
     Tree(String),
     Announced(String),
+    ClickId(String),
+    IdCheck(IdCheck),
+    ReadHas {
+        tag: String,
+        text: String,
+    },
 }
 
 /// A step as the frame loop takes it; `None` for a key no keyboard can type.
@@ -305,6 +388,9 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::Is { prop, text } => Some(Press::Is { prop: *prop, text: text.clone() }),
         Step::Tree(name) => Some(Press::Tree(name.clone())),
         Step::Announced(text) => Some(Press::Announced(text.clone())),
+        Step::ClickId(name) => Some(Press::ClickId(name.clone())),
+        Step::IdCheck(check) => Some(Press::IdCheck(check.clone())),
+        Step::ReadHas { tag, text } => Some(Press::ReadHas { tag: tag.clone(), text: text.clone() }),
         Step::Wait(d) => Some(Press::Wait(*d)),
         Step::Now => Some(Press::Now),
         Step::Shot(name) => Some(Press::Shot(name.clone())),
@@ -353,6 +439,9 @@ pub fn label(step: &Step) -> String {
         Step::Is { prop, text } => format!("<{}:{}>", prop.name(), paste_text_escape(text)),
         Step::Tree(name) => format!("<Tree:{name}>"),
         Step::Announced(text) => format!("<Announced:{}>", paste_text_escape(text)),
+        Step::ClickId(name) => format!("<ClickId:{name}>"),
+        Step::IdCheck(check) => check.token(),
+        Step::ReadHas { tag, text } => format!("<ReadHas:{tag}={}>", paste_text_escape(text)),
     }
 }
 
@@ -418,7 +507,7 @@ fn pointer(token: &str) -> Option<Result<Step, String>> {
             if !place.is_empty() && place.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') {
                 at(place).map(|at| Step::Click { right: name == "RClick", mods, at }).ok_or_else(bad)
             } else {
-                paste_text(token, name).map(|text| Step::ClickText { right: name == "RClick", text })
+                search_text(token, name).map(|text| Step::ClickText { right: name == "RClick", text })
             }
         }
         "DClick" => {
@@ -426,7 +515,7 @@ fn pointer(token: &str) -> Option<Result<Step, String>> {
             if !place.is_empty() && place.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') {
                 at(place).map(|at| Step::DClick { mods, at }).ok_or_else(bad)
             } else {
-                paste_text(token, name).map(Step::DClickText)
+                search_text(token, name).map(Step::DClickText)
             }
         }
         "Hover" => at(arg).map(|at| Step::Hover { at }).ok_or_else(bad),
@@ -508,9 +597,11 @@ pub fn commit_event(text: &str) -> egui::Event {
 
 /// How long `<Click:text>` and `<Assert:text>` keep looking for the text before the run fails: a popup
 /// opens a frame or two after the click that asked for it.
-const TEXT_WAIT: Duration = Duration::from_secs(3);
+pub const TEXT_WAIT: Duration = Duration::from_secs(3);
 /// How long an input the runner put in may wait to be drawn by the main window before the run fails.
-const DELIVER_WAIT: Duration = Duration::from_secs(10);
+pub const DELIVER_WAIT: Duration = Duration::from_secs(10);
+/// How long `<ReadHas:NAME=TEXT>` keeps reading before the run fails (a shell in a pane answers at its own pace).
+pub const READ_WAIT: Duration = Duration::from_secs(15);
 
 /// A labelled thing in the window, as egui's AccessKit tree names it.
 #[derive(Clone, Debug, PartialEq)]
@@ -543,6 +634,151 @@ struct Tap {
     focused: Option<bool>,
     /// The viewports of the passes begun and not yet ended (a pass ends in `output_hook`).
     passes: Vec<egui::ViewportId>,
+    /// The test IDs of the last main-window pass that brought a tree (see [`Observation::id`]).
+    ids: BTreeMap<String, Result<IdNode, String>>,
+}
+
+/// A widget found by its test ID (`ito_a11y::test_id`), as the last main-window pass left it.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct IdNode {
+    /// The test ID.
+    pub name: String,
+    /// The AccessKit role, as its `Debug` name (`Button`, `TextInput`, ...).
+    pub role: String,
+    /// Where it is, in points, in window coordinates (the layer's transform applied).
+    pub rect: egui::Rect,
+    /// Where egui takes a click for it, in window coordinates.
+    pub interact_rect: egui::Rect,
+    /// The layer it is drawn on.
+    pub layer: egui::LayerId,
+    /// Enabled, as the widget said and as the tree says.
+    pub enabled: bool,
+    /// It holds the keyboard focus.
+    pub focused: bool,
+    /// Its value (a text field's contents), if the tree has one.
+    pub value: Option<String>,
+    /// The tree hides it.
+    pub hidden: bool,
+    /// The point to press to click it, or why it cannot be clicked now. This guarantees only that a press there lands
+    /// on that point of that layer (inside the window, not covered, not behind a modal); it does not prove the widget
+    /// takes it.
+    pub click_at: Result<egui::Pos2, String>,
+}
+
+/// Join the test IDs a pass recorded with the author IDs in its tree. A name is good only when exactly one node and
+/// one entry carry it, they are the same widget, and no other name is on that widget.
+fn join_ids(
+    ctx: &egui::Context,
+    entries: Vec<ito_a11y::TestIdEntry>,
+    update: &egui::accesskit::TreeUpdate,
+    viewport_rect: egui::Rect,
+) -> BTreeMap<String, Result<IdNode, String>> {
+    let mut by_name_nodes: BTreeMap<&str, Vec<egui::accesskit::NodeId>> = BTreeMap::new();
+    for (id, node) in &update.nodes {
+        if let Some(name) = node.author_id() {
+            by_name_nodes.entry(name).or_default().push(*id);
+        }
+    }
+    let mut by_name_entries: BTreeMap<&str, Vec<&ito_a11y::TestIdEntry>> = BTreeMap::new();
+    for entry in &entries {
+        by_name_entries.entry(entry.name.as_str()).or_default().push(entry);
+    }
+    let mut names: Vec<&str> = by_name_nodes.keys().chain(by_name_entries.keys()).copied().collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut out = BTreeMap::new();
+    for name in names {
+        let nodes = by_name_nodes.get(name).map(Vec::as_slice).unwrap_or_default();
+        let named = by_name_entries.get(name).map(Vec::as_slice).unwrap_or_default();
+        let result = (|| {
+            if nodes.len() > 1 || named.len() > 1 {
+                let ids: Vec<_> = if nodes.len() > 1 { nodes.to_vec() } else { named.iter().map(|e| e.egui_id.accesskit_id()).collect() };
+                if nodes.len() <= 1 && ids.iter().all(|i| *i == ids[0]) {
+                    return Err(format!("the test ID `{name}` is given {} times to one widget ({:?})", ids.len(), ids[0]));
+                }
+                return Err(format!("the test ID `{name}` is on {} widgets ({ids:?})", ids.len()));
+            }
+            if let [entry] = named {
+                if let Some(other) = entries.iter().find(|o| o.name != name && o.egui_id == entry.egui_id) {
+                    let id = entry.egui_id.accesskit_id();
+                    let (a, b) = if name < other.name.as_str() { (name, other.name.as_str()) } else { (other.name.as_str(), name) };
+                    return Err(format!("the test IDs `{a}` and `{b}` are on the same widget ({id:?}); the last one wins in the tree"));
+                }
+            }
+            let (Some(&node_id), [entry]) = (nodes.first(), named) else {
+                return Err(match (nodes.first(), named.first()) {
+                    (Some(_), None) => format!("the test ID `{name}` is in the tree but was not set with ito_a11y::test_id"),
+                    (None, Some(e)) => {
+                        format!("the test ID `{name}` was set but its node is not in the tree ({:?})", e.egui_id.accesskit_id())
+                    }
+                    _ => unreachable!(),
+                });
+            };
+            let want = entry.egui_id.accesskit_id();
+            if node_id != want {
+                return Err(format!("the test ID `{name}` was set but its node is not in the tree ({want:?})"));
+            }
+            let node = update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == node_id)
+                .map(|(_, n)| n)
+                .ok_or_else(|| format!("the test ID `{name}` was set but its node is not in the tree ({want:?})"))?;
+            let t = ctx.layer_transform_to_global(entry.layer).unwrap_or_default();
+            let (rect, interact_rect) = (t * entry.rect, t * entry.interact_rect);
+            let enabled = entry.enabled && !node.is_disabled();
+            let hidden = node.is_hidden();
+            let click_at = click_point(ctx, name, interact_rect, entry.layer, enabled, hidden, viewport_rect);
+            Ok(IdNode {
+                name: name.to_owned(),
+                role: format!("{:?}", node.role()),
+                rect,
+                interact_rect,
+                layer: entry.layer,
+                enabled,
+                focused: node_id == update.focus,
+                value: node.value().map(String::from),
+                hidden,
+                click_at,
+            })
+        })();
+        out.insert(name.to_owned(), result);
+    }
+    out
+}
+
+/// The point to press to click the widget, or the first reason it cannot be clicked.
+fn click_point(
+    ctx: &egui::Context,
+    name: &str,
+    r: egui::Rect,
+    layer: egui::LayerId,
+    enabled: bool,
+    hidden: bool,
+    viewport_rect: egui::Rect,
+) -> Result<egui::Pos2, String> {
+    if hidden {
+        return Err(format!("`{name}` is hidden"));
+    }
+    if !enabled {
+        return Err(format!("`{name}` is disabled"));
+    }
+    if !(r.min.x.is_finite() && r.min.y.is_finite() && r.max.x.is_finite() && r.max.y.is_finite()) || r.width() <= 0.0 || r.height() <= 0.0
+    {
+        return Err(format!("`{name}` has no area to click ({r:?})"));
+    }
+    let c = r.center();
+    if !viewport_rect.contains(c) {
+        return Err(format!("`{name}` is outside the window (at {c:?}, window {viewport_rect:?})"));
+    }
+    if !ctx.memory(|m| m.allows_interaction(layer)) {
+        return Err(format!("`{name}` is behind a modal window or cannot be clicked ({layer:?})"));
+    }
+    match ctx.layer_id_at(c) {
+        Some(l) if l == layer => Ok(c),
+        other => Err(format!("`{name}` is covered by {other:?} at {c:?}")),
+    }
 }
 
 impl egui::Plugin for Tap {
@@ -568,9 +804,12 @@ impl egui::Plugin for Tap {
         if self.passes.pop() != Some(egui::ViewportId::ROOT) {
             return;
         }
+        // The IDs a pass records are taken on every main-window pass, so none is left over for a later one.
+        let entries = ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT);
         let Some(update) = &output.platform_output.accesskit_update else {
             self.items.clear();
             self.tree.clear();
+            self.ids.clear();
             self.fresh = false;
             return;
         };
@@ -599,6 +838,10 @@ impl egui::Plugin for Tap {
         self.fresh = true;
         self.pass_nr = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
         let (info, rect) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.viewport().clone(), i.viewport_rect()));
+        // `cumulative_pass_nr_for` has counted this pass already, so a widget that recorded N is in pass N + 1.
+        let pass = self.pass_nr;
+        let entries: Vec<_> = entries.into_iter().filter(|e| e.pass + 1 == pass).collect();
+        self.ids = join_ids(ctx, entries, update, rect);
         self.viewport_rect = Some(rect);
         self.minimized = info.minimized;
         self.focused = info.focused;
@@ -620,6 +863,20 @@ pub struct Observation {
     pub viewport_rect: egui::Rect,
     pub minimized: Option<bool>,
     pub focused: Option<bool>,
+    /// The widgets with a test ID (`ito_a11y::test_id`), by name; an `Err` is a name with a problem (a duplicate, two
+    /// names on one widget). Empty while AccessKit is off.
+    pub ids: BTreeMap<String, Result<IdNode, String>>,
+}
+
+impl Observation {
+    /// The widget with that test ID: `Ok(None)` when no widget has it, `Err` when the name has a problem.
+    pub fn id(&self, name: &str) -> Result<Option<&IdNode>, String> {
+        match self.ids.get(name) {
+            None => Ok(None),
+            Some(Ok(node)) => Ok(Some(node)),
+            Some(Err(e)) => Err(e.clone()),
+        }
+    }
 }
 
 /// Start reading the window's tree and what the app copies, from the next frame on. `Runner` does this
@@ -647,6 +904,7 @@ pub fn observation(ctx: &egui::Context) -> Option<Observation> {
             viewport_rect: t.viewport_rect.unwrap_or(egui::Rect::NOTHING),
             minimized: t.minimized,
             focused: t.focused,
+            ids: t.ids.clone(),
         })
     })
     .flatten()
@@ -954,7 +1212,7 @@ fn paste_text(token: &str, what: &str) -> Result<String, String> {
     let noun = match what {
         "Paste" => "a paste",
         "Click" | "RClick" | "DClick" | "Assert" | "Clipboard" | "ClipboardHas" | "Enabled" | "Disabled" | "Focused" | "Checked"
-        | "Unchecked" | "Announced" => "a text to look for",
+        | "Unchecked" | "Announced" | "ValueId" | "ReadHas" => "a text to look for",
         _ => "an input method step",
     };
     let bad = |why: &str| format!("`{token}` is not {noun}: {why}");
@@ -980,6 +1238,27 @@ fn paste_text(token: &str, what: &str) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+/// [`paste_text`] for a text to look for, which must not be empty: an empty text matches anything, so a check that
+/// uses it passes without looking.
+fn search_text(token: &str, what: &str) -> Result<String, String> {
+    let text = paste_text(token, what)?;
+    if text.is_empty() {
+        return Err(format!("`{token}` has nothing to look for; an empty text matches anything"));
+    }
+    Ok(text)
+}
+
+const TEST_ID_HELP: &str = "write lowercase letters, digits, - and _, in parts joined by `.`, as `<Id:settings.shell.env.add>`";
+
+/// The test ID in `<{what}:name>`.
+fn test_id_arg<'t>(token: &'t str, what: &str) -> Result<&'t str, String> {
+    let name = token.strip_prefix(&format!("<{what}:")).and_then(|t| t.strip_suffix('>')).unwrap_or("");
+    if ito_a11y::is_test_id(name) {
+        return Ok(name);
+    }
+    Err(format!("`{token}` is not a test ID; {TEST_ID_HELP}"))
 }
 
 /// `paste_text`'s inverse, for the label of a step.
@@ -1097,17 +1376,60 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
             None if token.starts_with("<Assert:") => {
                 // The `!` is read before the escapes, so `!` is a literal one.
                 let negated = token.starts_with("<Assert:!");
-                let token = if negated { token.replacen("<Assert:!", "<Assert:", 1) } else { token.to_owned() };
-                Step::Assert { text: paste_text(&token, "Assert")?, present: !negated }
+                let inner = if negated { token.replacen("<Assert:!", "<Assert:", 1) } else { token.to_owned() };
+                let text = paste_text(&inner, "Assert")?;
+                if text.is_empty() {
+                    return Err(format!("`{token}` has nothing to look for; an empty text matches anything"));
+                }
+                Step::Assert { text, present: !negated }
             }
-            None if token.starts_with("<Clipboard:") => Step::Clipboard(paste_text(token, "Clipboard")?),
-            None if token.starts_with("<ClipboardHas:") => Step::ClipboardHas(paste_text(token, "ClipboardHas")?),
+            None if token.starts_with("<Clipboard:") => Step::Clipboard(search_text(token, "Clipboard")?),
+            None if token.starts_with("<ClipboardHas:") => Step::ClipboardHas(search_text(token, "ClipboardHas")?),
+            None if token.starts_with("<ClickId:") => Step::ClickId(test_id_arg(token, "ClickId")?.to_owned()),
+            None if token.starts_with("<Id:!") => {
+                let name = token.strip_prefix("<Id:!").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+                if !ito_a11y::is_test_id(name) {
+                    return Err(format!("`{token}` is not a test ID; {TEST_ID_HELP}"));
+                }
+                Step::IdCheck(IdCheck::Absent(name.to_owned()))
+            }
+            None if token.starts_with("<Id:") => Step::IdCheck(IdCheck::Present(test_id_arg(token, "Id")?.to_owned())),
+            None if token.starts_with("<FocusedId:") => Step::IdCheck(IdCheck::Focused(test_id_arg(token, "FocusedId")?.to_owned())),
+            None if token.starts_with("<EnabledId:") => Step::IdCheck(IdCheck::Enabled(test_id_arg(token, "EnabledId")?.to_owned())),
+            None if token.starts_with("<DisabledId:") => Step::IdCheck(IdCheck::Disabled(test_id_arg(token, "DisabledId")?.to_owned())),
+            None if token.starts_with("<ValueId:") => {
+                let inner = token.strip_prefix("<ValueId:").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+                let Some((name, text)) = inner.split_once('=') else {
+                    return Err(format!("`{token}` has no value to compare; write it as `<ValueId:name=text>`"));
+                };
+                if !ito_a11y::is_test_id(name) {
+                    return Err(format!("`{token}` is not a test ID; {TEST_ID_HELP}"));
+                }
+                let text = paste_text(&format!("<ValueId:{text}>"), "ValueId")?;
+                Step::IdCheck(IdCheck::Value { name: name.to_owned(), text })
+            }
+            None if token.starts_with("<ReadHas:") => {
+                let inner = token.strip_prefix("<ReadHas:").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+                let Some((tag, text)) = inner.split_once('=') else {
+                    return Err(format!("`{token}` has no text to look for; write it as `<ReadHas:NAME=TEXT>`"));
+                };
+                let Some((tag, _)) = dialect.reads.iter().find(|(t, _)| *t == tag) else {
+                    let tags: Vec<&str> = dialect.reads.iter().map(|(t, _)| *t).collect();
+                    return Err(if tags.is_empty() {
+                        format!("`{token}`: this app reads nothing, so `<ReadHas:>` has nothing to read")
+                    } else {
+                        format!("`{token}`: `{tag}` is not something this app reads; write one of {}", tags.join(", "))
+                    });
+                };
+                let text = search_text(&format!("<ReadHas:{text}>"), "ReadHas")?;
+                Step::ReadHas { tag: (*tag).to_owned(), text }
+            }
             None if token.starts_with("<Tree:") => Step::Tree(named(token, "Tree", "tree name")?),
-            None if token.starts_with("<Announced:") => Step::Announced(paste_text(token, "Announced")?),
+            None if token.starts_with("<Announced:") => Step::Announced(search_text(token, "Announced")?),
             None if Prop::ALL.iter().any(|p| token.starts_with(&format!("<{}:", p.name()))) => {
                 let prop =
                     Prop::ALL.iter().copied().find(|p| token.starts_with(&format!("<{}:", p.name()))).unwrap_or_else(|| unreachable!());
-                Step::Is { prop, text: paste_text(token, prop.name())? }
+                Step::Is { prop, text: search_text(token, prop.name())? }
             }
             None if read.is_some() => {
                 let (tag, noun) = read.copied().unwrap_or_else(|| unreachable!());
@@ -1122,7 +1444,24 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
         // `<C-+>*45`: the key that many times. Only after a `<…>` key, since a
         // bare `*` is a key of its own.
         let mut times = 1;
-        if c == '<' && !matches!(step, Step::Wait(_) | Step::Now | Step::Quit | Step::Shot(_) | Step::State(_) | Step::Read { .. }) {
+        let no_times = matches!(
+            step,
+            Step::Wait(_)
+                | Step::Now
+                | Step::Quit
+                | Step::Shot(_)
+                | Step::State(_)
+                | Step::Read { .. }
+                | Step::ClickId(_)
+                | Step::IdCheck(_)
+                | Step::ReadHas { .. }
+        );
+        if matches!(step, Step::ClickId(_) | Step::IdCheck(_) | Step::ReadHas { .. })
+            && rest.strip_prefix('*').is_some_and(|after| after.starts_with(|d: char| d.is_ascii_digit()))
+        {
+            return Err(format!("`{token}` cannot be repeated with `*N`; write it once"));
+        }
+        if c == '<' && !no_times {
             if let Some(after) = rest.strip_prefix('*') {
                 let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
                 match digits.parse::<usize>() {
@@ -1145,6 +1484,18 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 "`<Now>` has to come right before a key or a reading (`<State:x>`, `<Shot:x>`), as `d<Now>w` or `<A-c><Now><State:mid>`"
                     .into(),
             );
+        }
+    }
+    // A `<ClickId:x>` proves nothing by itself (see `Step::ClickId`), so a check of its result has to come after it.
+    for (i, step) in out.iter().enumerate() {
+        let Step::ClickId(name) = step else { continue };
+        let next = out[i + 1..].iter().find(|s| !matches!(s, Step::Wait(_) | Step::State(_) | Step::Shot(_) | Step::Read { .. }));
+        let checked =
+            matches!(next, Some(Step::IdCheck(IdCheck::Focused(_) | IdCheck::Value { .. } | IdCheck::Present(_) | IdCheck::Absent(_))));
+        if !checked {
+            return Err(format!(
+                "`<ClickId:{name}>` has to be followed by a check of what it did \u{2014} `<FocusedId:\u{2026}>`, `<ValueId:\u{2026}=\u{2026}>`, `<Id:\u{2026}>` or `<Id:!\u{2026}>`; only `<Wait:>`, `<State:>`, `<Shot:>` and readings may come between"
+            ));
         }
     }
     Ok(out)
@@ -1382,6 +1733,25 @@ pub struct Runner {
     action_gen: u64,
     /// The label of the step that made the frames in `pointer`.
     pointer_step: String,
+    /// What the last `<ReadHas:>` read, while it waits.
+    last_read: Option<String>,
+}
+
+/// What an app reads for `<ReadHas:NAME=TEXT>` (a terminal pane's text, say). The runner asks for it in each frame
+/// the step waits and never keeps the reader.
+pub trait Reader {
+    /// The text under `name` (a tag of the app's [`Dialect::reads`]): `Ok(None)` when there is nothing yet (the step
+    /// waits), `Err` when there never will be (the step fails at once).
+    fn read(&mut self, name: &str) -> Result<Option<String>, String>;
+}
+
+/// The reader of [`Runner::input`]: an app that reads nothing.
+struct NoReader;
+
+impl Reader for NoReader {
+    fn read(&mut self, name: &str) -> Result<Option<String>, String> {
+        Err(format!("this app does not read {name}"))
+    }
 }
 
 impl Runner {
@@ -1397,7 +1767,7 @@ impl Runner {
         // before the panes exist.
         let reads_window = steps.iter().any(|s| {
             matches!(s, Step::ClickText { .. } | Step::DClickText(_) | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_))
-                || matches!(s, Step::Is { .. } | Step::Tree(_) | Step::Announced(_))
+                || matches!(s, Step::Is { .. } | Step::Tree(_) | Step::Announced(_) | Step::ClickId(_) | Step::IdCheck(_))
         });
         if steps.iter().any(|s| matches!(s, Step::Announced(_) | Step::Tree(_))) {
             ito_a11y::record_announcements(true);
@@ -1408,6 +1778,7 @@ impl Runner {
             flight: None,
             action_gen: 0,
             pointer_step: String::new(),
+            last_read: None,
             steps: steps.into(),
             next: Instant::now() + Duration::from_millis(500),
             shot: None,
@@ -1476,6 +1847,12 @@ impl Runner {
     /// Put the next step's events into this frame's input when it is due. Only the main window's hook gets
     /// any, and the next one waits until the main window has drawn the last.
     pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) -> Option<Do> {
+        self.input_with(ctx, raw, &mut NoReader)
+    }
+
+    /// [`input`](Self::input) for an app that reads something for `<ReadHas:>`: `reader` is asked in the frames that
+    /// step takes and is not kept.
+    pub fn input_with(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, reader: &mut dyn Reader) -> Option<Do> {
         if self.finished || self.shot.is_some() {
             return None;
         }
@@ -1525,7 +1902,7 @@ impl Runner {
             return Some(Do::Done);
         };
         self.next = now + GAP;
-        let did = self.take(&step, ctx, raw, now);
+        let did = self.take(&step, ctx, raw, now, reader);
         self.note(now);
         did
     }
@@ -1551,7 +1928,7 @@ impl Runner {
     }
 
     /// One step into this frame's input.
-    fn take(&mut self, step: &Step, ctx: &egui::Context, raw: &mut egui::RawInput, now: Instant) -> Option<Do> {
+    fn take(&mut self, step: &Step, ctx: &egui::Context, raw: &mut egui::RawInput, now: Instant, reader: &mut dyn Reader) -> Option<Do> {
         // A key no keyboard has is skipped, as `--keys` refuses it up front.
         match press(step)? {
             Press::Events(events) => {
@@ -1624,6 +2001,23 @@ impl Runner {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
+            Press::ClickId(name) => match self.fresh(ctx).and_then(|o| match o.id(&name)? {
+                Some(node) => node.click_at.clone(),
+                None => Err(format!("no widget has the test ID `{name}`")),
+            }) {
+                Ok(pos) => {
+                    self.deadline = None;
+                    self.pointer = click_frames(pos, false);
+                    self.pointer_step = label(step);
+                    self.next = now;
+                }
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::IdCheck(check) => match self.fresh(ctx).and_then(|o| check.check(&o)) {
+                Ok(()) => self.deadline = None,
+                Err(why) => return self.retry(step, why, now),
+            },
+            Press::ReadHas { tag, text } => return self.read_has(step, &tag, &text, now, ctx, reader),
             Press::Tree(name) => {
                 let obs = match self.fresh(ctx) {
                     Ok(o) if o.tree.is_empty() => Err("the window's tree was empty".to_owned()),
@@ -1655,6 +2049,47 @@ impl Runner {
                 self.next = now;
             }
         }
+        None
+    }
+
+    /// `<ReadHas:>`: read, and wait up to [`READ_WAIT`] for the text. Not an operation: no input goes in, so nothing
+    /// is in flight and the observation generation stays.
+    fn read_has(&mut self, step: &Step, tag: &str, text: &str, now: Instant, ctx: &egui::Context, reader: &mut dyn Reader) -> Option<Do> {
+        let read = reader.read(tag);
+        let fail = |this: &mut Self, why: String| {
+            this.deadline = None;
+            this.last_read = None;
+            this.finished = true;
+            Some(Do::Failed { step: label(step), why })
+        };
+        match read {
+            Err(e) => return fail(self, e),
+            Ok(Some(t)) if t.contains(text) => {
+                self.deadline = None;
+                self.last_read = None;
+                return None;
+            }
+            Ok(Some(t)) => self.last_read = Some(t),
+            Ok(None) => self.last_read = None,
+        }
+        let deadline = *self.deadline.get_or_insert(now + READ_WAIT);
+        if now >= deadline {
+            let why = match &self.last_read {
+                Some(t) => {
+                    let n = t.chars().count();
+                    if n > 200 {
+                        format!("\u{2026}{}", t.chars().skip(n - 200).collect::<String>())
+                    } else {
+                        t.clone()
+                    }
+                }
+                None => "nothing to read (no pane)".to_owned(),
+            };
+            return fail(self, why);
+        }
+        self.steps.push_front(step.clone());
+        self.next = now + FRAME;
+        ctx.request_repaint();
         None
     }
 
@@ -2559,7 +2994,343 @@ mod tests {
     /// one wait, which must stay under `STALL`.
     #[test]
     fn the_waits_stay_under_the_stall() {
-        assert!(DELIVER_WAIT < STALL && TEXT_WAIT < STALL);
-        assert!(SETTLE + DELIVER_WAIT.max(TEXT_WAIT) < STALL);
+        assert!(DELIVER_WAIT < STALL && TEXT_WAIT < STALL && READ_WAIT < STALL);
+        assert!(SETTLE + DELIVER_WAIT.max(TEXT_WAIT).max(READ_WAIT) < STALL);
+    }
+
+    const PANE: Dialect<'static> = Dialect { reads: &[("PaneText", "pane text")], shot_suffixes: &[] };
+
+    fn window() -> egui::RawInput {
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() }
+    }
+
+    /// The main window's observation after a few passes of `ui_fn`.
+    fn seen(ctx: &egui::Context, mut ui_fn: impl FnMut(&mut egui::Ui)) -> Observation {
+        observe(ctx);
+        for _ in 0..3 {
+            draw(ctx, window(), &mut ui_fn);
+        }
+        observation(ctx).expect("a tree")
+    }
+
+    fn button(ui: &mut egui::Ui, name: &str) -> egui::Response {
+        let r = ui.button(name);
+        ito_a11y::test_id(&r, name);
+        r
+    }
+
+    #[test]
+    fn id_steps_round_trip_and_refuse_bad_names() {
+        for script in [
+            "<ClickId:a.b-c_d><FocusedId:a.b-c_d>",
+            "<Id:a>",
+            "<Id:!a>",
+            "<EnabledId:a>",
+            "<DisabledId:a>",
+            "<ValueId:a.b=x=y>",
+            "<ValueId:a=>",
+        ] {
+            let steps = parse(script).unwrap_or_else(|e| panic!("{script}: {e}"));
+            let again: String = steps.iter().map(label).collect();
+            assert_eq!(again, script);
+            assert_eq!(parse(&again).unwrap(), steps);
+        }
+        assert_eq!(parse("<ValueId:a.b=x=y>").unwrap(), vec![Step::IdCheck(IdCheck::Value { name: "a.b".into(), text: "x=y".into() })]);
+        assert_eq!(parse("<ValueId:a=>").unwrap(), vec![Step::IdCheck(IdCheck::Value { name: "a".into(), text: String::new() })]);
+        assert_eq!(parse("<Id:!a>").unwrap(), vec![Step::IdCheck(IdCheck::Absent("a".into()))]);
+        for bad in ["<Id:A>", "<Id:a..b>", "<Id:>", "<Id:!>", "<Id:!A>", "<ClickId:>", "<ValueId:a>", "<ValueId:A=x>", "<Id:a>*2"] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        assert!(parse("<ClickId:a><FocusedId:a>*2").is_err());
+    }
+
+    #[test]
+    fn a_click_id_has_to_be_followed_by_a_check() {
+        for ok in [
+            "<ClickId:a><FocusedId:a>",
+            "<ClickId:a><ValueId:a=x>",
+            "<ClickId:a><Id:b>",
+            "<ClickId:a><Id:!a>",
+            "<ClickId:a><Wait:100><Id:b>",
+        ] {
+            parse(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        parse_with("<ClickId:a><PaneText:f><Id:!a>", &PANE).unwrap();
+        for bad in [
+            "<ClickId:a>",
+            "<ClickId:a><Wait:100>",
+            "<ClickId:a>j",
+            "<ClickId:a><EnabledId:a>",
+            "<ClickId:a><DisabledId:a>",
+            "<ClickId:a><Assert:x>",
+            "<ClickId:a><ClickId:b><FocusedId:b>",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_empty_text_to_look_for_is_refused() {
+        for bad in ["<Assert:>", "<Assert:!>", "<Clipboard:>", "<ClipboardHas:>", "<Announced:>", "<Click:>", "<RClick:>", "<DClick:>"] {
+            let e = parse(bad).expect_err(bad);
+            assert!(e.contains("nothing to look for"), "{bad}: {e}");
+        }
+        for ok in ["<Paste:>", "<Preedit:>", "<ValueId:a=>"] {
+            parse(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+    }
+
+    #[test]
+    fn read_has_parses_against_the_dialect() {
+        let steps = parse_with("<ReadHas:PaneText=ok\\x3e>", &PANE).unwrap();
+        assert_eq!(steps, vec![Step::ReadHas { tag: "PaneText".into(), text: "ok>".into() }]);
+        for bad in ["<ReadHas:Nope=a>", "<ReadHas:PaneText>", "<ReadHas:PaneText=>", "<ReadHas:PaneText=a>*2"] {
+            assert!(parse_with(bad, &PANE).is_err(), "{bad}");
+        }
+        assert!(parse("<ReadHas:PaneText=a>").is_err());
+    }
+
+    #[test]
+    fn a_widget_with_a_test_id_is_observed() {
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            button(ui, "b");
+        });
+        let node = obs.id("b").unwrap().expect("found");
+        assert_eq!(node.name, "b");
+        assert!(node.enabled && !node.hidden && !node.focused);
+        assert_eq!(node.click_at, Ok(node.interact_rect.center()));
+        assert!(obs.id("other").unwrap().is_none());
+        assert_eq!(IdCheck::Present("b".into()).check(&obs), Ok(()));
+    }
+
+    #[test]
+    fn a_name_on_two_widgets_or_two_names_on_one_are_errors() {
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            let a = ui.button("one");
+            ito_a11y::test_id(&a, "dup");
+            let b = ui.button("two");
+            ito_a11y::test_id(&b, "dup");
+        });
+        let e = obs.id("dup").unwrap_err();
+        assert!(e.contains("`dup`") && e.contains("2 widgets"), "{e}");
+        assert!(IdCheck::Absent("dup".into()).check(&obs).is_err());
+        assert!(IdCheck::Present("dup".into()).check(&obs).is_err());
+
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            let a = ui.button("one");
+            ito_a11y::test_id(&a, "first");
+            ito_a11y::test_id(&a, "second");
+        });
+        for name in ["first", "second"] {
+            let e = obs.id(name).unwrap_err();
+            assert!(e.contains("first") && e.contains("second") && e.contains("same widget"), "{name}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_gone_widget_is_none_and_accesskit_off_gives_no_ids() {
+        let ctx = egui::Context::default();
+        observe(&ctx);
+        for _ in 0..3 {
+            draw(&ctx, window(), |ui| {
+                button(ui, "b");
+            });
+        }
+        assert!(observation(&ctx).unwrap().id("b").unwrap().is_some());
+        for _ in 0..3 {
+            draw(&ctx, window(), |ui| {
+                ui.label("none");
+            });
+        }
+        let obs = observation(&ctx).unwrap();
+        assert!(obs.id("b").unwrap().is_none());
+        assert_eq!(IdCheck::Absent("b".into()).check(&obs), Ok(()));
+
+        // AccessKit off (no `observe`): `test_id` notes nothing, so nothing is left to take.
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            draw(&ctx, window(), |ui| {
+                button(ui, "b");
+            });
+        }
+        assert!(ito_a11y::take_test_ids(&ctx, egui::ViewportId::ROOT).is_empty());
+    }
+
+    #[test]
+    fn click_at_says_why_a_widget_cannot_be_clicked() {
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            let r = ui.add_enabled(false, egui::Button::new("d"));
+            ito_a11y::test_id(&r, "off");
+        });
+        let node = obs.id("off").unwrap().expect("found");
+        assert!(!node.enabled);
+        assert!(node.click_at.clone().unwrap_err().contains("disabled"));
+
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            let r = ui.put(egui::Rect::from_min_size(egui::pos2(5000.0, 5000.0), egui::vec2(40.0, 20.0)), egui::Button::new("far"));
+            ito_a11y::test_id(&r, "far");
+        });
+        let why = obs.id("far").unwrap().expect("found").click_at.clone().unwrap_err();
+        assert!(why.contains("outside the window") || why.contains("no area"), "{why}");
+
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            button(ui, "under");
+            egui::Modal::new(egui::Id::new("m")).show(ui.ctx(), |ui| {
+                ui.label("modal");
+            });
+        });
+        let why = obs.id("under").unwrap().expect("found").click_at.clone().unwrap_err();
+        assert!(why.contains("modal") || why.contains("covered"), "{why}");
+    }
+
+    #[test]
+    fn id_checks_say_what_they_found() {
+        let ctx = egui::Context::default();
+        let (mut full, mut empty) = ("hi".to_owned(), String::new());
+        let obs = seen(&ctx, |ui| {
+            button(ui, "b");
+            let r = ui.add_enabled(false, egui::Button::new("d"));
+            ito_a11y::test_id(&r, "d");
+            let r = ui.text_edit_singleline(&mut full);
+            ito_a11y::test_id(&r, "full");
+            let r = ui.text_edit_singleline(&mut empty);
+            ito_a11y::test_id(&r, "empty");
+        });
+        let v = |name: &str, text: &str| IdCheck::Value { name: name.into(), text: text.into() };
+        assert_eq!(IdCheck::Present("b".into()).check(&obs), Ok(()));
+        assert!(IdCheck::Present("zz".into()).check(&obs).unwrap_err().contains("`zz`"));
+        assert!(IdCheck::Absent("b".into()).check(&obs).is_err());
+        assert_eq!(IdCheck::Absent("zz".into()).check(&obs), Ok(()));
+        assert_eq!(IdCheck::Enabled("b".into()).check(&obs), Ok(()));
+        assert!(IdCheck::Enabled("d".into()).check(&obs).is_err());
+        assert_eq!(IdCheck::Disabled("d".into()).check(&obs), Ok(()));
+        assert!(IdCheck::Disabled("b".into()).check(&obs).is_err());
+        assert!(IdCheck::Enabled("zz".into()).check(&obs).is_err());
+        assert!(IdCheck::Focused("b".into()).check(&obs).is_err());
+        assert_eq!(v("full", "hi").check(&obs), Ok(()));
+        assert!(v("full", "ho").check(&obs).unwrap_err().contains("hi"));
+        assert_eq!(v("empty", "").check(&obs), Ok(()));
+        assert!(v("full", "").check(&obs).is_err());
+        assert!(v("zz", "x").check(&obs).is_err());
+    }
+
+    #[test]
+    fn a_click_id_lands_and_the_check_passes() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<ClickId:t><FocusedId:t>").unwrap(), None);
+        let mut f = Frames::new();
+        let mut text = String::new();
+        let mut out = None;
+        for _ in 0..200 {
+            let (raw, did) = f.prepare(&mut r, &ctx, window());
+            if did.is_some() {
+                out = did;
+                break;
+            }
+            draw(&ctx, raw, |ui| {
+                let resp = ui.text_edit_singleline(&mut text);
+                ito_a11y::test_id(&resp, "t");
+            });
+        }
+        assert_eq!(out, Some(Do::Done));
+    }
+
+    #[test]
+    fn a_click_id_on_a_missing_widget_fails_with_why() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<ClickId:missing><Id:missing>").unwrap(), None);
+        let mut f = Frames::new();
+        let mut out = None;
+        for _ in 0..200 {
+            let (raw, did) = f.prepare(&mut r, &ctx, window());
+            if did.is_some() {
+                out = did;
+                break;
+            }
+            draw(&ctx, raw, |ui| {
+                ui.label("nothing");
+            });
+            if r.deadline.is_some() {
+                r.deadline = Some(Instant::now());
+            }
+        }
+        match out {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("no widget has the test ID `missing`"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    struct Replies {
+        replies: Vec<Result<Option<String>, String>>,
+        at: usize,
+    }
+
+    impl Reader for Replies {
+        fn read(&mut self, _name: &str) -> Result<Option<String>, String> {
+            let reply = self.replies[self.at.min(self.replies.len() - 1)].clone();
+            self.at += 1;
+            reply
+        }
+    }
+
+    /// Run `<ReadHas:PaneText=ok>` against `replies`; from frame `expire_at` on the wait counts as over.
+    fn read_run(replies: Vec<Result<Option<String>, String>>, expire_at: Option<usize>) -> (Option<Do>, Runner) {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse_with("<ReadHas:PaneText=ok>", &PANE).unwrap(), None);
+        let mut reader = Replies { replies, at: 0 };
+        let mut out = None;
+        for i in 0..40 {
+            let mut raw = egui::RawInput::default();
+            r.next = Instant::now();
+            let did = r.input_with(&ctx, &mut raw, &mut reader);
+            if did.is_some() {
+                out = did;
+                break;
+            }
+            if expire_at.is_some_and(|k| i >= k) {
+                r.deadline = Some(Instant::now());
+            }
+        }
+        (out, r)
+    }
+
+    #[test]
+    fn read_has_waits_for_the_text() {
+        let (out, r) = read_run(vec![Ok(None), Ok(None), Ok(Some("all ok here".into()))], None);
+        assert_eq!(out, Some(Do::Done));
+        assert_eq!(r.action_gen, 0, "reading is not an operation");
+        assert!(r.flight.is_none());
+
+        let (out, _) = read_run(vec![Err("gone".into())], None);
+        assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why == "gone"), "{out:?}");
+
+        let long = format!("{}END", "x".repeat(300));
+        let (out, _) = read_run(vec![Ok(Some(long))], Some(3));
+        match out {
+            Some(Do::Failed { why, .. }) => {
+                assert_eq!(why.chars().count(), 201);
+                assert!(why.starts_with('\u{2026}') && why.ends_with("END"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let (out, _) = read_run(vec![Ok(None)], Some(3));
+        assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why == "nothing to read (no pane)"), "{out:?}");
+    }
+
+    #[test]
+    fn input_without_a_reader_fails_a_read_has() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse_with("<ReadHas:PaneText=ok>", &PANE).unwrap(), None);
+        let mut raw = egui::RawInput::default();
+        r.next = Instant::now();
+        let out = r.input(&ctx, &mut raw);
+        assert!(matches!(out, Some(Do::Failed { ref why, .. }) if why == "this app does not read PaneText"), "{out:?}");
     }
 }

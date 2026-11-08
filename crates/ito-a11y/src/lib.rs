@@ -174,9 +174,149 @@ pub fn announce(ui: &mut egui::Ui, message: &str) {
     say(&resp, Role::Label, message);
 }
 
+/// A test ID: lowercase ASCII letters, digits, `_` and `-`, in one or more parts joined by `.`
+/// (`settings.shell.env.add`). `^[a-z0-9_-]+(\.[a-z0-9_-]+)*$`.
+pub fn is_test_id(name: &str) -> bool {
+    !name.is_empty() && name.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-')))
+}
+
+/// Where a test ID was drawn, as [`test_id`] noted it.
+#[cfg(feature = "egui")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestIdEntry {
+    pub name: String,
+    pub egui_id: egui::Id,
+    /// `resp.rect`, in the layer's own coordinates.
+    pub rect: egui::Rect,
+    /// `resp.interact_rect`, in the layer's own coordinates.
+    pub interact_rect: egui::Rect,
+    pub layer: egui::LayerId,
+    /// `resp.enabled()`.
+    pub enabled: bool,
+    /// `ctx.viewport_id()` at the call.
+    pub viewport: egui::ViewportId,
+    /// `ctx.cumulative_pass_nr()` at the call.
+    pub pass: u64,
+}
+
+#[cfg(feature = "egui")]
+#[derive(Clone, Default)]
+struct TestIds(std::collections::HashMap<egui::ViewportId, (u64, Vec<TestIdEntry>)>);
+
+#[cfg(feature = "egui")]
+fn test_ids_key() -> egui::Id {
+    egui::Id::new("ito-a11y.test-ids")
+}
+
+/// Give the drawn `resp` a test ID that `--keys` can find (`<ClickId:name>`, `<Id:name>`...): AccessKit's `author_id` on its node,
+/// and a note of where it was drawn. Call it after the widget is drawn, every frame it is shown. A name that is not
+/// [`is_test_id`] is not attached (and trips a `debug_assert!`, AccessKit on or off). Otherwise it does nothing while
+/// AccessKit is off (a shipped app pays nothing).
+#[cfg(feature = "egui")]
+pub fn test_id(resp: &egui::Response, name: &str) {
+    if !is_test_id(name) {
+        debug_assert!(false, "`{name}` is not a test ID: lowercase letters, digits, - and _, in parts joined by `.`");
+        return;
+    }
+    let on = resp.ctx.accesskit_node_builder(resp.id, |n| n.set_author_id(name)).is_some();
+    if !on {
+        return;
+    }
+    let entry = TestIdEntry {
+        name: name.to_owned(),
+        egui_id: resp.id,
+        rect: resp.rect,
+        interact_rect: resp.interact_rect,
+        layer: resp.layer_id,
+        enabled: resp.enabled(),
+        viewport: resp.ctx.viewport_id(),
+        pass: resp.ctx.cumulative_pass_nr(),
+    };
+    resp.ctx.data_mut(|d| {
+        let store = d.get_temp_mut_or_default::<TestIds>(test_ids_key());
+        let slot = store.0.entry(entry.viewport).or_default();
+        if slot.0 != entry.pass {
+            slot.1.clear();
+            slot.0 = entry.pass;
+        }
+        slot.1.push(entry);
+    });
+}
+
+/// The test IDs recorded during the latest pass of `viewport`, taken out (the store keeps nothing for it afterwards).
+#[cfg(feature = "egui")]
+pub fn take_test_ids(ctx: &egui::Context, viewport: egui::ViewportId) -> Vec<TestIdEntry> {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<TestIds>(test_ids_key()).0.remove(&viewport).map(|s| s.1).unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_id_names() {
+        for ok in ["a", "settings.shell.env.row.3.name", "a-b_c"] {
+            assert!(is_test_id(ok), "{ok}");
+        }
+        for bad in ["", ".a", "a.", "a..b", "A", "a b", "ä", "a/b"] {
+            assert!(!is_test_id(bad), "{bad}");
+        }
+    }
+
+    #[cfg(feature = "egui")]
+    fn pass(ctx: &egui::Context, names: &[&str]) -> Vec<egui::accesskit::TreeUpdate> {
+        let mut upd = Vec::new();
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for n in names {
+                let r = ui.button(*n);
+                test_id(&r, n);
+            }
+        });
+        upd.extend(out.platform_output.accesskit_update.clone());
+        out.drop_without_applying_deltas();
+        upd
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn a_test_id_is_in_the_tree_and_noted_once() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut id = None;
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let r = ui.button("go");
+            test_id(&r, "x.y");
+            id = Some(r.id);
+        });
+        let upd = out.platform_output.accesskit_update.clone().expect("an update");
+        out.drop_without_applying_deltas();
+        let id = id.unwrap();
+        let node = upd.nodes.iter().find(|(i, _)| *i == id.accesskit_id()).map(|(_, n)| n).expect("the node");
+        assert_eq!(node.author_id(), Some("x.y"));
+        let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].name.as_str(), got[0].egui_id), ("x.y", id));
+        assert!(take_test_ids(&ctx, egui::ViewportId::ROOT).is_empty());
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn nothing_is_noted_while_accesskit_is_off() {
+        let ctx = egui::Context::default();
+        pass(&ctx, &["a"]);
+        assert!(take_test_ids(&ctx, egui::ViewportId::ROOT).is_empty());
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn only_the_latest_pass_is_kept() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        pass(&ctx, &["a", "b"]);
+        pass(&ctx, &["c"]);
+        let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["c"]);
+    }
 
     const ALL: [State; 14] = [
         State::Selected,

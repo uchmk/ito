@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.264.0] - 2026-11-08
+
+### 追加
+
+- `ito-a11y::test_id` と `take_test_ids`（#203 の ②）: 部品に試験用の名前（`is_test_id` の形）を付ける。AccessKit の `author_id` と、描いた場所の記録を残す。AccessKit が切れていれば何もしない。
+- `ito-keyscript` の ID の手順 `<ClickId:名前>`・`<Id:名前>`・`<Id:!名前>`・`<FocusedId:>`・`<EnabledId:>`・`<DisabledId:>`・`<ValueId:名前=文字>`、`Observation::ids`・`IdNode`・`IdCheck::check`。
+  - 同じ名前が 2 つ、1 つの部品に 2 つの名前などは、どの ID の手順も失敗にする（`<Id:!>` も）。
+  - `<Id:名前>` は、木で隠れている（hidden）部品では失敗する（`<Id:!名前>` も通らない）。
+  - `<ClickId:>` は、押した結果を確かめる手順（`<FocusedId:>`・`<ValueId:>`・`<Id:>`・`<Id:!>`）が続かなければ解析で断る。
+- `<ReadHas:名前=文字>` と `Reader`・`Runner::input_with`・`READ_WAIT`（15 秒）。`TEXT_WAIT`・`DELIVER_WAIT` も公開した。
+
+### 変更
+
+- 探す文字が空の手順（`<Assert:>`・`<Clipboard:>`・`<ClipboardHas:>`・`<Announced:>`・`<Enabled:>` などと文字のクリック）は、解析で断る。
+- ID の手順と `<ReadHas:>` は `*N` で繰り返せない（解析で断る）。
+- 使う側（kura）がやること: `Press` と `Step` に `ClickId`・`IdCheck`・`ReadHas` が増えたので、`match` に腕を足す。ID の手順は `fresh` の観測で `IdCheck::check`／`Observation::id(..).click_at` を使える。
+  `<ReadHas:>` を使うアプリは `Runner::input` の代わりに `input_with` で `Reader` を渡す（渡さなければ `this app does not read …` で失敗）。部品には描いたあとで `ito_a11y::test_id(&resp, "名前")` を付ける。
+
 ## [0.263.0] - 2026-11-08
 
 ### 変更
