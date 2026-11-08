@@ -37,6 +37,13 @@ pub enum ShotEvent {
     Failed(&'static str),
 }
 
+/// What happens to a state JSON asked for earlier, at the start of a tick.
+#[derive(Clone, Debug)]
+pub enum StateEvent {
+    Saved,
+    Failed(&'static str),
+}
+
 /// How the host answers a take.
 #[derive(Clone, Debug)]
 pub enum Answer {
@@ -49,6 +56,8 @@ pub enum Answer {
     Done,
     Again(&'static str),
     Shot(&'static str),
+    /// The app was asked to write the state JSON of `<State:name>`: [`Taken::State`].
+    State(&'static str),
     Quit,
     Failed(&'static str),
 }
@@ -61,6 +70,7 @@ impl Answer {
             Answer::Done => Taken::Done,
             Answer::Again(why) => Taken::Again { why: (*why).to_owned() },
             Answer::Shot(path) => Taken::Shot { path: (*path).to_owned() },
+            Answer::State(name) => Taken::State { name: (*name).to_owned() },
             Answer::Quit => Taken::Quit,
             Answer::Failed(why) => Taken::Failed((*why).to_owned()),
         }
@@ -110,6 +120,7 @@ pub struct Tick {
     pub generation: u64,
     pub writes: Option<StatusSpec>,
     pub shot: Option<ShotEvent>,
+    pub state: Option<StateEvent>,
     /// The answer if the frame takes a step; the default for the step's kind if `None`.
     pub answer: Option<Answer>,
 }
@@ -117,7 +128,7 @@ pub struct Tick {
 impl Tick {
     /// A settled frame of the main window.
     pub fn t(ms: u64, pass: u64) -> Self {
-        Self { ms, pass, viewport: None, settled: Some(true), generation: 0, writes: None, shot: None, answer: None }
+        Self { ms, pass, viewport: None, settled: Some(true), generation: 0, writes: None, shot: None, state: None, answer: None }
     }
     pub fn moving(mut self) -> Self {
         self.settled = Some(false);
@@ -141,6 +152,10 @@ impl Tick {
     }
     pub fn shot(mut self, e: ShotEvent) -> Self {
         self.shot = Some(e);
+        self
+    }
+    pub fn state(mut self, e: StateEvent) -> Self {
+        self.state = Some(e);
         self
     }
     pub fn answer(mut self, a: Answer) -> Self {
@@ -196,6 +211,8 @@ pub enum Need {
     FirstWait,
     /// Some answer is `Answer::Changed`.
     Changed,
+    /// Some answer is `Answer::State` or some tick has a state event: the subject writes a state JSON and acknowledges it.
+    StateJson,
 }
 
 impl Case {
@@ -205,6 +222,7 @@ impl Case {
         let has_then = |more: &[More]| more.iter().any(|m| matches!(m, More::Then(_)));
         let mut then = false;
         let mut changed = false;
+        let mut state_json = self.ticks.iter().any(|t| t.state.is_some());
         for a in self.ticks.iter().filter_map(|t| t.answer.as_ref()) {
             match a {
                 Answer::Input { more, .. } => then |= has_then(more),
@@ -212,16 +230,23 @@ impl Case {
                     changed = true;
                     then |= has_then(more);
                 }
+                Answer::State(_) => state_json = true,
                 _ => {}
             }
         }
         // A child-viewport tick never reads `settled`, so it does not count.
         let unknown = self.ticks.iter().any(|t| t.viewport.is_none() && t.settled.is_none());
         let first = !self.config.first_wait.is_zero();
-        [(then, Need::Then), (unknown, Need::UnknownSettled), (first, Need::FirstWait), (changed, Need::Changed)]
-            .into_iter()
-            .filter_map(|(on, n)| on.then_some(n))
-            .collect()
+        [
+            (then, Need::Then),
+            (unknown, Need::UnknownSettled),
+            (first, Need::FirstWait),
+            (changed, Need::Changed),
+            (state_json, Need::StateJson),
+        ]
+        .into_iter()
+        .filter_map(|(on, n)| on.then_some(n))
+        .collect()
     }
 }
 
@@ -301,6 +326,17 @@ impl Subject for PaceSubject {
                 Some(ShotEvent::Saved) => pace.shot_saved(now),
                 Some(ShotEvent::Failed(why)) => {
                     if let Some(e) = pace.shot_failed((*why).to_owned()) {
+                        ended = Some(e);
+                        end_ms = Some(tick.ms);
+                        break;
+                    }
+                }
+                None => {}
+            }
+            match &tick.state {
+                Some(StateEvent::Saved) => pace.state_saved(now),
+                Some(StateEvent::Failed(why)) => {
+                    if let Some(e) = pace.state_failed(why) {
                         ended = Some(e);
                         end_ms = Some(tick.ms);
                         break;
@@ -703,6 +739,84 @@ pub fn cases() -> Vec<Case> {
             ..Trace::default()
         },
     });
+    out.push(case(
+        "state_json_saved_lets_the_next_step_go",
+        "<State:a>b",
+        vec![T::t(0, 2).answer(Answer::State("a")), T::t(100, 3), T::t(200, 4).state(StateEvent::Saved), T::t(210, 5), T::t(220, 6)],
+        Trace {
+            takes: vec![(0, 0, false), (1, 200, false)],
+            marks: vec![(1, 200)],
+            tail: done_tail(),
+            end_ms: Some(220),
+            ..Trace::default()
+        },
+    ));
+    out.push(case(
+        "state_json_that_could_not_be_written_fails",
+        "<State:a>",
+        vec![T::t(0, 2).answer(Answer::State("a")), T::t(10, 3).state(StateEvent::Failed("disk full"))],
+        Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<State:a>", "disk full", 1),
+            failed: true,
+            why: Some("disk full".to_owned()),
+            end_ms: Some(10),
+            ..Trace::default()
+        },
+    ));
+    out.push(case(
+        "state_json_that_never_arrives_fails",
+        "<State:a>",
+        vec![T::t(0, 2).answer(Answer::State("a")), T::t(5000, 3), T::t(5001, 4)],
+        Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<State:a>", "no state JSON for <State:a> within 5 s", 1),
+            failed: true,
+            why: Some("no state JSON for <State:a> within 5 s".to_owned()),
+            end_ms: Some(5001),
+            ..Trace::default()
+        },
+    ));
+    out.push(Case {
+        name: "state_json_closing_with_one_out_fails",
+        script: "<State:a>b",
+        config: Config::new("app"),
+        ticks: vec![T::t(0, 2).answer(Answer::State("a"))],
+        end: Some((10, Ending::Closed)),
+        expect: Trace {
+            takes: vec![(0, 0, false)],
+            tail: failed_tail("<State:a>", "the window was closed before the state JSON of <State:a> was written", 2),
+            failed: true,
+            why: Some("the window was closed before the state JSON of <State:a> was written".to_owned()),
+            end_ms: Some(10),
+            left: 0,
+            ..Trace::default()
+        },
+    });
+    out.push(case(
+        "state_json_out_holds_a_following_wait",
+        "<State:a><Wait:100>b",
+        vec![
+            T::t(0, 2).answer(Answer::State("a")),
+            T::t(1, 3),
+            T::t(2, 4),
+            T::t(3, 5),
+            T::t(200, 6).state(StateEvent::Saved),
+            T::t(201, 7),
+            T::t(202, 8),
+            T::t(203, 9),
+            T::t(304, 10),
+            T::t(305, 11),
+        ],
+        // The wait is counted from the State step (as after a shot), so it is already up when the JSON is saved at 200.
+        Trace {
+            takes: vec![(0, 0, false), (2, 202, false)],
+            marks: vec![(2, 202)],
+            tail: done_tail(),
+            end_ms: Some(304),
+            ..Trace::default()
+        },
+    ));
     out.push(Case {
         name: "closing_with_steps_left_is_not_a_failure",
         script: "ab",

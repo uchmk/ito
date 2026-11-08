@@ -80,7 +80,7 @@ kura のあとの 4 つは、準備のほかに違いが無い。順は kura の
 
 ### 載せる順
 
-1. ito: `docs/visual-test.md`（契約と規則の文）と、state JSON v1・check spec・証拠のスキーマ。[ito#203](https://github.com/uchmk/ito/issues/203)（閉じた）、[ito#204](https://github.com/uchmk/ito/issues/204)（実行の状態機械と適合テスト）、[ito#205](https://github.com/uchmk/ito/issues/205)（状態 JSON v1・`<Snap:>`・矩形つきの Tree。パイロットの前）。
+1. ito: `docs/visual-test.md`（契約と規則の文）と、state JSON v1・check spec・証拠のスキーマ。[ito#203](https://github.com/uchmk/ito/issues/203)（閉じた）、[ito#204](https://github.com/uchmk/ito/issues/204)（実行の状態機械と適合テスト）、[ito#205](https://github.com/uchmk/ito/issues/205)（状態 JSON v1（v0.275.0 で ito 側）・`<Snap:>`・矩形つきの Tree。パイロットの前）。
 2. kura: 状態の書き出しを state JSON v1 にし、パイロットの 4 行（[成果物 8](#d8)）。ここで形を固める。
 3. ほかのアプリ: アダプター（`app_state` の中身・Test ID・`tests/visual/`・`lanes.conf` の 2 行）を足すだけで使える。規則のファイルへの参照は、変更 1 が承認済み（2026-11-08）なので、ito の `docs/visual-test.md`（版 1）の push のあと、各アプリに 1 項目ずつ。
 
@@ -169,44 +169,50 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 
 | もの | どこ | 中身 |
 |---|---|---|
-| state JSON v1 | スキーマと書き出しは ito、中身は各アプリ（kura が最初） | いまのテキストの State に並べて JSON を書く。`settled`・`theme`・`window`・`ui[]`・`toasts[]`・`capabilities`、アプリだけの値は `app_state` の中。分からない値は `null`（[穴の表](#gaps)）。 |
+| state JSON v1 | スキーマと書き出しは ito、中身は各アプリ（kura が最初） | **ito 側は v0.275.0 で実装。** `state/<name>.json` に、`<State:>` のテキストと並べて書く。`settled`・`theme`・`lang`・`window`・`ui[]`・`toasts[]`・`capabilities`・`stable`、アプリだけの値は `app_state` の中。分からない値は `null`（[穴の表](#gaps)）。 |
 | Test ID | `ito-a11y` の `test_id`。名前は各アプリ（ito の部品の分は ito） | egui の id と別の、変わらない名前（kura なら `spot.scroll.thumb`、ito の設定の画面なら `settings.field.<id>`）。観点はこれで対象を指す。 |
-| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#205） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 4 つのアプリ（yagura・koyomi・michi・fude）はそのまま使え、kura は自前の実行に写す。 |
+| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#205 の B。矩形は state JSON に v0.275.0 で入り、`<Snap:>` はこれから） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 4 つのアプリ（yagura・koyomi・michi・fude）はそのまま使え、kura は自前の実行に写す。 |
 | Shot の付属 JSON | ito（いまの `review::Meta` を広げる） | PNG ごとに run_id・snapshot_seq・前後の state のハッシュ・環境。名前は `shots/<name>.json`（State と分ける。v0.273.0 で実装。`theme`・`lang` は撮ると頼んだ時点で効いていたもの、`theme_requested`・`lang_requested` は `<Theme:>`・`<Lang:>` が頼んだもの。run_id・snapshot_seq・ハッシュは ito#205）。 |
 | kura の `<Tree:>`・`<Assert:>`・`<Is:>` | kura だけ | **済み（kura v0.154.0）。** ito の `tree_text` などを呼んで自前の実行で読む。Runner のアプリはもう使える。 |
 
 **座標の約束:** 矩形はスクリーンショットの画素（`rect_px`）で出し、`pixels_per_point` を並べて書く。画像と state の座標をそろえないと、切り抜きも突き合わせもできない。
 
-### state JSON v1（視覚の観点に要る部分の例）
+### state JSON v1（v0.275.0 から。`state/<name>.json`）
 
 ```json
 {
   "schema_version": 1,
-  "run_id": "20261107-101203-41.15",
-  "snapshot_seq": 2, "after_step": 9, "frame": 412,
-  "settled": true,
+  "name": "02-top-before",
+  "run_id": "1794125175403-44132",
+  "snapshot_seq": 2, "after_step": 8, "after_label": "<Click:Spot>", "frame": 412,
+  "settled": null,
   "app": { "name": "kura", "version": "0.152.2" },
+  "theme": { "requested": "Nord", "name": "Nord", "dark": true, "tokens": { "bg": "#2e3440ff", "…": "…" }, "tokens_sha256": "…" },
+  "lang": { "requested": "ja", "in_force": "ja" },
+  "window": { "inner_px": [0, 0, 1350, 630], "pixels_per_point": 1.5, "monitor_work_area_px": null },
   "screen": "main", "overlay": "spot",
-  "theme": { "requested": "Nord", "name": "Nord", "dark": true, "tokens_sha256": "…" },
-  "window": { "inner_px": [0, 0, 1350, 630], "pixels_per_point": 1.5,
-              "monitor_work_area_px": [0, 0, 2560, 1400] },
-  "ui": [
-    { "test_id": "spot.panel", "role": "group",
-      "rect_px": [768, 60, 1332, 606], "clip_px": [768, 60, 1332, 606], "visible": true },
-    { "test_id": "spot.scroll.thumb", "role": "scrollbar",
-      "rect_px": [1323, 60, 1329, 177], "visible": true },
-    { "test_id": "spot.row.0", "role": "text", "text": "Title",
-      "rect_px": [780, 66, 1010, 88], "elided": false }
-  ],
   "toasts": [],
-  "capabilities": ["state.v1", "ui.rects", "snap", "monitor.work_area"],
-  "app_state": { "cwd": "C:\\fixtures\\docs", "cursor": "report.docx" }
+  "app_state": { "cwd": "C:\\fixtures\\docs", "cursor": "report.docx" },
+  "ui": [
+    { "test_id": "spot.panel", "role": "group", "text": null, "label": null, "value": null,
+      "rect_px": [768, 60, 1332, 606], "clip_px": [768, 60, 1332, 606], "visible": true, "elided": null,
+      "enabled": true, "focused": false, "hidden": false, "layer": "Middle" },
+    { "test_id": "spot.row.0", "role": "label", "text": "Title", "label": "Title", "value": null,
+      "rect_px": [780, 66, 1010, 88], "clip_px": [780, 66, 1010, 88], "visible": true, "elided": false,
+      "enabled": true, "focused": false, "hidden": false, "layer": "Middle" }
+  ],
+  "capabilities": ["app_state", "lang", "overlay", "screen", "theme", "toasts", "ui", "window"],
+  "stable": { "projection": 1, "ui_sha256": "…", "app_sha256": "…" }
 }
 ```
 
-`app` はアプリの名前と版、`app_state` はそのアプリだけの値（ここは kura。ほかのアプリはそれぞれの値を入れ、ito の検査器は中を見ない）。 `theme.requested` は頼んだテーマ、`name` は効いているテーマ。macOS・Linux で作業領域が取れないときは `monitor_work_area_px: null` にし、`capabilities` から `monitor.work_area` を外す。
+書き方は、ito は a11y の木と窓・テーマ・言語を、アプリは `state::App { screen, overlay, toasts, app_state }` を埋める。`<State:名前>` が来ると、アプリは同じフレームで `Runner::write_state(ctx, 名前, App)`（自前の実行は `state::submit`）を呼ぶ。ito は **同じパスの** a11y の木と 1 つにして、専用のスレッドが `state/<名前>.json` に書く（`.part` に書いて flush してから名前替え）。書き終わるまで Pace は `<State:>` の次を止める。書けない、または 5 秒以内に来ないときは `keys: failed`（`.txt` の State は今までどおり）。
 
-`elided` は egui の `Galley` が文字を省略したかどうか。これがあれば「文字の欠け」は画像を見ずに分かる。省略されずに枠からはみ出した文字は、文字の矩形 ⊄ クリップで分かる。
+- **`null` と `capabilities`**: アプリが渡さなかった欄（`screen`・`overlay`・`toasts`・`app_state`）は `null` で、`capabilities` にその名前が無い。`overlay` は「渡したが無い」を `null` と `capabilities` の `overlay` ありで表す。「無い」と「知らない」を分ける。`monitor_work_area_px` は今は常に `null`（推測しない）で、`capabilities` に `monitor.work_area` を入れない。
+- **座標**: `rect_px`・`clip_px`・`window.inner_px` は物理ピクセルで、原点は viewport の左上。丸めない。画像の座標とそろう。
+- **`visible`・`clip_px`・`elided`**: 登録を `ito_a11y::test_id_in(ui, resp, 名前, galley)` にした行だけに付く。`test_id` で登録した行は `null`。`visible` は矩形とクリップと viewport の交わりが空でないか（上に重なる層は見ない）。`elided` は `Galley` が文字を省略したか。省略されずに枠からはみ出した文字は、文字の矩形 ⊄ クリップで分かる。
+- **`stable`**: `ui_sha256` は `ui[]` を、`app_sha256` は `screen`・`overlay`・`toasts`・`app_state`・`capabilities` を、キーを並べ替えた空白なしの JSON にした sha256。`frame`・`snapshot_seq`・`run_id`・`after_*`・`settled`・`window`・`theme`・`lang` は入らない。座標は丸めずに入る。**ハッシュが同じでも、間に動いたものが無いとは言えない**（State の間で動いて戻ったものは見えない）。
+- `theme.tokens` は `Colors::tokens()` の 42 色を `#rrggbbaa` にしたもの。`tokens_sha256` はそのハッシュ。
 
 ### Shot の付属 JSON
 
@@ -268,7 +274,7 @@ runner はどのアプリも ito から写した同じスクリプト: Windows �
 |---|---|---|
 | 1 | 対象と期待値が明確 | 行の check spec が実行の前にコミットされている（コミットの時刻 < 実行の開始）。観点ごとに test_id、期待値、許容差、失敗の見え方。 |
 | 2 | スクリーンショットがある | PNG があり、sha256 が manifest にあり、大きさ = 窓 × 倍率。 |
-| 3 | state JSON がある | `schema_version` が 1、`settled: true`、観点に要る `capabilities` がある。 |
+| 3 | state JSON がある | `schema_version` が 1、`settled: true`（v0.275.0 では `settled` はまだ `null`。`<Snap:>` で入れる）、観点に要る `capabilities` がある。 |
 | 4 | 画像と state が同じ実行 | run_id と snapshot_seq が同じ。前後の state のハッシュが同じ。 |
 | 5 | 機械が問題を見つけていない | `assertions.json` がすべて PASS。ERROR が無い。 |
 | 6 | Vision が指定の観点を確認した | Tier 2: 全観点に答えと bbox がある。Tier 1: 要らない（走らせたなら FAIL が無いこと）。 |
@@ -437,7 +443,7 @@ C:\dev\filer-evidence\20261107-101203-41.15\
 ## 成果物 8 — 導入の順とパイロット
 
 1. **前提: フェーズ 1（fail closed）** — 済み。kura v0.151.0（`keys: failed`・`settled`）、ito v0.262.3（`-Out` の掃除）と v0.262.7（`xrun.sh` は `keys: done` で終わらない回を失敗に。ito#202 は閉じた）。kura の段 ①（書き込みの番号と待ち）は v0.152.0〜v0.152.2 で、再テストは kura#511。
-2. **観測の契約（フェーズ 2）** — ito: state JSON v1 のスキーマ、`<Snap:>`、矩形つきの Tree、ID の手順、Runner の観測の世代（[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた（v0.263.0〜v0.267.0）。状態 JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree は [ito#205](https://github.com/uchmk/ito/issues/205)。実行の状態機械と適合テストは [ito#204](https://github.com/uchmk/ito/issues/204)（1〜4・6・8 は v0.269.0・v0.271.0・v0.272.0・v0.273.0））。kura は v0.153.0〜v0.154.0 で ID の手順・run の行を受けた。kura: state JSON v1 の中身、Test ID、自前の実行への写し。判断 3〜5 は 2026-11-08 に決まった。
+2. **観測の契約（フェーズ 2）** — ito: state JSON v1 のスキーマ、`<Snap:>`、矩形つきの Tree、ID の手順、Runner の観測の世代（[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた（v0.263.0〜v0.267.0）。状態 JSON v1 のスキーマは [ito#205](https://github.com/uchmk/ito/issues/205) の A（v0.275.0）、`<Snap:>`・Shot の付属 JSON の追加は B。実行の状態機械と適合テストは [ito#204](https://github.com/uchmk/ito/issues/204)（1〜4・6・8 は v0.269.0・v0.271.0・v0.272.0・v0.273.0））。kura は v0.153.0〜v0.154.0 で ID の手順・run の行を受けた。kura: state JSON v1 の中身、Test ID、自前の実行への写し。判断 3〜5 は 2026-11-08 に決まった。
 3. **Tier 1 の文字と状態の行（kura）** — 59.5・57.3・20.16（56.6・58.4 は v0.152.1 で `[ ]` に戻ったので、kura#511 の再テストでテキストとして測る）。規則の文言は変えずに測れるが、いまの `[~]` は「見た目の行」と判断された記録なので、`[x]` にするかは持ち主が決める。それまでは結果を報告に書くだけ。
 4. **Tier 1 の矩形と画素の行（kura。変更 1 は承認済み。ito の docs 版 1 と kura の規則のファイルに載せたあと）** — 41.15・49.4・1.46・18.7・54.16、54.18 の色。
 5. **Tier 2 の影運用** — Vision を走らせ、結果は `[~]` と AI の報告にとどめて、持ち主の判断と比べる。基準: 20 行以上・誤合格 0・カナリアの検出 100 %。満たしたら変更 2 を持ち主に出す。
@@ -578,7 +584,7 @@ C:\dev\filer-evidence\20261107-101203-41.15\
 2. **変更 2: 影運用の基準つきで進める**。20 行以上・誤合格 0・カナリアの検出 100 % を、アプリごとに数える。規則の文は、そのアプリで基準を満たしてから持ち主に出す。それまで Vision の答えは `[~]` と報告にとどめる。
 3. **印の形: 案 a。**`[x]` のまま、証拠（`verdict.json`）に `tier` を書く。生成器は変えない。
 4. **check spec: `tests/visual/<行>.toml`**。書くのは、その行を書いた開発のセッション。
-5. **[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた**（3 段、v0.263.0〜v0.267.0）。① 観測の世代と `Runner` の待ち、② test_id・ID の手順・`<ReadHas:>`、③ run_id・`with_run`・確かめ役・Shell カードの ID。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（1〜4・6・8 は v0.269.0・v0.271.0・v0.272.0・v0.273.0）。state JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree・検査器・証拠のフォルダは [ito#205](https://github.com/uchmk/ito/issues/205)（見た目のパイロットの前）。
+5. **[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた**（3 段、v0.263.0〜v0.267.0）。① 観測の世代と `Runner` の待ち、② test_id・ID の手順・`<ReadHas:>`、③ run_id・`with_run`・確かめ役・Shell カードの ID。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（1〜4・6・8 は v0.269.0・v0.271.0・v0.272.0・v0.273.0）。state JSON v1 のスキーマ（v0.275.0）・`<Snap:>`・検査器・証拠のフォルダは [ito#205](https://github.com/uchmk/ito/issues/205)（見た目のパイロットの前）。
 6. **2 つの設計は ito の `docs/visual-test.md`・`docs/autotest.md` に移す**。ito のセッションに頼んだ。移したあとは ito の文書が正で、このページは写し。
 7. **今の `[~]` の行を遡って `[x]` にしない**。59.5 などはパイロットで Tier 1 として測り直す。
 8. **パイロットは 4 行**（59.5・41.15・49.4・54.18）。

@@ -18,7 +18,7 @@
 //! 6. a config write pending: hold, or fail when it is [`CONFIG_WAIT`] old;
 //! 7. an input in flight for [`DELIVER_WAIT`]: fail;
 //! 8. a `<Wait:N>` at the front on a settled screen: sleep out the rest;
-//! 9. a shot out: hold, or fail after the deadline;
+//! 9. a shot (or a state JSON) out: hold, or fail after the deadline;
 //! 10. `<Now>` at the front: spent on the next step;
 //! 11. the first wait before the first step;
 //! 12. ready (a continuation, a tight retry or `<Now>`, or settled two passes on), else hold;
@@ -41,6 +41,8 @@ pub mod conformance;
 pub const SETTLE_WAIT: Duration = Duration::from_secs(5);
 /// How long a `<Shot:>` waits for its picture.
 pub const SHOT_DEADLINE: Duration = Duration::from_secs(5);
+/// How long a `<State:>` waits for its state JSON (the app's `write_state`, then the writer's acknowledgement).
+pub const STATE_DEADLINE: Duration = Duration::from_secs(5);
 /// How long a config write may stay unanswered.
 pub const CONFIG_WAIT: Duration = Duration::from_secs(10);
 /// The step name a config write failure is reported under.
@@ -57,6 +59,8 @@ pub struct Config {
     pub settle_wait: Duration,
     /// See [`SHOT_DEADLINE`].
     pub shot_deadline: Duration,
+    /// See [`STATE_DEADLINE`].
+    pub state_deadline: Duration,
     /// Whether the run writes a report. Without one an empty queue just holds (kura with no done file).
     pub report: bool,
 }
@@ -64,7 +68,14 @@ pub struct Config {
 impl Config {
     /// The usual setup for `app`: no first wait, the default waits, a report.
     pub fn new(app: &str) -> Self {
-        Self { app: app.to_owned(), first_wait: Duration::ZERO, settle_wait: SETTLE_WAIT, shot_deadline: SHOT_DEADLINE, report: true }
+        Self {
+            app: app.to_owned(),
+            first_wait: Duration::ZERO,
+            settle_wait: SETTLE_WAIT,
+            shot_deadline: SHOT_DEADLINE,
+            state_deadline: STATE_DEADLINE,
+            report: true,
+        }
     }
 }
 
@@ -187,6 +198,9 @@ pub enum Taken {
     Again { why: String },
     /// A picture was asked for; it is to be saved at `path`.
     Shot { path: String },
+    /// The app was asked to write the state JSON of `<State:name>`; the host reports the outcome with
+    /// [`Pace::state_saved`] / [`Pace::state_failed`].
+    State { name: String },
     /// The app was told to quit.
     Quit,
     /// The step failed.
@@ -243,6 +257,13 @@ struct Flight {
 }
 
 #[derive(Debug)]
+struct StateOut {
+    idx: usize,
+    name: String,
+    since: Instant,
+}
+
+#[derive(Debug)]
 struct ShotOut {
     idx: usize,
     name: String,
@@ -267,6 +288,7 @@ pub struct Pace {
     now_flag: bool,
     flight: Option<Flight>,
     shot: Option<ShotOut>,
+    state: Option<StateOut>,
     check_since: Option<Instant>,
     read_has_since: Option<Instant>,
     seen_answers: u64,
@@ -300,6 +322,7 @@ impl Pace {
             now_flag: false,
             flight: None,
             shot: None,
+            state: None,
             check_since: None,
             read_has_since: None,
             seen_answers: 0,
@@ -326,6 +349,7 @@ impl Pace {
             .map(|e| e.idx)
             .chain(self.take.as_ref().map(|e| e.idx))
             .chain(self.shot.as_ref().map(|s| s.idx))
+            .chain(self.state.as_ref().map(|s| s.idx))
             .chain(extra)
             .collect();
         steps.len()
@@ -346,6 +370,7 @@ impl Pace {
         self.failed = true;
         self.queue.clear();
         self.shot = None;
+        self.state = None;
         self.take = None;
         self.flight = None;
         // Nothing waits any more, so `due` stops asking for frames.
@@ -379,7 +404,7 @@ impl Pace {
             debug_assert!(false, "Pace::next called while a take is outstanding");
             return hold(None);
         }
-        if self.finished || (!self.config.report && self.queue.is_empty() && self.shot.is_none()) {
+        if self.finished || (!self.config.report && self.queue.is_empty() && self.shot.is_none() && self.state.is_none()) {
             return hold(None);
         }
         // Another window's frame is not the main window's: nothing goes in on it. An input waiting to be drawn that
@@ -436,7 +461,7 @@ impl Pace {
         // drawing frames that change nothing.
         if let Some(Kind::Wait(d)) = self.queue.front().map(|e| e.kind) {
             let left = d.saturating_sub(since);
-            if !left.is_zero() && self.shot.is_none() && f.pass >= self.at.0.saturating_add(2) && settled {
+            if !left.is_zero() && self.shot.is_none() && self.state.is_none() && f.pass >= self.at.0.saturating_add(2) && settled {
                 return hold(Some(left));
             }
         }
@@ -447,6 +472,15 @@ impl Pace {
             }
             let idx = shot.idx;
             let why = format!("no picture arrived within {} s; {} was not saved", self.config.shot_deadline.as_secs(), shot.path);
+            return Next::End(self.fail_at(idx, why));
+        }
+        // The state JSON being written holds the next step the same way. One that never comes is a harness failure.
+        if let Some(state) = &self.state {
+            if f.now.saturating_duration_since(state.since) <= self.config.state_deadline {
+                return hold(Some(Duration::ZERO));
+            }
+            let idx = state.idx;
+            let why = format!("no state JSON for <State:{}> within {} s", state.name, self.config.state_deadline.as_secs());
             return Next::End(self.fail_at(idx, why));
         }
         // `<Now>` is for the step after it only. Several in a row are spent on the same step.
@@ -570,6 +604,10 @@ impl Pace {
                 self.shot = Some(ShotOut { idx, name, path, since: f.now });
                 self.at = (f.pass, f.now);
             }
+            Taken::State { name } => {
+                self.state = Some(StateOut { idx, name, since: f.now });
+                self.at = (f.pass, f.now);
+            }
             Taken::Failed(why) => return Some(self.fail_at(idx, why)),
             Taken::Again { .. } => unreachable!("handled above"),
         }
@@ -608,6 +646,18 @@ impl Pace {
         Some(self.fail_at(idx, why))
     }
 
+    /// The state JSON was written and acknowledged.
+    pub fn state_saved(&mut self, now: Instant) {
+        self.state = None;
+        self.progress_at = now;
+    }
+
+    /// The state JSON could not be written. `None` when none is awaited (a late acknowledgement).
+    pub fn state_failed(&mut self, why: &str) -> Option<Ended> {
+        let idx = self.state.as_ref()?.idx;
+        Some(self.fail_at(idx, why.to_owned()))
+    }
+
     /// The host failed outside the steps (it could not write its evidence): the run fails at `label`. `None` once the run has ended.
     pub fn host_failed(&mut self, label: &str, why: String) -> Option<Ended> {
         if self.finished {
@@ -625,6 +675,10 @@ impl Pace {
         };
         if let Some(shot) = &self.shot {
             let (idx, why) = (shot.idx, format!("{what} before the picture of <Shot:{}> was saved", shot.name));
+            return Some(self.fail_at(idx, why));
+        }
+        if let Some(state) = &self.state {
+            let (idx, why) = (state.idx, format!("{what} before the state JSON of <State:{}> was written", state.name));
             return Some(self.fail_at(idx, why));
         }
         if !self.config.report || self.finished {

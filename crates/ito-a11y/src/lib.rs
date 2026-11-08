@@ -327,6 +327,10 @@ pub struct TestIdEntry {
     pub viewport: egui::ViewportId,
     /// `ctx.cumulative_pass_nr()` at the call.
     pub pass: u64,
+    /// `ui.clip_rect()` at the call, in the layer's own coordinates; `None` from [`test_id`].
+    pub clip: Option<egui::Rect>,
+    /// `Galley::elided` of the text drawn; `None` when [`test_id`] was used or no galley was given.
+    pub elided: Option<bool>,
 }
 
 #[cfg(feature = "egui")]
@@ -344,6 +348,20 @@ fn test_ids_key() -> egui::Id {
 /// AccessKit is off (a shipped app pays nothing).
 #[cfg(feature = "egui")]
 pub fn test_id(resp: &egui::Response, name: &str) {
+    register_test_id(resp, name, None, None);
+}
+
+/// [`test_id`], plus what only the `Ui` knows: its clip rectangle (`clip`), and whether the text `galley` was cut
+/// off (`elided`). `--keys` writes both into the state JSON (`clip_px`, `visible`, `elided`). `Response::interact_rect`
+/// is not a clip (menus widen it, `union` merges it), which is why the clip comes from the `Ui`. Pass the galley of the
+/// widget's text, or `None` when it has none.
+#[cfg(feature = "egui")]
+pub fn test_id_in(ui: &egui::Ui, resp: &egui::Response, name: &str, galley: Option<&egui::Galley>) {
+    register_test_id(resp, name, Some(ui.clip_rect()), galley.map(|g| g.elided));
+}
+
+#[cfg(feature = "egui")]
+fn register_test_id(resp: &egui::Response, name: &str, clip: Option<egui::Rect>, elided: Option<bool>) {
     if !is_test_id(name) {
         debug_assert!(false, "`{name}` is not a test ID: lowercase letters, digits, - and _, in parts joined by `.`");
         return;
@@ -361,6 +379,8 @@ pub fn test_id(resp: &egui::Response, name: &str) {
         enabled: resp.enabled(),
         viewport: resp.ctx.viewport_id(),
         pass: resp.ctx.cumulative_pass_nr(),
+        clip,
+        elided,
     };
     resp.ctx.data_mut(|d| {
         let store = d.get_temp_mut_or_default::<TestIds>(test_ids_key());
@@ -478,6 +498,39 @@ mod tests {
         pass(&ctx, &["c"]);
         let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
         assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["c"]);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn test_id_in_notes_the_clip_and_whether_the_text_was_cut() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let plain = ui.button("plain");
+            test_id(&plain, "plain");
+            let wide = ui.label("short");
+            let galley = egui::WidgetText::from("short").into_galley(ui, Some(egui::TextWrapMode::Truncate), 1000.0, egui::TextStyle::Body);
+            test_id_in(ui, &wide, "short", Some(&galley));
+            let narrow = ui.label("short");
+            let cut = egui::WidgetText::from("a very long line of text that cannot fit").into_galley(
+                ui,
+                Some(egui::TextWrapMode::Truncate),
+                20.0,
+                egui::TextStyle::Body,
+            );
+            test_id_in(ui, &narrow, "cut", Some(&cut));
+            let none = ui.label("none");
+            test_id_in(ui, &none, "none", None);
+        });
+        out.drop_without_applying_deltas();
+        let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
+        let by = |n: &str| got.iter().find(|e| e.name == n).unwrap_or_else(|| panic!("{n}"));
+        assert_eq!((by("plain").clip, by("plain").elided), (None, None));
+        assert!(by("short").clip.is_some());
+        assert_eq!(by("short").elided, Some(false));
+        assert_eq!(by("cut").elided, Some(true));
+        assert!(by("none").clip.is_some());
+        assert_eq!(by("none").elided, None);
     }
 
     #[cfg(feature = "egui")]

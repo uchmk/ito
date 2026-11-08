@@ -32,6 +32,7 @@ pub mod probe;
 #[cfg(test)]
 mod rev;
 pub mod review;
+pub mod state;
 
 use ito_keys::{self as keys, Code, Key};
 
@@ -667,6 +668,8 @@ struct Tap {
     passes: Vec<egui::ViewportId>,
     /// The test IDs of the last main-window pass that brought a tree (see [`Observation::id`]).
     ids: BTreeMap<String, Result<IdNode, String>>,
+    /// The state JSON waiting for a pass, the writer and its acknowledgements (see [`state`]).
+    state: state::Hub,
 }
 
 /// A widget found by its test ID (`ito_a11y::test_id`), as the last main-window pass left it.
@@ -695,6 +698,12 @@ pub struct IdNode {
     /// on that point of that layer (inside the window, not covered, not behind a modal); it does not prove the widget
     /// takes it.
     pub click_at: Result<egui::Pos2, String>,
+    /// The label the tree gives it, kept apart from `value`.
+    pub label: Option<String>,
+    /// The clip the widget was registered with (`ito_a11y::test_id_in`), in window coordinates, like `rect`.
+    pub clip: Option<egui::Rect>,
+    /// Whether its text was cut off (`ito_a11y::test_id_in` with a galley).
+    pub elided: Option<bool>,
 }
 
 /// Join the test IDs a pass recorded with the author IDs in its tree. A name is good only when exactly one node and
@@ -772,6 +781,9 @@ fn join_ids(
                 value: node.value().map(String::from),
                 hidden,
                 click_at,
+                label: node.label().map(String::from),
+                clip: entry.clip.map(|c| t * c),
+                elided: entry.elided,
             })
         })();
         out.insert(name.to_owned(), result);
@@ -844,6 +856,9 @@ impl egui::Plugin for Tap {
             self.tree.clear();
             self.ids.clear();
             self.fresh = false;
+            let pass = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+            let discard = will_discard(ctx, output);
+            self.state.merge(ctx, state::Pass { frame: pass, discard, ppp: ctx.pixels_per_point(), tree: None });
             return;
         };
         // egui writes the whole tree each pass, so the last one is the window as it is.
@@ -878,7 +893,15 @@ impl egui::Plugin for Tap {
         self.viewport_rect = Some(rect);
         self.minimized = info.minimized;
         self.focused = info.focused;
+        let discard = will_discard(ctx, output);
+        let tree = state::TreeView { ids: &self.ids, viewport_rect: rect };
+        self.state.merge(ctx, state::Pass { frame: pass, discard, ppp: ctx.pixels_per_point(), tree: Some(tree) });
     }
+}
+
+/// egui throws this pass away and runs another one (`Context::run` loops while a discard is requested and passes are left).
+fn will_discard(ctx: &egui::Context, output: &egui::FullOutput) -> bool {
+    output.platform_output.requested_discard() && output.platform_output.num_completed_passes < ctx.options(|o| o.max_passes.get())
 }
 
 /// What [`observe`] saw in the main window's last pass.
@@ -1375,12 +1398,17 @@ pub fn refused_report(why: &str) -> String {
     format!("keys: refused\nwhy: {}\n", why.replace('\n', " / "))
 }
 
+/// Whether `name` may carry a `<Shot:name>` or `<State:name>`: letters, digits, `-` and `_`.
+pub(crate) fn good_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// The name in `<Shot:name>` or `<State:name>`: letters, digits, `-` and `_`,
 /// so it is a file name on every platform and cannot climb out of the folder
 /// it is saved in. `what` is the tag, `noun` what the error calls it.
 fn named(token: &str, what: &str, noun: &str) -> Result<String, String> {
     let name = token.strip_prefix(&format!("<{what}:")).and_then(|t| t.strip_suffix('>')).unwrap_or("");
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !good_name(name) {
         return Err(format!("`{token}` is not a {noun}; name it with letters, digits, - and _, as `<{what}:before>`"));
     }
     Ok(name.to_owned())
@@ -1752,6 +1780,8 @@ pub fn events(key: &Key) -> Option<Vec<egui::Event>> {
 /// What the frame loop does with a step that is not a plain input.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Do {
+    /// `<State:name>`: write the state (`name.txt` beside the done file). With [`Runner::state_json`] on, the app also calls
+    /// [`Runner::write_state`] in the same frame; the step is held until the state JSON is written.
     State(String),
     /// A reading of the app's own ([`Dialect::reads`]).
     Read {
@@ -1911,6 +1941,10 @@ pub struct Runner {
     progress: Option<Arc<Mutex<Progress>>>,
     /// Some step reads the window's tree or the last copy.
     reads_window: bool,
+    /// [`Runner::state_json`] is on.
+    state_json: bool,
+    /// The `<State:>` step waiting for its state JSON: its name and index.
+    state_out: Option<(String, usize)>,
     /// What the last `<ReadHas:>` read, while it waits.
     last_read: Option<String>,
     /// Where the copies and announcements stood when the last action's first input went in (`None` before the first action).
@@ -2019,6 +2053,8 @@ impl Runner {
             clipboard: String::new,
             progress: None,
             reads_window,
+            state_json: false,
+            state_out: None,
             last_read: None,
             since: None,
             ended: None,
@@ -2039,6 +2075,76 @@ impl Runner {
         self.run.app = name.to_owned();
         self.run.app_version = version.to_owned();
         self
+    }
+
+    /// Turn state JSON v1 on: a `<State:name>` step then also asks for `state/<name>.json` (see [`state`]). The app answers
+    /// [`Do::State`] by calling [`write_state`](Self::write_state) in the same frame, besides writing the `.txt`. The step
+    /// is held until the file is written; a state that never comes (the deadline is [`pace::STATE_DEADLINE`]) or cannot be
+    /// written fails the run (`keys: failed`), it is not a test result. It also makes the runner observe the window, which
+    /// the merge needs.
+    #[must_use]
+    pub fn state_json(mut self, on: bool) -> Self {
+        self.state_json = on;
+        if on {
+            self.reads_window = true;
+        }
+        self
+    }
+
+    /// Give ito the app's part of the state JSON for the `<State:name>` that [`Do::State`] announced. Call it in the same
+    /// frame, from the app's ui. ito fills the rest from the accessibility tree of the pass that follows (the same pass the
+    /// rectangles come from; a pass egui throws away hands it to the next) and a writer thread writes
+    /// `<dir>/state/<name>.json`. Fill only what the app knows ([`state::App`]).
+    ///
+    /// `Err` when state JSON is off or the submission is refused; the run then fails at once (when it is on).
+    pub fn write_state(&mut self, ctx: &egui::Context, name: &str, app: state::App) -> Result<(), String> {
+        if !self.state_json {
+            return Err("state JSON is off; build the Runner with .state_json(true)".to_owned());
+        }
+        let after = self.state_out.as_ref().filter(|(n, _)| n == name).map(|(_, i)| *i).and_then(|i| i.checked_sub(1));
+        let header = state::Header {
+            dir: self.dir.clone(),
+            name: name.to_owned(),
+            run_id: current_run_id().map(str::to_owned),
+            after_step: after,
+            after_label: after.and_then(|i| self.labels.get(i).cloned()),
+            settled: None,
+            app_name: Some(self.info.app.clone()).filter(|a| !a.is_empty()),
+            app_version: Some(self.info.version.clone()).filter(|a| !a.is_empty()),
+            theme_requested: Some(self.info.theme_requested.clone()).filter(|a| !a.is_empty()),
+            lang_requested: Some(self.info.lang_requested.clone()).filter(|a| !a.is_empty()),
+        };
+        let sent = state::submit(ctx, header, app);
+        if let Err(why) = &sent {
+            self.state_failed(why);
+        }
+        sent
+    }
+
+    fn state_failed(&mut self, why: &str) {
+        self.state_out = None;
+        if let Some(ended) = self.pace.state_failed(why) {
+            let _ = self.keep(ended, false);
+        }
+    }
+
+    /// Hand Pace the acknowledgements of the state writer.
+    fn drain_state(&mut self, ctx: &egui::Context, now: Instant) {
+        if !self.state_json {
+            return;
+        }
+        while let Some(ack) = state::take_ack(ctx) {
+            match ack {
+                state::Ack::Written { name, .. } => match self.state_out.take() {
+                    Some((want, _)) if want == name => self.pace.state_saved(now),
+                    other => {
+                        let want = other.map_or_else(|| "none".to_owned(), |(w, _)| w);
+                        self.state_failed(&format!("state JSON for {name} arrived while waiting for {want}"));
+                    }
+                },
+                state::Ack::Failed { why, .. } => self.state_failed(&why),
+            }
+        }
     }
 
     /// The only clock the runner reads.
@@ -2203,6 +2309,7 @@ impl Runner {
         }
         self.start_run();
         let now = self.now();
+        self.drain_state(ctx, now);
         let writes = ito_common::writes::ledger().status();
         // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the input
         // would land in another viewport's frame, which Pace sees as one.
@@ -2397,6 +2504,10 @@ impl Runner {
             Press::ClipboardHas(text) => Self::judged(check_clipboard_has_after(ctx, self.since.unwrap_or_default(), text)),
             Press::Announced(text) => Self::judged(self.since.map_or_else(|| check_announced(text), |m| check_announced_after(m, text))),
             Press::ReadHas { tag, text } => (self.read_has(tag, text, reader), None),
+            Press::State(name) if self.state_json => {
+                self.state_out = Some((name.clone(), entry.idx));
+                (pace::Taken::State { name: name.clone() }, Some(Do::State(name.clone())))
+            }
             Press::State(name) => (pace::Taken::Done, Some(Do::State(name.clone()))),
             Press::Read { tag, name } => (pace::Taken::Done, Some(Do::Read { tag: tag.clone(), name: name.clone() })),
             Press::Shot(name) => {
@@ -4205,6 +4316,21 @@ mod tests {
                     }
                     None => {}
                 }
+                match &tick.state {
+                    Some(pace::conformance::StateEvent::Saved) => {
+                        r.state_out = None;
+                        r.pace.state_saved(now);
+                    }
+                    Some(pace::conformance::StateEvent::Failed(why)) => {
+                        r.state_failed(why);
+                        if r.ended.is_some() {
+                            r.delivered = true;
+                            end_ms = Some(tick.ms);
+                            break;
+                        }
+                    }
+                    None => {}
+                }
                 let status = tick.writes.as_ref().map(|w| w.status(base));
                 let frame = pace::Frame {
                     pass: tick.pass,
@@ -4275,6 +4401,87 @@ mod tests {
         let mut subject = RunnerSubject;
         assert!(pace::conformance::Subject::skips(&subject).is_empty());
         pace::conformance::check(&mut subject, &pace::conformance::cases()).unwrap();
+    }
+
+    /// A Runner with state JSON on, writing under a fresh temp folder; `deadline` bounds the wait for the acknowledgement.
+    fn state_runner(script: &str, tag: &str, deadline: Duration) -> (Runner, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ito-runner-state-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = pace::Config { state_deadline: deadline, ..pace::Config::new("app") };
+        let mut r = Runner::with_pace(config, parse(script).unwrap(), Instant::now()).state_json(true);
+        r.dir = dir.clone();
+        (r, dir)
+    }
+
+    #[test]
+    fn a_state_step_holds_the_run_until_the_json_is_written() {
+        let (mut r, dir) = state_runner("<State:a><Quit>", "ok", Duration::from_secs(5));
+        let ctx = egui::Context::default();
+        let (mut announced, mut last) = (0, None);
+        for _ in 0..400 {
+            r.skip(Duration::from_millis(20));
+            let mut raw = egui::RawInput::default();
+            let d = r.input(&ctx, &mut raw);
+            let mut submit_now = None;
+            match d {
+                Some(Do::State(name)) => {
+                    announced += 1;
+                    submit_now = Some(name);
+                }
+                Some(other) => {
+                    last = Some(other);
+                    break;
+                }
+                None => {}
+            }
+            ctx.run_ui(raw, |ui| {
+                let b = ui.button("ok");
+                ito_a11y::test_id(&b, "ok");
+                if let Some(name) = &submit_now {
+                    r.write_state(ui.ctx(), name, state::App::default()).unwrap();
+                }
+            })
+            .drop_without_applying_deltas();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(announced, 1);
+        assert!(matches!(last, Some(Do::Quit)), "{last:?}");
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("state").join("a.json")).unwrap()).unwrap();
+        assert_eq!(json["schema_version"], 1);
+        // The State step is the first one, so nothing came before it.
+        assert!(json["after_step"].is_null());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_state_step_without_write_state_fails_at_the_deadline() {
+        let (mut r, dir) = state_runner("<State:a><Quit>", "late", Duration::from_millis(200));
+        let ctx = egui::Context::default();
+        let mut last = None;
+        for _ in 0..100 {
+            r.skip(Duration::from_millis(50));
+            let mut raw = egui::RawInput::default();
+            match r.input(&ctx, &mut raw) {
+                Some(Do::State(_)) | None => {}
+                Some(other) => {
+                    last = Some(other);
+                    break;
+                }
+            }
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        }
+        let Some(Do::Failed { why, .. }) = last else { panic!("{last:?}") };
+        assert_eq!(why, "no state JSON for <State:a> within 0 s");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_state_is_refused_while_state_json_is_off() {
+        let mut r = Runner::with_pace(pace::Config::new("app"), parse("a").unwrap(), Instant::now());
+        let ctx = egui::Context::default();
+        let err = r.write_state(&ctx, "a", state::App::default()).unwrap_err();
+        assert!(err.contains("state JSON is off"), "{err}");
     }
 
     /// Plays `script` with a clock that moves `step` per frame. Returns the runner, the `Do`s in order with the skew they came at,

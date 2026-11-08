@@ -612,6 +612,13 @@ fn css_color(c: Color32) -> String {
     }
 }
 
+/// `#rrggbbaa`, lowercase, from the unmultiplied sRGB values (the ones [`Colors::css_vars`] writes), always with the
+/// alpha. The state JSON of `--keys` writes the theme tokens this way.
+pub fn rgba_hex(c: Color32) -> String {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+}
+
 impl Colors {
     /// The colours as CSS custom properties (one per line, no selector), for a page an app serves:
     /// the base ones (`--bg`, `--side`, `--panel`, `--border`, `--fg`, `--dim`, `--wait`, `--run`, `--err`,
@@ -619,7 +626,25 @@ impl Colors {
     /// `--strong`, `--faint`, `--wait-bg`, `--wait-text`, `--on-accent`, `--selection`) and `color-scheme`.
     /// Each is `#rrggbb`, or `rgba(...)` where the alpha is under 255.
     pub fn css_vars(&self) -> String {
-        let rows: [(&str, Color32); 42] = [
+        let mut out = String::new();
+        for (name, c) in self.tokens() {
+            out.push_str(&format!(
+                "  --{name}: {};
+",
+                css_color(c)
+            ));
+        }
+        out.push_str(&format!(
+            "  color-scheme: {};
+",
+            if self.light { "light" } else { "dark" }
+        ));
+        out
+    }
+
+    /// Every named colour of the theme, in the order [`Colors::css_vars`] writes them (`bg`, `side`, ...).
+    pub fn tokens(&self) -> [(&'static str, Color32); 42] {
+        [
             ("bg", self.bg),
             ("side", self.side),
             ("panel", self.panel),
@@ -662,21 +687,7 @@ impl Colors {
             ("match-bg", self.match_bg()),
             ("match-current-bg", self.match_current_bg()),
             ("fold", self.fold()),
-        ];
-        let mut out = String::new();
-        for (name, c) in rows {
-            out.push_str(&format!(
-                "  --{name}: {};
-",
-                css_color(c)
-            ));
-        }
-        out.push_str(&format!(
-            "  color-scheme: {};
-",
-            if self.light { "light" } else { "dark" }
-        ));
-        out
+        ]
     }
 }
 
@@ -846,6 +857,27 @@ mod tests {
         for name in ["accent", "gutter-active", "current-line", "caret", "invisible-fill", "diff-removed-bg", "match-current-bg", "fold"] {
             assert!(css.contains(&format!("--{name}: ")), "{name}");
         }
+    }
+
+    #[test]
+    fn tokens_are_the_css_vars_and_rgba_hex_is_unmultiplied() {
+        let c = builtin()[0].colors;
+        let css = c.css_vars();
+        let tokens = c.tokens();
+        assert_eq!(tokens.len(), 42);
+        assert_eq!((tokens[0].0, tokens[41].0), ("bg", "fold"));
+        let lines: Vec<&str> = css.lines().collect();
+        assert_eq!(lines.len(), 43);
+        for (line, (name, col)) in lines.iter().zip(tokens) {
+            assert!(line.starts_with(&format!("  --{name}: ")), "{line}");
+            let [r, g, b, a] = col.to_srgba_unmultiplied();
+            if a == 255 {
+                assert_eq!(*line, format!("  --{name}: #{r:02x}{g:02x}{b:02x};"));
+            }
+        }
+        assert_eq!(lines[42], format!("  color-scheme: {};", if c.light { "light" } else { "dark" }));
+        assert_eq!(rgba_hex(Color32::from_rgb(1, 0xab, 255)), "#01abffff");
+        assert_eq!(rgba_hex(Color32::from_rgba_unmultiplied(255, 128, 0, 64)), "#ff800040");
     }
 
     /// The high-contrast variant of every built-in theme: text, dim text and

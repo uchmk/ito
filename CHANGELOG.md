@@ -3,6 +3,34 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.275.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript::state`: 状態の JSON v1（ito#205 の A）。`<State:名前>` で `<dir>/state/<名前>.json` を書く。
+  - アプリは `App { screen, overlay, toasts, app_state }`（知っていることだけ）を渡す。ito は同じパスの a11y の木（test ID・役割・名前・値・状態・`rect_px`）と、窓・ズーム・テーマ・言語を足して 1 つにする。
+  - `rect_px` は物理ピクセル（原点は viewport の左上、丸めない）。`visible`・`clip_px`・`elided` は `test_id_in` で登録した行だけ。
+  - アプリが渡さなかった欄は `null` で、`capabilities` にその欄が無い。「無い」と「知らない」を分ける。
+  - `stable` は木・アプリ・画面の部分のハッシュ（sha256、キーを並べ替えた JSON）。座標は丸めずに入るので、ハッシュが同じでも、間に動いたものが無いとは言えない。
+  - 書くのは専用のスレッド（`.part` に書いて flush してから名前替え）。書き終わるまで Pace が `<State:>` の次を止める。書けない、または 5 秒（`Config::state_deadline`）以内に来ないときは `keys: failed`。
+- `Runner::state_json(true)` と `Runner::write_state(ctx, 名前, App)`。自前の実行は `state::submit(ctx, Header, App)` と `take_ack`。egui が捨てたパスは次のパスに引き継ぐ。
+- `ito-a11y::test_id_in(ui, resp, 名前, galley)`: クリップ矩形と文字の省略を一緒に登録する。`TestIdEntry` に `clip`・`elided` が増えた。
+- `ito-theme::Colors::tokens()`（42 の名前つきの色）と `rgba_hex`。`css_vars` はこれを使う。
+- `ito-keyscript::pace`: `Taken::State`、`Config::state_deadline`、`Pace::state_saved`・`state_failed`。適合テストに `Answer::State`・`StateEvent`・`Need::StateJson` と 5 つの例を足した。`Tick` に欄 `state`（組み立ては `.state(StateEvent)`）。`Tick { .. }` を字で書いている側は `state: None` を足す。
+
+### 変更
+
+- `IdNode` に `label`・`clip`・`elided` が増えた。
+
+### 使う側がやること
+
+- Runner を使うアプリ（yagura・koyomi・michi・fude）は任意。使うなら `.state_json(true)` を付け、`Do::State(名前)` が出たら同じフレームの中で `runner.write_state(ctx, &名前, App { … })` を呼ぶ（`.txt` は今までどおり）。知っている欄だけ埋める。切れる・隠れる文字の欄は `test_id_in` で登録すると `clip_px`・`visible`・`elided` が付く。
+- kura（Pace の上の自前の実行）:
+  - `Taken`・`Answer`・`Need` を網羅して `match` しているなら、`State` の腕を足す。
+  - 適合テストの `Subject::skips` に、state JSON を返すまでは `Need::StateJson` を入れる。
+  - `Config` を構造体リテラルで作っているなら、`state_deadline` を足す（`..Config::new(…)` なら変更なし）。
+  - `TestIdEntry` を外で組み立てているなら、`clip`・`elided` を足す。`IdNode` は `non_exhaustive` なので変更なし。
+
 ## [0.274.0] - 2026-11-08
 
 ### 修正

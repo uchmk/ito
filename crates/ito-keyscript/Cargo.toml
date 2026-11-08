@@ -16,6 +16,9 @@ ito-i18n = { path = "../ito-i18n" }
 ito-keys = { path = "../ito-keys", features = ["egui"] }
 ito-theme = { path = "../ito-theme" }
 png = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
 
 [dev-dependencies]
 ito-a11y = { path = "../ito-a11y", features = ["egui"] }

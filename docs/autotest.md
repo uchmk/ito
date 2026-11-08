@@ -4,7 +4,7 @@
 
 **持ち主は ito**。uchmk のアプリ（kura・yagura・koyomi・michi・fude と、これから作るもの）が同じ形で使う。契約・部品・レーンのスクリプトは ito に置き、各アプリはアダプター（状態の中身・Test ID・ハーネス・規則のファイル）だけを足す（§1a）。**最初に載せたのは kura** で、§2a・§3・§11 は kura での縦切り。見た目の行の判定は別のページ [uchmk 視覚テスト設計](visual-test.md) にある。
 
-AI が実機テストを自律で回すための設計。Codex の設計レビュー結果と、持ち主が決めた 5 件の判断を含む。**フェーズ 1（偽の緑を閉じる）は kura v0.151.0 で実装して push した**（再テスト uchmk/kura#507）。Linux のレーンの道具（`xrun.sh`）の穴は ito v0.262.7 で直り、kura v0.151.1 で取り込んだ（CI の smoke の直しが v0.151.2）。**フェーズ 2（観測の契約）は Codex と 6 ラウンドで設計を合意し、kura の側の stage 1（設定の書き込みの通し番号と、書き込みを見る終了の判定）を kura v0.152.0〜v0.152.2 で入れた**（§2a、再テスト uchmk/kura#511）。ito の側の部品は uchmk/ito#203 で 3 段に分けて進め、閉じた（v0.263.0〜v0.267.0）。kura は v0.153.0（run の行・`<ReadHas:>`・examples/term-probe）と v0.154.0（ID の手順 `<ClickId:>`・`<Id:>`・`<ValueId:>`・`<FocusedId:>`、`<Click:文字>`、`<Assert:>`、`<Is…:>`、`<Tree:>`、`<Announced:>`、`<Clipboard:>`）で取り込み、v0.154.1〜v0.154.2 で ito-clipboard と ito v0.271.0 に移った。実行の状態機械と適合テストは uchmk/ito#204（1〜3 が v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4・6・8）。状態 JSON v1・`<Snap:>`・矩形つきの `<Tree:>` は uchmk/ito#205。ito#202（`xrun.sh`）は閉じた。**判断 3〜5 は 2026-11-08 に決まった**（持ち主の「推奨で進めてください」）。
+AI が実機テストを自律で回すための設計。Codex の設計レビュー結果と、持ち主が決めた 5 件の判断を含む。**フェーズ 1（偽の緑を閉じる）は kura v0.151.0 で実装して push した**（再テスト uchmk/kura#507）。Linux のレーンの道具（`xrun.sh`）の穴は ito v0.262.7 で直り、kura v0.151.1 で取り込んだ（CI の smoke の直しが v0.151.2）。**フェーズ 2（観測の契約）は Codex と 6 ラウンドで設計を合意し、kura の側の stage 1（設定の書き込みの通し番号と、書き込みを見る終了の判定）を kura v0.152.0〜v0.152.2 で入れた**（§2a、再テスト uchmk/kura#511）。ito の側の部品は uchmk/ito#203 で 3 段に分けて進め、閉じた（v0.263.0〜v0.267.0）。kura は v0.153.0（run の行・`<ReadHas:>`・examples/term-probe）と v0.154.0（ID の手順 `<ClickId:>`・`<Id:>`・`<ValueId:>`・`<FocusedId:>`、`<Click:文字>`、`<Assert:>`、`<Is…:>`、`<Tree:>`、`<Announced:>`、`<Clipboard:>`）で取り込み、v0.154.1〜v0.154.2 で ito-clipboard と ito v0.271.0 に移った。実行の状態機械と適合テストは uchmk/ito#204（1〜4・6・8 が v0.269.0〜v0.273.0 で入った）。状態 JSON v1 は uchmk/ito#205 の A として v0.275.0 で入った（`state/<name>.json`。アプリが選んだとき）。`<Snap:>`・Shot の付属 JSON の追加は B。ito#202（`xrun.sh`）は閉じた。**判断 3〜5 は 2026-11-08 に決まった**（持ち主の「推奨で進めてください」）。
 
 Codex との合意の状況: フェーズ 1 は 2 ラウンドで条件つき合意（重大 3 点を仕様に入れた、§3）。フェーズ 2 は 1 ラウンド目（2026-11-08）の指摘（重大 2・高 4・中 2・軽 1）を受けて設計を v2 に書き直した。2 ラウンド目で 6 件が閉じ、残りの指摘（重大 3: 描画が止まったときの観測、設定の書き込みの成功の判定、自己テストの壊し方）をコードで確かめて全部採用し、v3 の修正にした。3 ラウンド目では、v3 の「届いていない出来事は入れ直す」が eframe の入力の持ち越しで二重に届く誤りだと分かり（重大 2・高 2・中 1）、v4 の修正にした。4 ラウンド目（重大は無し）の指摘を v5 の修正にし、5 ラウンド目で 2 件が閉じた。残りの高 1（× や終了の経路 `ended()` が、設定の書き込みの返事を見ずに成功を書く）と中 3 を、コードで確かめて全部採用し v6 の修正にした。6 ラウンド目で R1-M1 と R5-1〜3 が閉じ、重大・高は残っていない。v2〜v6 の仕様を受け入れ基準として固定した。
 
@@ -30,7 +30,7 @@ kura v0.154.4 / main ・ 2026-11-08 更新（初版 2026-11-07、全アプリ向
 
 ### **決定** 2. 観測の契約
 
-状態 JSON v1（`<State:name>` が `name.json` も書く。txt は残す）と、意味のある Test ID を採用する。
+状態 JSON v1（`<State:name>` が `state/<name>.json` も書く。txt は残す。ito v0.275.0 から、アプリが `Runner::state_json(true)` で選んだとき。書けない・来ないときは `keys: failed`）と、意味のある Test ID を採用する。
 
 失敗は閉じる方向に倒す。未対応の手順、成果物の欠落や古さ、書き込み失敗、満たされない待ちは、例外なく成功にしない。
 
@@ -208,7 +208,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 
 ### 後回し
 
-状態 JSON v1 と検証（ito#205。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合（`xrun.sh` にはまだ無い）と証拠のフォルダ、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
+状態 JSON v1 の ito 側（v0.275.0 で実装）と検証（ito#205。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合（`xrun.sh` にはまだ無い）と証拠のフォルダ、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
 
 ## 3. 黙って飛ばす不具合（P0、フェーズ 1 で直した）
 
@@ -412,7 +412,7 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 - 実行の状態機械と適合テストを別の Issue uchmk/ito#204 にした（③ のあと）。2 つの設計を ito の docs/autotest.md・docs/visual-test.md に移すよう、ito のセッション（ito-d4）に頼んだ。
 
 【次にやること】
-1. ito のセッションの push を待つ: ito#204 の残り（5・7）と ito#205（状態 JSON v1・Snap・矩形つきの Tree。ito#203 は閉じ、ito#204 の 1〜4・6・8 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
+1. ito のセッションの push を待つ: ito#204 の残り（5・7）と ito#205（状態 JSON v1 は A として v0.275.0 で入った。残りは Snap・Shot の付属 JSON の追加。ito#203 は閉じ、ito#204 の 1〜4・6・8 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
 2. ito の docs/visual-test.md（版 1）が push されたら、kura に変更 1 を入れる（視覚テストのページの #rule: docs/claude/lanes.md の 105 行の下に 1 項目と 113〜114 行の置き換え、.claude/windows-role.md 147 行、docs/claude/wintest-measure.md に矩形と画素の測り方、.claude/agents/wintest.md に機械の測定の証拠）→ PATCH の版・CHANGELOG・verify・scripts/push-main.sh。変更 2 の文は影運用の基準を満たしてから。
 3. kura の残りの分（ID の手順・run の行・確かめ役は v0.153.0〜v0.154.0 で入った。ハーネス scripts/check-term-settings.sh と壊し方の自己テストは作業中で、まず State に `term args`・`term env names`・`terminal` の行）を Sonnet の subagent に仕様ファイルで渡す → audit → verify → main がコミット・push。
 4. ito#204（状態機械と適合テスト）は 1〜3 が v0.269.0・v0.271.0・v0.272.0、4・6・8 が v0.273.0（Shot は `shots/` に書き、`theme`・`lang` は効いていた値で頼んだ値は `*_requested`、`run.json` を Runner が書く）で入り、残りは 5・7。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1 のスキーマ・矩形つきの Tree・Snap・検査器・証拠のフォルダは ito#205。見た目のパイロットの前に要る。
