@@ -163,10 +163,13 @@ pub enum Step {
         text: String,
         present: bool,
     },
-    /// `<Clipboard:text>`: the last text the app copied is exactly this. Read from egui's
-    /// output, so no OS clipboard is touched.
+    /// `<Clipboard:text>`: the last text the app copied after the last action is exactly this. Read from egui's
+    /// output, so no OS clipboard is touched. An action is a step that puts an input in: keys, text, `<Paste>`,
+    /// `<Size:>`, `<Theme:>`, `<Lang:>` and the pointer steps. `<Wait>`, `<Now>`, `<State>`, `<Shot>` and the reading
+    /// steps are not actions. Before the first action, copies since the run began count.
     Clipboard(String),
-    /// `<ClipboardHas:text>`: the last text the app copied contains this (a path or a state inside a longer line).
+    /// `<ClipboardHas:text>`: the last text the app copied after the last action contains this (a path or a state inside
+    /// a longer line). Actions are as for [`Step::Clipboard`].
     ClipboardHas(String),
     /// `<Enabled:text>`, `<Disabled:text>`, `<Focused:text>`, `<Checked:text>`, `<Unchecked:text>`: the one thing with that
     /// text (as `<Click:text>` finds it) is in that state. Waits a few seconds, like `<Assert:>`.
@@ -176,7 +179,8 @@ pub enum Step {
     },
     /// `<Tree:name>`: write the window's tree to `name.txt` beside the done file (see [`tree_text`]).
     Tree(String),
-    /// `<Announced:text>`: a message `ito_a11y::announce`d since the run began contains the text. Waits like `<Assert:>`.
+    /// `<Announced:text>`: a message `ito_a11y::announce`d after the last action contains the text. Actions are as for
+    /// [`Step::Clipboard`]. Waits like `<Assert:>`.
     Announced(String),
     /// `<ClickId:name>`: press at the centre of the widget with that test ID (see `ito_a11y::test_id`), once it can
     /// be clicked (shown, enabled, not covered, not behind a modal). This guarantees only that the press lands on that
@@ -623,7 +627,9 @@ pub struct Item {
 #[derive(Default)]
 struct Tap {
     items: Vec<Item>,
+    /// The last text copied, and how many copies (`CopyText` commands, any viewport) have been seen, this one included.
     copied: Option<String>,
+    copies: u64,
     /// The tree, one line per named node, indented by depth (see [`tree_text`]).
     tree: Vec<String>,
     /// Counts main-window passes that brought a tree.
@@ -799,6 +805,7 @@ impl egui::Plugin for Tap {
         for command in &output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
                 self.copied = Some(text.clone());
+                self.copies += 1;
             }
         }
         // `Context::viewport_id` is already the parent's here, so the pass's own viewport is the one `input_hook` saw.
@@ -1040,14 +1047,59 @@ fn check_is_in(all: &[Item], prop: Prop, text: &str) -> Result<(), String> {
     Err(format!("`{}` is not {}: it is {is}", item.text, prop.name().to_lowercase()))
 }
 
-/// `<Announced:text>`.
+/// Where the copies and announcements stood when the last action went in. `<Clipboard:>`, `<ClipboardHas:>` and
+/// `<Announced:>` look only after it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mark {
+    /// How many copies `observe` had seen.
+    pub copies: u64,
+    /// `ito_a11y::announced_count()`.
+    pub announced: u64,
+}
+
+/// The mark as of now: the copies `observe` has seen (0 before it) and `ito_a11y::announced_count()`.
+pub fn mark(ctx: &egui::Context) -> Mark {
+    Mark { copies: ctx.with_plugin::<Tap, _>(|t| t.copies).unwrap_or(0), announced: ito_a11y::announced_count() }
+}
+
+/// `<Announced:text>`, over the kept announcements (the last 200 since the run began).
 pub fn check_announced(text: &str) -> Result<(), String> {
     let heard = ito_a11y::announced();
     if heard.iter().any(|m| m.contains(text)) {
         return Ok(());
     }
-    let tail: Vec<String> = heard.iter().rev().take(8).map(|m| format!("`{m}`")).collect();
-    Err(format!("`{text}` was not announced; announced: {}", if tail.is_empty() { "nothing".into() } else { tail.join(", ") }))
+    Err(format!("`{text}` was not announced; announced: {}", last_said(&heard)))
+}
+
+/// `<Announced:text>`, over what was announced after `after`.
+pub fn check_announced_after(after: Mark, text: &str) -> Result<(), String> {
+    let heard = ito_a11y::announced_after(after.announced);
+    if heard.iter().any(|m| m.contains(text)) {
+        return Ok(());
+    }
+    // With nothing after the mark, everything kept is from before it.
+    let before = if heard.is_empty() { ito_a11y::announced() } else { Vec::new() };
+    Err(not_announced_after(text, &heard, &before))
+}
+
+/// The last 8 of `said`, newest first, or `nothing`.
+fn last_said(said: &[String]) -> String {
+    let tail: Vec<String> = said.iter().rev().take(8).map(|m| format!("`{m}`")).collect();
+    if tail.is_empty() {
+        "nothing".into()
+    } else {
+        tail.join(", ")
+    }
+}
+
+/// What `check_announced_after` says: `heard` was announced after the mark, `before` before it (looked at only when
+/// `heard` is empty).
+fn not_announced_after(text: &str, heard: &[String], before: &[String]) -> String {
+    let mut msg = format!("`{text}` was not announced after the last action; announced after it: {}", last_said(heard));
+    if heard.is_empty() && !before.is_empty() {
+        msg.push_str(&format!(" (before it: {})", last_said(before)));
+    }
+    msg
 }
 
 fn listed(found: &[&Item]) -> String {
@@ -1091,21 +1143,57 @@ fn check_in(all: &[Item], text: &str, present: bool) -> Result<(), String> {
     }
 }
 
+/// The last copy and its serial (0 when nothing was copied).
+fn last_copy(ctx: &egui::Context) -> (Option<String>, u64) {
+    ctx.with_plugin::<Tap, _>(|t| (t.copied.clone(), t.copies)).unwrap_or((None, 0))
+}
+
+/// What a clipboard check says when there is no newer copy: nothing at all, or only one from before the mark.
+fn no_newer_copy(want: &str, before: Option<String>) -> String {
+    let want = paste_text_escape(want);
+    match before {
+        Some(old) => {
+            format!("nothing copied after the last action, not `{want}` (the last copy, before it, was `{}`)", paste_text_escape(&old))
+        }
+        None => format!("nothing copied yet, not `{want}`"),
+    }
+}
+
 /// `<Clipboard:text>`: the last text the app copied is exactly `expect`.
 pub fn check_clipboard(ctx: &egui::Context, expect: &str) -> Result<(), String> {
-    match ctx.with_plugin::<Tap, _>(|t| t.copied.clone()).flatten() {
-        Some(got) if got == expect => Ok(()),
-        Some(got) => Err(format!("copied `{}`, not `{}`", paste_text_escape(&got), paste_text_escape(expect))),
-        None => Err(format!("nothing copied yet, not `{}`", paste_text_escape(expect))),
+    check_clipboard_after(ctx, Mark::default(), expect)
+}
+
+/// `<Clipboard:text>`, over the copies made after `after`.
+pub fn check_clipboard_after(ctx: &egui::Context, after: Mark, expect: &str) -> Result<(), String> {
+    match last_copy(ctx) {
+        (Some(got), n) if n > after.copies => {
+            if got == expect {
+                Ok(())
+            } else {
+                Err(format!("copied `{}`, not `{}`", paste_text_escape(&got), paste_text_escape(expect)))
+            }
+        }
+        (before, _) => Err(no_newer_copy(expect, before)),
     }
 }
 
 /// `<ClipboardHas:text>`: the last text the app copied contains `part`.
 pub fn check_clipboard_has(ctx: &egui::Context, part: &str) -> Result<(), String> {
-    match ctx.with_plugin::<Tap, _>(|t| t.copied.clone()).flatten() {
-        Some(got) if got.contains(part) => Ok(()),
-        Some(got) => Err(format!("copied `{}`, which has no `{}`", paste_text_escape(&got), paste_text_escape(part))),
-        None => Err(format!("nothing copied yet, not `{}`", paste_text_escape(part))),
+    check_clipboard_has_after(ctx, Mark::default(), part)
+}
+
+/// `<ClipboardHas:text>`, over the copies made after `after`.
+pub fn check_clipboard_has_after(ctx: &egui::Context, after: Mark, part: &str) -> Result<(), String> {
+    match last_copy(ctx) {
+        (Some(got), n) if n > after.copies => {
+            if got.contains(part) {
+                Ok(())
+            } else {
+                Err(format!("copied `{}`, which has no `{}`", paste_text_escape(&got), paste_text_escape(part)))
+            }
+        }
+        (before, _) => Err(no_newer_copy(part, before)),
     }
 }
 
@@ -1762,7 +1850,8 @@ struct Flight {
 /// A reading step (`<Assert:>`, `<Assert:!>`, the states, `<Tree:>`, `<Click:text>`, `<DClick:text>`) judges only an
 /// observation made after the last input was drawn by the main window. A negative step (`<Assert:!x>`) passes on
 /// the first such observation without `x` (waiting up to [`TEXT_WAIT`] for it to go); once it has passed, it does
-/// not watch for `x` appearing later.
+/// not watch for `x` appearing later. `<Clipboard:>`, `<ClipboardHas:>` and `<Announced:>` look only at copies and
+/// announcements made after the last input went in (see [`Mark`]).
 pub struct Runner {
     steps: VecDeque<Step>,
     next: Instant,
@@ -1791,8 +1880,12 @@ pub struct Runner {
     action_gen: u64,
     /// The label of the step that made the frames in `pointer`.
     pointer_step: String,
+    /// The frames in `pointer` are a step's first: the next one to go in takes the mark.
+    pointer_new: bool,
     /// What the last `<ReadHas:>` read, while it waits.
     last_read: Option<String>,
+    /// Where the copies and announcements stood when the last action's first input went in (`None` before the first action).
+    since: Option<Mark>,
 }
 
 /// What an app reads for `<ReadHas:NAME=TEXT>` (a terminal pane's text, say). The runner asks for it in each frame
@@ -1837,6 +1930,8 @@ impl Runner {
             action_gen: 0,
             pointer_step: String::new(),
             last_read: None,
+            since: None,
+            pointer_new: false,
             steps: steps.into(),
             next: Instant::now() + Duration::from_millis(500),
             shot: None,
@@ -1949,6 +2044,10 @@ impl Runner {
         }
         if let Some(frame) = self.pointer.pop_front() {
             raw.events.extend(frame);
+            // The step's first frame is the action: a copy made by the press still counts after the release.
+            if std::mem::take(&mut self.pointer_new) {
+                self.since = Some(mark(ctx));
+            }
             self.next = now + FRAME;
             self.fly(ctx, now, self.pointer_step.clone(), true);
             self.note(now);
@@ -1991,6 +2090,7 @@ impl Runner {
         match press(step)? {
             Press::Events(events) => {
                 raw.events.extend(events);
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), true);
             }
             Press::Wait(d) => self.next = now + d,
@@ -2009,15 +2109,18 @@ impl Runner {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
                 // The window lays out again at the new size before the next step.
                 self.next = now + SETTLE;
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), false);
             }
             Press::Theme(name) => {
                 self.info.theme = name.clone();
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), false);
                 return Some(Do::Theme(name));
             }
             Press::Lang(code) => {
                 self.info.lang = code.clone();
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), false);
                 return Some(Do::Lang(code));
             }
@@ -2026,6 +2129,7 @@ impl Runner {
                     self.deadline = None;
                     self.pointer = click_frames(pos, right);
                     self.pointer_step = label(step);
+                    self.pointer_new = true;
                     self.next = now;
                 }
                 Err(why) => return self.retry(step, why, now),
@@ -2035,6 +2139,7 @@ impl Runner {
                     self.deadline = None;
                     self.pointer = dclick_frames(pos);
                     self.pointer_step = label(step);
+                    self.pointer_new = true;
                     self.next = now;
                 }
                 Err(why) => return self.retry(step, why, now),
@@ -2043,11 +2148,11 @@ impl Runner {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::Clipboard(text) => match check_clipboard(ctx, &text) {
+            Press::Clipboard(text) => match check_clipboard_after(ctx, self.since.unwrap_or_default(), &text) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::ClipboardHas(text) => match check_clipboard_has(ctx, &text) {
+            Press::ClipboardHas(text) => match check_clipboard_has_after(ctx, self.since.unwrap_or_default(), &text) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
@@ -2055,7 +2160,7 @@ impl Runner {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::Announced(text) => match check_announced(&text) {
+            Press::Announced(text) => match self.since.map_or_else(|| check_announced(&text), |m| check_announced_after(m, &text)) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
@@ -2067,6 +2172,7 @@ impl Runner {
                     self.deadline = None;
                     self.pointer = click_frames(pos, false);
                     self.pointer_step = label(step);
+                    self.pointer_new = true;
                     self.next = now;
                 }
                 Err(why) => return self.retry(step, why, now),
@@ -2094,16 +2200,19 @@ impl Runner {
             }
             Press::Paste => {
                 raw.events.push(egui::Event::Paste((self.clipboard)()));
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), true);
             }
             Press::PasteText(text) => {
                 raw.events.push(paste_text_event(&text));
+                self.since = Some(mark(ctx));
                 self.fly(ctx, now, label(step), true);
             }
             p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
                 let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
                 self.pointer = pointer_frames(&p, rect);
                 self.pointer_step = label(step);
+                self.pointer_new = true;
                 self.next = now;
             }
         }
@@ -2752,6 +2861,173 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(failed_report("<Assert:x>", "a\nb", 2).starts_with("keys: failed\nstep: <Assert:x>\nwhy: a / b\n"));
+    }
+
+    /// Plays `script` against `app` (called once per pass with the pass number). `quick`: a failing step fails at once.
+    fn drive(script: &str, quick: bool, mut app: impl FnMut(&mut egui::Ui, usize)) -> Option<Do> {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse(script).unwrap(), None);
+        for i in 0..400 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                return Some(d);
+            }
+            ctx.run_ui(raw, |ui| app(ui, i)).drop_without_applying_deltas();
+            if quick {
+                r.deadline = Some(Instant::now());
+            }
+        }
+        None
+    }
+
+    fn typed(ui: &egui::Ui, c: &str) -> bool {
+        ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == c)))
+    }
+
+    #[test]
+    fn a_wait_or_state_is_not_an_action_for_the_clipboard() {
+        let app = |ui: &mut egui::Ui, _: usize| {
+            if typed(ui, "y") {
+                ui.ctx().copy_text("x".into());
+            }
+        };
+        assert_eq!(drive("y<Wait:500><Clipboard:x>", true, app), Some(Do::Done));
+        let mut states = 0;
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("y<State:s><Clipboard:x>").unwrap(), None);
+        let mut out = None;
+        for _ in 0..100 {
+            r.next = Instant::now();
+            let mut raw = egui::RawInput::default();
+            match r.input(&ctx, &mut raw) {
+                Some(Do::State(_)) => states += 1,
+                Some(d) => {
+                    out = Some(d);
+                    break;
+                }
+                None => {}
+            }
+            ctx.run_ui(raw, |ui| app(ui, 0)).drop_without_applying_deltas();
+        }
+        assert_eq!((states, out), (1, Some(Do::Done)));
+    }
+
+    #[test]
+    fn a_copy_before_the_last_action_does_not_count() {
+        let app = |ui: &mut egui::Ui, _: usize| {
+            if typed(ui, "a") {
+                ui.ctx().copy_text("x".into());
+            }
+        };
+        assert_eq!(drive("a<Clipboard:x>", true, app), Some(Do::Done));
+        assert_eq!(drive("a<ClipboardHas:x>", true, app), Some(Do::Done));
+        for script in ["ab<Clipboard:x>", "ab<ClipboardHas:x>"] {
+            match drive(script, true, app) {
+                Some(Do::Failed { why, .. }) => {
+                    assert!(why.contains("nothing copied after the last action"), "{why}");
+                    assert!(why.contains("`x`"), "{why}");
+                }
+                other => panic!("{script}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_copy_before_any_action_still_counts() {
+        let app = |ui: &mut egui::Ui, i: usize| {
+            if i == 0 {
+                ui.ctx().copy_text("x".into());
+            }
+        };
+        assert_eq!(drive("<Clipboard:x>", true, app), Some(Do::Done));
+    }
+
+    #[test]
+    fn a_click_marks_once_at_its_first_frame() {
+        let app = |ui: &mut egui::Ui, _: usize| {
+            let _ = ui.button("Save");
+            if ui.input(|i| i.pointer.any_pressed()) {
+                ui.ctx().copy_text("pressed".into());
+            }
+        };
+        assert_eq!(drive("<Click:Save><Clipboard:pressed>", false, app), Some(Do::Done));
+    }
+
+    #[test]
+    fn announcements_count_only_after_the_last_action() {
+        ito_a11y::record_announcements(true);
+        let app = |ui: &mut egui::Ui, i: usize| {
+            if i == 0 {
+                ito_a11y::announce(ui, "mark-test first");
+            }
+            if typed(ui, "a") {
+                ito_a11y::announce(ui, "mark-test after a");
+            }
+        };
+        assert_eq!(drive("<Announced:mark-test first>", true, app), Some(Do::Done));
+        assert_eq!(drive("a<Wait:20><Announced:mark-test after a>", true, app), Some(Do::Done));
+        match drive("ab<Announced:mark-test after a>", true, app) {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("not announced after the last action"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_after_checks_use_a_hand_made_mark() {
+        ito_a11y::record_announcements(true);
+        let ctx = egui::Context::default();
+        assert_eq!(mark(&ctx).copies, 0);
+        assert_eq!(check_clipboard_after(&ctx, Mark::default(), "x").unwrap_err(), "nothing copied yet, not `x`");
+        observe(&ctx);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().copy_text("y".into());
+            ito_a11y::announce(ui, "mark-direct one");
+        })
+        .drop_without_applying_deltas();
+        let m = mark(&ctx);
+        assert_eq!(m.copies, 1);
+        assert!(m.announced >= 1);
+        assert_eq!(check_clipboard_after(&ctx, Mark { copies: 0, announced: 0 }, "y"), Ok(()));
+        assert_eq!(check_clipboard_has_after(&ctx, Mark { copies: 0, announced: 0 }, "y"), Ok(()));
+        assert_eq!(check_clipboard_after(&ctx, Mark { copies: 0, announced: 0 }, "z").unwrap_err(), "copied `y`, not `z`");
+        assert_eq!(check_clipboard_has_after(&ctx, Mark { copies: 0, announced: 0 }, "z").unwrap_err(), "copied `y`, which has no `z`");
+        let why = check_clipboard_after(&ctx, m, "x").unwrap_err();
+        assert_eq!(why, "nothing copied after the last action, not `x` (the last copy, before it, was `y`)");
+        assert!(check_clipboard_has_after(&ctx, m, "y").unwrap_err().contains("nothing copied after the last action"));
+        assert_eq!(check_announced_after(Mark { copies: 0, announced: 0 }, "mark-direct one"), Ok(()));
+        let why = check_announced_after(m, "mark-direct nope").unwrap_err();
+        assert!(why.contains("`mark-direct nope` was not announced after the last action; announced after it: "), "{why}");
+        assert!(check_announced("mark-direct nope").unwrap_err().contains("was not announced; announced: "));
+    }
+
+    #[test]
+    fn the_announced_after_message_names_what_came_before() {
+        let s = |v: &[&str]| v.iter().map(|m| m.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            not_announced_after("x", &[], &s(&["a", "b"])),
+            "`x` was not announced after the last action; announced after it: nothing (before it: `b`, `a`)"
+        );
+        assert_eq!(not_announced_after("x", &[], &[]), "`x` was not announced after the last action; announced after it: nothing");
+        assert_eq!(
+            not_announced_after("x", &s(&["c"]), &s(&["a"])),
+            "`x` was not announced after the last action; announced after it: `c`"
+        );
+    }
+
+    /// Before the first action the Runner uses the old message; after one, the new one, even when nothing was announced
+    /// before that action.
+    #[test]
+    fn the_runner_words_announced_by_whether_an_action_went_in() {
+        let app = |_: &mut egui::Ui, _: usize| {};
+        match drive("<Announced:wording-test never>", true, app) {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("`wording-test never` was not announced; announced: "), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        match drive("a<Announced:wording-test never>", true, app) {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("`wording-test never` was not announced after the last action"), "{why}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// #145: states, the tree file and announcements are checked from the AccessKit tree.

@@ -140,7 +140,13 @@ pub fn say(resp: &egui::Response, role: Role, label: &str) {
 }
 
 static RECORD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static HEARD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// The kept messages with their serial numbers, and the serial of the last one.
+struct Heard {
+    count: u64,
+    kept: Vec<(u64, String)>,
+}
+
+static HEARD: std::sync::Mutex<Heard> = std::sync::Mutex::new(Heard { count: 0, kept: Vec::new() });
 
 /// Keep the messages given to `announce` (a `--keys` run turns this on, for `<Announced:text>`). Off by default, so a
 /// shipped app keeps nothing.
@@ -150,17 +156,31 @@ pub fn record_announcements(on: bool) {
 
 /// The messages `announce`d since [`record_announcements`] was turned on, oldest first (the last 200).
 pub fn announced() -> Vec<String> {
-    HEARD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    HEARD.lock().unwrap_or_else(|e| e.into_inner()).kept.iter().map(|(_, m)| m.clone()).collect()
+}
+
+/// The serial number of the last recorded message: 1 for the first one in the process, counting up, never reset (0
+/// before any). Only messages given while [`record_announcements`] is on are counted.
+pub fn announced_count() -> u64 {
+    HEARD.lock().unwrap_or_else(|e| e.into_inner()).count
+}
+
+/// The kept messages recorded after serial `count` (as [`announced_count`] returned it), oldest first. With more than
+/// 200 messages after `count`, only the last 200 are kept.
+pub fn announced_after(count: u64) -> Vec<String> {
+    HEARD.lock().unwrap_or_else(|e| e.into_inner()).kept.iter().filter(|(n, _)| *n > count).map(|(_, m)| m.clone()).collect()
 }
 
 #[cfg(feature = "egui")]
 fn heard(message: &str) {
     if RECORD.load(std::sync::atomic::Ordering::SeqCst) {
-        let mut v = HEARD.lock().unwrap_or_else(|e| e.into_inner());
-        if v.len() >= 200 {
-            v.remove(0);
+        let mut h = HEARD.lock().unwrap_or_else(|e| e.into_inner());
+        if h.kept.len() >= 200 {
+            h.kept.remove(0);
         }
-        v.push(message.to_owned());
+        h.count += 1;
+        let n = h.count;
+        h.kept.push((n, message.to_owned()));
     }
 }
 
@@ -261,6 +281,38 @@ mod tests {
         for bad in ["", ".a", "a.", "a..b", "A", "a b", "ä", "a/b"] {
             assert!(!is_test_id(bad), "{bad}");
         }
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn announcements_have_serial_numbers() {
+        record_announcements(true);
+        let start = announced_count();
+        // Other tests may announce too, so only look at our own texts.
+        for i in 0..3 {
+            heard(&format!("serial-a-{i}"));
+        }
+        let mid = announced_count();
+        assert!(mid >= start + 3);
+        heard("serial-b-0");
+        let after_mid = announced_after(mid);
+        assert!(after_mid.contains(&"serial-b-0".to_owned()));
+        assert!(!after_mid.iter().any(|m| m.starts_with("serial-a-")));
+        assert_eq!(announced_after(start).iter().filter(|m| m.starts_with("serial-a-")).count(), 3);
+        // The cap keeps the serials.
+        let base = announced_count();
+        for i in 0..205 {
+            heard(&format!("serial-cap-{i}"));
+        }
+        let kept = announced_after(base);
+        assert_eq!(kept.len(), 200);
+        assert!(announced_count() >= base + 205);
+        // Another test may announce in between and push one more of ours out, so ours are an unbroken run from the 6th
+        // message or later up to the last.
+        let ours: Vec<usize> = kept.iter().filter_map(|m| m.strip_prefix("serial-cap-")?.parse().ok()).collect();
+        assert!(ours.first().is_some_and(|&i| i >= 5), "{ours:?}");
+        assert_eq!(ours.last(), Some(&204));
+        assert!(ours.windows(2).all(|w| w[1] == w[0] + 1), "{ours:?}");
     }
 
     #[cfg(feature = "egui")]

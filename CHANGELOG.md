@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.266.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: 直前の操作より後だけを見る確かめ（#203 B4）。`Mark { copies, announced }`（操作が入ったときのコピーの数と読み上げの通し番号）、`mark(ctx)`、`check_clipboard_after(ctx, after, expect)`・`check_clipboard_has_after(ctx, after, part)`・`check_announced_after(after, text)`。今までの `check_clipboard`・`check_clipboard_has`・`check_announced` は形も意味（実行の始まりから）も文言もそのまま。
+- `ito-a11y`: 記録した読み上げに通し番号を付ける。`announced_count()`（最後の番号。1 から数え、戻さない。まだ無ければ 0）と `announced_after(count)`（その番号より後のもの、古い順）。残すのは今までどおり最後の 200 件。`announced()` はそのまま。
+
+### 変更
+
+- `ito-keyscript`: `Runner` の `<Clipboard:>`・`<ClipboardHas:>`・`<Announced:>` は、直前の操作より後のコピーと読み上げだけを見る（#203 B4）。前の手順のコピーや読み上げで合格にしない。
+  - 操作は入力を入れる手順: キー・文字・`<Paste>`・`<Paste:文字>`・`<Size:>`・`<Theme:>`・`<Lang:>`・ポインターの手順（`<Click:>`・`<DClick:>`・`<Hover:>`・`<Wheel:>`・`<Drag:>`・`<Click:文字>`・`<RClick:文字>`・`<DClick:文字>`・`<ClickId:>`）。`<Wait>`・`<Now>`・`<State>`・`<Shot>`・読む手順は操作ではないので、`y<Wait:500><Clipboard:x>` は今までどおり通る。
+  - 区切りは、操作の最初の入力が入るとき（その入力を描く描画より前）。ポインターの手順は最初のフレームで 1 回だけなので、押したフレームのコピーは離したあとも数える。最初の操作の前は、実行の始まりからのコピーと読み上げを数える（違ったときの文言も今までどおり）。
+  - 違ったときの文言: `` nothing copied after the last action, not `x` (the last copy, before it, was `y`) ``、`` `x` was not announced after the last action; announced after it: … ``（後に何も無ければ `(before it: …)` も）。
+  - アプリがやること: 台本のコピー・読み上げの確かめは、それを起こす操作の直後に置く（間に別の操作を挟まない）。kura は自分のループで、まだこの手順を断る（使うときは `mark` と `_after` を呼ぶ）。
+
 ## [0.265.1] - 2026-11-08
 
 ### 変更
