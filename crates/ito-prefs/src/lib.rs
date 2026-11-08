@@ -872,6 +872,16 @@ pub fn focus_ring(ui: &egui::Ui, r: &egui::Response) {
 /// Down (Home and End) move the light, Enter or Space picks and shuts it, Esc
 /// shuts it as it was, and Tab shuts it and goes on to the next control.
 pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
+    select_with_response(ui, id, now, options).0
+}
+
+/// [`select`] and the list button's response, for a caller that gives the button a test ID.
+pub(crate) fn select_with_response<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    id: &str,
+    now: T,
+    options: &[(T, &str)],
+) -> (Option<T>, egui::Response) {
     let mut pick = now;
     let shown = options.iter().find(|(v, _)| *v == now).map_or("", |(_, t)| *t).to_owned();
     let salt = ("prefs", id);
@@ -955,7 +965,7 @@ pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options:
     }
     take_keys(ui, &combo.response);
     focus_ring(ui, &combo.response);
-    (pick != now).then_some(pick)
+    ((pick != now).then_some(pick), combo.response)
 }
 
 /// A segmented control: one outlined group of parts, the chosen one filled.
@@ -1162,6 +1172,11 @@ pub fn field(ui: &mut egui::Ui, drafts: &mut Drafts, id: &str, now: &str, hint: 
     let shown = edit.show(ui);
     let resp = &shown.response.response;
     take_keys(ui, resp);
+    // Only a name `is_test_id` accepts: app ids may hold other characters, and those get no ID.
+    let name = format!("settings.field.{id}");
+    if ito_a11y::is_test_id(&name) {
+        ito_a11y::test_id(resp, &name);
+    }
     if resp.gained_focus() {
         let mut st = shown.state.clone();
         st.cursor.set_char_range(Some(egui::text::CCursorRange::select_all(&shown.galley)));

@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.265.0] - 2026-11-08
+
+### 追加
+
+- `ito-keyscript`: done ファイルの report に run ID を付ける（#203 part 3）。古い実行の done ファイルと自分の実行のものを、テストの道具が見分けるため。
+  - `run_id(prefix)`（`<PREFIX>_KEYS_RUN_ID` か、なければ `<unix ms>-<pid>`。1 プロセスで最初に決まったものを保つ。値が `A-Za-z0-9_-` の 1〜64 文字でなければ `Err`）、`current_run_id()`、`with_run(id, report)`、`with_current_run(report)`。
+  - 置き場所の規則: report にちょうど 1 行の `run: <id>` を入れる。1 行目は元のまま（`keys: stalled` を 1 行目で読む `xrun.sh` はそのまま動く）。成功の report は最後が `keys: done` のまま（`run:` はその直前）。
+  - ito の watchdog（stalled）と `install_panic_report` は自分で `with_current_run` で包む（`run_id` を呼ばないアプリでは `run: (none)`）。`*_report` の関数そのものは `run:` の行を足さない。
+  - アプリがやること: 窓を開く前に `run_id("KURA")` のように 1 回呼ぶ（`Err` は `refused_report` で断る。その report も `with_current_run` で包む）。done ファイルに書く全部の report（done・failed・quit・closed・refused・アプリ自身の stalled など）を `with_run` / `with_current_run` で包む。
+- `ito-keyscript::probe`: 子として起動される確かめ役（Settings → Shell の program・引数・環境変数が子に届いたかを、テストが確かめる）。`ITO_PROBE_DIR`・`ITO_PROBE_NONCE`（どちらも必須。無いか空、または nonce に制御文字があれば出力なしで exit 2）・`ITO_PROBE_ENV`（記録する変数名）を読み、`probe-<n>.txt` を書いてから `probe ready <n>` を出す。書けなければ stderr に `probe error: …` で exit 1。stdin が閉じるか 120 秒で exit 0。kura は `examples/term-probe.rs`（`fn main() { ito_keyscript::probe::main() }`）を足す。yagura も同じ形で使える。
+- `ito-prefs`: Shell カードにテスト ID（AccessKit が有効なときだけ付く）: `settings.shell.program`、`settings.shell.env.edit`・`.add`・`.cancel`・`.save`、環境変数の行 `settings.shell.env.row.<key>.name`・`.value`・`.remove`。引数の欄は `settings.field.shell-args`。
+
+### 変更
+
+- `ito-keyscript`: `refused_report(why)` は `why` の改行を ` / ` にして 1 行にする（`failed_report` と同じ。改行で `run:` などの行が混ざらない）。`run_id` の `Err` の文は値をエスケープして見せる。
+- `ito-prefs`: Shell カードの「追加」は、押したフレームの次の描画を頼む（足した行がすぐ見える）。
+- `ito-prefs`: `field` が欄に `settings.field.<id>` のテスト ID を付ける（`ito_a11y::is_test_id` に通る id だけ。通らない id には付けず、落ちない）。
+- `ito-prefs`: Shell カードの環境変数の行は番号（key）を持ち、行を消しても他の行の番号を振り直さない（テスト ID が同じ行を指し続ける）。公開 API は変わらない（`ShellEdit` は `Default` のまま）。
+
 ## [0.264.1] - 2026-11-08
 
 ### 追加

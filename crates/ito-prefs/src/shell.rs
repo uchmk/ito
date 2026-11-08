@@ -5,7 +5,7 @@
 use egui::RichText;
 use std::collections::BTreeMap;
 
-use crate::{button, field, focus_ring, keyed_row, section, sep, take_keys, z, Drafts, Look};
+use crate::{button_with, field, focus_ring, keyed_row, section, sep, take_keys, z, Drafts, Look, Tone};
 
 /// The card's words, in one language.
 pub struct ShellWords {
@@ -92,7 +92,35 @@ pub struct Shell<'a> {
 /// The variables being edited; the app keeps one across frames.
 #[derive(Default)]
 pub struct ShellEdit {
-    vars: Option<Vec<(String, String)>>,
+    vars: Option<Vec<EnvRow>>,
+    /// The key the next added row gets.
+    next: u32,
+}
+
+/// One variable being edited. The key is fixed for the row's life (removing another row does not renumber it), so its test IDs
+/// (`settings.shell.env.row.<key>.name`) keep naming the same row.
+struct EnvRow {
+    key: u32,
+    name: String,
+    value: String,
+}
+
+impl ShellEdit {
+    /// Opens the editor on `env`: its rows get keys `0..len`, in name order.
+    fn open(&mut self, env: &BTreeMap<String, String>) {
+        let rows: Vec<EnvRow> =
+            env.iter().enumerate().map(|(k, (n, v))| EnvRow { key: k as u32, name: n.clone(), value: v.clone() }).collect();
+        self.next = rows.len() as u32;
+        self.vars = Some(rows);
+    }
+
+    /// Adds an empty row with a new key; nothing while the editor is shut.
+    fn add(&mut self) {
+        if let Some(vars) = &mut self.vars {
+            vars.push(EnvRow { key: self.next, name: String::new(), value: String::new() });
+            self.next += 1;
+        }
+    }
 }
 
 /// One change of the card.
@@ -135,7 +163,12 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
         if !now.program.is_empty() && !shells.iter().any(|(p, _)| *p == now.program) {
             shells.push((now.program, now.program));
         }
-        if let Some(p) = keyed_row(ui, l, SHELL_KEYS[0], w.shell, w.shell_note, |ui| crate::select(ui, "shell", now.program, &shells)) {
+        let program = keyed_row(ui, l, SHELL_KEYS[0], w.shell, w.shell_note, |ui| {
+            let (picked, resp) = crate::select_with_response(ui, "shell", now.program, &shells);
+            ito_a11y::test_id(&resp, "settings.shell.program");
+            picked
+        });
+        if let Some(p) = program {
             out.push(ShellChange::Program(p.to_owned()));
         }
         sep(ui, l);
@@ -146,39 +179,58 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
         }
         sep(ui, l);
         let words = if now.env.is_empty() { w.edit.to_owned() } else { w.edit_n.replace("{n}", &now.env.len().to_string()) };
-        if keyed_row(ui, l, SHELL_KEYS[2], w.env, w.env_note, |ui| button(ui, l, &words)) {
-            edit.vars = match edit.vars {
-                Some(_) => None,
-                None => Some(now.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
-            };
+        let clicked = keyed_row(ui, l, SHELL_KEYS[2], w.env, w.env_note, |ui| {
+            let r = button_with(ui, l, &words, Tone::Plain);
+            ito_a11y::test_id(&r, "settings.shell.env.edit");
+            r.clicked()
+        });
+        if clicked {
+            if edit.vars.is_some() {
+                edit.vars = None;
+            } else {
+                edit.open(now.env);
+            }
         }
         let mut done = false;
+        let mut adding = false;
         if let Some(vars) = &mut edit.vars {
             let mut gone = None;
-            for (k, (name, value)) in vars.iter_mut().enumerate() {
+            for row in vars.iter_mut() {
+                let key = row.key;
                 ui.horizontal(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(name).hint_text("NAME").desired_width(160.0).font(egui::FontId::monospace(z(ui, 12.5))),
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut row.name)
+                            .hint_text("NAME")
+                            .desired_width(160.0)
+                            .font(egui::FontId::monospace(z(ui, 12.5))),
                     );
+                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.name"));
                     ui.label("=");
-                    ui.add(
-                        egui::TextEdit::singleline(value)
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut row.value)
                             .hint_text(w.value)
                             .desired_width(280.0)
                             .font(egui::FontId::monospace(z(ui, 12.5))),
                     );
-                    if ui.small_button(w.remove).clicked() {
-                        gone = Some(k);
+                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.value"));
+                    let r = ui.small_button(w.remove);
+                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.remove"));
+                    if r.clicked() {
+                        gone = Some(key);
                     }
                 });
             }
-            if let Some(k) = gone {
-                vars.remove(k);
+            if let Some(key) = gone {
+                vars.retain(|r| r.key != key);
             }
-            let bad = vars.iter().any(|(n, _)| bad_name(n.trim()));
+            let bad = vars.iter().any(|r| bad_name(r.name.trim()));
             ui.horizontal(|ui| {
-                if button(ui, l, w.add) {
-                    vars.push((String::new(), String::new()));
+                let r = button_with(ui, l, w.add, Tone::Plain);
+                ito_a11y::test_id(&r, "settings.shell.env.add");
+                if r.clicked() {
+                    // The row is added after the list is drawn, so draw again to show it.
+                    adding = true;
+                    ui.ctx().request_repaint();
                 }
                 if bad {
                     ui.label(egui::RichText::new(w.bad_name).size(z(ui, 12.0)).color(l.c.err));
@@ -190,7 +242,9 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
                     let height = ui.available_height();
                     let shown =
                         ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            if button(ui, l, w.cancel) {
+                            let r = button_with(ui, l, w.cancel, Tone::Plain);
+                            ito_a11y::test_id(&r, "settings.shell.env.cancel");
+                            if r.clicked() {
                                 done = true;
                             }
                             let b = egui::Button::new(RichText::new(w.save).size(z(ui, 12.5)))
@@ -199,8 +253,10 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
                             let r = ui.add_enabled(!bad, b);
                             take_keys(ui, &r);
                             focus_ring(ui, &r);
+                            ito_a11y::test_id(&r, "settings.shell.env.save");
                             if r.clicked() {
-                                out.extend(env_changes(now.env, vars));
+                                let pairs = vars.iter().map(|r| (r.name.clone(), r.value.clone())).collect::<Vec<_>>();
+                                out.extend(env_changes(now.env, &pairs));
                                 done = true;
                             }
                         });
@@ -212,6 +268,9 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
                 });
             });
             ui.add_space(ito_theme::scale::space::SM);
+        }
+        if adding {
+            edit.add();
         }
         if done {
             edit.vars = None;
@@ -273,5 +332,94 @@ mod tests {
         out.textures_delta.clear();
         assert!(got.is_empty());
         assert!(shell_index(&SHELL_EN).contains(&"shell.env"));
+    }
+
+    fn frame(ctx: &egui::Context, drafts: &mut Drafts, edit: &mut ShellEdit, now: &Shell) -> Vec<String> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                shell_card(ui, Look { c: ito_theme::colors(), q: "" }, &SHELL_EN, drafts, edit, now);
+            });
+        });
+        out.textures_delta.clear();
+        let mut names: Vec<String> = ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT).into_iter().map(|e| e.name).collect();
+        names.sort();
+        names
+    }
+
+    fn keys(edit: &ShellEdit) -> Vec<u32> {
+        edit.vars.as_ref().map_or_else(Vec::new, |v| v.iter().map(|r| r.key).collect())
+    }
+
+    #[test]
+    fn the_card_has_test_ids_and_env_rows_keep_their_keys() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let env = map(&[("A", "1"), ("B", "2")]);
+        let now = Shell { program: "", auto: "Automatic", shells: &[], args: &[], env: &env };
+        let (mut drafts, mut edit) = (Drafts::new(), ShellEdit::default());
+        let has = |names: &[String], n: &str| names.iter().any(|x| x == n);
+
+        let names = frame(&ctx, &mut drafts, &mut edit, &now);
+        for n in ["settings.shell.program", "settings.field.shell-args", "settings.shell.env.edit"] {
+            assert!(has(&names, n), "{n} in {names:?}");
+        }
+        assert!(!has(&names, "settings.shell.env.add"));
+
+        edit.open(&env);
+        let names = frame(&ctx, &mut drafts, &mut edit, &now);
+        for n in [
+            "settings.shell.env.row.0.name",
+            "settings.shell.env.row.1.value",
+            "settings.shell.env.row.1.remove",
+            "settings.shell.env.add",
+            "settings.shell.env.cancel",
+            "settings.shell.env.save",
+        ] {
+            assert!(has(&names, n), "{n} in {names:?}");
+        }
+
+        edit.add();
+        edit.add();
+        assert_eq!(keys(&edit), [0, 1, 2, 3]);
+        edit.vars.as_mut().unwrap().retain(|r| r.key != 1);
+        let names = frame(&ctx, &mut drafts, &mut edit, &now);
+        assert_eq!(keys(&edit), [0, 2, 3]);
+        assert!(has(&names, "settings.shell.env.row.0.name") && has(&names, "settings.shell.env.row.2.name"));
+        assert!(has(&names, "settings.shell.env.row.3.value"));
+        assert!(!names.iter().any(|n| n.starts_with("settings.shell.env.row.1.")), "{names:?}");
+
+        edit.vars = None;
+        let names = frame(&ctx, &mut drafts, &mut edit, &now);
+        assert!(!has(&names, "settings.shell.env.add"));
+    }
+
+    #[test]
+    fn without_accesskit_the_card_draws_and_notes_no_ids() {
+        let ctx = egui::Context::default();
+        let env = map(&[("A", "1")]);
+        let now = Shell { program: "", auto: "Automatic", shells: &[], args: &[], env: &env };
+        let (mut drafts, mut edit) = (Drafts::new(), ShellEdit::default());
+        edit.open(&env);
+        assert!(frame(&ctx, &mut drafts, &mut edit, &now).is_empty());
+    }
+
+    #[test]
+    fn a_field_with_an_id_that_is_not_a_test_id_attaches_nothing() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut drafts = Drafts::new();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                field(ui, &mut drafts, "Shell Args", "", "", 100.0);
+                field(ui, &mut drafts, "ok-one", "", "", 100.0);
+            });
+        });
+        out.textures_delta.clear();
+        let names: Vec<String> = ito_a11y::take_test_ids(&ctx, egui::ViewportId::ROOT).into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["settings.field.ok-one"]);
     }
 }

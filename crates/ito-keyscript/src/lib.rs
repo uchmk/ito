@@ -14,14 +14,16 @@
 //! which waits for its panes to settle). The reports a run leaves in the
 //! app's `<APP>_KEYS_DONE` file ([`stalled_report`], [`quit_report`],
 //! [`closed_report`], [`refused_report`], [`install_panic_report`]) are
-//! shared too; a [`Runner`] says how many steps are left for them
-//! ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
+//! shared too; the writer adds one `run: <id>` line to each ([`run_id`], [`with_run`]; ito's own stall and panic writers
+//! do it themselves); a [`Runner`] says how many steps are left
+//! for them ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod probe;
 pub mod review;
 
 use ito_keys::{self as keys, Code, Key};
@@ -1148,7 +1150,7 @@ pub fn panic_report(info: &std::panic::PanicHookInfo<'_>) -> String {
 pub fn install_panic_report(done: std::path::PathBuf) {
     let before = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let report = panic_report(info);
+        let report = with_current_run(&panic_report(info));
         let _ = std::fs::write(&done, &report);
         let mut named = done.clone().into_os_string();
         named.push(".panic");
@@ -1156,6 +1158,61 @@ pub fn install_panic_report(done: std::path::PathBuf) {
         before(info);
         std::process::exit(101);
     }));
+}
+
+static RUN_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The run id of this process: `<prefix>_KEYS_RUN_ID` if set (kura: prefix `KURA`), else `<unix ms>-<pid>`. A test harness tells
+/// its own run's done file from a stale one by the `run: <id>` line. Decided once per process: the first `Ok` is kept and
+/// later calls return it unchanged. A set but malformed value is an `Err` (nothing is kept) that the app turns into a
+/// [`refused_report`] before any window opens.
+pub fn run_id(prefix: &str) -> Result<String, String> {
+    let name = format!("{prefix}_KEYS_RUN_ID");
+    if let Some(id) = RUN_ID.get() {
+        return Ok(id.clone());
+    }
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let id = decide_run_id(std::env::var_os(&name), &name, ms, std::process::id())?;
+    Ok(RUN_ID.get_or_init(|| id).clone())
+}
+
+/// The id [`run_id`] kept, once it has been called successfully.
+pub fn current_run_id() -> Option<&'static str> {
+    RUN_ID.get().map(String::as_str)
+}
+
+/// `var` is the environment value of `name`. Valid is 1 to 64 of `A-Z a-z 0-9 _ -`; an empty value is set, so invalid.
+fn decide_run_id(var: Option<std::ffi::OsString>, name: &str, now_ms: u128, pid: u32) -> Result<String, String> {
+    let Some(var) = var else { return Ok(format!("{now_ms}-{pid}")) };
+    let text = var.to_string_lossy();
+    let ok =
+        var.to_str().is_some_and(|t| (1..=64).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'));
+    if ok {
+        return Ok(text.into_owned());
+    }
+    // Escaped: a newline in the value must not add a line (a `run:` one, say) to the refused report.
+    let shown: String = text.chars().take(64).flat_map(char::escape_debug).collect();
+    Err(format!("{name}: '{shown}' is not a run id (1 to 64 of A-Z a-z 0-9 _ -)"))
+}
+
+/// `report` with exactly one `run: <id>` line: any `run:` line it had is dropped, and the new one goes just before a final
+/// `keys: done`, else last. So the first line stays what it was (readers look for `keys: stalled` there) and a finished run
+/// still ends with `keys: done`.
+pub fn with_run(id: &str, report: &str) -> String {
+    let mut lines: Vec<&str> = report.lines().filter(|l| !l.starts_with("run: ")).collect();
+    let line = format!("run: {id}");
+    match lines.last() {
+        Some(&"keys: done") => lines.insert(lines.len() - 1, &line),
+        _ => lines.push(&line),
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// [`with_run`] with [`current_run_id`], or `(none)` before one was decided. For an app's writers and ito's own.
+pub fn with_current_run(report: &str) -> String {
+    with_run(current_run_id().unwrap_or("(none)"), report)
 }
 
 /// What the done file holds for a script that failed on a step that reads the window
@@ -1193,7 +1250,8 @@ pub fn closed_report(left: usize) -> String {
 /// (#193, proposal 1): a run started detached never sees the message on the
 /// command line, and without this the file simply never arrived.
 pub fn refused_report(why: &str) -> String {
-    format!("keys: refused\nwhy: {why}\n")
+    // One line, as in [`failed_report`]: a reader takes the last line as the outcome.
+    format!("keys: refused\nwhy: {}\n", why.replace('\n', " / "))
 }
 
 /// The name in `<Shot:name>` or `<State:name>`: letters, digits, `-` and `_`,
@@ -1674,7 +1732,7 @@ fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: Pat
             let quiet = p.at.elapsed();
             if !told && quiet > p.due + STALL {
                 told = true;
-                let report = stalled_report(&labels, p.left, quiet);
+                let report = with_current_run(&stalled_report(&labels, p.left, quiet));
                 let _ = std::fs::write(&done, &report);
                 use std::io::Write;
                 // Not `eprintln!`: started from an app's `.com` front, this can be
@@ -2188,6 +2246,70 @@ mod tests {
     }
 
     use super::*;
+
+    fn run_lines(r: &str) -> usize {
+        r.lines().filter(|l| l.starts_with("run: ")).count()
+    }
+
+    #[test]
+    fn run_id_parsing() {
+        let name = "KURA_KEYS_RUN_ID";
+        assert_eq!(decide_run_id(None, name, 1234, 77).unwrap(), "1234-77");
+        assert_eq!(decide_run_id(Some("abc_DEF-09".into()), name, 1, 1).unwrap(), "abc_DEF-09");
+        let long = "a".repeat(64);
+        assert_eq!(decide_run_id(Some(long.clone().into()), name, 1, 1).unwrap(), long);
+        for bad in ["a".repeat(65), String::new(), "a b".into(), "a.b".into(), "ä".into()] {
+            let e = decide_run_id(Some(bad.clone().into()), name, 1, 1).unwrap_err();
+            assert!(e.starts_with(&format!("{name}: '")) && e.contains("is not a run id"), "{e}");
+        }
+        let e = decide_run_id(Some("a".repeat(100).into()), name, 1, 1).unwrap_err();
+        assert!(e.contains(&format!("'{}'", "a".repeat(64))), "{e}");
+    }
+
+    #[test]
+    fn run_id_is_kept_for_the_process() {
+        let a = run_id("ITO_TEST_UNSET_PREFIX").unwrap();
+        assert_eq!(run_id("OTHER_PREFIX").unwrap(), a);
+        assert_eq!(current_run_id(), Some(a.as_str()));
+    }
+
+    #[test]
+    fn with_run_puts_one_run_line_in_the_right_place() {
+        let stalled = stalled_report(&["j".to_owned(), "k".to_owned()], 1, Duration::from_secs(31));
+        let failures = [
+            stalled,
+            refused_report("bad"),
+            failed_report("<Assert:x>", "no", 2),
+            "keys: panicked\nthread: t\nat: a\nwhy: w\n".to_owned(),
+            quit_report(2),
+            closed_report(2),
+        ];
+        for r in &failures {
+            let got = with_run("R", r);
+            assert_eq!(run_lines(&got), 1, "{got}");
+            assert_eq!(got.lines().next(), r.lines().next(), "{got}");
+            assert_eq!(got.lines().last(), Some("run: R"), "{got}");
+            assert!(got.ends_with('\n') && !got.ends_with("\n\n"), "{got:?}");
+        }
+        for r in [quit_report(0), closed_report(0)] {
+            let got = with_run("R", &r);
+            assert_eq!(run_lines(&got), 1, "{got}");
+            assert_eq!(got.lines().next(), r.lines().next(), "{got}");
+            assert!(got.ends_with("run: R\nkeys: done\n"), "{got:?}");
+        }
+        assert_eq!(with_run("R", "keys: done\n"), "run: R\nkeys: done\n");
+        assert_eq!(with_run("R", &quit_report(0)), "quit: yes\nrun: R\nkeys: done\n");
+        assert_eq!(with_run("R", ""), "run: R\n");
+    }
+
+    #[test]
+    fn with_run_twice_leaves_the_last_id_only() {
+        for x in ["keys: done\n", "keys: failed\nstep: s\n", ""] {
+            let got = with_run("B", &with_run("A", x));
+            assert_eq!(run_lines(&got), 1, "{got}");
+            assert!(got.contains("run: B\n") && !got.contains("run: A"), "{got}");
+        }
+    }
 
     /// #168: a script that stopped says how far it got, in the notation it
     /// was written in.
@@ -2730,6 +2852,7 @@ mod tests {
         };
         let said = watched(Duration::ZERO, "stuck.done").expect("a report");
         assert!(said.starts_with("keys: stalled\n"), "{said}");
+        assert_eq!(run_lines(&said), 1, "{said}");
         assert!(said.contains("pressed: 2 of 3 (last: `<Wait:2000>`)\nleft: k\n"), "{said}");
         assert_eq!(watched(Duration::from_secs(60), "waiting.done"), None, "still inside a <Wait:60000>");
         // No done file, nothing to watch.
