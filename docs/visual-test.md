@@ -3,7 +3,7 @@
 > **version 1**（2026-11-08）。2026-11-08 に設計のページ（claude.ai の artifact）から移した。ここが正本。artifact は写し。
 > アプリの規則ファイルは「ito docs/visual-test.md, version 1」のように版で名指しする。判定の規則（Tier・自動合格の条件・判定不能の条件）を変えるときは版を上げる。
 
-uchmk · ito · 視覚テスト · 設計案（未承認） · 2026-11-08
+uchmk · ito · 視覚テスト · 版 1 ・ 変更 1（Tier 1）は承認済み（2026-11-08）、変更 2（Tier 2）は未承認 · 2026-11-08
 
 AI Vision を「合格を決める目」にしない。事前に決めた観点を確かめる検査員として使い、機械の測定と同じ実行の証拠がそろったときだけ合格の候補にする。 **uchmk の全部のアプリ（kura・yagura・koyomi・michi・fude と、これから作るもの）で使う形**にする。tsumugi・minato は 2026-11-08 にメンテナンス対象から外した（代わりに Orca と Linear を使う）ので、この設計の対象にしない。契約・部品・規則の文は ito が持ち、アプリは自分の状態と Test ID と観点の表を出すだけ。 土台は [自動実機テスト基盤の設計（観測の契約）](autotest.md)で、その上に載る。
 
@@ -80,7 +80,7 @@ kura のあとの 4 つは、準備のほかに違いが無い。順は kura の
 
 ### 載せる順
 
-1. ito: `docs/visual-test.md`（契約と規則の文）と、state JSON v1・check spec・証拠のスキーマ。[ito#203](https://github.com/uchmk/ito/issues/203)（段 ① Runner の観測の世代と待ちは v0.263.0 で済み。② ID の手順、③ run の行と確かめ役）と [ito#204](https://github.com/uchmk/ito/issues/204)（実行の状態機械と適合テスト）。
+1. ito: `docs/visual-test.md`（契約と規則の文）と、state JSON v1・check spec・証拠のスキーマ。[ito#203](https://github.com/uchmk/ito/issues/203)（閉じた）、[ito#204](https://github.com/uchmk/ito/issues/204)（実行の状態機械と適合テスト）、[ito#205](https://github.com/uchmk/ito/issues/205)（状態 JSON v1・`<Snap:>`・矩形つきの Tree。パイロットの前）。
 2. kura: 状態の書き出しを state JSON v1 にし、パイロットの 4 行（[成果物 8](#d8)）。ここで形を固める。
 3. ほかのアプリ: アダプター（`app_state` の中身・Test ID・`tests/visual/`・`lanes.conf` の 2 行）を足すだけで使える。規則のファイルへの参照は、変更 1 が承認済み（2026-11-08）なので、ito の `docs/visual-test.md`（版 1）の push のあと、各アプリに 1 項目ずつ。
 
@@ -171,7 +171,7 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 |---|---|---|
 | state JSON v1 | スキーマと書き出しは ito、中身は各アプリ（kura が最初） | いまのテキストの State に並べて JSON を書く。`settled`・`theme`・`window`・`ui[]`・`toasts[]`・`capabilities`、アプリだけの値は `app_state` の中。分からない値は `null`（[穴の表](#gaps)）。 |
 | Test ID | `ito-a11y` の `test_id`。名前は各アプリ（ito の部品の分は ito） | egui の id と別の、変わらない名前（kura なら `spot.scroll.thumb`、ito の設定の画面なら `settings.field.<id>`）。観点はこれで対象を指す。 |
-| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#203） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 3 つのアプリはそのまま使え、kura は自前の実行に写す。 |
+| `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#205） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 3 つのアプリはそのまま使え、kura は自前の実行に写す。 |
 | Shot の付属 JSON | ito（いまの `review::Meta` を広げる） | PNG ごとに run_id・snapshot_seq・前後の state のハッシュ・環境。名前は `shots/<name>.json`（State と分ける）。 |
 | kura の `<Tree:>`・`<Assert:>`・`<Is:>` | kura だけ | **済み（kura v0.154.0）。** ito の `tree_text` などを呼んで自前の実行で読む。Runner のアプリはもう使える。 |
 
@@ -436,13 +436,13 @@ C:\dev\filer-evidence\20261107-101203-41.15\
 ## 成果物 8 — 導入の順とパイロット
 
 1. **前提: フェーズ 1（fail closed）** — 済み。kura v0.151.0（`keys: failed`・`settled`）、ito v0.262.3（`-Out` の掃除）と v0.262.7（`xrun.sh` は `keys: done` で終わらない回を失敗に。ito#202 は閉じた）。kura の段 ①（書き込みの番号と待ち）は v0.152.0〜v0.152.2 で、再テストは kura#511。
-2. **観測の契約（フェーズ 2）** — ito: state JSON v1 のスキーマ、`<Snap:>`、矩形つきの Tree、ID の手順、Runner の観測の世代（[ito#203](https://github.com/uchmk/ito/issues/203) は 3 段: ① 観測の世代と待ちは v0.263.0 で済み、② ID の手順は v0.264.0、③ run の行と確かめ役は v0.265.0 の予定。状態 JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree は、見た目のパイロットの前に別に頼む。実行の状態機械と適合テストは [ito#204](https://github.com/uchmk/ito/issues/204)）。kura: state JSON v1 の中身、Test ID、自前の実行への写し。判断 3〜5 は 2026-11-08 に決まった。
+2. **観測の契約（フェーズ 2）** — ito: state JSON v1 のスキーマ、`<Snap:>`、矩形つきの Tree、ID の手順、Runner の観測の世代（[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた（v0.263.0〜v0.267.0）。状態 JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree は [ito#205](https://github.com/uchmk/ito/issues/205)。実行の状態機械と適合テストは [ito#204](https://github.com/uchmk/ito/issues/204)（1〜3 は v0.269.0・v0.271.0・v0.272.0））。kura は v0.153.0〜v0.154.0 で ID の手順・run の行を受けた。kura: state JSON v1 の中身、Test ID、自前の実行への写し。判断 3〜5 は 2026-11-08 に決まった。
 3. **Tier 1 の文字と状態の行（kura）** — 59.5・57.3・20.16（56.6・58.4 は v0.152.1 で `[ ]` に戻ったので、kura#511 の再テストでテキストとして測る）。規則の文言は変えずに測れるが、いまの `[~]` は「見た目の行」と判断された記録なので、`[x]` にするかは持ち主が決める。それまでは結果を報告に書くだけ。
 4. **Tier 1 の矩形と画素の行（kura。変更 1 は承認済み。ito の docs 版 1 と kura の規則のファイルに載せたあと）** — 41.15・49.4・1.46・18.7・54.16、54.18 の色。
 5. **Tier 2 の影運用** — Vision を走らせ、結果は `[~]` と AI の報告にとどめて、持ち主の判断と比べる。基準: 20 行以上・誤合格 0・カナリアの検出 100 %。満たしたら変更 2 を持ち主に出す。
 6. **基準画像の回帰** — 主な画面（設定の各ページ、パレット、spot、ヘルプ、確認）を ライト／ダーク × 100 %／150 % で。基準画像は持ち主が承認する。
 7. **独立レビュー** — Codex・ChatGPT は高リスクの画面、意見の割れ、大きなデザインの変更だけ。
-8. **ほかのアプリ** — kura のパイロットが通ったら、yagura・koyomi・michi・fude にアダプターを足し（順はパイロットのあとで決める）、道具ごとに 1 行ずつパイロットを回す。これから作るアプリも同じ形で足す。Runner のアプリは ito#203 の段 ③ より新しい rev が前提（ito#204 が入ったら、その rev）。
+8. **ほかのアプリ** — kura のパイロットが通ったら、yagura・koyomi・michi・fude にアダプターを足し（順はパイロットのあとで決める）、道具ごとに 1 行ずつパイロットを回す。これから作るアプリも同じ形で足す。Runner のアプリは ito v0.272.0 以降が前提（ito#204 の残りが入ったら、その rev）。
 
 ### パイロット（kura。道具ごとに 1 行）
 
@@ -577,7 +577,7 @@ C:\dev\filer-evidence\20261107-101203-41.15\
 2. **変更 2: 影運用の基準つきで進める**。20 行以上・誤合格 0・カナリアの検出 100 % を、アプリごとに数える。規則の文は、そのアプリで基準を満たしてから持ち主に出す。それまで Vision の答えは `[~]` と報告にとどめる。
 3. **印の形: 案 a。**`[x]` のまま、証拠（`verdict.json`）に `tier` を書く。生成器は変えない。
 4. **check spec: `tests/visual/<行>.toml`**。書くのは、その行を書いた開発のセッション。
-5. **[ito#203](https://github.com/uchmk/ito/issues/203) は 3 段**。① 観測の世代と `Runner` の待ち（v0.263.0、済み）、② test_id・ID の手順・`<ReadHas:>`（v0.264.0）、③ run_id・`with_run`・確かめ役・Shell カードの ID（v0.265.0）。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（③ のあと）。state JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree・検査器・証拠のフォルダは、見た目のパイロットの前に ito に頼む。
+5. **[ito#203](https://github.com/uchmk/ito/issues/203) は閉じた**（3 段、v0.263.0〜v0.267.0）。① 観測の世代と `Runner` の待ち、② test_id・ID の手順・`<ReadHas:>`、③ run_id・`with_run`・確かめ役・Shell カードの ID。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（1〜3 は v0.269.0・v0.271.0・v0.272.0）。state JSON v1 のスキーマ・`<Snap:>`・矩形つきの Tree・検査器・証拠のフォルダは [ito#205](https://github.com/uchmk/ito/issues/205)（見た目のパイロットの前）。
 6. **2 つの設計は ito の `docs/visual-test.md`・`docs/autotest.md` に移す**。ito のセッションに頼んだ。移したあとは ito の文書が正で、このページは写し。
 7. **今の `[~]` の行を遡って `[x]` にしない**。59.5 などはパイロットで Tier 1 として測り直す。
 8. **パイロットは 4 行**（59.5・41.15・49.4・54.18）。

@@ -4,11 +4,11 @@
 
 **持ち主は ito**。uchmk のアプリ（kura・yagura・koyomi・michi・fude と、これから作るもの）が同じ形で使う。契約・部品・レーンのスクリプトは ito に置き、各アプリはアダプター（状態の中身・Test ID・ハーネス・規則のファイル）だけを足す（§1a）。**最初に載せたのは kura** で、§2a・§3・§11 は kura での縦切り。見た目の行の判定は別のページ [uchmk 視覚テスト設計](visual-test.md) にある。
 
-AI が実機テストを自律で回すための設計。Codex の設計レビュー結果と、持ち主が決めた 5 件の判断を含む。**フェーズ 1（偽の緑を閉じる）は kura v0.151.0 で実装して push した**（再テスト uchmk/kura#507）。Linux のレーンの道具（`xrun.sh`）の穴は ito v0.262.7 で直り、kura v0.151.1 で取り込んだ（CI の smoke の直しが v0.151.2）。**フェーズ 2（観測の契約）は Codex と 6 ラウンドで設計を合意し、kura の側の stage 1（設定の書き込みの通し番号と、書き込みを見る終了の判定）を kura v0.152.0〜v0.152.2 で入れた**（§2a、再テスト uchmk/kura#511）。ito の側の部品は uchmk/ito#203 で 3 段に分けて進めている（段 ① の観測の世代と `Runner` の待ちは ito v0.263.0 で入った）。実行の状態機械と適合テストは別の Issue uchmk/ito#204。ito#202（`xrun.sh`）は閉じた。**判断 3〜5 は 2026-11-08 に決まった**（持ち主の「推奨で進めてください」）。
+AI が実機テストを自律で回すための設計。Codex の設計レビュー結果と、持ち主が決めた 5 件の判断を含む。**フェーズ 1（偽の緑を閉じる）は kura v0.151.0 で実装して push した**（再テスト uchmk/kura#507）。Linux のレーンの道具（`xrun.sh`）の穴は ito v0.262.7 で直り、kura v0.151.1 で取り込んだ（CI の smoke の直しが v0.151.2）。**フェーズ 2（観測の契約）は Codex と 6 ラウンドで設計を合意し、kura の側の stage 1（設定の書き込みの通し番号と、書き込みを見る終了の判定）を kura v0.152.0〜v0.152.2 で入れた**（§2a、再テスト uchmk/kura#511）。ito の側の部品は uchmk/ito#203 で 3 段に分けて進め、閉じた（v0.263.0〜v0.267.0）。kura は v0.153.0（run の行・`<ReadHas:>`・examples/term-probe）と v0.154.0（ID の手順 `<ClickId:>`・`<Id:>`・`<ValueId:>`・`<FocusedId:>`、`<Click:文字>`、`<Assert:>`、`<Is…:>`、`<Tree:>`、`<Announced:>`、`<Clipboard:>`）で取り込み、v0.154.1〜v0.154.2 で ito-clipboard と ito v0.271.0 に移った。実行の状態機械と適合テストは uchmk/ito#204（1〜3 が v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4・6・8）。状態 JSON v1・`<Snap:>`・矩形つきの `<Tree:>` は uchmk/ito#205。ito#202（`xrun.sh`）は閉じた。**判断 3〜5 は 2026-11-08 に決まった**（持ち主の「推奨で進めてください」）。
 
 Codex との合意の状況: フェーズ 1 は 2 ラウンドで条件つき合意（重大 3 点を仕様に入れた、§3）。フェーズ 2 は 1 ラウンド目（2026-11-08）の指摘（重大 2・高 4・中 2・軽 1）を受けて設計を v2 に書き直した。2 ラウンド目で 6 件が閉じ、残りの指摘（重大 3: 描画が止まったときの観測、設定の書き込みの成功の判定、自己テストの壊し方）をコードで確かめて全部採用し、v3 の修正にした。3 ラウンド目では、v3 の「届いていない出来事は入れ直す」が eframe の入力の持ち越しで二重に届く誤りだと分かり（重大 2・高 2・中 1）、v4 の修正にした。4 ラウンド目（重大は無し）の指摘を v5 の修正にし、5 ラウンド目で 2 件が閉じた。残りの高 1（× や終了の経路 `ended()` が、設定の書き込みの返事を見ずに成功を書く）と中 3 を、コードで確かめて全部採用し v6 の修正にした。6 ラウンド目で R1-M1 と R5-1〜3 が閉じ、重大・高は残っていない。v2〜v6 の仕様を受け入れ基準として固定した。
 
-kura v0.152.2 / main ・ 2026-11-08 更新（初版 2026-11-07、全アプリ向けに書き直したのも 2026-11-08）・ Codex レビュー run_77a21329dfec（フェーズ 1 の 1 ラウンド目）、codex exec（フェーズ 1 の 2 ラウンド目、フェーズ 2 の 1〜6 ラウンド目）
+kura v0.154.4 / main ・ 2026-11-08 更新（初版 2026-11-07、全アプリ向けに書き直したのも 2026-11-08）・ Codex レビュー run_77a21329dfec（フェーズ 1 の 1 ラウンド目）、codex exec（フェーズ 1 の 2 ラウンド目、フェーズ 2 の 1〜6 ラウンド目）
 
 ## 要点
 
@@ -120,7 +120,7 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 
 1 ラウンド目の Codex の指摘をコードで確かめて v2 に書き直し、2 ラウンド目の指摘を v3、3 ラウンド目を v4、4 ラウンド目を v5、5 ラウンド目を v6 の修正にした。6 ラウンド目で重大・高が無くなり、この内容で確定した。仕様ファイルは `C:\Users\yuu06\.claude\design\kura-phase2\` の `spec-phase2-v2-design-review.md`、`spec-phase2-v3-amendments.md`〜`spec-phase2-v6-amendments.md`、Codex の結果は同じ場所の `codex-r2.md`〜`codex-r6.md`。
 
-**実装の状況**: kura の stage 1（設定の書き込みに通し番号を付け、手順と `ended()` が書き込みの返事を見て終わる）は kura v0.152.0 で入れ、v0.152.1（設定の画面の Export・Import・Reset も待つ）と v0.152.2（kura 自身の書き込みで「Reloaded」を出さず、監視が書き戻さない）で直した。再テストは uchmk/kura#511。ito の部品（`ito-a11y` の test_id、`ito-keyscript` の観測の世代・ID の手順・run の行・確かめ役、`ito-prefs` の ID）は uchmk/ito#203 で頼んだ。段 ①（観測の世代と `Runner` の待ち）は ito v0.263.0 で入った。残りの kura の分は、ID の手順を受けるのが ito#203 の段 ②（v0.264.0）、run の行と確かめ役が段 ③（v0.265.0）の push を待つ。ハーネスと壊し方の自己テストは ② のあとに一緒に入れる。
+**実装の状況**: kura の stage 1（設定の書き込みに通し番号を付け、手順と `ended()` が書き込みの返事を見て終わる）は kura v0.152.0 で入れ、v0.152.1（設定の画面の Export・Import・Reset も待つ）と v0.152.2（kura 自身の書き込みで「Reloaded」を出さず、監視が書き戻さない）で直した。再テストは uchmk/kura#511。ito の部品（`ito-a11y` の test_id、`ito-keyscript` の観測の世代・ID の手順・run の行・確かめ役、`ito-prefs` の ID）は uchmk/ito#203 で頼んだ。段 ①（観測の世代と `Runner` の待ち）は ito v0.263.0 で入った。ID の手順・run の行・確かめ役は kura が v0.153.0 と v0.154.0 で取り込んだ。ハーネス（scripts/check-term-settings.sh）と壊し方の自己テストは kura で作業中で、まず State に `term args`・`term env names`・`terminal` の行を足している。
 
 ### v6 で変えたこと（Codex 5 ラウンド目、重大は無し・高 1・中 3。どれもコードで確かめた）
 
@@ -182,13 +182,13 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 | 実行の状態機械と適合テスト | §1a。`Runner` が使い、kura も同じ表で確かめる（[ito#204](https://github.com/uchmk/ito/issues/204)） |
 | レーンのスクリプト | `scripts/lanes/` の `keys.ps1`・`xrun.sh` が run_id を作って渡し、`<evidence>\<run_id>\` を毎回新しく作る。後片付けは途中で落ちても必ず回す（いまは一番外側でしか片付けない） |
 
-ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 ① 観測の世代と `Runner` の待ち（v0.263.0、16dbe90。済み）、段 ② `ito-a11y` の test_id・`<ClickId:>` などの ID の手順・`<ReadHas:>`（v0.264.0、2d25645。済み）、段 ③ run_id と `with_run`・確かめ役 `probe::main`・Shell カードの ID（v0.265.0、50612a3。済み）。B4（コピーと読み上げは直前の操作より後だけ）は v0.266.0（99b5e15）、時間を決めた読み取り `<Now><Wait:N>` と `since last action:` の行は v0.267.0。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（③ のあと）。状態 JSON v1 のスキーマ・矩形つきの `<Tree>`・`<Snap:>`・検査器・証拠のフォルダは、まだ Issue にしていない（見た目のパイロットの前に頼む）。
+ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 ① 観測の世代と `Runner` の待ち（v0.263.0、16dbe90。済み）、段 ② `ito-a11y` の test_id・`<ClickId:>` などの ID の手順・`<ReadHas:>`（v0.264.0、2d25645。済み）、段 ③ run_id と `with_run`・確かめ役 `probe::main`・Shell カードの ID（v0.265.0、50612a3。済み）。B4（コピーと読み上げは直前の操作より後だけ）は v0.266.0（99b5e15）、時間を決めた読み取り `<Now><Wait:N>` と `since last action:` の行は v0.267.0。ito#203 は閉じた。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（1〜3 は v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4 `<Theme:>` の要求と適用・6 付属 JSON の置き場所・8 manifest）。状態 JSON v1 のスキーマと書き手・矩形つきの `<Tree>`・`<Snap:>`・検査器・証拠のフォルダは [ito#205](https://github.com/uchmk/ito/issues/205)（見た目のパイロットの前に要る）。
 
 <a id="adopt"></a>
 
 ### ほかのアプリが載せるとき
 
-1. **ito の rev**: ito#203 の段 ③（v0.265.0 の予定）より新しい rev にそろえる（Runner のアプリはこれだけで観測の世代・ID の手順・run の行が入る）。ito#204 が入ったら、その rev に上げる。
+1. **ito の rev**: v0.272.0 以降（ito#203 は閉じた。ito#204 の 3 が入った rev）にそろえる（Runner のアプリはこれだけで観測の世代・ID の手順・run の行が入る）。ito#204 の残りが入ったら、その rev に上げる。
 2. **`scripts/lanes.conf`**: `evidence=`（既定 `C:\dev\<app>-evidence`。kura は今の `C:\dev\filer-evidence`）と `visual_specs=`（既定 `tests/visual`）。
 3. **状態のアダプター**: `screen`・`overlay` の名前、`app`、`app_state` の中身、書き込みの待ちに答える口。
 4. **Test ID**: 自分の画面の部品に `<画面>.<部品>`。ito の部品（設定の画面・パレット・トースト）の ID は ito が付ける。
@@ -198,7 +198,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 
 ### kura でやること（最初に載せるアプリの例。Sonnet の subagent）
 
-- 木を読む手順（`ClickId`・ID の確認・`Tree`）だけを受ける。文字で探す `Assert`・`Is`・`ClickText`、`Clipboard`、`Announced` は断ったまま。
+- 木を読む手順（`ClickId`・ID の確認・`Tree`）、文字で探す `Assert`・`Is`・`ClickText`、`Clipboard`、`Announced` は kura v0.154.0 で全部受けた。kura が自分で読み上げを出す（AccessKit の live、トーストの announce）のは ito#207 を待つ（kura TODO 57）。
 - 設定の書き込みに通し番号を振り、まとめ書きの返事は最大の番号を返す。common.toml は 1 本の書き手にする。始められない失敗も失敗として残す。手順の待ちを「落ち着いた かつ 書き込みが残っていない」にする。
 - 注入は ROOT の hook でだけ、ROOT の frame 数で届いたことを確かめる（今の「入れ直さない」はそのまま）。`ReadHas` のためにペインの読み取りを「無い・読めた・失敗」に分ける。
 - `<APP>_KEYS_RUN_ID`（kura では `KURA_KEYS_RUN_ID`）を done ファイルの全部の書き口に通す。
@@ -208,7 +208,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 
 ### 後回し
 
-状態 JSON v1 と検証（ito#203 の段 ②。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合と証拠のフォルダ（段 ③）、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
+状態 JSON v1 と検証（ito#205。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合（`xrun.sh` にはまだ無い）と証拠のフォルダ、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
 
 ## 3. 黙って飛ばす不具合（P0、フェーズ 1 で直した）
 
@@ -334,7 +334,7 @@ await = { source = "file", path = "config.toml", op = "contains", value = "-NoLo
 | フェーズ | 内容 |
 |---|---|
 | 1 | 偽の緑を閉じる（`--keys` を失敗側に倒す + 故障注入テスト）。**済み** v0.151.0（d0f778b）。TESTING の 25.17a・25.17b を足し、再テストは #507。v0.151.1 で CI の smoke（ubuntu、Xvfb）が `xrun.sh` 経由で成功・書けない State・拒む手順の 3 通りを確かめ、v0.151.2 でその smoke の読み方を直した |
-| 2 | 観測の契約。**設計確定** Codex と 6 ラウンドで合意。kura の stage 1 は v0.152.0〜v0.152.2 で入れた（再テスト #511）、ito の部品は ito#203（3 段）を待つ。全アプリで同じ意味にする実行の状態機械と適合テストも ito に（§1a）。前半（§2a）: Test ID・ID の手順・観測の世代・run の行・設定の書き込みの完了・57.2 / 57.3 の縦切り。後半: 状態 JSON v1、レーンの run ID の照合、テストモード |
+| 2 | 観測の契約。**設計確定** Codex と 6 ラウンドで合意。kura の stage 1 は v0.152.0〜v0.152.2 で入れた（再テスト #511）、ito#203 は閉じ、kura は v0.153.0〜v0.154.4 で取り込んだ。ito#204 は 1〜3 が入り残りは 4・6・8。全アプリで同じ意味にする実行の状態機械と適合テストも ito に（§1a）。前半（§2a）: Test ID・ID の手順・観測の世代・run の行・設定の書き込みの完了・57.2 / 57.3 の縦切り。後半: 状態 JSON v1、レーンの run ID の照合、テストモード |
 | 3 | 縦に通す 3 つのテスト（§11。57.2 / 57.3 はフェーズ 2 の前半で先に通す）。**範囲決定** 判断 4。今のユーザーで §9 のガードレールを掛けて回す（判断 3） |
 | 4 | 見た目 + 回帰。**範囲決定** パイロット 4 行（59.5・41.15・49.4・54.18）。Tier 1 は変更 1 の承認で使える（ito の `docs/visual-test.md` 版 1 が push されたあと）。Tier 2 は影運用（20 行以上・誤合格 0・カナリア 100 % を、アプリごとに数える） |
 | 5 | 上限つきの修正ループ（§6 の上限、判断 5）。始める前に、専用の標準ユーザーか Windows Sandbox に移す（判断 3） |
@@ -383,7 +383,7 @@ await = { source = "file", path = "config.toml", op = "contains", value = "-NoLo
 > 移したときの文に、2026-11-08 の載せるアプリの変更（kura のあとは yagura・koyomi・michi・fude）だけを足した。中の artifact の URL は写しで、正本はこの `docs/autotest.md` と `docs/visual-test.md`。
 
 ```text
-uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるのは kura: C:\dev\kura、main、v0.152.2）の続き。フェーズ 2（観測の契約）。返答は日本語、コード・コメント・コミットは英語。
+uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるのは kura: C:\dev\kura、main、v0.154.4）の続き。フェーズ 2（観測の契約）。返答は日本語、コード・コメント・コミットは英語。
 
 【読むもの】
 1. 設計ページ（Artifact）: https://claude.ai/artifact/8VZmtoXgfxC544itHX8SK9（§1a が Runner と自前の実行役、§2a が kura のフェーズ 2）と、視覚テストのページ https://claude.ai/artifact/La6ZMvBmRDuQGP6y7rCWgT（穴の表 #gaps、規則の雛形 #rule）。正のファイルは C:\Users\yuu06\.claude\design\uchmk-autotest\ の autotest-design.html・visual-test.html（R: は再起動で消えるので置かない）
@@ -404,7 +404,7 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 - フェーズ 1（--keys の fail-closed）: v0.151.0（d0f778b）、再テスト uchmk/kura#507。v0.151.1 で ito v0.262.7（xrun.sh）を取り込み、v0.151.2 で CI の smoke を直した（CI 緑）。
 - v0.151.3（80ef476）: ワーカーと Codex を Agent ツールの subagent として起動することを SKILL.md に書いた。
 - v0.151.4: 詳細ビュー（m a）の不具合 3 件（落ちる・ちらつき・移ると使用量が消える）。再テストは 69.10・69.15〜69.19。
-- フェーズ 2 の設計: Codex と 6 ラウンドで合意（重大・高なし）。ito の部品は uchmk/ito#203 で頼んだ（開いている）。
+- フェーズ 2 の設計: Codex と 6 ラウンドで合意（重大・高なし）。ito の部品は uchmk/ito#203 で頼んだ（閉じた。v0.263.0〜v0.267.0）。
 - kura の stage 1（設定の書き込みの番号と待ち）: v0.152.0〜v0.152.2、再テスト uchmk/kura#511。
 - ito#202（xrun.sh）は閉じた。
 - 2 つの設計を全アプリ向けにした（ito と各アプリの分担、§1a の穴、視覚テストの規則の雛形）。Codex の全アプリ向けのレビュー 1 回。
@@ -412,10 +412,10 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 - 実行の状態機械と適合テストを別の Issue uchmk/ito#204 にした（③ のあと）。2 つの設計を ito の docs/autotest.md・docs/visual-test.md に移すよう、ito のセッション（ito-d4）に頼んだ。
 
 【次にやること】
-1. ito のセッションの push を待つ: ito#203 の ②（v0.264.0: test_id・ID の手順・ReadHas）と ③（v0.265.0: run_id・with_run・probe・Shell カードの ID）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
+1. ito のセッションの push を待つ: ito#204 の残り（4・6・8）と ito#205（状態 JSON v1・Snap・矩形つきの Tree。ito#203 は閉じ、ito#204 の 1〜3 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
 2. ito の docs/visual-test.md（版 1）が push されたら、kura に変更 1 を入れる（視覚テストのページの #rule: docs/claude/lanes.md の 105 行の下に 1 項目と 113〜114 行の置き換え、.claude/windows-role.md 147 行、docs/claude/wintest-measure.md に矩形と画素の測り方、.claude/agents/wintest.md に機械の測定の証拠）→ PATCH の版・CHANGELOG・verify・scripts/push-main.sh。変更 2 の文は影運用の基準を満たしてから。
-3. ito#203 の ② が push されたら、kura の rev を上げ、残りの kura の分（ID の手順を受ける。③ のあとに run の行と確かめ役。ハーネス scripts/check-term-settings.sh と壊し方の自己テスト）を Sonnet の subagent に仕様ファイルで渡す → audit → verify → main がコミット・push。
-4. ito#204（状態機械と適合テスト）は ③ のあと。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1 のスキーマ・矩形つきの Tree・Snap・検査器・証拠のフォルダは、まだ Issue にしていない。見た目のパイロットの前に ito に頼む。
+3. kura の残りの分（ID の手順・run の行・確かめ役は v0.153.0〜v0.154.0 で入った。ハーネス scripts/check-term-settings.sh と壊し方の自己テストは作業中で、まず State に `term args`・`term env names`・`terminal` の行）を Sonnet の subagent に仕様ファイルで渡す → audit → verify → main がコミット・push。
+4. ito#204（状態機械と適合テスト）は 1〜3 が v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4・6・8。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1 のスキーマ・矩形つきの Tree・Snap・検査器・証拠のフォルダは ito#205。見た目のパイロットの前に要る。
 5. kura のパイロットが通ったら、yagura・koyomi・michi・fude のアダプター（lanes.conf の evidence= と visual_specs=、状態の中身、Test ID、ハーネス）と規則のファイル（成果物 5 の雛形）を、それぞれのセッションに頼む（順はパイロットのあとで決める）。これから作るアプリも同じ形で載せる。tsumugi・minato には頼まない（メンテナンス対象から外した）。
 6. Codex は haiku の包みの subagent で回す。UAC を避けるフラグ（-c mcp_servers.node_repl.enabled=false --disable plugins -c 'notify=[]'）は、効くと示せていないので、持ち主が決めるまで既定にしない。
 

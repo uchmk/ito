@@ -3,6 +3,12 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.272.1] - 2026-11-08
+
+### 変更
+
+- `docs/autotest.md`・`docs/visual-test.md`: 古くなった進み具合を直した（ito#203 は閉じた・ito#204 は 1〜3 が入った・状態 JSON v1 と `<Snap:>` と矩形つきの Tree は ito#205・kura は v0.154.4 で ID の手順と確かめを受けた・visual-test の版 1 の変更 1 は承認済み）。kura のセッションの依頼。
+
 ## [0.272.0] - 2026-11-08
 
 ### 変更
