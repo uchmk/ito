@@ -1,6 +1,7 @@
 # uchmk のアプリの共通仕様
 
-tsumugi・yagura（旧 mimamori）・kura（旧 filer）、これから作る uchmk のアプリが揃えるもの（2026-10-10、持ち主の依頼で決めた）。
+kura（旧 filer）・yagura（旧 mimamori）・koyomi・michi・fude と、これから作る uchmk のアプリが揃えるもの（2026-10-10、持ち主の依頼で決めた）。
+tsumugi（ターミナル）・minato は 2026-11-08 にメンテナンス対象から外した。文中の tsumugi・minato の記述は、そのときまでの記録（テーマの名前 `tsumugi Dark`・`tsumugi Light` は今も使う）。
 **common.toml を変えれば、uchmk のアプリが一括で変わる**ようにする。コードは ito の共有のクレートにあり、
 どのアプリも `Cargo.toml` の `rev` で固定して読む（直すときは ito で直して push し、使う側の `rev` を上げる）。
 2026-10-11 に tsumugi の `docs/common-spec.md` からここに移した。同じ日に倍率・標準のキー・置き場所・環境変数・CLI・字体・窓を揃えた
@@ -279,7 +280,7 @@ prepend_keymap = [
   `Runner` を使うアプリは、最初の一歩の前に `watch(ctx)` を呼び（1 秒ごとに描画を起こすので、裏の窓でも台本が進む）、`clipboard` に
   クリップボードの文字を返す関数を入れる。`<Quit>` では `quit_report(runner.left())` を、外から閉じられたときは `finish()` のあと
   `closed_report(runner.left())` を状態の後ろに書く（`running()` が偽なら書かない）。
-- 上の語はすべて ito の `ito-keyscript` が解析して再生する（kura・yagura・tsumugi が同じものを使う）。`<Space>` はキーとテキストの両方で届く。
+- 上の語はすべて ito の `ito-keyscript` が解析して再生する（kura・yagura・koyomi・michi・fude が同じものを使う）。`<Space>` はキーとテキストの両方で届く。
 - アプリが足してよい語（kura の `<PaneText:name>`・`<PreviewText:name>`、`<Shot:name@preview>` の `@preview` など）は `Dialect`
   （`parse_with(script, &Dialect { reads, shot_suffixes })`）で渡す。`reads` の語は `<Word:name>` の形で、`Do::Read { tag, name }` として
   アプリに返る。足すときは名前の形（`<Word:引数>`）を守り、そのアプリの README に書く。
@@ -380,7 +381,7 @@ scale: 100%           # 書くなら倍率を % で
 
 ## 通知
 
-アプリの出来事（kura なら長い操作の終わり、yagura ならアラート、minato なら見張った実行の終わり）を窓の外に知らせる。
+アプリの出来事（kura なら長い操作の終わり、yagura ならアラート、koyomi なら仕事の終わりと失敗）を窓の外に知らせる。
 知らせ方は `ito-notify`、設定の画面の「通知」のページは `ito_prefs::notify_page` が描く。
 
 - 知らせ方は 3 つ: **システムの通知**（`ito_notify::toast::show_with_icon`。アプリの id は `uchmk.<app>`、窓と同じアイコンを
@@ -398,9 +399,9 @@ scale: 100%           # 書くなら倍率を % で
     出来事ごとに送り分けるアプリだけ（`Hook::on` が空なら出さない）。
   - 「鳴らす音」: 出来事ごとの音（▶ で鳴らしてみる）と集中モードのスイッチ。
   - 「Webhook」: 送り先ごとに名前と「外す」「ここに試しに送る」（`Test::Hook(k)`）、アドレス（http(s) でなければ赤い注意）と形式。
-    最後に「アドレスを足す」。自分のカードに置くアプリ（tsumugi）は `webhook_rows` を使う。
+    最後に「アドレスを足す」。自分のカードに置くアプリは `webhook_rows` を使う。
   - 検索の言葉は `notify_index`。
-- 設定はアプリの設定ファイルの `[notify]` に置く（minato は `config.toml` へ移行中。それまでは `minato-settings.json`）。鍵は tsumugi に揃える:
+- 設定はアプリの設定ファイルの `[notify]` に置く。鍵は次のとおり:
   `system`・`sound`（出来事の名前の並び。出来事が 1 つのアプリは真偽値にしてよい）、`sound_<出来事>`、`focus_mode`。
   Webhook の送り先は `[[notify.webhooks]]` の表を並べ、それぞれ `url`・`format`・`states`（出来事の名前の並び。省けばアプリの既定）。
   前の 1 つだけの形（`[notify]` の `webhook`（アドレス）・`webhook_format`・`webhook_states`）も読み、1 つ目の送り先にする
@@ -480,6 +481,7 @@ scale: 100%           # 書くなら倍率を % で
 ## 各アプリの対応
 
 2026-10-11 の時点（kura 0.100・yagura 0.39・tsumugi 0.87）。○ は揃った、△ は一部、× はまだ（各アプリの TODO にある）。
+tsumugi の列と括弧の中の minato は、2026-11-08 にメンテナンス対象から外す前の記録。koyomi・michi・fude の列はまだ無い。
 
 | 項目 | kura | yagura | tsumugi |
 | --- | --- | --- | --- |

@@ -10,14 +10,14 @@
   アナウンスは `ito_a11y::announce` を使い、`ito-a11y` の `egui` の機能を入れる。通知は `Cargo.toml` の機能 `test-hooks`（`ito-notify/test-sink`）を入れたビルドで
   `ITO_NOTIFY_SINK=<file>` に記録できる。トレイを持つなら `ito-tray/test-hook` も同じ機能にまとめる。出荷するビルドには入れない。
 - [ ] `keymap.toml` と設定の「キー」ページ: `ito-keys`・`ito-keymap`・`ito-prefs` の `keys_page`。既定のキーは `defaults/keymap.toml`
-  （`<C-,>` 設定・`<F1>` ヘルプ・`<C-q>` 終了）。手本は minato の `keymap.rs`・`prefs.rs`。
+  （`<C-,>` 設定・`<F1>` ヘルプ・`<C-q>` 終了）。手本は koyomi の `keymap.rs`・`prefs.rs`。
 - [ ] `?` と F1 のヘルプ: `ito-help`（`ito-keymap` の一覧を描く）。手本は michi の `app.rs`・`ui.rs`。
-- [ ] 通知と設定の「通知」ページ: `ito-notify`（システムの通知・音・webhook）と `ito-prefs` の `notify_page`。手本は minato の `app.rs`・`settings.rs`。
-- [ ] 設定の画面: `ito_prefs::show`（Language・CLOCK・Theme の共通のページ + キー）。手本は minato の `settings.rs`。
+- [ ] 通知と設定の「通知」ページ: `ito-notify`（システムの通知・音・webhook）と `ito-prefs` の `notify_page`。手本は koyomi の `notify.rs`・`settings.rs`。
+- [ ] 設定の画面: `ito_prefs::show`（Language・CLOCK・Theme の共通のページ + キー）。手本は koyomi の `settings.rs`。
 - [ ] 窓の場所を戻す: 雛形は `window::Saved` で戻し `Tracker::follow` で書く。終わるときの `Tracker::close` は未配線。
 - [ ] 通知を入れる: 雛形のベルは `notices` が空のまま。`ito_notices::Notice` を push し（`go` に飛び先の型）、`ito-notify` の `Toast::open` で押すと開くトーストにする。
-- [ ] コマンドパレットの中身: 箱と `<C-S-p>` は繋いである。`Command` と `commands` に、アプリのコマンドを足す（キーは `ito-keymap` から引く）。手本は minato の `main.rs`。
-- [ ] 字体（日本語が出る字体を `egui` に足す）。手本は minato の `fonts.rs`。
+- [ ] コマンドパレットの中身: 箱と `<C-S-p>` は繋いである。`Command` と `commands` に、アプリのコマンドを足す（キーは `ito-keymap` から引く）。手本は koyomi の `main.rs`（`commands`）。
+- [ ] 字体（日本語が出る字体を `egui` に足す）。手本は michi の `fonts.rs`。
 - [ ] `TESTING.md` に確認の行を足し、`cargo run --example make-testcheck` で `TESTING-CHECKS.md` を作る。
 - [ ] `icon.rs` に本当のアイコンを描く。
 - [ ] リリースの workflow は kura か yagura のものを写す。

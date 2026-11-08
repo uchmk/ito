@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.265.1] - 2026-11-08
+
+### 変更
+
+- 文書: tsumugi・minato をメンテナンス中のアプリとして書いていたところを直した（2026-11-08 にメンテナンス対象から外した）。メンテナンスしているのは kura・yagura・koyomi・michi・fude（と ito）。
+  - `README.md` の使う側の一覧から tsumugi・minato を外し、koyomi を足した。2 つが前に使っていたことは注に残した。
+  - 手本のアプリを koyomi（設定・ボタン・パレット・通知・キー）と michi（ヘルプ・`--keys`・字体）にした（`docs/design-guide.md`・`templates/app/TODO.md`）。空の一覧（`empty_state`）の手本は、メンテナンスしているアプリにはまだ無い。
+  - `docs/common-spec.md`・`docs/design-principles.md` のアプリの並びを直した。2026-10-11 の時点の表と文中の古い記述は記録として残し、そう注に書いた。テーマの名前 `tsumugi Dark`・`tsumugi Light` と変更履歴はそのまま。
+  - `CLAUDE.md` のクレートの表の「主に使う側」から tsumugi・minato を外した。抜けたところは、各アプリの `Cargo.toml` で今使っているもので埋めた。kura・yagura・koyomi・michi・fude の全部が使うものは「全アプリ」と書いた。`ito-browser` は今使うアプリが無い。冒頭の使う側の一覧も直した。
+  - 切り出しの由来、動きに関わる `tsumugi` の文字列、needs-pc の巡回の対象の記述は残した。
+
 ## [0.265.0] - 2026-11-08
 
 ### 追加

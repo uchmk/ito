@@ -1,6 +1,6 @@
 # デザインの原則（Quiet Precision）
 
-uchmk のアプリ（weft・kura・fude・yagura・tsumugi など）が共有する見た目と操作の考え方。値は [design-tokens.md](design-tokens.md)、
+uchmk のアプリ（kura・yagura・koyomi・michi・fude など）が共有する見た目と操作の考え方。値は [design-tokens.md](design-tokens.md)、
 状態と操作の規則は [interaction.md](interaction.md)、部品の選び方は [design-guide.md](design-guide.md)、撮って確かめる手順は [visual-review.md](visual-review.md)。
 文言の出どころは weft の `docs/design.md`「ビジュアルデザインとインタラクション」。
 

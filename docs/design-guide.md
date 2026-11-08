@@ -86,5 +86,5 @@
 
 ## 迷ったら
 
-1. この表。2. ito の `CLAUDE.md` の表（クレートの全部）。3. 手本のアプリ: 設定・ボタン・空の一覧は minato、ヘルプ・`--keys` は michi、パレットは minato の `main.rs`。
+1. この表。2. ito の `CLAUDE.md` の表（クレートの全部）。3. 手本のアプリ: 設定・ボタン・パレットは koyomi（`settings.rs`・`ui/mod.rs`・`main.rs` の `commands`）、ヘルプ・`--keys`・字体は michi。空の一覧（`empty_state`）は、メンテナンスしているアプリにまだ手本が無い。
 4. 無ければ `crate-request`（`gh issue create -R uchmk/ito --label crate-request`）。

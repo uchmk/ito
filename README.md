@@ -29,13 +29,15 @@ the clock) is in [docs/common-spec.md](docs/common-spec.md) (in Japanese).
 
 ## The apps
 
-- [tsumugi](https://github.com/uchmk/tsumugi) (紬): a terminal for running many AI CLI sessions side by side
 - [kura](https://github.com/uchmk/kura) (蔵): a keyboard-driven file manager in the spirit of yazi
 - [yagura](https://github.com/uchmk/yagura) (櫓): a keyboard-driven system monitor
-- [minato](https://github.com/uchmk/minato) (港): a keyboard-driven GitHub app for several repositories at once
+- [koyomi](https://github.com/uchmk/koyomi) (暦): a small job scheduler and monitor
 - [michi](https://github.com/uchmk/michi) (道): a keyboard-driven Git client for a repository with many worktrees
 - [fuda](https://github.com/uchmk/fuda) (札, to come): a keyboard-driven to-do list
-- [fude](https://github.com/uchmk/fude) (筆, to come): a keyboard-driven text editor
+- [fude](https://github.com/uchmk/fude) (筆): a text editor that keeps to one line and to typing
+
+tsumugi (紬, a terminal) and minato (港, a GitHub app) used these crates too.
+They are no longer maintained (2026-11-08).
 
 ## Using a crate
 
