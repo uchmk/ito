@@ -509,6 +509,8 @@ pub fn commit_event(text: &str) -> egui::Event {
 /// How long `<Click:text>` and `<Assert:text>` keep looking for the text before the run fails: a popup
 /// opens a frame or two after the click that asked for it.
 const TEXT_WAIT: Duration = Duration::from_secs(3);
+/// How long an input the runner put in may wait to be drawn by the main window before the run fails.
+const DELIVER_WAIT: Duration = Duration::from_secs(10);
 
 /// A labelled thing in the window, as egui's AccessKit tree names it.
 #[derive(Clone, Debug, PartialEq)]
@@ -531,6 +533,16 @@ struct Tap {
     copied: Option<String>,
     /// The tree, one line per named node, indented by depth (see [`tree_text`]).
     tree: Vec<String>,
+    /// Counts main-window passes that brought a tree.
+    generation: u64,
+    /// The last main-window pass brought a tree.
+    fresh: bool,
+    pass_nr: u64,
+    viewport_rect: Option<egui::Rect>,
+    minimized: Option<bool>,
+    focused: Option<bool>,
+    /// The viewports of the passes begun and not yet ended (a pass ends in `output_hook`).
+    passes: Vec<egui::ViewportId>,
 }
 
 impl egui::Plugin for Tap {
@@ -538,14 +550,31 @@ impl egui::Plugin for Tap {
         "ito-keyscript"
     }
 
-    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+    fn input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.passes.len() > 64 {
+            self.passes.clear();
+        }
+        self.passes.push(raw.viewport_id);
+    }
+
+    fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
         for command in &output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
                 self.copied = Some(text.clone());
             }
         }
+        // `Context::viewport_id` is already the parent's here, so the pass's own viewport is the one `input_hook` saw.
+        // Nothing on the stack: the plugin was added in the middle of this pass, and whose it is is not known.
+        if self.passes.pop() != Some(egui::ViewportId::ROOT) {
+            return;
+        }
+        let Some(update) = &output.platform_output.accesskit_update else {
+            self.items.clear();
+            self.tree.clear();
+            self.fresh = false;
+            return;
+        };
         // egui writes the whole tree each pass, so the last one is the window as it is.
-        let Some(update) = &output.platform_output.accesskit_update else { return };
         let mut items: Vec<Item> = Vec::new();
         let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
         let mut tree = Vec::new();
@@ -566,7 +595,31 @@ impl egui::Plugin for Tap {
             }
         }
         self.items = items;
+        self.generation += 1;
+        self.fresh = true;
+        self.pass_nr = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+        let (info, rect) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.viewport().clone(), i.viewport_rect()));
+        self.viewport_rect = Some(rect);
+        self.minimized = info.minimized;
+        self.focused = info.focused;
     }
+}
+
+/// What [`observe`] saw in the main window's last pass.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct Observation {
+    /// Counts up by one for each main-window pass that brought a tree; never goes back.
+    pub generation: u64,
+    pub items: Vec<Item>,
+    /// One line per named node (the body of [`tree_text`], without announcements).
+    pub tree: Vec<String>,
+    /// `cumulative_pass_nr_for(ROOT)` after the pass that produced it.
+    pub pass_nr: u64,
+    pub viewport: egui::ViewportId,
+    pub viewport_rect: egui::Rect,
+    pub minimized: Option<bool>,
+    pub focused: Option<bool>,
 }
 
 /// Start reading the window's tree and what the app copies, from the next frame on. `Runner` does this
@@ -577,7 +630,30 @@ pub fn observe(ctx: &egui::Context) {
     ctx.add_plugin(Tap::default());
 }
 
-/// The labelled things as of the last frame; empty before [`observe`] has seen one.
+/// The current generation: 0 before [`observe`] (or before its first tree). Readable at any time; it only goes up.
+pub fn generation(ctx: &egui::Context) -> u64 {
+    ctx.with_plugin::<Tap, _>(|t| t.generation).unwrap_or(0)
+}
+
+/// The main window's last observation, if the last main-window pass brought a tree; `None` otherwise.
+pub fn observation(ctx: &egui::Context) -> Option<Observation> {
+    ctx.with_plugin::<Tap, _>(|t| {
+        t.fresh.then(|| Observation {
+            generation: t.generation,
+            items: t.items.clone(),
+            tree: t.tree.clone(),
+            pass_nr: t.pass_nr,
+            viewport: egui::ViewportId::ROOT,
+            viewport_rect: t.viewport_rect.unwrap_or(egui::Rect::NOTHING),
+            minimized: t.minimized,
+            focused: t.focused,
+        })
+    })
+    .flatten()
+}
+
+/// The labelled things as of the last main-window pass; empty before [`observe`] has seen a tree, and empty again
+/// after a main-window pass that brought none. Passes of child windows are not observed.
 pub fn items(ctx: &egui::Context) -> Vec<Item> {
     ctx.with_plugin::<Tap, _>(|t| t.items.clone()).unwrap_or_default()
 }
@@ -650,7 +726,13 @@ fn dump(
 /// `button "確かめた" focused`, `switch "…" checked`, `text "Name" value="…"`. Then the messages `announce`d, as
 /// `announced: …` lines.
 pub fn tree_text(ctx: &egui::Context) -> String {
-    let mut s = ctx.with_plugin::<Tap, _>(|t| t.tree.join("\n")).unwrap_or_default();
+    let tree = ctx.with_plugin::<Tap, _>(|t| t.tree.clone()).unwrap_or_default();
+    tree_file(&tree)
+}
+
+/// `lines` of the tree, then the `announced:` lines.
+fn tree_file(lines: &[String]) -> String {
+    let mut s = lines.join("\n");
     if !s.is_empty() {
         s.push('\n');
     }
@@ -662,7 +744,10 @@ pub fn tree_text(ctx: &egui::Context) -> String {
 
 /// `<Enabled:text>` and its kin.
 pub fn check_is(ctx: &egui::Context, prop: Prop, text: &str) -> Result<(), String> {
-    let all = items(ctx);
+    check_is_in(&items(ctx), prop, text)
+}
+
+fn check_is_in(all: &[Item], prop: Prop, text: &str) -> Result<(), String> {
     let exact: Vec<&Item> = all.iter().filter(|i| i.text == text).collect();
     let found: Vec<&Item> = if exact.is_empty() { all.iter().filter(|i| i.text.contains(text)).collect() } else { exact };
     let item = match found.as_slice() {
@@ -716,7 +801,10 @@ fn listed(found: &[&Item]) -> String {
 /// Where `<Click:text>` clicks: the centre of the one thing whose text is `text`, or else the one
 /// whose text contains it. An error says what was found instead.
 pub fn locate(ctx: &egui::Context, text: &str) -> Result<egui::Pos2, String> {
-    let all = items(ctx);
+    locate_in(&items(ctx), text)
+}
+
+fn locate_in(all: &[Item], text: &str) -> Result<egui::Pos2, String> {
     let exact: Vec<&Item> = all.iter().filter(|i| i.text == text).collect();
     let found = if exact.is_empty() { all.iter().filter(|i| i.text.contains(text)).collect() } else { exact };
     match found.as_slice() {
@@ -731,7 +819,10 @@ pub fn locate(ctx: &egui::Context, text: &str) -> Result<egui::Pos2, String> {
 
 /// `<Assert:text>` (`present`) or `<Assert:!text>`.
 pub fn check(ctx: &egui::Context, text: &str, present: bool) -> Result<(), String> {
-    let all = items(ctx);
+    check_in(&items(ctx), text, present)
+}
+
+fn check_in(all: &[Item], text: &str, present: bool) -> Result<(), String> {
     let found: Vec<&Item> = all.iter().filter(|i| i.text.contains(text)).collect();
     match (present, found.is_empty()) {
         (true, false) | (false, true) => Ok(()),
@@ -1244,7 +1335,25 @@ fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: Pat
     }
 }
 
+/// An input the runner put in that no main-window pass has drawn yet.
+#[derive(Clone, Debug)]
+struct Flight {
+    /// `cumulative_pass_nr_for(ROOT)` when it went in.
+    pass: u64,
+    at: Instant,
+    /// The label of the step it came from.
+    step: String,
+    /// Whether events went into the raw input (`<Size:>`, `<Theme:>` and `<Lang:>` put none in, but still wait for a
+    /// main-window pass).
+    events: bool,
+}
+
 /// A script being played.
+///
+/// A reading step (`<Assert:>`, `<Assert:!>`, the states, `<Tree:>`, `<Click:text>`, `<DClick:text>`) judges only an
+/// observation made after the last input was drawn by the main window. A negative step (`<Assert:!x>`) passes on
+/// the first such observation without `x` (waiting up to [`TEXT_WAIT`] for it to go); once it has passed, it does
+/// not watch for `x` appearing later.
 pub struct Runner {
     steps: VecDeque<Step>,
     next: Instant,
@@ -1267,6 +1376,12 @@ pub struct Runner {
     reads_window: bool,
     /// Until when a step that reads the window keeps looking.
     deadline: Option<Instant>,
+    /// An input put in, not yet seen drawn by a main-window pass.
+    flight: Option<Flight>,
+    /// The generation as of the pass that drew the last input; a reading step needs a newer one.
+    action_gen: u64,
+    /// The label of the step that made the frames in `pointer`.
+    pointer_step: String,
 }
 
 impl Runner {
@@ -1290,6 +1405,9 @@ impl Runner {
         Self {
             reads_window,
             deadline: None,
+            flight: None,
+            action_gen: 0,
+            pointer_step: String::new(),
             steps: steps.into(),
             next: Instant::now() + Duration::from_millis(500),
             shot: None,
@@ -1355,7 +1473,8 @@ impl Runner {
         }
     }
 
-    /// Put the next step's events into this frame's input when it is due.
+    /// Put the next step's events into this frame's input when it is due. Only the main window's hook gets
+    /// any, and the next one waits until the main window has drawn the last.
     pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) -> Option<Do> {
         if self.finished || self.shot.is_some() {
             return None;
@@ -1364,12 +1483,39 @@ impl Runner {
             observe(ctx);
         }
         let now = Instant::now();
+        let root_passes = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+        if raw.viewport_id != egui::ViewportId::ROOT {
+            // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the
+            // input would land here.
+            if let Some(f) = self.flight.clone().filter(|f| f.events && root_passes == f.pass) {
+                self.finished = true;
+                self.note(now);
+                let why = format!("the input went to viewport {:?} while the main window was not drawn", raw.viewport_id);
+                return Some(Do::Failed { step: f.step, why });
+            }
+            return None;
+        }
+        if let Some(f) = self.flight.clone() {
+            if root_passes > f.pass {
+                self.flight = None;
+                self.action_gen = generation(ctx);
+                self.note(now);
+            } else if now.saturating_duration_since(f.at) >= DELIVER_WAIT {
+                self.finished = true;
+                self.note(now);
+                let why = "the input was not drawn within 10 s (the window may be hidden, minimized or covered)".to_owned();
+                return Some(Do::Failed { step: f.step, why });
+            } else {
+                return None;
+            }
+        }
         if now < self.next {
             return None;
         }
         if let Some(frame) = self.pointer.pop_front() {
             raw.events.extend(frame);
             self.next = now + FRAME;
+            self.fly(ctx, now, self.pointer_step.clone(), true);
             self.note(now);
             return None;
         }
@@ -1384,11 +1530,34 @@ impl Runner {
         did
     }
 
+    /// An input has gone in (`events`: into the raw input): wait for the main window to draw it.
+    fn fly(&mut self, ctx: &egui::Context, now: Instant, step: String, events: bool) {
+        self.flight = Some(Flight { pass: ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT), at: now, step, events });
+    }
+
+    /// The window as a reading step may judge it: seen after the last input was drawn, in the main window,
+    /// and not minimized.
+    fn fresh(&self, ctx: &egui::Context) -> Result<Observation, String> {
+        match observation(ctx) {
+            Some(o) if o.generation > self.action_gen && o.viewport == egui::ViewportId::ROOT => {
+                if o.minimized == Some(true) {
+                    Err("the window is minimized".into())
+                } else {
+                    Ok(o)
+                }
+            }
+            _ => Err("the window's tree was not updated after the last action (the window may be hidden, minimized or covered)".into()),
+        }
+    }
+
     /// One step into this frame's input.
     fn take(&mut self, step: &Step, ctx: &egui::Context, raw: &mut egui::RawInput, now: Instant) -> Option<Do> {
         // A key no keyboard has is skipped, as `--keys` refuses it up front.
         match press(step)? {
-            Press::Events(events) => raw.events.extend(events),
+            Press::Events(events) => {
+                raw.events.extend(events);
+                self.fly(ctx, now, label(step), true);
+            }
             Press::Wait(d) => self.next = now + d,
             // This runner has no settling to skip.
             Press::Now => self.next = now,
@@ -1405,32 +1574,37 @@ impl Runner {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
                 // The window lays out again at the new size before the next step.
                 self.next = now + SETTLE;
+                self.fly(ctx, now, label(step), false);
             }
             Press::Theme(name) => {
                 self.info.theme = name.clone();
+                self.fly(ctx, now, label(step), false);
                 return Some(Do::Theme(name));
             }
             Press::Lang(code) => {
                 self.info.lang = code.clone();
+                self.fly(ctx, now, label(step), false);
                 return Some(Do::Lang(code));
             }
-            Press::ClickText { right, text } => match locate(ctx, &text) {
+            Press::ClickText { right, text } => match self.fresh(ctx).and_then(|o| locate_in(&o.items, &text)) {
                 Ok(pos) => {
                     self.deadline = None;
                     self.pointer = click_frames(pos, right);
+                    self.pointer_step = label(step);
                     self.next = now;
                 }
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::DClickText(text) => match locate(ctx, &text) {
+            Press::DClickText(text) => match self.fresh(ctx).and_then(|o| locate_in(&o.items, &text)) {
                 Ok(pos) => {
                     self.deadline = None;
                     self.pointer = dclick_frames(pos);
+                    self.pointer_step = label(step);
                     self.next = now;
                 }
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::Assert { text, present } => match check(ctx, &text, present) {
+            Press::Assert { text, present } => match self.fresh(ctx).and_then(|o| check_in(&o.items, &text, present)) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
@@ -1442,7 +1616,7 @@ impl Runner {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
-            Press::Is { prop, text } => match check_is(ctx, prop, &text) {
+            Press::Is { prop, text } => match self.fresh(ctx).and_then(|o| check_is_in(&o.items, prop, &text)) {
                 Ok(()) => self.deadline = None,
                 Err(why) => return self.retry(step, why, now),
             },
@@ -1451,17 +1625,33 @@ impl Runner {
                 Err(why) => return self.retry(step, why, now),
             },
             Press::Tree(name) => {
+                let obs = match self.fresh(ctx) {
+                    Ok(o) if o.tree.is_empty() => Err("the window's tree was empty".to_owned()),
+                    other => other,
+                };
+                let obs = match obs {
+                    Ok(o) => o,
+                    Err(why) => return self.retry(step, why, now),
+                };
+                self.deadline = None;
                 let path = self.dir.join(format!("{name}.txt"));
-                if let Err(e) = std::fs::write(&path, tree_text(ctx)) {
+                if let Err(e) = std::fs::write(&path, tree_file(&obs.tree)) {
                     self.finished = true;
                     return Some(Do::Failed { step: label(step), why: format!("cannot write {}: {e}", path.display()) });
                 }
             }
-            Press::Paste => raw.events.push(egui::Event::Paste((self.clipboard)())),
-            Press::PasteText(text) => raw.events.push(paste_text_event(&text)),
+            Press::Paste => {
+                raw.events.push(egui::Event::Paste((self.clipboard)()));
+                self.fly(ctx, now, label(step), true);
+            }
+            Press::PasteText(text) => {
+                raw.events.push(paste_text_event(&text));
+                self.fly(ctx, now, label(step), true);
+            }
             p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
                 let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
                 self.pointer = pointer_frames(&p, rect);
+                self.pointer_step = label(step);
                 self.next = now;
             }
         }
@@ -1483,11 +1673,13 @@ impl Runner {
     }
 
     /// When the next frame is wanted for the script: a repaint asked for in
-    /// `raw_input_hook` is forgotten when the frame begins, so the frame asks.
+    /// `raw_input_hook` is forgotten when the frame begins, so the frame asks. While an input waits to be drawn, no
+    /// sooner than [`FRAME`], so a window that is not drawn is not asked for frames back to back.
     pub fn due(&self) -> Option<Duration> {
         match () {
             _ if self.finished => None,
             _ if self.shot.is_some() => Some(Duration::ZERO),
+            _ if self.flight.is_some() => Some(self.next.saturating_duration_since(Instant::now()).max(FRAME)),
             _ => Some(self.next.saturating_duration_since(Instant::now())),
         }
     }
@@ -1907,9 +2099,12 @@ mod tests {
     fn a_quit_leaves_the_steps_after_it() {
         let ctx = egui::Context::default();
         let mut r = Runner::new(parse("j<Quit>kl").unwrap(), None);
+        // The main window draws a pass after each input, as a real frame loop does.
         let step = |r: &mut Runner| {
             r.next = Instant::now();
-            r.input(&ctx, &mut egui::RawInput::default())
+            let did = r.input(&ctx, &mut egui::RawInput::default());
+            ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
+            did
         };
         assert_eq!((r.left(), r.running()), (4, true));
         assert_eq!(step(&mut r), None);
@@ -2107,5 +2302,264 @@ mod tests {
         r.watch(egui::Context::default());
         assert!(r.progress.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// eframe's input carry-over: `prepare` takes what a logic-only tick put back, appends the new input and calls the hook;
+    /// `logic_only` runs no pass and puts the prepared input back.
+    struct Frames {
+        pending: egui::RawInput,
+    }
+
+    impl Frames {
+        fn new() -> Self {
+            Self { pending: egui::RawInput::default() }
+        }
+
+        fn prepare(&mut self, r: &mut Runner, ctx: &egui::Context, new: egui::RawInput) -> (egui::RawInput, Option<Do>) {
+            let mut raw = std::mem::take(&mut self.pending);
+            raw.append(new);
+            r.next = Instant::now();
+            let did = r.input(ctx, &mut raw);
+            (raw, did)
+        }
+
+        fn logic_only(&mut self, raw: egui::RawInput) {
+            self.pending = raw;
+        }
+    }
+
+    fn child() -> egui::ViewportId {
+        egui::ViewportId::from_hash_of("child")
+    }
+
+    fn child_input() -> egui::RawInput {
+        let mut raw = egui::RawInput { viewport_id: child(), ..Default::default() };
+        raw.viewports.insert(child(), egui::ViewportInfo::default());
+        raw
+    }
+
+    fn texts_in(raw: &egui::RawInput, what: &str) -> usize {
+        raw.events.iter().filter(|e| matches!(e, egui::Event::Text(t) if t == what)).count()
+    }
+
+    /// A pass in which the window draws what `ui_fn` says.
+    fn draw(ctx: &egui::Context, raw: egui::RawInput, ui_fn: impl FnMut(&mut egui::Ui)) {
+        ctx.run_ui(raw, ui_fn).drop_without_applying_deltas();
+    }
+
+    /// An input that waits through logic-only ticks (a minimized window) goes in once, and the next one only after
+    /// the main window has drawn it.
+    #[test]
+    fn an_input_goes_in_once_through_logic_only_ticks() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("ab").unwrap(), None);
+        let mut f = Frames::new();
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!((did, texts_in(&raw, "a"), r.left()), (None, 1, 1));
+        f.logic_only(raw);
+        for _ in 0..3 {
+            let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+            assert_eq!(did, None);
+            assert_eq!((texts_in(&raw, "a"), texts_in(&raw, "b"), r.left()), (1, 0, 1), "carried over, nothing added");
+            f.logic_only(raw);
+        }
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!((did, texts_in(&raw, "a"), r.left()), (None, 1, 1));
+        let mut seen = 0;
+        draw(&ctx, raw, |ui| seen = ui.input(|i| i.raw.events.iter().filter(|e| matches!(e, egui::Event::Text(t) if t == "a")).count()));
+        assert_eq!(seen, 1, "the pass saw `a` exactly once");
+        // The hook after the delivering pass delivers, and only then puts `b` in.
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!((did, texts_in(&raw, "a"), texts_in(&raw, "b"), r.left()), (None, 0, 1, 0));
+    }
+
+    /// eframe gives what is left over to the next window; the runner puts nothing into a child hook, and fails the
+    /// run when the input would have landed there.
+    #[test]
+    fn a_child_viewport_never_gets_the_input() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("ab").unwrap(), None);
+        let mut f = Frames::new();
+        let (raw, _) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        f.logic_only(raw);
+        let (raw, did) = f.prepare(&mut r, &ctx, child_input());
+        match did {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "a");
+                assert!(why.contains("viewport"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!r.running());
+        assert_eq!(texts_in(&raw, "a"), 1, "only what was carried over");
+
+        let mut r = Runner::new(parse("ab").unwrap(), None);
+        let mut f = Frames::new();
+        let (raw, did) = f.prepare(&mut r, &ctx, child_input());
+        assert_eq!((did, raw.events.len(), r.left(), r.running()), (None, 0, 2, true));
+
+        // `<Theme:>` puts nothing into the input: a child's hook before the main window draws is not a failure.
+        let mut r = Runner::new(parse("<Theme:dark>a").unwrap(), None);
+        let mut f = Frames::new();
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!(did, Some(Do::Theme("dark".into())));
+        f.logic_only(raw);
+        let (_, did) = f.prepare(&mut r, &ctx, child_input());
+        assert_eq!((did, r.left(), r.running()), (None, 1, true));
+    }
+
+    /// An input nobody draws fails the run after `DELIVER_WAIT`.
+    #[test]
+    fn an_input_not_drawn_in_time_fails_the_run() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("ab").unwrap(), None);
+        let mut f = Frames::new();
+        let (raw, _) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        f.logic_only(raw);
+        let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        assert_eq!(did, None);
+        f.logic_only(raw);
+        // Waiting for the draw asks for frames no faster than `FRAME`.
+        r.next = Instant::now();
+        assert_eq!(r.due(), Some(FRAME));
+        let flight = r.flight.as_mut().expect("in flight");
+        flight.at = flight.at.checked_sub(DELIVER_WAIT).unwrap();
+        let (_, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+        match did {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("not drawn within"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(!r.running());
+    }
+
+    /// The pass that draws the input is not the window the next reading step may judge.
+    #[test]
+    fn the_delivering_pass_does_not_count_for_a_reading_step() {
+        let run = |script: &str, expire: bool| {
+            let ctx = egui::Context::default();
+            let mut r = Runner::new(parse(script).unwrap(), None);
+            let mut f = Frames::new();
+            let mut kept = false;
+            for i in 0..40 {
+                let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+                if did.is_some() {
+                    return did;
+                }
+                draw(&ctx, raw, |ui| {
+                    if ui.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "x"))) {
+                        ui.label("Flash");
+                        kept = true;
+                    }
+                    if kept {
+                        ui.label("Kept");
+                    }
+                });
+                if expire && i >= 6 {
+                    r.deadline = Some(Instant::now());
+                }
+            }
+            None
+        };
+        assert_eq!(run("x<Assert:Kept>", false), Some(Do::Done));
+        match run("x<Assert:Flash>", true) {
+            Some(Do::Failed { step, why }) => {
+                assert_eq!(step, "<Assert:Flash>");
+                assert!(why.contains("Flash"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Only the main window is observed; a pass with no tree empties the observation; the generation never goes back.
+    #[test]
+    fn only_the_main_window_is_observed() {
+        let ctx = egui::Context::default();
+        assert_eq!(generation(&ctx), 0);
+        assert!(observation(&ctx).is_none());
+        observe(&ctx);
+        assert_eq!(generation(&ctx), 0);
+        for _ in 0..2 {
+            draw(&ctx, egui::RawInput::default(), |ui| {
+                ui.label("Root");
+            });
+        }
+        let seen = observation(&ctx).expect("a main-window pass brought a tree");
+        assert!(seen.generation >= 1 && seen.generation == generation(&ctx));
+        assert!(seen.items.iter().any(|i| i.text == "Root"));
+        assert_eq!(seen.viewport, egui::ViewportId::ROOT);
+        assert_eq!(seen.pass_nr, ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT));
+        assert!(!seen.tree.is_empty());
+
+        draw(&ctx, child_input(), |ui| {
+            ui.label("Child");
+        });
+        assert_eq!(generation(&ctx), seen.generation);
+        assert_eq!(observation(&ctx).map(|o| o.generation), Some(seen.generation));
+        assert!(items(&ctx).iter().all(|i| i.text != "Child"));
+
+        ctx.disable_accesskit();
+        draw(&ctx, egui::RawInput::default(), |_| {});
+        let after = generation(&ctx);
+        assert!(after >= seen.generation);
+        draw(&ctx, egui::RawInput::default(), |_| {});
+        assert!(observation(&ctx).is_none());
+        assert!(items(&ctx).is_empty());
+        assert_eq!(generation(&ctx), after, "monotonic: a pass without a tree does not count");
+    }
+
+    /// A reading step with no newer observation, or in a minimized window, retries and then says why.
+    #[test]
+    fn a_reading_step_says_why_it_could_not_judge() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("j<Assert:Kept>").unwrap(), None);
+        let mut f = Frames::new();
+        let mut out = None;
+        for _ in 0..10 {
+            let (raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+            if did.is_some() {
+                out = did;
+                break;
+            }
+            // Only the pass that draws the key happens; the delivery is then confirmed but no newer tree comes.
+            if r.flight.is_some() {
+                draw(&ctx, raw, |ui| {
+                    ui.label("Kept");
+                });
+            }
+            r.deadline = Some(Instant::now());
+        }
+        match out {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("not updated after the last action"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Assert:Kept>").unwrap(), None);
+        let mut f = Frames::new();
+        let mut out = None;
+        for _ in 0..10 {
+            let (mut raw, did) = f.prepare(&mut r, &ctx, egui::RawInput::default());
+            if did.is_some() {
+                out = did;
+                break;
+            }
+            raw.viewports.insert(egui::ViewportId::ROOT, egui::ViewportInfo { minimized: Some(true), ..Default::default() });
+            draw(&ctx, raw, |ui| {
+                ui.label("Kept");
+            });
+            r.deadline = Some(Instant::now());
+        }
+        match out {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("minimized"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Every wait inside the runner starts after the last progress the watch saw, so the longest quiet is a settle plus
+    /// one wait, which must stay under `STALL`.
+    #[test]
+    fn the_waits_stay_under_the_stall() {
+        assert!(DELIVER_WAIT < STALL && TEXT_WAIT < STALL);
+        assert!(SETTLE + DELIVER_WAIT.max(TEXT_WAIT) < STALL);
     }
 }

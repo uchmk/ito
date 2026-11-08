@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.263.0] - 2026-11-08
+
+### 変更
+
+- `ito-keyscript`（#203 の ①）: 窓の観測に世代を付け、`Runner` の読み取りの手順を新しい観測だけで判定するようにした。
+  - `observe` が見るのは主の窓（`ViewportId::ROOT`）の pass だけ。AccessKit の木が来た pass ごとに観測を作り、世代を 1 つ上げる（新しい `generation(ctx)`。単調に増え、`observe` の前は 0）。
+    木が来なかった主の窓の pass のあとは観測を空にする（`items` も空を返す。これまでは古い一覧を返し続けた）。子の窓の pass は観測を変えない（コピーした文字は今までどおり記録する）。
+  - 新しい `observation(ctx) -> Option<Observation>`: 主の窓の最後の観測（世代・一覧・木・pass の番号・viewport・窓の矩形・最小化・フォーカス）。最後の pass で木が来ていなければ `None`。`Observation` は `#[non_exhaustive]`。
+  - `Runner` は、入れた入力（キー・貼り付け・ポインターの 1 フレームずつ・`<Size:>`・`<Theme:>`・`<Lang:>`）を主の窓の pass が描いたのを確かめてから次へ進む。
+    10 秒（`DELIVER_WAIT`）のうちに描かれなければ `keys: failed`（`the input was not drawn within 10 s …`）。
+    キー・貼り付け・ポインターのあと、主の窓が描かれないうちに子の窓の hook が来たら（eframe は残った入力を次の窓に渡す）`keys: failed`（入力を入れない `<Size:>`・`<Theme:>`・`<Lang:>` では落ちない）。
+    主の窓以外の hook には何も入れない（これまではどの窓の hook にも入れていた）。描かれるのを待つあいだ、`due()` は `FRAME`（20 ms）より短くならない。
+  - 読み取りの手順（`<Assert:>`・`<Assert:!…>`・`<Enabled:>` などの状態・`<Tree:>`・`<Click:文字>`・`<DClick:文字>`）は、最後の入力を描いた pass より後の観測でだけ判定する。
+    観測が古い・無い・窓が最小化されているときは、毎フレームやり直し、`TEXT_WAIT`（3 秒）を過ぎたら `keys: failed`。否定の手順（`<Assert:!x>`）は、`x` の無い新しい観測で通る（消えるのを `TEXT_WAIT` まで待つ）。通ったあとで出てくるものは見ない。
+    `<Tree:>` は、新しい観測が無いか木が空なら失敗する。
+  - `<Clipboard:>`・`<ClipboardHas:>`・`<Announced:>` は今のまま。
+  - 使う側: API は変わらない（yagura はそのまま）。読み取りの手順は 1 フレーム遅れて通る。`items`・`locate`・`check`・`check_is`・`tree_text` を自分で呼ぶアプリは、木が来なかった pass のあとで一覧と木が空になることに注意。
+
 ## [0.262.7] - 2026-11-08
 
 ### 修正
