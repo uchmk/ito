@@ -3,6 +3,27 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.279.0] - 2026-11-08
+
+### 追加
+
+- `scripts/lanes/keys.ps1` に `-Evidence`、`scripts/lanes/xrun.sh` に `--evidence LABEL`（見た目の行の証拠、ito#205 の続き）。`evidence.py new` と `manifest` を手で順に呼ばなくてよくなった。
+  実行の folder を作り、run ID を環境変数（`keys_env` の `_DONE` を `_RUN_ID` に替えた名前）で渡し、`isolate=` の変数ごとに空のフォルダーを渡し、どの終わり方（終わった・失敗・時間切れ・窓が出ない・Ctrl+C・SIGTERM）でも manifest を書く。
+  アプリが残したものは manifest の note に名前を書いて止め、cleanup を FAIL にする（Windows はジョブ オブジェクト、Linux はプロセス グループ）。`-Spec`・`-Scenario`・`-EvidenceRoot`（`--spec`・`--scenario`・`--evidence-root`）も渡せる。folder の道は最後の行に出す。
+  - 終了コードを 2 つ足した。5 は証拠を作れなかった（実行の前に断った・`new` か `manifest` が失敗した）、6 は実行は成功したが manifest に問題がある。実行の前に断ったときは folder を残さない。
+  - `-Evidence` は `-Out`・`-Launches` と組めない（5）。`--evidence` はアプリの引数に `--keys` が要る。
+  - 限界: `xrun.sh --evidence` はまだ本物の Linux で回していない（Git Bash の上のスタブで確かめただけで、`setsid`・`ps`・グループへの kill は未確認）。`keys.ps1` のジョブの一覧が取れないときの道と、`evidence.py` の呼び出しが失敗するときの道も試していない。自分でセッションやプロセス グループを作ったプログラムは、`xrun.sh` の後片付けの検査の外。
+
+### 変更
+
+- `keys.ps1`: 設定した環境変数（`keys_env`・`isolate=` のもの）を、終わるときに元の値に戻す（無かったものは消す）。同じセッションの 2 回目の実行が、1 回目のフォルダーを受け継がない。
+- `xrun.sh`: `--evidence` でなくても、アプリを `setsid` で起動し、終わるときにアプリ・グループに残ったもの・Xvfb の順に止める。`setsid`（util-linux）と `ps`（procps）が要る。再利用する OUTDIR から `*.jsonl` も消す。
+
+### 使う側がやること
+
+- `rev` を上げたら `scripts/lanes.sh sync` を流す。
+- `-Evidence` を使うアプリは、`scripts/lanes.conf` に `isolate=` と `evidence=` を足す（`evidence=` の代わりに `-EvidenceRoot`・`--evidence-root` でもよい）。いま `isolate=` があるのは kura だけで、ほかのアプリでは 5 で断る。
+
 ## [0.278.0] - 2026-11-08
 
 ### 追加

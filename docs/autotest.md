@@ -180,7 +180,7 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 | 子の確かめ役 | テスト用の「シェル」。nonce・引数・指定した環境変数を `probe-N.txt` に書いて生き続ける。kura は `examples/term-probe.rs` に 1 行だけ |
 | `ito-prefs` | 欄に `settings.field.<id>`、Shell カードに `settings.shell.*`。環境変数の行は Edit のあいだ変わらない番号（消しても振り直さない） |
 | 実行の状態機械と適合テスト | §1a。`Runner` が使い、kura も同じ表で確かめる（[ito#204](https://github.com/uchmk/ito/issues/204)） |
-| レーンのスクリプト | `scripts/lanes/` の `keys.ps1`・`xrun.sh` が run_id を作って渡し、`<evidence>\<run_id>\` を毎回新しく作る。後片付けは途中で落ちても必ず回す（いまは一番外側でしか片付けない） |
+| レーンのスクリプト | `scripts/lanes/` の `keys.ps1`・`xrun.sh` が run_id を作って渡し、`<evidence>\<run_id>\` を毎回新しく作る。後片付けと manifest は途中で落ちても必ず回す（keys.ps1 の `-Evidence`・xrun.sh の `--evidence`、v0.279.0） |
 
 ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 ① 観測の世代と `Runner` の待ち（v0.263.0、16dbe90。済み）、段 ② `ito-a11y` の test_id・`<ClickId:>` などの ID の手順・`<ReadHas:>`（v0.264.0、2d25645。済み）、段 ③ run_id と `with_run`・確かめ役 `probe::main`・Shell カードの ID（v0.265.0、50612a3。済み）。B4（コピーと読み上げは直前の操作より後だけ）は v0.266.0（99b5e15）、時間を決めた読み取り `<Now><Wait:N>` と `since last action:` の行は v0.267.0。ito#203 は閉じた。実行の状態機械と適合テストは別の Issue [ito#204](https://github.com/uchmk/ito/issues/204)（1〜3 は v0.269.0・v0.271.0・v0.272.0 で入り、残りは 4 `<Theme:>` の要求と適用・6 付属 JSON の置き場所・8 manifest）。状態 JSON v1 のスキーマと書き手・矩形つきの `<Tree>`・`<Snap:>`・検査器・証拠のフォルダは [ito#205](https://github.com/uchmk/ito/issues/205)（見た目のパイロットの前に要る）。
 
@@ -208,7 +208,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 
 ### 後回し
 
-状態 JSON v1 の ito 側（v0.275.0 で実装）と検証（ito#205。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合（`xrun.sh` にはまだ無い）と証拠のフォルダ、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
+状態 JSON v1 の ito 側（v0.275.0 で実装）と検証（ito#205。kura の serde_json の直接依存も、そのとき）、レーンのスクリプト（`xrun.sh`・`keys.ps1`）での run ID の照合と証拠のフォルダ（v0.279.0 の `-Evidence`・`--evidence`。照合は `evidence.py manifest` がする）、テストモード、kura でのクリップボードと読み上げの確認（受けるときは「直前の操作より後」だけを見る）、Windows のハーネス。
 
 ## 3. 黙って飛ばす不具合（P0、フェーズ 1 で直した）
 

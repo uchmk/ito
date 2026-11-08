@@ -167,9 +167,10 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 
 ### 足すもの（案。どれもフェーズ 2 以降。自動テストの設計の判断 3〜5 は 2026-11-08 に決まった）
 
-**いまの状態（v0.277.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
+**いまの状態（v0.279.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
 v0.277.0 で、検査（`visual-check.py`）、実行の folder・manifest・verdict（`evidence.py`）、全部の JSON の schema（`docs/schemas/*.v1.json`）が入った。
-まだ無いもの: keys.ps1 / xrun.sh が folder と manifest を自動で作る `-Evidence`、merge-lanes.py の `[x]` の門番、Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
+v0.279.0 で、keys.ps1 の `-Evidence` と xrun.sh の `--evidence` が folder と manifest を自動で作るようになった。
+まだ無いもの: merge-lanes.py の `[x]` の門番、Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
 
 | もの | どこ | 中身 |
 |---|---|---|
@@ -439,13 +440,13 @@ schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`
 
 **実行の順（実機のセッション）:**
 
-1. `python3 scripts/evidence.py new --label <行> --spec tests/visual/<行>.toml` → `run_id=`・`dir=`・`env=` を出す。
-2. 環境変数 `env=` が指す名前（`lanes.conf` の `keys_env` から `_DONE` を除いて `_RUN_ID` を付けたもの）に run id を入れる。
-3. `keys.ps1 -Out <dir>`（Linux は `xrun.sh`）。
-4. どの終わり方でも（失敗・時間切れ・殺した場合も）`evidence.py manifest --run <dir> --exit-code N [--killed] --cleanup PASS|FAIL`。
-5. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
-6. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。
-7. main モデルが verdict を読み、`mark` と `decided_by` を書く。
+1. `keys.ps1 -Dir <フォルダー> -Keys '<台本>' -Evidence -Label <行> -Spec tests/visual/<行>.toml`（Linux は `xrun.sh --evidence <行> --spec tests/visual/<行>.toml -- <フォルダー> --keys '<台本>'`）。
+   `evidence.py new` で folder を作り、run id を環境変数（`lanes.conf` の `keys_env` から `_DONE` を除いて `_RUN_ID` を付けた名前）に入れて、`lanes.conf` の `isolate=` の変数ごとに空のフォルダーを渡して走らせる。
+   どの終わり方でも（失敗・時間切れ・殺した場合も）アプリが残したものを止め、`isolate` を消し、`evidence.py manifest` を呼ぶ。出力の最後の行が folder（以下の `<dir>`）。
+   `lanes.conf` に `isolate=` が要る。置き場所は `evidence=`（Windows は `-EvidenceRoot`、Linux は `--evidence-root` でも渡せる）。終了コードの 5 は証拠なし（走らせる前に断った、`manifest` を書けなかった）、6 はアプリは成功したが manifest が合格でない。
+2. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
+3. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。
+4. main モデルが verdict を読み、`mark` と `decided_by` を書く。
 
 `evidence.py check --run <dir>` は folder が壊れていないかだけ見る。
 
