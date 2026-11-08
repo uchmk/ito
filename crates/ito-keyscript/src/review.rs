@@ -447,4 +447,72 @@ mod tests {
         assert_eq!(s, "<Theme:dark><Shot:empty-dark><A-e><Shot:error-dark><Theme:light><Shot:empty-light><A-e><Shot:error-light><Quit>");
         assert!(crate::parse(&s).is_ok());
     }
+
+    fn meta() -> Meta {
+        Meta {
+            name: "main-dark".into(),
+            app: "demo".into(),
+            version: "1.2.3".into(),
+            theme: "ito-dark".into(),
+            theme_requested: "ito-dark".into(),
+            lang: "ja".into(),
+            lang_requested: "ja".into(),
+            size: [800.0, 600.0],
+            zoom: 1.0,
+            state: "empty".into(),
+            component: "window".into(),
+            rect: [0.0, 0.0, 800.0, 600.0],
+            time: 1_731_050_000,
+            pixels_per_point: 1.5,
+        }
+    }
+
+    fn state_ref(name: &str) -> StateRef {
+        StateRef {
+            path: format!("state/{name}.json"),
+            sha256: "aa".repeat(32),
+            projection: 1,
+            ui_sha256: "bb".repeat(32),
+            app_sha256: "cc".repeat(32),
+        }
+    }
+
+    /// The files in `docs/schemas/examples/` have the shape (keys, order, types) of what the writer writes.
+    #[test]
+    fn the_side_json_has_the_shape_of_the_examples() {
+        let mut c = Capture {
+            run_id: Some("20261108-101203-41_15-3f9a".into()),
+            snapshot_seq: Some(2),
+            capture_id: "1-main-dark".into(),
+            png: "main-dark.png".into(),
+            png_sha256: "dd".repeat(32),
+            size_px: [1200, 900],
+            state_before: Some(state_ref("main-dark-before")),
+            state_after: Some(state_ref("main-dark-after")),
+            state_unchanged: Some(true),
+            requested_frame: 40,
+            received_frame: 42,
+            ..Capture::default()
+        };
+        c.env = Env {
+            os: "windows".into(),
+            arch: "x86_64".into(),
+            wgpu_backend: Some("gl".into()),
+            font_set_sha256: Some("ee".repeat(32)),
+            theme: "ito-dark".into(),
+            pixels_per_point: 1.5,
+        };
+        crate::shape::check("shot-snap", &meta().to_json_with(&c), crate::shape::example!("shot-snap"));
+
+        // A shot without `<Snap:>`: no states, no run id, and the env facts ito does not fill yet are null.
+        let mut p = Capture {
+            capture_id: "2-main".into(),
+            png: "main.png".into(),
+            png_sha256: "dd".repeat(32),
+            size_px: [1200, 900],
+            ..Capture::default()
+        };
+        p.env = Env { os: "windows".into(), arch: "x86_64".into(), theme: "ito-dark".into(), pixels_per_point: 1.5, ..Env::default() };
+        crate::shape::check("shot-plain", &meta().to_json_with(&p), crate::shape::example!("shot-plain"));
+    }
 }

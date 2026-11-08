@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/intent.v1.json",
+  "title": "ito intent v1",
+  "description": "pre/intent.json: written by evidence.py new, before the run, to fix which specs the run is checked against.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "intent.v1"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "written_ms": {
+      "type": "integer"
+    },
+    "specs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Lower-case hex SHA-256."
+          },
+          "blob": {
+            "type": "string"
+          },
+          "head": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "blob",
+          "head"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "tool",
+    "run_id",
+    "written_ms",
+    "specs"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

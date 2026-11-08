@@ -356,4 +356,27 @@ mod tests {
         assert!(r.write(&dir.join("nope")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The files in `docs/schemas/examples/` have the shape (keys, order, types) of what the writers write.
+    #[test]
+    fn the_run_and_trace_have_the_shape_of_the_examples() {
+        use crate::pace::{Outcome, TraceLine};
+        let dir = std::env::temp_dir().join(format!("ito-evidence-shape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut t = TraceFile::create(&dir, Some("1731050000000-1234")).unwrap();
+        let mut line = TraceLine::new(Some(2), "<Click:ok>", Outcome::Done, 10, 200, None);
+        line.settled = Some(true);
+        line.end_frame = 12;
+        line.end_ms = 230;
+        crate::shape::check("trace-done", &t.line_json(&line), crate::shape::example!("trace-done"));
+        let nostep = TraceLine::new(None, "<run.json>", Outcome::Failed, 4, 50, Some("cannot write".into()));
+        crate::shape::check("trace-nostep", &t.line_json(&nostep), crate::shape::example!("trace-nostep"));
+        let _ = t.write(&line);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        crate::shape::check("run-running", &run().to_json(), crate::shape::example!("run-running"));
+        let mut r = run();
+        r.end(&ended(How::Failed { step: "<Assert:x>".into(), why: "no x".into() }, true, Some("failed"), "", 2), 1731050009000);
+        crate::shape::check("run-done", &r.to_json(), crate::shape::example!("run-done"));
+    }
 }

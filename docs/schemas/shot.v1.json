@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/shot.v1.json",
+  "title": "ito shot side JSON v1",
+  "description": "The shots/<name>.json file next to each picture (Meta keys plus the <Snap:> state references).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "app": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "theme_requested": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lang": {
+      "type": "string"
+    },
+    "lang_requested": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "size": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "zoom": {
+      "type": "number"
+    },
+    "state": {
+      "type": "string"
+    },
+    "component": {
+      "type": "string"
+    },
+    "rect": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "time": {
+      "type": "integer"
+    },
+    "pixels_per_point": {
+      "type": "number"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_seq": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "capture_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "png": {
+      "type": "string"
+    },
+    "png_sha256": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "size_px": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "state_before": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/state_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state_after": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/state_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state_unchanged": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "requested_frame": {
+      "type": "integer"
+    },
+    "received_frame": {
+      "type": "integer"
+    },
+    "env": {
+      "$ref": "#/$defs/env"
+    }
+  },
+  "required": [
+    "name",
+    "app",
+    "version",
+    "theme",
+    "theme_requested",
+    "lang",
+    "lang_requested",
+    "size",
+    "zoom",
+    "state",
+    "component",
+    "rect",
+    "time",
+    "pixels_per_point",
+    "run_id",
+    "snapshot_seq",
+    "capture_id",
+    "png",
+    "png_sha256",
+    "size_px",
+    "state_before",
+    "state_after",
+    "state_unchanged",
+    "requested_frame",
+    "received_frame",
+    "env"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "state_ref": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        },
+        "stable": {
+          "$ref": "#/$defs/stable"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "stable"
+      ],
+      "additionalProperties": false
+    },
+    "stable": {
+      "type": "object",
+      "properties": {
+        "projection": {
+          "type": "integer"
+        },
+        "ui_sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        },
+        "app_sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        }
+      },
+      "required": [
+        "projection",
+        "ui_sha256",
+        "app_sha256"
+      ],
+      "additionalProperties": false,
+      "description": "Hashes of the parts that do not depend on timing."
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "wgpu_backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_set_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "theme": {
+          "type": "string"
+        },
+        "pixels_per_point": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "os",
+        "arch",
+        "wgpu_backend",
+        "font_set_sha256",
+        "theme",
+        "pixels_per_point"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

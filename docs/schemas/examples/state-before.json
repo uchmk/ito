@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "name": "a-before",
+  "run_id": "r1",
+  "snapshot_seq": 1,
+  "phase": "before",
+  "capture_id": "1-a",
+  "after_step": 3,
+  "after_label": "<Click:x>",
+  "frame": 2,
+  "settled": true,
+  "app": {
+    "name": "demo",
+    "version": "1.2.3"
+  },
+  "theme": {
+    "requested": "ito-dark",
+    "name": "tsumugi Dark",
+    "dark": true,
+    "tokens": {
+      "accent": "#6fd0d0ff",
+      "bg": "#16181dff",
+      "blue": "#7ab8f5ff",
+      "border": "#2c3039ff",
+      "border-strong": "#434851ff",
+      "caret": "#e4e6ecff",
+      "caret-idle": "#9aa3b5ff",
+      "chosen": "#2b2e34ff",
+      "current-line": "#1f2126ff",
+      "diff-added": "#8ed08eff",
+      "diff-added-bg": "#27322dff",
+      "diff-modified": "#7ab8f5ff",
+      "diff-modified-bg": "#242e3bff",
+      "diff-removed": "#f07178ff",
+      "diff-removed-bg": "#35242aff",
+      "dim": "#9aa3b5ff",
+      "done": "#8ed08eff",
+      "err": "#f07178ff",
+      "faint": "#808797ff",
+      "fg": "#c8cdd8ff",
+      "fold": "#2e3138ff",
+      "gutter": "#79808fff",
+      "gutter-active": "#bac0ceff",
+      "hover": "#24272dff",
+      "ime-underline": "#6fd0d0ff",
+      "invisible": "#6c7280ff",
+      "invisible-fill": "#282b32ff",
+      "magenta": "#c99cf0ff",
+      "match-bg": "#36322bff",
+      "match-current-bg": "#484233ff",
+      "on-accent": "#16181dff",
+      "panel": "#1b1e24ff",
+      "raised": "#22252bff",
+      "run": "#6fd0d0ff",
+      "selection": "#304b4fff",
+      "side": "#121418ff",
+      "strong": "#e4e6ecff",
+      "success": "#8ed08eff",
+      "wait": "#e8c87aff",
+      "wait-bg": "#272829ff",
+      "wait-text": "#e5e0d5ff",
+      "warning": "#e8c87aff"
+    },
+    "tokens_sha256": "1932bfe42c50b04a5eeeced8544c5814ae2e6ef8ee73be7e0a6ee28a12e9d317"
+  },
+  "lang": {
+    "requested": "ja",
+    "in_force": "ja"
+  },
+  "window": {
+    "inner_px": [
+      0.0,
+      0.0,
+      800.0,
+      600.0
+    ],
+    "pixels_per_point": 2.0,
+    "monitor_work_area_px": null
+  },
+  "screen": "main",
+  "overlay": "palette",
+  "toasts": [
+    {
+      "text": "saved",
+      "kind": "info"
+    }
+  ],
+  "app_state": {
+    "tab": 1
+  },
+  "ui": [
+    {
+      "test_id": "a_cut",
+      "role": "Label",
+      "text": "cut",
+      "label": null,
+      "value": "cut",
+      "rect_px": [
+        0.0,
+        0.0,
+        36.8125,
+        30.0
+      ],
+      "clip_px": [
+        0.0,
+        0.0,
+        18.40625,
+        30.0
+      ],
+      "visible": true,
+      "elided": true,
+      "enabled": true,
+      "focused": false,
+      "hidden": false,
+      "layer": "Background"
+    },
+    {
+      "test_id": "b_plain",
+      "role": "Button",
+      "text": "plain",
+      "label": "plain",
+      "value": null,
+      "rect_px": [
+        0.0,
+        42.0,
+        72.0,
+        78.0
+      ],
+      "clip_px": null,
+      "visible": null,
+      "elided": null,
+      "enabled": true,
+      "focused": false,
+      "hidden": false,
+      "layer": "Background"
+    }
+  ],
+  "capabilities": [
+    "app_state",
+    "lang",
+    "overlay",
+    "screen",
+    "theme",
+    "toasts",
+    "ui",
+    "window"
+  ],
+  "stable": {
+    "projection": 1,
+    "ui_sha256": "4b2d8aa538ac209df1235022b893fc1f0534c35080373d53b30bb50d8da2c222",
+    "app_sha256": "4be3300da6aee8e66ece871e7371ab927b6864753e46e9962d71eae1f5ce08e1"
+  }
+}

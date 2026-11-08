@@ -1,0 +1,412 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/state.v1.json",
+  "title": "ito state JSON v1",
+  "description": "The state/<name>.json file ito-keyscript writes for <State:>, <Snap:> and the --keys state requests (docs/autotest.md).",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_seq": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "phase": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "before",
+        "after",
+        null
+      ]
+    },
+    "capture_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "after_step": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "after_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "frame": {
+      "type": "integer"
+    },
+    "settled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "app": {
+      "$ref": "#/$defs/app"
+    },
+    "theme": {
+      "$ref": "#/$defs/theme"
+    },
+    "lang": {
+      "type": "object",
+      "properties": {
+        "requested": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "in_force": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The language in force (ito_i18n::in_force); null when the app has not set one (capabilities then lacks lang)."
+        }
+      },
+      "required": [
+        "requested",
+        "in_force"
+      ],
+      "additionalProperties": false
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "inner_px": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "pixels_per_point": {
+          "type": "number"
+        },
+        "monitor_work_area_px": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "inner_px",
+        "pixels_per_point",
+        "monitor_work_area_px"
+      ],
+      "additionalProperties": false
+    },
+    "screen": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "overlay": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toasts": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "app_state": {
+      "description": "Free-form: whatever the app reports (null when it reports nothing)."
+    },
+    "ui": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/widget"
+          },
+          {
+            "$ref": "#/$defs/widget_error"
+          }
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stable": {
+      "$ref": "#/$defs/stable"
+    }
+  },
+  "required": [
+    "schema_version",
+    "name",
+    "run_id",
+    "snapshot_seq",
+    "phase",
+    "capture_id",
+    "after_step",
+    "after_label",
+    "frame",
+    "settled",
+    "app",
+    "theme",
+    "lang",
+    "window",
+    "screen",
+    "overlay",
+    "toasts",
+    "app_state",
+    "ui",
+    "capabilities",
+    "stable"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "requested": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The theme in force (ito_theme::name); null when the app has not set a theme (capabilities then lacks theme)."
+        },
+        "dark": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the theme in force is dark; null when the app has not set a theme (capabilities then lacks theme)."
+        },
+        "tokens": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Token name to #rrggbbaa; null when the app has not set a theme (capabilities then lacks theme)."
+        },
+        "tokens_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Lower-case hex SHA-256 of the canonical tokens; null when the app has not set a theme (capabilities then lacks theme)."
+        }
+      },
+      "required": [
+        "requested",
+        "name",
+        "dark",
+        "tokens",
+        "tokens_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "widget": {
+      "type": "object",
+      "properties": {
+        "test_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rect_px": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "clip_px": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "visible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "elided": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "layer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "test_id",
+        "role",
+        "text",
+        "label",
+        "value",
+        "rect_px",
+        "clip_px",
+        "visible",
+        "elided",
+        "enabled",
+        "focused",
+        "hidden",
+        "layer"
+      ],
+      "additionalProperties": false
+    },
+    "widget_error": {
+      "type": "object",
+      "properties": {
+        "test_id": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "test_id",
+        "error"
+      ],
+      "additionalProperties": false,
+      "description": "A test ID that could not be resolved (for example on 2 widgets)."
+    },
+    "stable": {
+      "type": "object",
+      "properties": {
+        "projection": {
+          "type": "integer"
+        },
+        "ui_sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        },
+        "app_sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        }
+      },
+      "required": [
+        "projection",
+        "ui_sha256",
+        "app_sha256"
+      ],
+      "additionalProperties": false,
+      "description": "Hashes of the parts that do not depend on timing."
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/run.v1.json",
+  "title": "ito run.json v1",
+  "description": "The run record Runner writes: running at the start, overwritten once at the end.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "runner": {
+      "type": "string"
+    },
+    "ito": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rev_source": {
+          "type": "string",
+          "enum": [
+            "env",
+            "checkout-path",
+            "unknown"
+          ],
+          "description": "Where the rev came from: ITO_BUILD_REV (env), cargo's git checkout path (checkout-path), or neither (unknown)."
+        }
+      },
+      "required": [
+        "version",
+        "rev",
+        "rev_source"
+      ],
+      "additionalProperties": false
+    },
+    "app": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "os": {
+      "type": "string"
+    },
+    "arch": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "integer"
+    },
+    "started_ms": {
+      "type": "integer"
+    },
+    "ended_ms": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "done",
+        "unsettled",
+        "failed",
+        "closed",
+        "quit"
+      ]
+    },
+    "failed": {
+      "type": "boolean"
+    },
+    "step": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "left": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "runner",
+    "ito",
+    "app",
+    "run_id",
+    "os",
+    "arch",
+    "steps",
+    "started_ms",
+    "ended_ms",
+    "status",
+    "failed",
+    "step",
+    "why",
+    "left"
+  ],
+  "additionalProperties": false
+}

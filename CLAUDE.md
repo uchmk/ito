@@ -87,6 +87,7 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
+見た目の行の検査の道具もここにある: `visual-check.py`（check spec と実行の folder → `machine/assertions.json`）と `evidence.py`（実行の folder・manifest・verdict）。どれも標準ライブラリだけの Python で、ito は自己検査（`--self-test`）と `scripts/check-schemas.py`（`docs/schemas/*.v1.json` と例、両スクリプトが出す実物の検査）で確かめる。規則は [docs/visual-test.md](docs/visual-test.md)。
 アプリの `scripts/lanes.sh sync` が、固定した `rev` のここから自分の `scripts/` へバイト単位で同じものを写し、`lanes.sh check` は写しが違えば落ちる。
 アプリごとの値（名前・クレート・実行ファイル・`--keys` の環境変数・状態のフォルダー・TODO の印）はアプリの `scripts/lanes.conf` から読むので、
 ここにアプリの名前を書き込まない。

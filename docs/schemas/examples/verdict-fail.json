@@ -1,0 +1,53 @@
+{
+  "schema": "verdict.v1",
+  "tool": {
+    "name": "evidence.py",
+    "version": 1
+  },
+  "row": "r20",
+  "tier": 1,
+  "run_id": "c20-assertions-fail",
+  "result": "fail",
+  "conditions": {
+    "expected_defined": true,
+    "assertions_match": true,
+    "screenshot": true,
+    "state_json": true,
+    "same_run": true,
+    "machine_issues": 1,
+    "vision_points": "n/a",
+    "major_mismatch": false,
+    "unconfirmed": 0,
+    "cleanup": "PASS",
+    "rationale_saved": true,
+    "manifest_intact": true,
+    "run_problems": 0
+  },
+  "reasons": [
+    "machine_issues: 1"
+  ],
+  "evidence": [
+    "machine/assertions.json#thumb-top",
+    "machine/assertions.json#title"
+  ],
+  "inputs": [
+    {
+      "path": "manifest.json",
+      "sha256": "a2213ea2bf0e56bc5c423d7a54d95b89df11da3681379d03c2474b5f5ef3fdf7"
+    },
+    {
+      "path": "pre/intent.json",
+      "sha256": "b96bf744d8ace27d5806550c98595706e8987678c36397cf9aff1c65647532b3"
+    },
+    {
+      "path": "machine/assertions.json",
+      "sha256": "b98b94baed58d2667ed68d339e7196a369d101483793555fc0ec2ea79ecc5134"
+    }
+  ],
+  "spec": {
+    "path": "tests/visual/r20.toml",
+    "sha256": "a12f71b420cf23c319997a5a1e3e71d96378613d8d7b5d8f04dbed05b1eb833d"
+  },
+  "mark": null,
+  "decided_by": null
+}

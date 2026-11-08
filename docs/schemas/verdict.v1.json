@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/verdict.v1.json",
+  "title": "ito verdict v1",
+  "description": "verdict-<id>.json: written by evidence.py verdict. The result is a candidate; mark and decided_by are the main model's.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "verdict.v1"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "row": {
+      "type": "string"
+    },
+    "tier": {
+      "type": "integer"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "result": {
+      "type": "string",
+      "enum": [
+        "auto-pass-candidate",
+        "fail",
+        "undecidable",
+        "owner"
+      ]
+    },
+    "conditions": {
+      "type": "object",
+      "properties": {
+        "expected_defined": {
+          "type": "boolean"
+        },
+        "assertions_match": {
+          "type": "boolean"
+        },
+        "screenshot": {
+          "type": "boolean"
+        },
+        "state_json": {
+          "type": "boolean"
+        },
+        "same_run": {
+          "type": "boolean"
+        },
+        "machine_issues": {
+          "type": "integer"
+        },
+        "vision_points": {
+          "type": "string",
+          "enum": [
+            "n/a",
+            "not implemented"
+          ]
+        },
+        "major_mismatch": {
+          "type": "boolean"
+        },
+        "unconfirmed": {
+          "type": "integer"
+        },
+        "cleanup": {
+          "type": "string"
+        },
+        "rationale_saved": {
+          "type": "boolean"
+        },
+        "manifest_intact": {
+          "type": "boolean"
+        },
+        "run_problems": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_defined",
+        "assertions_match",
+        "screenshot",
+        "state_json",
+        "same_run",
+        "machine_issues",
+        "vision_points",
+        "major_mismatch",
+        "unconfirmed",
+        "cleanup",
+        "rationale_saved",
+        "manifest_intact",
+        "run_problems"
+      ],
+      "additionalProperties": false
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path_sha"
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/path_sha"
+    },
+    "mark": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "decided_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "tool",
+    "row",
+    "tier",
+    "run_id",
+    "result",
+    "conditions",
+    "reasons",
+    "evidence",
+    "inputs",
+    "spec",
+    "mark",
+    "decided_by"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "path_sha": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

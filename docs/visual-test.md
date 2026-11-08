@@ -167,6 +167,10 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 
 ### 足すもの（案。どれもフェーズ 2 以降。自動テストの設計の判断 3〜5 は 2026-11-08 に決まった）
 
+**いまの状態（v0.277.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
+v0.277.0 で、検査（`visual-check.py`）、実行の folder・manifest・verdict（`evidence.py`）、全部の JSON の schema（`docs/schemas/*.v1.json`）が入った。
+まだ無いもの: keys.ps1 / xrun.sh が folder と manifest を自動で作る `-Evidence`、merge-lanes.py の `[x]` の門番、Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
+
 | もの | どこ | 中身 |
 |---|---|---|
 | state JSON v1 | スキーマと書き出しは ito、中身は各アプリ（kura が最初） | **ito 側は v0.275.0 で実装。** `state/<name>.json` に、`<State:>` のテキストと並べて書く。`settled`・`theme`・`lang`・`window`・`ui[]`・`toasts[]`・`capabilities`・`stable`、アプリだけの値は `app_state` の中。分からない値は `null`（[穴の表](#gaps)）。 |
@@ -286,6 +290,24 @@ runner はどのアプリも ito から写した同じスクリプト: Windows �
 | + | カナリアを見つけた（Tier 2） | 同じ回に混ぜた既知の不良の画像を、Vision が FAIL にした。 |
 | + | 系のダイアログが前に出ていない | `blocked.txt` が無い。 |
 
+**verdict.json の `conditions` との対応**（`evidence.py verdict` が書く。キーの形は `docs/schemas/verdict.v1.json`）:
+
+| # | `conditions` のキー |
+|---|---|
+| 1 | `expected_defined`（check spec が実行より前にコミットされ、`pre/intent.json` の sha256 と合う） |
+| 2 | `screenshot` |
+| 3 | `state_json` |
+| 4 | `same_run` |
+| 5 | `assertions_match`（`assertions.json` が spec と実行の folder から作り直した結果と同じ）、`machine_issues`（FAIL と ERROR の数。0 であること） |
+| 6 | `vision_points`（Tier 1 は `"n/a"`。Tier 2 は未実装なので `"not implemented"` で、候補にならない） |
+| 7 | `major_mismatch` |
+| 8 | `unconfirmed` |
+| 9 | `cleanup`（manifest の `cleanup` の `PASS` / `FAIL`） |
+| 10 | `rationale_saved`、`manifest_intact`（manifest の sha256 が全ファイルと合う）。`run_problems` は manifest の `problems` の数 |
+
+`result` は `auto-pass-candidate`（Tier 1 で全条件がそろった）・`fail`（機械が FAIL）・`undecidable`（条件が欠けた）・`owner`（Tier 3）の 4 つ。
+**`assertions.json` だけでは行に印を付けない。verdict の `auto-pass-candidate` は「候補」で、`mark` と `decided_by` は main モデルだけが書く**（スクリプトは `null` のままにする）。
+
 ### 判定不能（印を付けず、`[~]` の報告か持ち主へ）
 
 - 上の条件のどれかが欠けた。runner が `keys: failed`・`keys: unsettled`・`keys: stalled`・時間切れで終わった。
@@ -311,11 +333,12 @@ TESTING.md の行は人が読む要件のまま残し、測る形は行ごとの
 6. **残る主観は分けて書き、Tier 3 と明記する**（例: 2.2 の「元のファイルの形に見えること」）。
 
 ```toml
-# tests/visual/41.15.toml（案）
+# tests/visual/41.15.toml
+spec = 1
 row = "41.15"
 tier = 1
 fixtures = "spot-long"
-window = { size = [900, 420], pixels_per_point = 1.5 }
+window = { size_pt = [900, 420], pixels_per_point = 1.5 }
 
 [[point]]
 id = "thumb-top"
@@ -343,8 +366,25 @@ expect = { present = false }
 id = "ok-bar"
 snap = "after-dir"
 target = "pane.mark[0]"          # dir のプロンプトの印。行の y は state から
-expect = { color_token = "ok", delta_e = { max = 3 } }
+expect = { color_token = { token = "ok", delta_e_max = 3, min_fraction = 0.95, inset_px = 1 } }
 ```
+
+### check spec の読み方（version 1。`visual-check.py` が読む）
+
+- **表**: 先頭に `spec = 1`（版。1 以外は ERROR）、`row`、`tier`（1〜3）、`fixtures`・`theme`・`lang`（任意の文字）、`window = { size_pt = [幅, 高さ], pixels_per_point = 倍率 }`（**単位はポイント**。画素は `size_pt` × 倍率）。
+  `[[point]]` は 1 つ以上。各 point は `id`、`snap`（`<Snap:>` の名前）か `state`（`<State:>` の名前）のどちらか 1 つ、`target`（test_id）、`relative_to`（任意）、`fail_looks_like`（必須。失敗の見え方）、`expect`。知らないキーは ERROR。
+- **単位**: `*_px` は画面の画素（state の `rect_px` と同じ座標）。`delta_e_max` は CIEDE2000、`min_fraction` は 0 より大きく 1 以下の割合、`inset_px` と `tol_px` は画素。
+- **`expect` の閉じた一覧**（これ以外は ERROR）:
+  - state: `present`・`visible`・`elided`・`enabled`・`focused`（真偽）、`text`・`label`・`value`（文字そのもの、または contains）、`role`。
+  - 画面: `screen`・`overlay`・`no_overlay`・`toast`・`no_toast`・`app_state`・`theme`・`dark`。
+  - 矩形（`{ min, max }`）: `width_px`・`height_px`・`left_gap_px`・`right_gap_px`・`top_gap_px`・`bottom_gap_px`（後の 4 つは `relative_to` が要る）。
+  - 関係: `inside`（`relative_to` の中）・`unclipped`・`in_window`・`aligned = { with, edge, tol_px }`・`no_overlap = [test_id…]`・`gap = { to, side, min, max }`。
+  - 画素: `color_token = { token, delta_e_max, min_fraction, inset_px, over, mask, max_mask_fraction }`。
+- **色のサンプリング**: 対象の矩形をクリップと画像で切り、`inset_px` だけ内側に縮め、画素の中心が入るものを読む。`mask`（test_id か `[l, t, r, b]`）の中は数えない。`mask` と `max_mask_fraction`（0 より大きく 0.5 以下の上限）は必ず組で、覆う割合が上限を超えれば ERROR。
+  読んだ画素の alpha が 255 でなければ ERROR。トークンが半透明（alpha が 255 でない）なら `over`（不透明なトークンか `#rrggbb`）が要り、その上に重ねた色と比べる。`over` が無いのに半透明なら ERROR。
+- **許容差 eps**: 矩形の比べには 1e-3 px の許容を使う（浮動小数点の誤差だけ。判定の幅ではない）。
+- **ERROR と FAIL**: 測って期待に合わなければ **FAIL**。測れなかった（target が無い・capability が無い・画像が壊れている・spec が不正・mask が広すぎる）は **ERROR**。ERROR は PASS にも FAIL にも数えず、verdict は `undecidable` になる。終了コードは PASS 0・FAIL 1・ERROR 2。
+- **閾値は実行の前に spec に書く**。`evidence.py new --spec` が実行の前に spec の git の blob と HEAD を `pre/intent.json` に固定する（コミットされていない・変更されている spec は断る）。実行のあとに閾値を変えた verdict は `expected_defined: false` になる。
 
 ### kura の `[~]` の行の見立て（最初に載せるアプリの例）
 
@@ -377,25 +417,39 @@ expect = { color_token = "ok", delta_e = { max = 3 } }
 置き場所は `<evidence>\<run_id>\`。`<evidence>` は各アプリの `scripts/lanes.conf` の `evidence=`（既定 `C:\dev\<app>-evidence`。kura は今の `[~]` の規則と同じ `C:\dev\filer-evidence`）。 1 回の実行が 1 つの**新しい** folder（使い回さない。[穴の表](#gaps)）。形は全アプリで同じで、ito の検査器が読む。下は kura の例。
 
 ```text
-C:\dev\filer-evidence\20261107-101203-41.15\
-  manifest.json         アプリの名前・版・コミット、実行の種類（Runner か自前か）、ito の rev、OS・アーキテクチャ・GPU のバックエンド・倍率・テーマ・フォント、
-                        窓の大きさ、シナリオと check spec の sha256、開始と終了、keys.done の最後の行、終了コード、
-                        後片付けの結果、全ファイルの sha256
-  keys.done
-  run.json              Runner が書く実行の記録（v0.273.0。app・ito の rev・status・steps・failed の手順。manifest.json の元になる）
-  trace.jsonl           1 手順 1 行（v0.276.0。Runner が書く）: step, label, outcome, settled, frame, time, why
-  state\top-before.json   state JSON v1（Snap の前。テキストの State も並べて置く）
+C:\dev\filer-evidence\20261108-101203-41_15-3f9a\
+  .keys-run               keys.ps1 が「この folder は実行の folder」と見分ける印（evidence.py new が置く）
+  pre\intent.json         実行の前に固定した spec（path・sha256・git の blob・HEAD）  intent.v1
+  manifest.json           アプリ・ito・OS、終了コード、後片付け、scenarios と specs の sha256、全ファイルの sha256、problems   manifest.v1
+  keys.done               keys.ps1 が書く最後の行
+  run.json                Runner が書く実行の記録（v0.273.0）  run.v1
+  trace.jsonl             1 手順 1 行（v0.276.0）  trace.v1
+  state\top-before.json   state JSON v1（Snap の前）  state.v1
   state\top-after.json    Snap の後（同じ capture_id と snapshot_seq）
-  shots\top.png      全体
-  shots\top.json     Shot / Snap の付属 JSON（Snap では前後の state の path・sha256・png_sha256・state_unchanged）
-  crops\41.15-thumb-top.png
-  canary\…              Tier 2 だけ。名前は伏せ、対応表は manifest の外（scratch）に
-  machine\assertions.json
-  vision\claude-<model>-41.15.json   生の応答も残す
-  verdict-41.15.json
+  shots\top.png           全体
+  shots\top.json          Shot / Snap の付属 JSON  shot.v1
+  crops\…                 切り抜き（任意）
+  machine\assertions.json visual-check.py の出力  assertions.v1
+  vision\…                Tier 2 だけ（未実装）
+  verdict-41.15.json      evidence.py verdict の出力  verdict.v1
 ```
 
-### vision の出力（案）
+**run id は `.` を含まない**（`^[A-Za-z0-9_-]{1,64}$`。行 `41.15` は `41_15` になる）。形は `<日付>-<時刻>-<行>-<乱数 4 桁>`。使い回さず、同じ名前の folder があれば `evidence.py new` は失敗する。
+schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`manifest`・`assertions`・`verdict` の各 `.v1.json`、例は `docs/schemas/examples/`。`scripts/check-schemas.py` が schema の書き方、例、両スクリプトの自己検査が出す実物を検査し、ito-keyscript のテストが Rust の書き手の出力を例と突き合わせる。
+
+**実行の順（実機のセッション）:**
+
+1. `python3 scripts/evidence.py new --label <行> --spec tests/visual/<行>.toml` → `run_id=`・`dir=`・`env=` を出す。
+2. 環境変数 `env=` が指す名前（`lanes.conf` の `keys_env` から `_DONE` を除いて `_RUN_ID` を付けたもの）に run id を入れる。
+3. `keys.ps1 -Out <dir>`（Linux は `xrun.sh`）。
+4. どの終わり方でも（失敗・時間切れ・殺した場合も）`evidence.py manifest --run <dir> --exit-code N [--killed] --cleanup PASS|FAIL`。
+5. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
+6. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。
+7. main モデルが verdict を読み、`mark` と `decided_by` を書く。
+
+`evidence.py check --run <dir>` は folder が壊れていないかだけ見る。
+
+### vision の出力（案。Tier 2 は未実装で、vision.v1 の schema はまだ無い）
 
 ```json
 {
@@ -416,23 +470,59 @@ C:\dev\filer-evidence\20261107-101203-41.15\
 }
 ```
 
-### verdict（案）
+### verdict（v0.277.0 から。`verdict-<行>.json`、`docs/schemas/verdict.v1.json`）
 
 ```json
 {
-  "row": "41.15", "tier": 1,
+  "schema": "verdict.v1",
+  "tool": {
+    "name": "evidence.py",
+    "version": 1
+  },
+  "row": "r19",
+  "tier": 1,
+  "run_id": "c19-candidate",
   "result": "auto-pass-candidate",
   "conditions": {
-    "expected_defined": true, "screenshot": true,
-    "state_json": true, "same_run": true,
-    "machine_issues": 0, "vision_points": "n/a",
-    "major_mismatch": false, "unconfirmed": 0,
-    "cleanup": "PASS", "rationale_saved": true
+    "expected_defined": true,
+    "assertions_match": true,
+    "screenshot": true,
+    "state_json": true,
+    "same_run": true,
+    "machine_issues": 0,
+    "vision_points": "n/a",
+    "major_mismatch": false,
+    "unconfirmed": 0,
+    "cleanup": "PASS",
+    "rationale_saved": true,
+    "manifest_intact": true,
+    "run_problems": 0
   },
-  "evidence": ["machine/assertions.json#thumb-top",
-               "machine/assertions.json#thumb-bottom"],
-  "mark": "[x]",
-  "decided_by": "real-machine session, main model"
+  "reasons": [],
+  "evidence": [
+    "machine/assertions.json#thumb-top",
+    "machine/assertions.json#title"
+  ],
+  "inputs": [
+    {
+      "path": "manifest.json",
+      "sha256": "572a68c681081ee6173d5d54e65467873a24a929f78b8bc53592da50954f3c03"
+    },
+    {
+      "path": "pre/intent.json",
+      "sha256": "53ab384f9ea249f158fb76e055c9a6c9029b3e173e360e356afa4ab9f173330a"
+    },
+    {
+      "path": "machine/assertions.json",
+      "sha256": "a4161189b788e20bc1dc9665758e3da0b7e2e3cf87dd35d4ac5870e27830062b"
+    }
+  ],
+  "spec": {
+    "path": "tests/visual/r19.toml",
+    "sha256": "6d1a9ba0c2d25c9e94435392ada9fa5c755925c0c2043f9962c29e8adcf785e2"
+  },
+  "mark": null,
+  "decided_by": null
 }
 ```
 

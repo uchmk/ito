@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/manifest.v1.json",
+  "title": "ito manifest v1",
+  "description": "manifest.json: written by evidence.py manifest on every exit path; hashes the run folder.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "manifest.v1"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "written_ms": {
+      "type": "integer"
+    },
+    "app": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "commit"
+      ],
+      "additionalProperties": false
+    },
+    "runner": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ito": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "rev"
+      ],
+      "additionalProperties": false
+    },
+    "os": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "arch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_ms": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ended_ms": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "keys_done": {
+      "type": "object",
+      "properties": {
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "run",
+        "last"
+      ],
+      "additionalProperties": false
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "killed": {
+      "type": "boolean"
+    },
+    "cleanup": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    },
+    "specs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path_sha"
+      }
+    },
+    "envs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/env"
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Lower-case hex SHA-256."
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "tool",
+    "run_id",
+    "written_ms",
+    "app",
+    "runner",
+    "ito",
+    "os",
+    "arch",
+    "started_ms",
+    "ended_ms",
+    "status",
+    "keys_done",
+    "exit_code",
+    "killed",
+    "cleanup",
+    "note",
+    "scenarios",
+    "specs",
+    "envs",
+    "files",
+    "problems"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "path_sha": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "wgpu_backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_set_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "theme": {
+          "type": "string"
+        },
+        "pixels_per_point": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "os",
+        "arch",
+        "wgpu_backend",
+        "font_set_sha256",
+        "theme",
+        "pixels_per_point"
+      ],
+      "additionalProperties": false
+    },
+    "scenario": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "description": "A scenario file; sha256 is null when it could not be read."
+    }
+  }
+}

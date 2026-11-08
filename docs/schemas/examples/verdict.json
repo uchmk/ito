@@ -1,0 +1,51 @@
+{
+  "schema": "verdict.v1",
+  "tool": {
+    "name": "evidence.py",
+    "version": 1
+  },
+  "row": "r19",
+  "tier": 1,
+  "run_id": "c19-candidate",
+  "result": "auto-pass-candidate",
+  "conditions": {
+    "expected_defined": true,
+    "assertions_match": true,
+    "screenshot": true,
+    "state_json": true,
+    "same_run": true,
+    "machine_issues": 0,
+    "vision_points": "n/a",
+    "major_mismatch": false,
+    "unconfirmed": 0,
+    "cleanup": "PASS",
+    "rationale_saved": true,
+    "manifest_intact": true,
+    "run_problems": 0
+  },
+  "reasons": [],
+  "evidence": [
+    "machine/assertions.json#thumb-top",
+    "machine/assertions.json#title"
+  ],
+  "inputs": [
+    {
+      "path": "manifest.json",
+      "sha256": "572a68c681081ee6173d5d54e65467873a24a929f78b8bc53592da50954f3c03"
+    },
+    {
+      "path": "pre/intent.json",
+      "sha256": "53ab384f9ea249f158fb76e055c9a6c9029b3e173e360e356afa4ab9f173330a"
+    },
+    {
+      "path": "machine/assertions.json",
+      "sha256": "a4161189b788e20bc1dc9665758e3da0b7e2e3cf87dd35d4ac5870e27830062b"
+    }
+  ],
+  "spec": {
+    "path": "tests/visual/r19.toml",
+    "sha256": "6d1a9ba0c2d25c9e94435392ada9fa5c755925c0c2043f9962c29e8adcf785e2"
+  },
+  "mark": null,
+  "decided_by": null
+}

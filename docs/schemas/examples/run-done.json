@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "runner": "ito_keyscript::Runner",
+  "ito": { "version": "0.277.0", "rev": null, "rev_source": "unknown" },
+  "app": { "name": "fude", "version": "0.9.0" },
+  "run_id": "1731050000000-1234",
+  "os": "windows",
+  "arch": "x86_64",
+  "steps": 12,
+  "started_ms": 1731050000000,
+  "ended_ms": 1731050009000,
+  "status": "failed",
+  "failed": true,
+  "step": "<Assert:x>",
+  "why": "no x",
+  "left": 2
+}

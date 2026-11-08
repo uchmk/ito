@@ -67,10 +67,14 @@ for t in $others; do
 done
 run cargo +stable clippy -q --workspace --all-targets -- -D warnings
 # The lanes' scripts (scripts/lanes/FILES): they run in the apps, so here they
-# are only parsed, and merge-lanes.py's self-test run.
+# are only parsed, and the self-tests of merge-lanes.py, ito-first.py, visual-check.py and evidence.py run;
+# check-schemas.py checks docs/schemas/ against its examples and against what those self-tests emit.
 for f in scripts/lanes/*.sh; do run bash -n "$f"; done
 run python3 scripts/lanes/merge-lanes.py --self-test
 run python3 scripts/lanes/ito-first.py --self-test
+run python3 scripts/lanes/visual-check.py --self-test
+run python3 scripts/lanes/evidence.py --self-test
+run python3 scripts/check-schemas.py
 run bash -n scripts/lanes/lanes.sh
 if command -v pwsh >/dev/null; then run pwsh -NoProfile -File scripts/lanes/check-ps1.ps1; fi
 # The workflow templates: every {{token}} is one lanes.sh fills, and each renders to YAML.

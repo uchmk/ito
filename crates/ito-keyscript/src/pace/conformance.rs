@@ -20,7 +20,8 @@ pub struct StatusSpec {
 }
 
 impl StatusSpec {
-    pub(crate) fn status(&self, base: Instant) -> Status {
+    /// The ledger's [`Status`] at a run that started at `base` (`pending.2` is milliseconds from `base`).
+    pub fn status(&self, base: Instant) -> Status {
         Status {
             pending: usize::from(self.pending.is_some()),
             oldest: self.pending.map(|(seq, file, ms)| Pending { seq, file: file.to_owned(), since: base + Duration::from_millis(ms) }),
@@ -66,7 +67,8 @@ pub enum Answer {
 }
 
 impl Answer {
-    pub(crate) fn taken(&self, e: &Entry) -> Taken {
+    /// The [`Taken`] this answer gives for the step `e` ([`Answer::Stage`] is resolved with the entry's `<Snap:>` stage).
+    pub fn taken(&self, e: &Entry) -> Taken {
         match self {
             Answer::Stage => match &e.press {
                 Press::Snap { name, stage: SnapStage::Before } => Taken::State { name: format!("{name}-before") },
@@ -86,7 +88,7 @@ impl Answer {
     }
 
     /// What a host that has nothing special to say answers a step of this kind.
-    pub(crate) fn default_for(e: &Entry) -> Self {
+    pub fn default_for(e: &Entry) -> Self {
         match e.kind {
             Kind::Input => Answer::Input { flight: false, more: Vec::new() },
             // A look that is not `<Tree:>` finds its target and presses it (so it acts); `<Tree:>` only writes a file.
@@ -318,7 +320,8 @@ pub fn check(subject: &mut impl Subject, cases: &[Case]) -> Result<(), String> {
     }
 }
 
-pub(crate) fn dialect() -> Dialect<'static> {
+/// The dialect the cases' scripts are parsed with: one app reading, `Pane` (tag `pane`), for `<ReadHas:Pane=...>`.
+pub fn dialect() -> Dialect<'static> {
     Dialect { reads: &[("Pane", "pane")], ..Dialect::default() }
 }
 

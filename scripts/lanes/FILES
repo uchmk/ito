@@ -5,6 +5,7 @@
 # An app that takes only some names them in lanes.conf's `files=`.
 check-ps1.ps1
 claim.sh
+evidence.py
 ito-first.py
 ito-first.txt
 ito-required.txt
@@ -16,6 +17,7 @@ lane-status.ps1
 lanes.sh
 merge-lanes.py
 push-main.sh
+visual-check.py
 todo-open.sh
 xrun.sh
 lane-trust.ps1

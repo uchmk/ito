@@ -1,0 +1,105 @@
+{
+  "schema": "assertions.v1",
+  "tool": {
+    "name": "visual-check.py",
+    "version": 1
+  },
+  "row": "r21",
+  "tier": 1,
+  "spec": {
+    "path": "tests/visual/r21.toml",
+    "sha256": "cda20b06b38a349183e2c684a808e3a959154fde5e7f69fd1dfb81f00bb8e1a2"
+  },
+  "run_id": "c21-assertions-error",
+  "inputs": [
+    {
+      "path": "run.json",
+      "sha256": "7ad2234bfb2c36533175d63804e4ad3c0a694bf6bce9684e10fe4bb9aca4b08e"
+    },
+    {
+      "path": "keys.done",
+      "sha256": "a056a3e708fac50075a793a2fe7f9b942f01d5f264a59573ac3de77386814f1d"
+    },
+    {
+      "path": "trace.jsonl",
+      "sha256": "e29c81e1113e174e3b0299d351f78442a93d23784c449eae3a6ef51f01514b2b"
+    }
+  ],
+  "overall": "ERROR",
+  "points": [
+    {
+      "id": "thumb-top",
+      "snap": "top",
+      "state": null,
+      "target": "spot.scroll.thumb",
+      "relative_to": "spot.panel",
+      "outcome": "ERROR",
+      "inputs": [
+        {
+          "path": "state/top-before.json",
+          "sha256": "18b3f9c53102e392259d37e45dacc68d9a3c5034a288e5ddda06312fe4f9769f"
+        },
+        {
+          "path": "state/top-after.json",
+          "sha256": "fa7e99d3ad2b2b864c2ccb490f48e3b13f973ea49cf2c59770409c10fba780a9"
+        },
+        {
+          "path": "shots/top.json",
+          "sha256": "815477cf0e4f622090cbbb36324fe7273ab62c178bb040f0cef923d15825a86e"
+        },
+        {
+          "path": "shots/top.png",
+          "sha256": "89994af5d139c9c4c0e23e7f7b8458da302f97083c2017458edf8768bafc4f5e"
+        }
+      ],
+      "checks": [
+        {
+          "check": "right_gap_px",
+          "outcome": "ERROR",
+          "measured": 1,
+          "expected": {
+            "min": 0,
+            "max": 2
+          },
+          "why": null
+        },
+        {
+          "check": "width_px",
+          "outcome": "PASS",
+          "measured": 1,
+          "expected": {
+            "min": 4,
+            "max": 9
+          },
+          "why": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "title",
+      "snap": null,
+      "state": "hello",
+      "target": "title",
+      "relative_to": null,
+      "outcome": "PASS",
+      "inputs": [
+        {
+          "path": "state/hello.json",
+          "sha256": "39582ad8deeb9b4c137043ec02affc30363d254e43c409ea1bab55432b94e2b8"
+        }
+      ],
+      "checks": [
+        {
+          "check": "present",
+          "outcome": "PASS",
+          "measured": 1,
+          "expected": true,
+          "why": null
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/assertions.v1.json",
+  "title": "ito assertions v1",
+  "description": "machine/assertions.json: written by visual-check.py. Alone it never marks a row (docs/visual-test.md).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "assertions.v1"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "row": {
+      "type": "string"
+    },
+    "tier": {
+      "type": "integer"
+    },
+    "spec": {
+      "$ref": "#/$defs/path_sha"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path_sha"
+      }
+    },
+    "overall": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "ERROR"
+      ]
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "snap": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "relative_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "FAIL",
+              "ERROR"
+            ]
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/path_sha"
+            }
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "PASS",
+                    "FAIL",
+                    "ERROR"
+                  ]
+                },
+                "measured": {
+                  "description": "What was measured; its shape depends on the check (null when it could not be)."
+                },
+                "expected": {
+                  "description": "The spec's bound for the check: an object with min and/or max, or a boolean."
+                },
+                "why": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "check",
+                "outcome",
+                "measured",
+                "expected",
+                "why"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "snap",
+          "state",
+          "target",
+          "relative_to",
+          "outcome",
+          "inputs",
+          "checks",
+          "errors"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "tool",
+    "row",
+    "tier",
+    "spec",
+    "run_id",
+    "inputs",
+    "overall",
+    "points",
+    "errors"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "path_sha": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Lower-case hex SHA-256."
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

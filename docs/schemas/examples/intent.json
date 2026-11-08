@@ -1,0 +1,17 @@
+{
+  "schema": "intent.v1",
+  "tool": {
+    "name": "evidence.py",
+    "version": 1
+  },
+  "run_id": "c19-candidate",
+  "written_ms": 1794129139764,
+  "specs": [
+    {
+      "path": "tests/visual/r19.toml",
+      "sha256": "6d1a9ba0c2d25c9e94435392ada9fa5c755925c0c2043f9962c29e8adcf785e2",
+      "blob": "d0a1c8824fa801af3da3c0aa6176562593540959",
+      "head": "e2690f45f24a6177156c045dfc2e6e27e1e00812"
+    }
+  ]
+}

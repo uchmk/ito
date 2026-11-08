@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "name": "err",
+  "run_id": "r1",
+  "snapshot_seq": 1,
+  "phase": null,
+  "capture_id": null,
+  "after_step": null,
+  "after_label": null,
+  "frame": 2,
+  "settled": null,
+  "app": {
+    "name": null,
+    "version": null
+  },
+  "theme": {
+    "requested": null,
+    "name": "tsumugi Dark",
+    "dark": true,
+    "tokens": {
+      "accent": "#6fd0d0ff",
+      "bg": "#16181dff",
+      "blue": "#7ab8f5ff",
+      "border": "#2c3039ff",
+      "border-strong": "#434851ff",
+      "caret": "#e4e6ecff",
+      "caret-idle": "#9aa3b5ff",
+      "chosen": "#2b2e34ff",
+      "current-line": "#1f2126ff",
+      "diff-added": "#8ed08eff",
+      "diff-added-bg": "#27322dff",
+      "diff-modified": "#7ab8f5ff",
+      "diff-modified-bg": "#242e3bff",
+      "diff-removed": "#f07178ff",
+      "diff-removed-bg": "#35242aff",
+      "dim": "#9aa3b5ff",
+      "done": "#8ed08eff",
+      "err": "#f07178ff",
+      "faint": "#808797ff",
+      "fg": "#c8cdd8ff",
+      "fold": "#2e3138ff",
+      "gutter": "#79808fff",
+      "gutter-active": "#bac0ceff",
+      "hover": "#24272dff",
+      "ime-underline": "#6fd0d0ff",
+      "invisible": "#6c7280ff",
+      "invisible-fill": "#282b32ff",
+      "magenta": "#c99cf0ff",
+      "match-bg": "#36322bff",
+      "match-current-bg": "#484233ff",
+      "on-accent": "#16181dff",
+      "panel": "#1b1e24ff",
+      "raised": "#22252bff",
+      "run": "#6fd0d0ff",
+      "selection": "#304b4fff",
+      "side": "#121418ff",
+      "strong": "#e4e6ecff",
+      "success": "#8ed08eff",
+      "wait": "#e8c87aff",
+      "wait-bg": "#272829ff",
+      "wait-text": "#e5e0d5ff",
+      "warning": "#e8c87aff"
+    },
+    "tokens_sha256": "1932bfe42c50b04a5eeeced8544c5814ae2e6ef8ee73be7e0a6ee28a12e9d317"
+  },
+  "lang": {
+    "requested": null,
+    "in_force": "ja"
+  },
+  "window": {
+    "inner_px": [
+      0.0,
+      0.0,
+      800.0,
+      600.0
+    ],
+    "pixels_per_point": 2.0,
+    "monitor_work_area_px": null
+  },
+  "screen": null,
+  "overlay": null,
+  "toasts": null,
+  "app_state": null,
+  "ui": [
+    {
+      "test_id": "dup",
+      "error": "the test ID `dup` is on 2 widgets ([#16188804752753044341, #12320929853585917734])"
+    }
+  ],
+  "capabilities": [
+    "lang",
+    "theme",
+    "ui",
+    "window"
+  ],
+  "stable": {
+    "projection": 1,
+    "ui_sha256": "35ba6f756d3b9b0ea74a709f62d501868e8d3cf29b0d40f621a872299edb3152",
+    "app_sha256": "bba2dd7488afdd057f513747d98a806d93cb12e03c8fb7ca7567490305a8e37b"
+  }
+}

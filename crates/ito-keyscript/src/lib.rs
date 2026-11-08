@@ -32,6 +32,8 @@ pub mod probe;
 #[cfg(test)]
 mod rev;
 pub mod review;
+#[cfg(test)]
+mod shape;
 pub mod state;
 
 use ito_keys::{self as keys, Code, Key};
@@ -5195,9 +5197,6 @@ mod tests {
         assert_eq!(r.due(), None);
     }
 
-    /// `ito_theme` and `ito_i18n` hold process-wide state; the tests that write it take turns.
-    static GLOBALS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn temp(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ito-keyscript-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -5272,7 +5271,7 @@ mod tests {
 
     #[test]
     fn the_shot_takes_the_theme_and_language_in_force_when_the_request_goes_out() {
-        let _g = GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::shape::GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
         let themes = ito_theme::builtin();
         ito_theme::set_theme(&themes[0]);
         ito_i18n::set_in_force("ja");

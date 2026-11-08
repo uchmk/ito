@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/trace.v1.json",
+  "title": "ito trace line v1",
+  "description": "One line of trace.jsonl: a script step that ran (compact JSON, one object per line).",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "step": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "done",
+        "failed",
+        "cut"
+      ]
+    },
+    "settled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "frame": {
+      "type": "integer"
+    },
+    "time_ms": {
+      "type": "integer"
+    },
+    "end_frame": {
+      "type": "integer"
+    },
+    "end_ms": {
+      "type": "integer"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "step",
+    "label",
+    "outcome",
+    "settled",
+    "frame",
+    "time_ms",
+    "end_frame",
+    "end_ms",
+    "why"
+  ],
+  "additionalProperties": false
+}

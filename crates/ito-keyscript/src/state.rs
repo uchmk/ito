@@ -862,4 +862,75 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+
+    /// Writes one state through the real writer and returns the file's text.
+    fn written(dir: &std::path::Path, h: Header, app: App, draw: &mut dyn FnMut(&mut egui::Ui)) -> String {
+        let ctx = egui::Context::default();
+        crate::observe(&ctx);
+        ctx.set_pixels_per_point(2.0);
+        pass(&ctx, draw);
+        let name = h.name.clone();
+        submit(&ctx, h, app).unwrap();
+        pass(&ctx, draw);
+        assert!(matches!(wait_ack(&ctx), Ack::Written { .. }));
+        std::fs::read_to_string(dir.join("state").join(format!("{name}.json"))).unwrap()
+    }
+
+    /// The files in `docs/schemas/examples/` have the shape (keys, order, types) of what the writer writes.
+    #[test]
+    fn the_written_state_has_the_shape_of_the_examples() {
+        let _g = crate::shape::GLOBALS.lock().unwrap_or_else(|e| e.into_inner());
+        ito_theme::set_theme(&ito_theme::builtin()[0]);
+        ito_i18n::set_in_force("ja");
+        let dir = temp("shape");
+        let mut draw = |ui: &mut egui::Ui| {
+            let r = ui.label("cut");
+            let mut job = egui::text::LayoutJob::single_section("a long label that has to be cut".into(), egui::TextFormat::default());
+            job.wrap.max_width = 20.0;
+            job.wrap.max_rows = 1;
+            job.wrap.break_anywhere = true;
+            let cut = ui.fonts_mut(|f| f.layout_job(job));
+            let clip = egui::Rect::from_min_max(r.rect.min, egui::pos2(r.rect.center().x, r.rect.max.y));
+            ui.scope(|ui| {
+                ui.set_clip_rect(clip);
+                ito_a11y::test_id_in(ui, &r, "a_cut", Some(&cut));
+            });
+            let r = ui.button("plain");
+            ito_a11y::test_id(&r, "b_plain");
+        };
+        let app = App {
+            screen: Some("main".into()),
+            overlay: Some(Some("palette".into())),
+            toasts: Some(vec![Toast { text: "saved".into(), kind: "info".into() }]),
+            app_state: Some(serde_json::json!({"tab": 1})),
+        };
+        let plain = written(&dir, header(&dir, "plain"), app.clone(), &mut draw);
+        crate::shape::check("state", &plain, crate::shape::example!("state"));
+
+        let h = Header {
+            after_step: Some(3),
+            after_label: Some("<Click:x>".into()),
+            settled: Some(true),
+            app_name: Some("demo".into()),
+            app_version: Some("1.2.3".into()),
+            theme_requested: Some("ito-dark".into()),
+            lang_requested: Some("ja".into()),
+            phase: Some(Phase::Before),
+            capture_id: Some("1-a".into()),
+            ..header(&dir, "a-before")
+        };
+        let before = written(&dir, h, app, &mut draw);
+        crate::shape::check("state-before", &before, crate::shape::example!("state-before"));
+
+        // Two widgets with one test id: the entry is an error, not a rectangle.
+        let mut dup = |ui: &mut egui::Ui| {
+            let r = ui.button("one");
+            ito_a11y::test_id(&r, "dup");
+            let r = ui.button("two");
+            ito_a11y::test_id(&r, "dup");
+        };
+        let err = written(&dir, header(&dir, "err"), App::default(), &mut dup);
+        crate::shape::check("state-error-entry", &err, crate::shape::example!("state-error-entry"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

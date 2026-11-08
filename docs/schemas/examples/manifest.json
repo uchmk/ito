@@ -1,0 +1,102 @@
+{
+  "schema": "manifest.v1",
+  "tool": {
+    "name": "evidence.py",
+    "version": 1
+  },
+  "run_id": "c19-candidate",
+  "written_ms": 1794129139803,
+  "app": {
+    "name": "demo",
+    "version": "0.1.0",
+    "commit": null
+  },
+  "runner": "ito-keyscript",
+  "ito": {
+    "version": "0.277.0",
+    "rev": "7d28f32"
+  },
+  "os": "windows",
+  "arch": "x86_64",
+  "started_ms": 1794129140764,
+  "ended_ms": 1794129141264,
+  "status": "done",
+  "keys_done": {
+    "run": "c19-candidate",
+    "last": "keys: done"
+  },
+  "exit_code": 0,
+  "killed": false,
+  "cleanup": "PASS",
+  "note": null,
+  "scenarios": [],
+  "specs": [
+    {
+      "path": "tests/visual/r19.toml",
+      "sha256": "6d1a9ba0c2d25c9e94435392ada9fa5c755925c0c2043f9962c29e8adcf785e2"
+    }
+  ],
+  "envs": [
+    {
+      "os": "windows",
+      "arch": "x86_64",
+      "wgpu_backend": null,
+      "font_set_sha256": null,
+      "theme": "dark",
+      "pixels_per_point": 1.5
+    }
+  ],
+  "files": [
+    {
+      "path": ".keys-run",
+      "sha256": "7b6bf1b75e3088d343f80b091c41460ab7c6935bb146e1ea78ba4d1d3577b538",
+      "size": 67
+    },
+    {
+      "path": "keys.done",
+      "sha256": "51b08761cc17028a8908359bb17b7def8b24e7ea189446e055943df7b045e9ec",
+      "size": 39
+    },
+    {
+      "path": "pre/intent.json",
+      "sha256": "53ab384f9ea249f158fb76e055c9a6c9029b3e173e360e356afa4ab9f173330a",
+      "size": 417
+    },
+    {
+      "path": "run.json",
+      "sha256": "44ae8ca246fc2bbf31cf36b2b8f2a4f2aec9ea958203f747b5865283c1ca955a",
+      "size": 421
+    },
+    {
+      "path": "shots/top.json",
+      "sha256": "4a5d4f1d86805dee7e9e4b6ba98e78b01e88d418cb6ea2969e1b796c0582c49b",
+      "size": 1507
+    },
+    {
+      "path": "shots/top.png",
+      "sha256": "89994af5d139c9c4c0e23e7f7b8458da302f97083c2017458edf8768bafc4f5e",
+      "size": 233
+    },
+    {
+      "path": "state/hello.json",
+      "sha256": "a4a8c3f51ae46a08376fb9fa26812c3db6dde4b774aaf534b27834a0b278d92a",
+      "size": 1687
+    },
+    {
+      "path": "state/top-after.json",
+      "sha256": "58abc26f7595fe774dfddd36d4edf6a94517a6acd5b3d6f38e00448ded6fa521",
+      "size": 1697
+    },
+    {
+      "path": "state/top-before.json",
+      "sha256": "05089a44cc46eb36963d3e6d127ada89ed54ce37da81028180e8e3b476be509b",
+      "size": 1699
+    },
+    {
+      "path": "trace.jsonl",
+      "sha256": "cb118312493fc88d99e22656079dbdd5fa7c0562ae9a72f6d4dbf6b4aadf89f9",
+      "size": 579
+    }
+  ],
+  "problems": []
+}

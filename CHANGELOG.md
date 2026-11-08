@@ -3,6 +3,29 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.277.0] - 2026-11-08
+
+### 追加
+
+- 見た目の行の検査と証拠の道具（ito#205 の C）。`scripts/lanes/` に入り、`lanes.sh sync` で各アプリの `scripts/` に写る（標準ライブラリだけの Python 3.11 以上）。
+  - `visual-check.py`: check spec（`tests/visual/<行>.toml`）と実行の folder を読み、`machine/assertions.json`（assertions.v1）を書く。終了コードは PASS 0・FAIL 1・ERROR 2。
+  - `evidence.py`: `new`（実行の folder と、spec を固定する `pre/intent.json`）・`manifest`（どの終わり方でも）・`check`・`verdict`（`verdict-<行>.json`。`result` は候補で、`mark` と `decided_by` は main モデルが書く）。
+- `docs/schemas/`: state・shot・trace・run・intent・manifest・assertions・verdict の `*.v1.json` と、`examples/`。`scripts/check-schemas.py` が schema の書き方、例、両スクリプトの出す実物を検査し、verify.sh と CI の `lanes` が回す。
+- ito-keyscript のテスト: Rust の書き手（state・shot の付属 JSON・trace・run）の出力が `docs/schemas/examples/` と同じ形（キー・順序・型）であることを確かめる。
+- `pace::conformance` の 4 つを `pub` にした（kura の頼み）。アプリが自前の `Subject` で `check(&mut subject, &cases())` を回し、合わない手順の答えを自分で組める:
+  `StatusSpec::status(base)`（台帳の `Status` を作る）、`Answer::taken(&Entry)`（`Stage` は `<Snap:>` の段で決める）、`Answer::default_for(&Entry)`（手順の種類の既定の答え）、`dialect()`（台本を読む `Dialect`。`<ReadHas:Pane=…>` の `Pane`）。
+
+### 変更
+
+- `docs/visual-test.md`（版は 1 のまま。判定は変えず、規則を正確にした）: check spec の読み方（`spec = 1`・`size_pt`・`expect` の閉じた一覧・単位・色のサンプリングと mask・半透明のトークン・ERROR と FAIL）、
+  実際のファイル名と run id（`.` を含まない）、実行の順、条件 1〜10 と verdict の `conditions` の対応。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す（`evidence.py` と `visual-check.py` が `scripts/` に入る）。
+- 見た目の行は `tests/visual/<行>.toml` を書き、実行の前にコミットする（`docs/visual-test.md` の d6 の形）。
+- Rust の API は足しただけ（上の `pace::conformance` の 4 つ）。使う側に直すところは無い。
+
 ## [0.276.0] - 2026-11-08
 
 ### 追加

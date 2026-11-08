@@ -1,0 +1,105 @@
+{
+  "schema": "assertions.v1",
+  "tool": {
+    "name": "visual-check.py",
+    "version": 1
+  },
+  "row": "r19",
+  "tier": 1,
+  "spec": {
+    "path": "tests/visual/r19.toml",
+    "sha256": "6d1a9ba0c2d25c9e94435392ada9fa5c755925c0c2043f9962c29e8adcf785e2"
+  },
+  "run_id": "c19-candidate",
+  "inputs": [
+    {
+      "path": "run.json",
+      "sha256": "44ae8ca246fc2bbf31cf36b2b8f2a4f2aec9ea958203f747b5865283c1ca955a"
+    },
+    {
+      "path": "keys.done",
+      "sha256": "51b08761cc17028a8908359bb17b7def8b24e7ea189446e055943df7b045e9ec"
+    },
+    {
+      "path": "trace.jsonl",
+      "sha256": "cb118312493fc88d99e22656079dbdd5fa7c0562ae9a72f6d4dbf6b4aadf89f9"
+    }
+  ],
+  "overall": "PASS",
+  "points": [
+    {
+      "id": "thumb-top",
+      "snap": "top",
+      "state": null,
+      "target": "spot.scroll.thumb",
+      "relative_to": "spot.panel",
+      "outcome": "PASS",
+      "inputs": [
+        {
+          "path": "state/top-before.json",
+          "sha256": "05089a44cc46eb36963d3e6d127ada89ed54ce37da81028180e8e3b476be509b"
+        },
+        {
+          "path": "state/top-after.json",
+          "sha256": "58abc26f7595fe774dfddd36d4edf6a94517a6acd5b3d6f38e00448ded6fa521"
+        },
+        {
+          "path": "shots/top.json",
+          "sha256": "4a5d4f1d86805dee7e9e4b6ba98e78b01e88d418cb6ea2969e1b796c0582c49b"
+        },
+        {
+          "path": "shots/top.png",
+          "sha256": "89994af5d139c9c4c0e23e7f7b8458da302f97083c2017458edf8768bafc4f5e"
+        }
+      ],
+      "checks": [
+        {
+          "check": "right_gap_px",
+          "outcome": "PASS",
+          "measured": 1,
+          "expected": {
+            "min": 0,
+            "max": 2
+          },
+          "why": null
+        },
+        {
+          "check": "width_px",
+          "outcome": "PASS",
+          "measured": 1,
+          "expected": {
+            "min": 4,
+            "max": 9
+          },
+          "why": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "title",
+      "snap": null,
+      "state": "hello",
+      "target": "title",
+      "relative_to": null,
+      "outcome": "PASS",
+      "inputs": [
+        {
+          "path": "state/hello.json",
+          "sha256": "a4a8c3f51ae46a08376fb9fa26812c3db6dde4b774aaf534b27834a0b278d92a"
+        }
+      ],
+      "checks": [
+        {
+          "check": "present",
+          "outcome": "PASS",
+          "measured": 1,
+          "expected": true,
+          "why": null
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "errors": []
+}
