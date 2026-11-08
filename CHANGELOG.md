@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.278.0] - 2026-11-08
+
+### 追加
+
+- ito-testcheck の `testcheck` に `--open`（ito#200）。まだ済んでいない手で押す行（`[ ]` と、見ただけの `[~]`）だけを、その節の見出し・注・準備と一緒に stdout に出す。
+  全体の表（kura では 400 KB ほど）を読まずに、残りだけを丸ごと読める。ファイルは書かず、印は今までどおり全体の表に付ける。`--lane NAME` と組める。
+  全部が自動テスト済みの節と「自動テスト済みなので下には出していない」の行は出さない。済みだが TESTING.md に無い項目は全体の表と同じに出す。残りが無ければ「残りはありません。」（`plain` なら `Nothing open.`）。
+  行の書き方は全体の表と同じ関数で作るので、2 つがずれない。`--check`・`--stats` とは組めない（終了コード 2）。行が 1 つも読めない TESTING.md は `--check` と同じく終了コード 1 で断る。
+  使う側は何も変えなくてよい（`cargo run --example make-testcheck -- --open`、ほかのレーンは `-- --lane linux --open`）。
+
 ## [0.277.0] - 2026-11-08
 
 ### 追加

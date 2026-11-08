@@ -39,7 +39,7 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 | `ito-palette` | コマンドパレット（一覧・文字の順の一致・egui の重ね表示）と、キャレットに付く補完の小さな一覧 `show_at`（`InlineView`。下に開き、足りなければ上へ返す・窓の内に収める・8 行まで・Up/Down/Ctrl+P/N/Enter/Tab/Esc だけ取り、打鍵はエディターに残す） | yagura、koyomi、michi、fude |
 | `ito-select` | 描画で並べた文字（ガラスのレイアウト）をマウスの範囲選択でコピーする（プレビュー・詳細欄のように、部品でなく painter で描く窓向け） | kura、michi |
 | `ito-browser` | ペインの横のウェブのページ（Windows・macOS は OS の WebView を窓の子に、Linux はシステムのブラウザへ）、egui のアドレスの欄、打った行の読み方 | まだ無い（tsumugi・minato が使っていた） |
-| `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。依存は serde と toml だけ | kura（dev-dependencies） |
+| `ito-testcheck` | テストのレーンが押すチェック表の生成（`TESTING.md` → レーンごとの表、`keymap.toml` → キーの表）。アプリの `examples/` が `Config` を渡して `run` を呼ぶ。`--check`・`--stats`、残りの行だけを出す `--open`。依存は serde と toml だけ | kura（dev-dependencies） |
 | `ito-winres` | `.exe` のアイコンと版の情報の `.res`（rc.exe なしで書く）と、`build.rs` から呼ぶ `emit(name, sides, rgba)`。MSVC のターゲットだけ、クロスビルドでも付く |
 | `ito-watch` | フォルダーの変更をその場で受ける（`notify` を別スレッドで。ネットワークの共有は見ない・見られないときは `Watching(false)` で呼ぶ側が定期に見に行く・最新の願いだけ通す） | michi |
 | `ito-guard` | コミットの前の見張り（守る名前のブランチ `*`、ステージされたファイルの大きさ・鍵・`.env`・中のトークン）。Git は知らない（`Entry` の一覧と読む関数を渡す） | michi |

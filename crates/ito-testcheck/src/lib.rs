@@ -12,7 +12,8 @@
 //! regenerating costs nothing already done, and both take `--check` (write
 //! nothing, exit 1 when the file is out of date: what CI runs) and `--stats`
 //! (the counts, which are kept out of the file so that two pull requests
-//! ticking boxes do not conflict over a total).
+//! ticking boxes do not conflict over a total). [`testcheck`] also takes
+//! `--open`: only the rows still open, to read in full instead of the file.
 
 pub mod keycheck;
 pub mod testcheck;
