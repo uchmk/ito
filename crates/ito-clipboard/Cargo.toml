@@ -1,0 +1,17 @@
+[package]
+name = "ito-clipboard"
+description = "Copy text to the clipboard the same way in every app: one writer, CRLF on Windows, a fake under test, and the copy record `--keys` reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["os"]
+# The OS clipboard (arboard). Without it, `Clipboard` works only as a fake.
+os = ["dep:arboard"]
+
+[dependencies]
+# Text only: no image feature.
+arboard = { version = "3.6", default-features = false, optional = true }

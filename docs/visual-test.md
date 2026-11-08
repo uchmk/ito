@@ -41,7 +41,7 @@ AI Vision を「合格を決める目」にしない。事前に決めた観点�
 
 - **規則は kura・yagura・michi で同じ考え。**`[x]` は「実機で測って確かめた」で、付けてよいのは実機のセッションの main モデルと持ち主だけ。見た目の行は `[~]`（Agent が撮った画像で判断した。済みに数えない。持ち主が同じ画像を見て `[x]` にする）。 書いてある場所はアプリごとに違う: kura `docs/claude/lanes.md` 100 行〜（「`[x]` の規則（正）」）、yagura `.claude/windows-role.md` 44・53 行（“Never tick a look.”）、michi `CLAUDE.md` 63 行（「見た目の行は `[~]`（画面の画像で判断した）まで」）。koyomi と fude には、`[~]`・`[x]` の規則の文がまだ無い。
 - **いまの規則にある食い違い（kura で見つけた。ほかのアプリの文も同じ形）**。kura `lanes.md` 114 行は「見た目の行には絶対に付けない」、`windows-role.md` 157 行は「位置や色はピクセルで測れるので測る」。 どこまでが「測った」かの線が無い。変更 1 はこの線を引くだけの変更にする。
-- **ito keys**。ito の `ito-keyscript` には `<Tree:name>`（AccessKit の木。役割・名前・値・focused・checked と `announced:`）、`<Assert:>`、`<Is:>`、`<ClickText:>` がある。 yagura・koyomi・michi・fude は ito の `Runner` で実行するのでそのまま使える。**kura は自前の実行（`src/script_run.rs`）で、これらを窓を開く前に拒む**（v0.151.0。以前は黙って飛ばしていた）。`tree_text` は矩形を出さない。
+- **ito keys**。ito の `ito-keyscript` には `<Tree:name>`（AccessKit の木。役割・名前・値・focused・checked と `announced:`）、`<Assert:>`、`<Is:>`、`<ClickText:>` がある。 yagura・koyomi・michi・fude は ito の `Runner` で実行するのでそのまま使える。**kura は自前の実行（`src/script_run.rs`）で、v0.154.0 からこれらとクリップボードの手順を自分で実行する**（v0.151.0〜v0.153 は窓を開く前に拒み、それより前は黙って飛ばしていた）。`tree_text` は矩形を出さない。
 - **`<State:name>` と `<Shot:name>` は kura と Runner のアプリ（yagura・koyomi・michi・fude）にある**が、中身はアプリごとの自由なテキスト。kura はそこに `settled: yes|no` を足した（v0.151.0）。`<Shot:>` は PNG だけで、いつの状態の画像かを示すものが無い。
 - **runner**。ito のレーンのスクリプト `keys.ps1 -Isolate -Out`（Windows）と `xrun.sh`（Linux）を各アプリが写して使う（ito `scripts/lanes/FILES`、値は各アプリの `scripts/lanes.conf`）。 使い回した `-Out` に前の回の成果物が残る問題は ito v0.262.3 で直った（kura は v0.150.4 で写した）。`xrun.sh` が `keys: done` で終わらない run を成功にしていた問題は ito v0.262.7 で直った（ito#202、閉じた）。
 
@@ -173,7 +173,7 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 | Test ID | `ito-a11y` の `test_id`。名前は各アプリ（ito の部品の分は ito） | egui の id と別の、変わらない名前（kura なら `spot.scroll.thumb`、ito の設定の画面なら `settings.field.<id>`）。観点はこれで対象を指す。 |
 | `<Snap:name>`、矩形つきの `<Tree:>` | ito-keyscript（ito#203） | State → Shot → State を 1 つの手順に。木の行に矩形とクリップを足す。Runner の 3 つのアプリはそのまま使え、kura は自前の実行に写す。 |
 | Shot の付属 JSON | ito（いまの `review::Meta` を広げる） | PNG ごとに run_id・snapshot_seq・前後の state のハッシュ・環境。名前は `shots/<name>.json`（State と分ける）。 |
-| kura の `<Tree:>`・`<Assert:>`・`<Is:>` | kura だけ | ito の `tree_text` などを呼んで実行する（いまは窓を開く前に拒否）。Runner のアプリはもう使える。 |
+| kura の `<Tree:>`・`<Assert:>`・`<Is:>` | kura だけ | **済み（kura v0.154.0）。** ito の `tree_text` などを呼んで自前の実行で読む。Runner のアプリはもう使える。 |
 
 **座標の約束:** 矩形はスクリーンショットの画素（`rect_px`）で出し、`pixels_per_point` を並べて書く。画像と state の座標をそろえないと、切り抜きも突き合わせもできない。
 

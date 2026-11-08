@@ -3,6 +3,28 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.270.0] - 2026-11-08
+
+### 追加
+
+- `ito-clipboard`（#206 の 2）: 文字をクリップボードに写す共通の書き手。依存は任意の arboard（機能 `os`、既定）だけ。
+  - `clipboard!()` が `Clipboard` を選ぶ。そのスレッドで `Fake::enter()` したものがあればそれ、なければ（呼んだクレート自身の `cfg(test)` では）そのスレッドの偽物、それ以外は OS。テストが機械のクリップボードを書き換えない。
+  - `Clipboard::set_text(text)`: OS は長生きの 1 つの handle で書く。Windows は `\n` を CRLF にする（`line_endings(text, windows)`。既存の CRLF は 1 つのまま、ほかの OS は CRLF を LF に）。成功したときだけ `last_set` を覚え、`note_copy` に元の文字を渡す。`get_text()` は短命の handle で読む（書き込みを待たせない。X11 では止まるのでワーカーから。空・文字なしは `Ok(None)`）。`last_set()`・`is_fake()`。`Clipboard` は `Clone + Send + Sync` で、ワーカーに渡すと選んだ偽物がついていく。
+  - `Error::{Occupied, NotSupported(String), Conversion, Other(String)}`（`#[non_exhaustive]`）。
+  - `Fake`: メモリ上のクリップボード（clone は同じものを指す）。`enter`（`Entered` の guard。入れ子可）・`this_thread`・`put`（他のプログラムがコピーした体で `get_text` に出す）・`contents`・`last_set`・`writes`・`fail_next_write`・`noting`（成功した書き込みを `note_copy` にも渡す。記録はプロセスで 1 つなので、順番を取ること）。
+  - `release()`: 終わるときに 1 回。X11 では最後の handle を落としたときにクリップボードマネージャーへ渡る。
+  - コピーの記録（`note_copy`・`record::{start, next_stamp, snapshot, note_when, reset}`）を `ito-keyscript` から移した。動きは同じ。
+
+### 変更
+
+- `ito-keyscript`: `note_copy` は `ito_clipboard::note_copy` の再エクスポート（呼び方・意味は同じ）。`observe` は `ito_clipboard::record::start()` を呼ぶ。
+- 文書: `docs/visual-test.md`・`docs/autotest.md` の「kura は木とクリップボードの手順を窓の前で断る」を、kura v0.154.0 から自分で実行する、に直した。
+
+### 使う側がやること
+
+- kura: `exec::set_clipboard` → `ito_clipboard::clipboard!().set_text(text)`、`get_clipboard` → `clipboard!().get_text()`（ワーカーで。`None` は空）、`last_set_clipboard` → `clipboard!().last_set()`、`fake_clipboard` → `Fake::this_thread().put(Some(..))`、`note_copies_here` → `Fake::new().noting()` を `enter` して順番を取る。arboard の直接の依存を外す。終わるときに `ito_clipboard::release()`。
+- ほかのアプリ（michi・fude・yagura・koyomi）: `ctx.copy_text` はそのまま `<Clipboard:>` に見える。Windows で CRLF にしたいなら `clipboard!().set_text`。
+
 ## [0.269.0] - 2026-11-08
 
 ### 追加

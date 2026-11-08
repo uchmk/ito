@@ -67,6 +67,7 @@
 | コードの色分け | `ito-syntax` |
 | 日本語の変換中の下線・候補窓の位置 | `ito-ime` |
 | 描いた文字をマウスで範囲選択してコピー | `ito-select` |
+| 文字をクリップボードに写す | `ito_clipboard::clipboard!().set_text(..)`（Windows は CRLF、テストでは偽物 `Fake`、`--keys` の `<Clipboard:>` に見える。読むのは `get_text()`、ワーカーで） |
 | 検索の一致（正規表現・曖昧）・置換の編集 | `ito-match`（`Matcher`・`Subst::edits`） |
 | **検索・置換のバー**（Ctrl+F / Ctrl+H） | `ito-find`（`FindBar`） |
 | 行の差分（ガターの変更表示、保存前の比較） | `ito-diff` |

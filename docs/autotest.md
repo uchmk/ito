@@ -160,7 +160,7 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 
 ### わかった事実
 
-- kura の `--keys` は ito の `Runner` を使わない自前の実行役（`src/script_run.rs`、v0.151.0 で分けた）。木とクリップボードの手順は全部、窓の前で断る。yagura・koyomi・michi・fude は `Runner` を使う（§1a）。
+- kura の `--keys` は ito の `Runner` を使わない自前の実行役（`src/script_run.rs`、v0.151.0 で分けた）。木とクリップボードの手順は v0.154.0 から自分で実行する（v0.151.0〜v0.153 は窓の前で断っていた）。yagura・koyomi・michi・fude は `Runner` を使う（§1a）。
 - ito の `Tap` は、AccessKit の更新が無い frame で前の観測をそのまま残す。`<Tree>` は空の木でも通る。`<Assert:>` など空の文字列は何にでも合う。
 - 設定の書き込みは別のスレッドで、待っている仕事を 1 回にまとめて書く。`settled` に入らない。
 - ターミナルを開くキーは、開いていれば焦点を移すだけ（新しい子にならない）。
