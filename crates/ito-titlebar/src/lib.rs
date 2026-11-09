@@ -245,6 +245,7 @@ fn search_box(ui: &mut Ui, r: Rect, compact: bool, words: &Words<'_>) -> bool {
     let c = ito_theme::colors();
     let p = ui.painter().clone();
     let resp = ui.interact(r, ui.id().with("titlebar-search"), Sense::CLICK).on_hover_text(words.search);
+    ito_a11y::test_id(&resp, "titlebar.search");
     p.rect_filled(r, BOX_RADIUS, if resp.hovered() { c.hover() } else { c.panel });
     p.rect_stroke(r, BOX_RADIUS, Stroke::new(1.0, c.border), egui::StrokeKind::Inside);
     let glass = Pos2::new(r.left() + 15.0, r.center().y - 1.0);
@@ -303,6 +304,7 @@ pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>
         return ThemeTag { clicked: false, end: rect.left() };
     }
     let resp = ui.interact(r, ui.id().with("titlebar-theme"), Sense::CLICK).on_hover_text(words.hover);
+    ito_a11y::test_id(&resp, "titlebar.theme");
     let p = ui.painter().clone();
     if resp.hovered() {
         p.rect_filled(r, 6.0, c.hover());
@@ -319,6 +321,7 @@ pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>
 fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> egui::Response {
     let c = ito_theme::colors();
     let resp = ui.interact(rect, ui.id().with("titlebar-bell"), Sense::CLICK).on_hover_text(spec.words.bell);
+    ito_a11y::test_id(&resp, "titlebar.bell");
     let p = ui.painter_at(rect.expand(6.0));
     if resp.hovered() {
         p.rect_filled(rect, 6.0, c.selection().gamma_multiply(0.5));
@@ -355,13 +358,14 @@ fn caption_buttons(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> Option<WindowOp>
     let mut out = None;
     let w = &spec.words;
     let ops = [
-        (WindowOp::Minimize, w.minimize),
-        (WindowOp::ToggleMax, if spec.maximized { w.restore } else { w.maximize }),
-        (WindowOp::Close, w.close),
+        (WindowOp::Minimize, w.minimize, "titlebar.caption.minimize"),
+        (WindowOp::ToggleMax, if spec.maximized { w.restore } else { w.maximize }, "titlebar.caption.maximize"),
+        (WindowOp::Close, w.close, "titlebar.caption.close"),
     ];
-    for (k, (op, words)) in ops.into_iter().enumerate() {
+    for (k, (op, words, name)) in ops.into_iter().enumerate() {
         let r = Rect::from_min_size(rect.min + Vec2::new(k as f32 * CAPTION_W, 0.0), Vec2::new(CAPTION_W, rect.height()));
         let resp = ui.interact(r, ui.id().with(("titlebar-caption", k)), Sense::CLICK).on_hover_text(words);
+        ito_a11y::test_id(&resp, name);
         let p = ui.painter();
         let hot = resp.hovered();
         let close = op == WindowOp::Close;
@@ -462,6 +466,55 @@ mod tests {
 
     fn spec(unread: usize, centre: bool) -> Spec<'static> {
         Spec { own: true, left: 0.0, maximized: false, unread, any_error: false, centre, right_min: 0.0, words: words() }
+    }
+
+    /// One frame with AccessKit on: the test IDs the bar registered, with the theme tag in the right slot.
+    fn ids(width: f32, spec: &Spec<'_>) -> (Out, Vec<ito_a11y::TestIdEntry>) {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut out = Out::default();
+        let tw = ThemeWords { dark: "Dark", light: "Light", hover: "Switch" };
+        let mut full = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width, HEIGHT))), ..Default::default() },
+            |ui| {
+                out = show(
+                    ui,
+                    spec,
+                    |_, _| 120.0,
+                    |ui, rect| {
+                        theme_tag(ui, rect, true, &tw);
+                    },
+                );
+            },
+        );
+        full.textures_delta.clear();
+        (out, ito_a11y::take_test_ids(&ctx, egui::ViewportId::ROOT))
+    }
+
+    #[test]
+    fn the_parts_register_their_test_ids_once() {
+        let (out, found) = ids(1600.0, &spec(1, true));
+        let names: Vec<&str> = found.iter().map(|e| e.name.as_str()).collect();
+        let mut want = vec!["titlebar.search", "titlebar.theme", "titlebar.bell"];
+        if !cfg!(target_os = "macos") {
+            want.extend(["titlebar.caption.minimize", "titlebar.caption.maximize", "titlebar.caption.close"]);
+        }
+        for n in &want {
+            assert_eq!(names.iter().filter(|x| *x == n).count(), 1, "{n} in {names:?}");
+        }
+        assert_eq!(names.len(), want.len(), "{names:?}");
+        let bell = found.iter().find(|e| e.name == "titlebar.bell").unwrap();
+        assert_eq!(bell.rect, out.bell_rect.expect("a bell"));
+    }
+
+    #[test]
+    fn without_own_buttons_no_caption_id_is_registered() {
+        let mut s = spec(0, true);
+        s.own = false;
+        let (_, found) = ids(1600.0, &s);
+        let names: Vec<&str> = found.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.iter().all(|n| !n.starts_with("titlebar.caption.")), "{names:?}");
+        assert!(names.contains(&"titlebar.bell"), "{names:?}");
     }
 
     /// One frame of a bar `width` wide; the rects the slots were given.

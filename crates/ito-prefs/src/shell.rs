@@ -368,6 +368,7 @@ mod tests {
             assert!(has(&names, n), "{n} in {names:?}");
         }
         assert!(!has(&names, "settings.shell.env.add"));
+        assert!(!names.iter().any(|n| n.starts_with("settings.select.")), "the shell button has one name: {names:?}");
 
         edit.open(&env);
         let names = frame(&ctx, &mut drafts, &mut edit, &now);

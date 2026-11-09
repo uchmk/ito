@@ -872,7 +872,13 @@ pub fn focus_ring(ui: &egui::Ui, r: &egui::Response) {
 /// Down (Home and End) move the light, Enter or Space picks and shuts it, Esc
 /// shuts it as it was, and Tab shuts it and goes on to the next control.
 pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
-    select_with_response(ui, id, now, options).0
+    let (pick, resp) = select_with_response(ui, id, now, options);
+    // Only a name `is_test_id` accepts: app ids may hold other characters, and those get no ID.
+    let name = format!("settings.select.{id}");
+    if ito_a11y::is_test_id(&name) {
+        ito_a11y::test_id(&resp, &name);
+    }
+    pick
 }
 
 /// [`select`] and the list button's response, for a caller that gives the button a test ID.
@@ -935,6 +941,10 @@ pub(crate) fn select_with_response<T: PartialEq + Copy>(
         for (k, (v, t)) in options.iter().enumerate() {
             let behind = ui.painter().add(egui::Shape::Noop);
             let r = ui.selectable_value(&mut pick, *v, *t);
+            let name = format!("settings.select.{id}.{k}");
+            if ito_a11y::is_test_id(&name) {
+                ito_a11y::test_id(&r, &name);
+            }
             if light == Some(k) {
                 ui.painter().set(behind, egui::Shape::rect_filled(r.rect, 3.0, ito_theme::colors().wait.gamma_multiply(0.25)));
                 if moved {
@@ -1502,6 +1512,71 @@ mod tests {
         let to_light = flip_theme(("system", "nord", "paper"), false);
         assert_eq!((to_dark.len(), to_dark[0].key, to_dark[0].value.as_str()), (1, "theme", "\"nord\""));
         assert_eq!(to_light[0].value, "\"paper\"");
+    }
+
+    /// One frame with AccessKit on: a `select` with three options; the test IDs it registered, in order.
+    fn select_frame(ctx: &egui::Context, id: &str, events: Vec<egui::Event>) -> Vec<ito_a11y::TestIdEntry> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                select(ui, id, 1u8, &[(0, "zero"), (1, "one"), (2, "two")]);
+            });
+        });
+        out.textures_delta.clear();
+        ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT)
+    }
+
+    fn select_names(found: &[ito_a11y::TestIdEntry]) -> Vec<&str> {
+        found.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    /// Opens a `select_frame` list for real: a click on the box, over three frames (move, press, release).
+    fn open_select(ctx: &egui::Context, id: &str, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        select_frame(ctx, id, vec![egui::Event::PointerMoved(at)]);
+        select_frame(ctx, id, vec![button(true)]);
+        select_frame(ctx, id, vec![button(false)]);
+    }
+
+    #[test]
+    fn a_closed_select_has_one_test_id_and_an_open_one_names_its_options() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let found = select_frame(&ctx, "mode", vec![]);
+        assert_eq!(select_names(&found), ["settings.select.mode"]);
+        open_select(&ctx, "mode", found[0].rect.center());
+        let found = select_frame(&ctx, "mode", vec![]);
+        let names = select_names(&found);
+        assert!(names.contains(&"settings.select.mode"), "{names:?}");
+        let options: Vec<&str> = names.iter().copied().filter(|n| n.starts_with("settings.select.mode.")).collect();
+        assert_eq!(options, ["settings.select.mode.0", "settings.select.mode.1", "settings.select.mode.2"]);
+        // The options are in the order of the list, top to bottom.
+        let ys: Vec<f32> = found.iter().filter(|e| e.name.starts_with("settings.select.mode.")).map(|e| e.rect.top()).collect();
+        assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
+    }
+
+    #[test]
+    fn a_select_id_that_is_not_a_test_id_gets_no_name() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        assert!(!ito_a11y::is_test_id("settings.select.Two Words"));
+        assert!(select_frame(&ctx, "Two Words", vec![]).is_empty());
+        // Open as well, since the options are named in their own loop. This box has no rect to read, so a good id's box gives the place.
+        let good = egui::Context::default();
+        good.enable_accesskit();
+        let at = select_frame(&good, "mode", vec![])[0].rect.center();
+        open_select(&ctx, "Two Words", at);
+        assert!(select_frame(&ctx, "Two Words", vec![]).is_empty());
+        assert!(egui::Popup::is_any_open(&ctx), "the list was open while no name was registered");
     }
 
     /// Esc closes the screen, but not while a popup is open: that Esc is the popup's.

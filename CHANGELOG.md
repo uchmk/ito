@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.285.0] - 2026-11-09
+
+### 追加
+
+- `ito-titlebar`: 窓のタイトルバーの部品にテストの ID を付けた（#209）。`titlebar.search`（パレットの箱）・`titlebar.theme`（テーマの札）・`titlebar.bell`（ベル）・`titlebar.caption.minimize`・`titlebar.caption.maximize`・`titlebar.caption.close`（窓のボタン）。最大化のボタンは、最大化している間も同じ名前。ドラッグの場所には名前を付けない。
+- `ito-prefs`: `select` にテストの ID を付けた（#211）。閉じた箱が `settings.select.{id}`、開いた一覧の項目が `settings.select.{id}.{n}`（`options` の順に 0 から）。`is_test_id` が受け付けない `id` には名前を付けない。`settings.shell.program` のように自分で名前を付けるシェルのボタンは、その名前のまま。
+
+### 使う側がやること
+
+- `rev` を上げるだけ。コードの変更は要らない。`--keys` の台本では `<ClickId:titlebar.search>`・`<Id:settings.select.{id}>` のように書ける。一覧の項目の名前は、開いている間だけある。
+
 ## [0.284.1] - 2026-11-09
 
 ### 修正

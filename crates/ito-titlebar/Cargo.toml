@@ -9,4 +9,5 @@ repository.workspace = true
 
 [dependencies]
 egui = "0.36"
+ito-a11y = { path = "../ito-a11y", features = ["egui"] }
 ito-theme = { path = "../ito-theme" }
