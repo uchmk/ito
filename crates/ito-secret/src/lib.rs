@@ -4,7 +4,14 @@
 //! Credential Manager, macOS' Keychain, and on Linux the Secret Service
 //! (through `secret-tool` of libsecret, the value passed on its stdin, never
 //! on a command line). Where no store runs, every call is an `Err` that says
-//! so; nothing falls back to a file.
+//! so. Secrets are written only to the OS store; nothing falls back to a file
+//! for storing.
+//!
+//! The one exception is reading, on Linux: a service that systemd started
+//! with `LoadCredential=` finds each credential as a file
+//! `$CREDENTIALS_DIRECTORY/<app>_<name>`, and `get` looks there first. That
+//! folder is a read-only source: this crate never writes it, and `set` and
+//! `delete` do not touch it.
 //!
 //! These block (the store may ask the user to unlock), so call them from a
 //! worker thread, not the UI thread.
@@ -17,8 +24,36 @@ fn target(app: &str, name: &str) -> String {
 }
 
 /// The secret kept as `name` for `app`; `None` when there is none.
+///
+/// On Linux a systemd credential (`$CREDENTIALS_DIRECTORY/<app>_<name>`) wins over the store; the store is asked
+/// only when there is no such credential. A credential that exists but cannot be read is an `Err`, not a fall-through.
 pub fn get(app: &str, name: &str) -> io::Result<Option<String>> {
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = std::env::var_os("CREDENTIALS_DIRECTORY") {
+        if let Some(value) = read_credential(std::path::Path::new(&dir), app, name)? {
+            return Ok(Some(value));
+        }
+    }
     sys::get(&target(app, name))
+}
+
+/// The credential file `<app>_<name>` in `dir`, with one final line end removed. `None` when `dir` is not absolute, when
+/// `app` or `name` could name another place (`/`, `\`, NUL), when `app` has a `_` (the first `_` must be the boundary), or
+/// when there is no such file. Any other read error is an `Err` that names the file but never shows its contents.
+#[cfg(any(test, target_os = "linux"))]
+fn read_credential(dir: &std::path::Path, app: &str, name: &str) -> io::Result<Option<String>> {
+    if !dir.is_absolute() {
+        return Ok(None);
+    }
+    if app.contains(['/', '\\', '\0']) || name.contains(['/', '\\', '\0']) || app.contains('_') {
+        return Ok(None);
+    }
+    let file = format!("{app}_{name}");
+    match std::fs::read_to_string(dir.join(&file)) {
+        Ok(text) => Ok(Some(text.strip_suffix('\n').map_or(text.as_str(), |t| t.strip_suffix('\r').unwrap_or(t)).to_owned())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io::Error::new(e.kind(), format!("cannot read the credential {file}: {e}"))),
+    }
 }
 
 /// Keep `value` as `name` for `app`, replacing what was there.
@@ -230,5 +265,90 @@ mod tests {
         delete(app, &name).unwrap();
         assert_eq!(get(app, &name).unwrap(), None);
         delete(app, &name).unwrap();
+    }
+
+    fn cred_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ito-secret-cred-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_credential_loses_one_final_line_end() {
+        let d = cred_dir("eol");
+        for (file, text, want) in [
+            ("app_a", "v\n", "v"),
+            ("app_b", "v\r\n", "v"),
+            ("app_c", "a\n\n", "a\n"),
+            ("app_d", "a\nb  ", "a\nb  "),
+            ("app_e", "v", "v"),
+            ("app_f", "", ""),
+        ] {
+            std::fs::write(d.join(file), text).unwrap();
+            let name = &file[4..];
+            assert_eq!(read_credential(&d, "app", name).unwrap().as_deref(), Some(want), "{file}");
+        }
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_credential_app_has_no_underscore_but_a_name_may() {
+        let d = cred_dir("us");
+        std::fs::write(d.join("a_b_c"), "x").unwrap();
+        std::fs::write(d.join("a_b"), "y").unwrap();
+        assert_eq!(read_credential(&d, "a_b", "c").unwrap(), None);
+        assert_eq!(read_credential(&d, "a", "b_c").unwrap().as_deref(), Some("x"));
+        assert_eq!(read_credential(&d, "a", "missing").unwrap(), None);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_credential_stays_inside_its_folder() {
+        // A relative folder that really holds the file (tests run in the crate's folder), so only the check can make it `None`.
+        let relative = std::path::PathBuf::from(format!("relative-credentials-{}", std::process::id()));
+        std::fs::create_dir_all(&relative).unwrap();
+        std::fs::write(relative.join("app_x"), "s").unwrap();
+        let got = read_credential(&relative, "app", "x");
+        std::fs::remove_dir_all(&relative).unwrap();
+        assert_eq!(got.unwrap(), None);
+        let d = cred_dir("trav");
+        let inner = d.join("inner");
+        // A real file at the place each refused name would reach, so only the check can make it `None`.
+        for (folder, file) in [("app_x", "y"), ("a", "b_x")] {
+            std::fs::create_dir_all(inner.join(folder)).unwrap();
+            std::fs::write(inner.join(folder).join(file), "s").unwrap();
+        }
+        // Windows cannot make a folder whose name ends in dots or a file with `\` in its name, so the two `..` names prove
+        // the check only on Unix.
+        #[cfg(unix)]
+        {
+            std::fs::create_dir_all(inner.join("app_..")).unwrap();
+            std::fs::write(inner.join("app_..").join("secret"), "s").unwrap();
+            std::fs::write(inner.join("app_..\\secret"), "s").unwrap();
+        }
+        assert_eq!(read_credential(&inner, "app", "../secret").unwrap(), None);
+        assert_eq!(read_credential(&inner, "app", "..\\secret").unwrap(), None);
+        assert_eq!(read_credential(&inner, "app", "x/y").unwrap(), None);
+        assert_eq!(read_credential(&inner, "a/b", "x").unwrap(), None);
+        // No file can have a NUL in its name: without the check the read fails and this `unwrap` panics.
+        assert_eq!(read_credential(&inner, "app", "x\0").unwrap(), None);
+        std::fs::write(inner.join("app_z"), "s").unwrap();
+        assert_eq!(read_credential(&inner, "app", "z").unwrap().as_deref(), Some("s"));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_credential_is_an_error_without_its_contents() {
+        let d = cred_dir("bad");
+        std::fs::create_dir(d.join("app_dir")).unwrap();
+        let e = read_credential(&d, "app", "dir").unwrap_err();
+        assert!(e.to_string().contains("app_dir"), "{e}");
+        std::fs::write(d.join("app_bin"), b"hunter2\xff\xfe").unwrap();
+        let e = read_credential(&d, "app", "bin").unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+        assert!(e.to_string().contains("app_bin"), "{e}");
+        assert!(!e.to_string().contains("hunter2"), "{e}");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }

@@ -3,6 +3,20 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.288.0] - 2026-11-10
+
+### 追加
+
+- `ito-secret`: Linux の `get` が、OS の保管庫より先に systemd の `LoadCredential=` のファイル `$CREDENTIALS_DIRECTORY/<app>_<name>` を読む。読むだけで、`set`・`delete` は触らない。末尾の改行は 1 つだけ除く。`app` に `_` があるとき、`app`・`name` に `/`・`\`・NUL があるとき、フォルダーが絶対パスでないときは見ない。ファイルがあるのに読めないときは `secret-tool` へ進まず、同じ `kind()` の `Err` を返す（ファイル名は出すが中身は出さない）。
+- `ito-http`: `Client::max_reply`（受ける本文の上限。既定は今までと同じ 4 MiB）。`Content-Length` が上限を超えていれば `the body is too large (over N bytes)` と言う。
+- `ito-http`: `Client::deadline: Option<Duration>`（既定は `None` で今までと同じ）。名前解決・接続・TLS の握手・送信・受信を合わせた 1 回の呼び出し全体の期限で、切れたら新しい `Error::Deadline` を返す。少しずつ送り続けるサーバーでも期限を越えない。`Error::Deadline` で返るときソケットは閉じる。止まった名前解決のスレッドは OS の時間切れまで残る（ソケットは持たず、結果は捨てる）。サーバーがその要求を実行したかどうかは分からない。
+- `ito-service`: Linux の `state` が `systemctl show` で `<name>.service` の状態を返す。`pid` は `MainPID`。systemd で起動していない機械とユニットが無いときは `Ok(None)`、調べられないときと知らない状態は `Err(Failed)`、名前に `*`・`?`・`[` があれば `BadName`。`reloading`・`refreshing` は `Running`、`maintenance` は `Stopped`。ほかの関数と macOS は今までどおり `Unsupported`。
+
+### 使う側がやること
+
+- `ito_http::client::Error` を網羅して `match` しているところに `Error::Deadline` の腕を足す。
+- `deadline` と `max_reply` は要るところでだけ設定する（どちらも `Client` の公開の欄）。
+
 ## [0.287.1] - 2026-11-09
 
 ### 修正

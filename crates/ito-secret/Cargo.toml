@@ -1,6 +1,6 @@
 [package]
 name = "ito-secret"
-description = "Secrets (a webhook address, a password) kept in the OS credential store, never in a file: Windows Credential Manager, macOS Keychain, Linux Secret Service"
+description = "Secrets (a webhook address, a password) kept in the OS credential store, never written to a file: Windows Credential Manager, macOS Keychain, Linux Secret Service; on Linux also reads systemd service credentials"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

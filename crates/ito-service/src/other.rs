@@ -1,4 +1,4 @@
-//! Not Windows: there is no Service Control Manager.
+//! Not Windows: there is no Service Control Manager. Only `state` on Linux has an answer (from systemd).
 
 use crate::{Error, Install, Status, Stop};
 use std::time::Duration;
@@ -23,6 +23,12 @@ pub fn stop(_name: &str, _wait: Duration) -> Result<(), Error> {
     Err(Error::Unsupported)
 }
 
+#[cfg(target_os = "linux")]
+pub fn state(name: &str) -> Result<Option<Status>, Error> {
+    crate::systemd::state(name)
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn state(_name: &str) -> Result<Option<Status>, Error> {
     Err(Error::Unsupported)
 }

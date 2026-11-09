@@ -10,7 +10,8 @@
 //! `main` with a [`Stop`] that is set on STOP, SHUTDOWN and PRESHUTDOWN, then reports Stopped with the
 //! exit code. Started any other way it returns [`Error::NotService`] so the app can say so.
 //!
-//! Only Windows has a Service Control Manager; elsewhere every function is [`Error::Unsupported`]
+//! Only Windows has a Service Control Manager. On Linux [`state`] asks systemd (`systemctl show`), so a stopped
+//! unit can be told from no unit; everything else, and every function on macOS, is [`Error::Unsupported`]
 //! (after the name check, so a bad name is [`Error::BadName`] everywhere).
 
 use std::fmt;
@@ -24,11 +25,13 @@ mod sys;
 #[cfg(not(windows))]
 #[path = "other.rs"]
 mod sys;
+#[cfg(any(test, target_os = "linux"))]
+mod systemd;
 
 /// Why a service call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// Not Windows.
+    /// Not Windows (on Linux only [`state`] works, through systemd).
     Unsupported,
     /// The process was not started by the Service Control Manager (run from a console).
     NotService,
@@ -225,7 +228,9 @@ pub fn stop(name: &str, wait: Duration) -> Result<(), Error> {
     sys::stop(name, wait)
 }
 
-/// Where the service is; `None` when it is not installed.
+/// Where the service is; `None` when it is not installed. On Linux this asks systemd for the unit `<name>.service`
+/// (`None` when systemd has no such unit or did not boot this machine); on macOS it is [`Error::Unsupported`].
+/// On Linux it waits for the `systemctl` child, with no time limit of its own, so call it from a worker thread.
 pub fn state(name: &str) -> Result<Option<Status>, Error> {
     check(name)?;
     sys::state(name)

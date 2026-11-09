@@ -1,6 +1,6 @@
 [package]
 name = "ito-service"
-description = "Run as a Windows service that logs on as a person's own account, and install, start, stop and query it: service logon right, DACL for that account, delayed auto start"
+description = "Run as a Windows service that logs on as a person's own account, and install, start, stop and query it: service logon right, DACL for that account, delayed auto start; on Linux `state` asks systemd"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
