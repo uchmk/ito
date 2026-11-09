@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.287.0] - 2026-11-09
+
+### 追加
+
+- `ito-keyscript`: Shot の付属 JSON と manifest の `env.font_set_sha256`・`env.wgpu_backend` を埋める。`font_set_sha256` は窓に登録したフォントの全部（名前・中身・`index`・`tweak`・ファミリーの順序）のハッシュで、アプリのコードは要らない（フォントが変わったときだけ計算し直す）。`wgpu_backend` はアプリが起動時に新しい `set_wgpu_backend(name)` を呼ぶと入り（`gl`・`dx12`・`vulkan`・`metal`）、呼ばなければ今までどおり `null`。`Runner` は絵を頼んだ時点の `Env` を残すので、保存までの間にフォントが変わっても、絵と違う値は付かない。最初のパスの途中で頼んだ `<Now><Shot:>` だけは `null` のまま。
+- `templates/app`: 雛形の `main.rs` が `set_wgpu_backend` を呼ぶ。
+
+### 変更
+
+- `lanes.conf` の `scale_env=` の定義をはっきりさせた（#213）。値は OS の倍率を含めた絶対の `pixels_per_point` で、アプリはこれを `native_pixels_per_point` で割ってズームにする。0.286.0 のここの「kura は `KURA_SCALE`」は誤りだった。`KURA_SCALE` は OS の倍率に掛かるズームなので、書くと 100% 以外の画面で倍率が合わず `ERROR` になる（誤って PASS にはならない）。`docs/visual-test.md` と雛形の `lanes.conf` も同じ定義にした。
+
+### 使う側がやること
+
+- `rev` を上げるだけで `font_set_sha256` は入る。ただし自前の実行が `observe` を呼ばないアプリでは `null` のまま。
+- `cc.wgpu_render_state` を読むところで、`ito_keyscript::set_wgpu_backend(rs.adapter.get_info().backend.to_str())` を 1 行足す。足さなくても壊れない（`null` のまま）。
+- 自前の実行を持つアプリ（kura）は、`review::Env::of` を絵を頼んだ時点で呼ぶようにする。保存のときに呼ぶと、頼んだあとにフォントが変わった回で、絵と違う値が付く。シグネチャは変えていないので、直さなくてもビルドは通る。
+- `scale_env=` に掛け算のズームの変数を書いているアプリは外す。絶対の `pixels_per_point` を受ける変数を足すまで、書かないままでよい（倍率が違う回は `ERROR` になる）。
+
 ## [0.286.0] - 2026-11-09
 
 ### 追加

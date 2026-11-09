@@ -163,14 +163,19 @@ pub struct Env {
 }
 
 impl Env {
-    /// The `env` block for a picture taken here. An app that writes its own `<Snap:>` side JSON should call this, so it gets
-    /// `wgpu_backend` and `font_set_sha256` when ito starts filling them.
+    /// The `env` block for a picture taken here. An app that writes its own `<Snap:>` side JSON should call this.
+    /// `font_set_sha256` is the font set last seen in a pass of the main window (null before the first one);
+    /// `wgpu_backend` stays null until the app calls [`crate::set_wgpu_backend`].
     pub fn of(meta: &Meta) -> Env {
+        Env::drawn_with(meta, crate::drawn::wgpu_backend(), crate::drawn::font_set_sha256())
+    }
+
+    fn drawn_with(meta: &Meta, wgpu_backend: Option<String>, font_set_sha256: Option<String>) -> Env {
         Env {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
-            wgpu_backend: None,
-            font_set_sha256: None,
+            wgpu_backend,
+            font_set_sha256,
             theme: meta.theme.clone(),
             pixels_per_point: meta.pixels_per_point,
         }
@@ -367,7 +372,7 @@ mod tests {
     #[test]
     fn env_of_a_meta_takes_theme_and_scale_from_it() {
         let meta = Meta { theme: "dark".into(), pixels_per_point: 1.25, ..Default::default() };
-        let env = Env::of(&meta);
+        let env = Env::drawn_with(&meta, None, None);
         assert_eq!((env.theme.as_str(), env.pixels_per_point), ("dark", 1.25));
         assert_eq!((env.os.as_str(), env.arch.as_str()), (std::env::consts::OS, std::env::consts::ARCH));
         assert!(env.wgpu_backend.is_none() && env.font_set_sha256.is_none());

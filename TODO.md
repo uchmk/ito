@@ -16,7 +16,7 @@ ito のやること。`【人】` は持ち主の作業。
   - [ ] `xrun.sh --evidence` を本物の Linux で回す（v0.279.0 は Git Bash の上のスタブで確かめただけ。`setsid`・`ps`・グループへの kill）。アプリが `isolate=` と `evidence=` を足してからの Linux のレーンで。
   - [x] `merge-lanes.py`: 見た目の行の `[x]` を、候補の verdict が無いまま付けたら断る。v0.281.0 で済んだ。
   - [ ] Vision（Tier 2）と、その `vision.v1` の schema。
-  - [ ] `env.wgpu_backend` / `env.font_set_sha256` を ito が埋める（今は `null`）。
+  - [x] `env.wgpu_backend` / `env.font_set_sha256` を ito が埋める。v0.287.0 で済んだ（`wgpu_backend` はアプリが `set_wgpu_backend` を呼ぶ）。
   - [ ] 基準画像との比較（承認した基準画像と、証拠の鎖の中での置き場所）。
 - [ ] ito-keyscript の小さな直し（kura v0.158.0 が `pace::Pace` に載せ替えたときの指摘）。
   - [x] `Runner::start_run`: 最初の `run.json` が書けないとき、失敗の行を `trace.jsonl` に書かないまま trace を捨てている。捨てる前に `flush_trace` する。v0.280.0 で済んだ。

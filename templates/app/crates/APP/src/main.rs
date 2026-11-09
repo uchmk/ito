@@ -62,6 +62,8 @@ impl App {
             let info = rs.adapter.get_info();
             used.adapter = info.name;
             used.backend = format!("{:?}", info.backend);
+            // For the `env` block of `--keys` shots.
+            ito_keyscript::set_wgpu_backend(info.backend.to_str());
             used.device = format!("{:?}", info.device_type);
         }
         used.ppp = cc.egui_ctx.pixels_per_point();

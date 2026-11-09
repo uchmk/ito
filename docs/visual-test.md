@@ -172,7 +172,7 @@ v0.277.0 で、検査（`visual-check.py`）、実行の folder・manifest・ver
 v0.279.0 で、keys.ps1 の `-Evidence` と xrun.sh の `--evidence` が folder と manifest を自動で作るようになった。
 v0.281.0 で、merge-lanes.py が門番になった。PR のベースのブランチに `tests/visual/<row>.toml` がある行の新しい `[x]` は、仕様が正しくて `tier = 1` で、PR に `<row> tier1 [x] <…\verdict-<row>.json>` の行があるときだけマージする。
 門番の限界: 証拠はレーンの機械にあるので、GitHub Actions からは verdict の中身もハッシュも読めない（宣言の行だけを見る。本当に `auto-pass-candidate` だったかは、レーンの規則のまま）。仕様を持たない見た目の行も見分けられない。
-まだ無いもの: Vision（Tier 2）、基準画像との比較、`env.wgpu_backend` / `env.font_set_sha256`（今は `null`）。いずれも [TODO.md](../TODO.md)。
+まだ無いもの: Vision（Tier 2）、基準画像との比較。どちらも [TODO.md](../TODO.md)。
 
 | もの | どこ | 中身 |
 |---|---|---|
@@ -229,10 +229,14 @@ v0.281.0 で、merge-lanes.py が門番になった。PR のベースのブラ�
   "png": "shots/02-top.png", "png_sha256": "…", "size_px": [1350, 630],
   "state_before_sha256": "…", "state_after_sha256": "…",
   "requested_frame": 412, "captured_frame": 413,
-  "env": { "os": "Windows 11 26300", "arch": "x86_64", "wgpu_backend": "Dx12",
+  "env": { "os": "Windows 11 26300", "arch": "x86_64", "wgpu_backend": "dx12",
            "font_set_sha256": "…", "theme": "Nord", "pixels_per_point": 1.5 }
 }
 ```
+
+`env.font_set_sha256` は、窓に登録したフォントの全部（名前・中身・`index`・`tweak`・ファミリーの順序）のハッシュで、ito-keyscript が入れる（v0.287.0）。アプリのコードは要らない。`null` になるのは、最初のパスの途中で頼んだ `<Now><Shot:>` と、`observe` を呼ばない自前の実行だけ。
+`env.wgpu_backend` は、アプリが起動時に `ito_keyscript::set_wgpu_backend(info.backend.to_str())` を呼ぶと入る（wgpu の小文字の名前で、環境変数 `WGPU_BACKEND` と同じ語）。呼ばないアプリでは `null`。
+どちらも絵を頼んだ時点の値を残す。自前の実行では `review::Env::of` を呼んだ時点の値になる。
 
 ### シナリオの例（41.15）
 
@@ -448,7 +452,7 @@ schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`
    `evidence.py new` で folder を作り、run id を環境変数（`lanes.conf` の `keys_env` から `_DONE` を除いて `_RUN_ID` を付けた名前）に入れて、`lanes.conf` の `isolate=` の変数ごとに空のフォルダーを渡して走らせる。
    どの終わり方でも（失敗・時間切れ・殺した場合も）アプリが残したものを止め、`isolate` を消し、`evidence.py manifest` を呼ぶ。出力の最後の行が folder（以下の `<dir>`）。
    `lanes.conf` に `isolate=` が要る。置き場所は `evidence=`（Windows は `-EvidenceRoot`、Linux は `--evidence-root` でも渡せる）。終了コードの 5 は証拠なし（走らせる前に断った、`manifest` を書けなかった）、6 はアプリは成功したが manifest が合格でない。
-   `lanes.conf` に `scale_env=`（アプリの倍率の環境変数の名前。kura は `KURA_SCALE`）があれば、spec の `window.pixels_per_point` をその変数でアプリに渡す。`--spec` を複数渡して倍率が違う、変数名が `keys_env`・`*_RUN_ID`・`isolate=` と重なる、のどちらも `evidence.py new` が folder を作る前に断る。
+   `lanes.conf` に `scale_env=`（アプリの環境変数の名前）があれば、spec の `window.pixels_per_point` をその変数でアプリに渡す。この変数の値は OS の倍率を含めた絶対の `pixels_per_point` で、アプリは今の画面の `native_pixels_per_point` で割ってズームにする。どの画面でも同じ倍率になるのはこの形だけ。OS の倍率に掛かるズームの変数（kura の `KURA_SCALE`）を書くと、100% 以外の画面では掛け算になり、`window.pixels_per_point` の違いで `ERROR` になる。`--spec` を複数渡して倍率が違う、変数名が `keys_env`・`*_RUN_ID`・`isolate=` と重なる、のどちらも `evidence.py new` が folder を作る前に断る。
    上書きしたかは manifest の `scale_override` に残る。spec から渡せば `{ env, value, source: "spec" }`、spec から渡せず（`--spec` が無いなど）その変数が手で設定されていれば `source: "environment"`、どちらでもなければ `null`。実機の倍率で撮った回と、上書きした回を取り違えないため。
 2. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
 3. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。

@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+mod drawn;
 pub mod evidence;
 pub mod pace;
 pub mod probe;
@@ -885,6 +886,7 @@ impl egui::Plugin for Tap {
         if self.passes.pop() != Some(egui::ViewportId::ROOT) {
             return;
         }
+        drawn::note_fonts(ctx);
         // The IDs a pass records are taken on every main-window pass, so none is left over for a later one.
         let entries = ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT);
         let Some(update) = &output.platform_output.accesskit_update else {
@@ -971,6 +973,7 @@ impl Observation {
     }
 }
 
+pub use drawn::set_wgpu_backend;
 pub use ito_clipboard::note_copy;
 
 /// Start reading the window's tree and what the app copies, from the next frame on. `Runner` does this
@@ -2067,6 +2070,8 @@ struct PendingShot {
     /// Everything the side JSON says about the frame the picture is of, frozen when the request went out (the theme and
     /// language in force then, the size, the time); the picture arrives a frame or more later.
     meta: review::Meta,
+    /// The `env` block, frozen with `meta`: the fonts may change before the picture arrives.
+    env: review::Env,
     /// The pass the request went out in.
     requested_frame: u64,
 }
@@ -2082,6 +2087,7 @@ struct SnapState {
 /// A `<Snap:>` picture that is saved.
 struct SnapShot {
     meta: review::Meta,
+    env: review::Env,
     png_sha256: String,
     size_px: [u32; 2],
     requested_frame: u64,
@@ -2366,7 +2372,7 @@ impl Runner {
             state_unchanged: Some(unchanged),
             requested_frame: shot.requested_frame,
             received_frame: shot.received_frame,
-            env: review::Env::of(&shot.meta),
+            env: shot.env.clone(),
         };
         evidence::write_durable(&self.shot_path(a, "json"), shot.meta.to_json_with(&capture).as_bytes())
             .map_err(|e| format!("cannot write shots/{a}.json: {e}"))
@@ -2923,6 +2929,8 @@ impl Runner {
             let theme = ito_theme::name().unwrap_or_default();
             let lang = ito_i18n::in_force().unwrap_or_default();
             pending.meta = frozen_meta(&self.info, &name, (&theme, &lang), ctx.content_rect().size(), ctx.pixels_per_point());
+            drawn::note_fonts(ctx);
+            pending.env = review::Env::of(&pending.meta);
             return None;
         }
         let image = ctx.input(|i| {
@@ -2936,17 +2944,25 @@ impl Runner {
             })
         })?;
         let received = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
-        let (meta, idx, snap, requested) = {
+        let (meta, env, idx, snap, requested) = {
             let p = self.shot.as_ref()?;
-            (p.meta.clone(), p.idx, p.snap, p.requested_frame)
+            (p.meta.clone(), p.env.clone(), p.idx, p.snap, p.requested_frame)
         };
-        let saved = self.save_picture(&name, meta, &image, (idx, snap), (requested, received));
+        let saved = self.save_picture(&name, (meta, env), &image, (idx, snap), (requested, received));
         let now = self.now();
         self.shot_result(&name, saved, now)
     }
 
     fn pending_shot(&self, name: &str, idx: usize, snap: bool) -> PendingShot {
-        PendingShot { name: name.to_owned(), idx, snap, sent: false, meta: review::Meta::default(), requested_frame: 0 }
+        PendingShot {
+            name: name.to_owned(),
+            idx,
+            snap,
+            sent: false,
+            meta: review::Meta::default(),
+            env: review::Env::default(),
+            requested_frame: 0,
+        }
     }
 
     /// `<dir>/shots/<name>.<ext>`: where a shot's picture (`png`) and sidecar (`json`) go.
@@ -2968,7 +2984,7 @@ impl Runner {
     fn save_picture(
         &mut self,
         name: &str,
-        meta: review::Meta,
+        (meta, env): (review::Meta, review::Env),
         image: &egui::ColorImage,
         (idx, snap): (usize, bool),
         (requested_frame, received_frame): (u64, u64),
@@ -2976,7 +2992,7 @@ impl Runner {
         let (png_sha256, size_px) = self.store_png(name, image)?;
         if snap {
             let run = self.snap.as_mut().ok_or_else(|| format!("no <Snap:{name}> is running"))?;
-            run.shot = Some(SnapShot { meta, png_sha256, size_px, requested_frame, received_frame });
+            run.shot = Some(SnapShot { meta, env, png_sha256, size_px, requested_frame, received_frame });
             return Ok(());
         }
         let capture = review::Capture {
@@ -2991,7 +3007,7 @@ impl Runner {
             state_unchanged: None,
             requested_frame,
             received_frame,
-            env: review::Env::of(&meta),
+            env,
         };
         evidence::write_durable(&self.shot_path(name, "json"), meta.to_json_with(&capture).as_bytes()).map_err(|e| e.to_string())
     }
@@ -3008,7 +3024,8 @@ impl Runner {
         pixels_per_point: f32,
     ) -> Result<(), String> {
         let meta = frozen_meta(&self.info, name, in_force, screen, pixels_per_point);
-        self.save_picture(name, meta, image, (0, false), (0, 0))
+        let env = review::Env::of(&meta);
+        self.save_picture(name, (meta, env), image, (0, false), (0, 0))
     }
 
     /// The picture was saved or could not be: tell Pace. A failure ends the run (its [`Do::Failed`] goes out at the
@@ -5212,6 +5229,20 @@ mod tests {
 
     fn run_json(dir: &std::path::Path) -> String {
         std::fs::read_to_string(dir.join("run.json")).unwrap()
+    }
+
+    #[test]
+    fn save_picture_writes_the_env_it_is_given() {
+        let dir = temp("shots-env");
+        let mut r = Runner::new(Vec::new(), Some(dir.join("done"))).app("demo", "1.2.3");
+        let image = egui::ColorImage::filled([4, 3], egui::Color32::RED);
+        let meta = frozen_meta(&r.info, "env", ("", ""), egui::vec2(4.0, 3.0), 1.0);
+        let env = review::Env { wgpu_backend: Some("frozen".into()), font_set_sha256: Some("ab".repeat(32)), ..review::Env::of(&meta) };
+        r.save_picture("env", (meta, env), &image, (0, false), (0, 0)).unwrap();
+        let j = std::fs::read_to_string(dir.join("shots").join("env.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert_eq!(v["env"]["wgpu_backend"], "frozen", "{j}");
+        assert_eq!(v["env"]["font_set_sha256"], "ab".repeat(32), "{j}");
     }
 
     #[test]
