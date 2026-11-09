@@ -39,6 +39,11 @@ pub struct Palette {
     pub cursor: Color32,
     /// Text drawn on top of `cursor`.
     pub on_cursor: Color32,
+    /// The bar in the margin of a command that ended with exit code 0. Drawn
+    /// as given (opaque), so a check can measure it against a theme token.
+    pub mark_ok: Color32,
+    /// The bar in the margin of a command that ended with another exit code.
+    pub mark_failed: Color32,
     /// The sixteen named colours (black, red, … bright white) a theme gives;
     /// `None` keeps filer's.
     pub ansi: Option<[Color32; 16]>,
@@ -55,6 +60,8 @@ impl Default for Palette {
             found: Color32::from_rgb(0xe0, 0xaf, 0x4a),
             cursor: Color32::from_rgb(0x6f, 0xd0, 0xd0),
             on_cursor: Color32::from_rgb(0x16, 0x18, 0x1d),
+            mark_ok: Color32::from_rgb(0x8e, 0xd0, 0x8e),
+            mark_failed: Color32::from_rgb(0xf0, 0x71, 0x78),
             ansi: None,
         }
     }
@@ -711,19 +718,22 @@ pub fn show_faces<P: Pane + ?Sized>(
     };
     // Each command that ended, a bar in the margin from its prompt to the
     // next: green for success, red for a failure (Warp's and iTerm2's marks).
+    // `pane.mark.N` counts the bars drawn on screen from the top: N is a
+    // position in the current frame, not a stable identity of a block across
+    // scrolling. A block that draws nothing takes no number.
+    let mut drawn = 0usize;
     for b in &blocks {
-        let tint = match b.exit {
-            0 => named(NamedColor::Green, pal, false),
-            _ => named(NamedColor::Red, pal, false),
-        };
+        let tint = if b.exit == 0 { pal.mark_ok } else { pal.mark_failed };
         let (y0, y1) =
             (inner.top() + b.lines.start as f32 * row_h + 1.0, (inner.top() + b.lines.end as f32 * row_h - 1.0).min(inner.bottom()));
         if y1 > y0 {
-            painter.rect_filled(
-                Rect::from_min_max(egui::pos2(rect.left() + 2.0, y0), egui::pos2(rect.left() + 4.0, y1)),
-                CornerRadius::same(1),
-                tint.gamma_multiply(0.8),
-            );
+            let bar = Rect::from_min_max(egui::pos2(rect.left() + 2.0, y0), egui::pos2(rect.left() + 4.0, y1));
+            painter.rect_filled(bar, CornerRadius::same(1), tint);
+            // Hover only: it joins neither click nor drag hit-testing, so a
+            // press on a bar still starts a selection in the pane.
+            let r = ui.interact(bar, id.with(("pane-mark", drawn)), egui::Sense::hover());
+            ito_a11y::test_id_in(ui, &r, &format!("pane.mark.{drawn}"), None);
+            drawn += 1;
         }
     }
     for h in &hyperlinks {
@@ -1192,6 +1202,148 @@ mod tests {
         fn win32_input(&self) -> bool {
             false
         }
+    }
+
+    /// A pane with given blocks that records the `select` calls it gets.
+    struct Marked {
+        blocks: Vec<crate::Block>,
+        alt_screen: bool,
+        selects: std::cell::RefCell<Vec<((usize, usize), bool)>>,
+    }
+
+    impl Marked {
+        fn new(blocks: Vec<(std::ops::Range<usize>, i32)>) -> Self {
+            let blocks = blocks.into_iter().map(|(lines, exit)| crate::Block { lines, exit }).collect();
+            Self { blocks, alt_screen: false, selects: Default::default() }
+        }
+    }
+
+    impl crate::Pane for Marked {
+        fn resize(&mut self, _: crate::Size, _: (u16, u16)) {}
+        fn screen(&self) -> crate::Screen {
+            crate::Screen { rows: vec![Vec::new(); 30], alt_screen: self.alt_screen, ..crate::Screen::default() }
+        }
+        fn scrolled_back(&self) -> usize {
+            0
+        }
+        fn scroll(&self, _: Scroll) {}
+        fn select(&self, cell: (usize, usize), _: bool, start: bool) {
+            self.selects.borrow_mut().push((cell, start));
+        }
+        fn select_word(&self, _: (usize, usize)) {}
+        fn clear_selection(&self) {}
+        fn selection(&self) -> Option<String> {
+            None
+        }
+        fn send(&self, _: Vec<u8>) {}
+        fn paste(&self, _: &str) {}
+        fn win32_input(&self) -> bool {
+            false
+        }
+        fn blocks(&self) -> Vec<crate::Block> {
+            self.blocks.clone()
+        }
+    }
+
+    const PANE: Rect = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 600.0));
+    const ROW_H: f32 = 17.5;
+
+    /// One frame of a `Marked` pane with `events` and `pal`: the test IDs it
+    /// registered and the shapes it painted.
+    fn marked_frame(
+        ctx: &egui::Context,
+        pane: &mut Marked,
+        pal: &Palette,
+        events: Vec<egui::Event>,
+    ) -> (Vec<(String, Rect)>, Vec<egui::epaint::ClippedShape>) {
+        let input = egui::RawInput { screen_rect: Some(PANE), events, ..Default::default() };
+        let faces = Faces::plain(FontId::monospace(14.0));
+        let opts = ViewOptions { focused: true, wheel: false, copy_on_select: false, highlights: &[] };
+        let out = ctx.run_ui(input, |ui| {
+            show_faces(ui, Some(&mut *pane), &mut ViewState::default(), PANE, &faces, ROW_H, pal, opts);
+        });
+        let shapes = out.shapes.clone();
+        out.drop_without_applying_deltas();
+        let ids = ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT);
+        (ids.into_iter().filter(|e| e.name.starts_with("pane.mark.")).map(|e| (e.name, e.rect)).collect(), shapes)
+    }
+
+    fn accesskit_ctx() -> egui::Context {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        ctx
+    }
+
+    /// Each bar drawn is named by its place from the top and has the bar's
+    /// rectangle, 2 points wide in the margin.
+    #[test]
+    fn the_bars_are_numbered_from_the_top_with_their_rectangles() {
+        let mut pane = Marked::new(vec![(0..2, 0), (3..5, 1)]);
+        let (ids, _) = marked_frame(&accesskit_ctx(), &mut pane, &Palette::default(), vec![]);
+        let top = 4.0; // the pane's inner top
+        let want = |a: usize, b: usize| {
+            Rect::from_min_max(egui::pos2(2.0, top + a as f32 * ROW_H + 1.0), egui::pos2(4.0, top + b as f32 * ROW_H - 1.0))
+        };
+        let names: Vec<&str> = ids.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["pane.mark.0", "pane.mark.1"]);
+        assert_eq!(ids[0].1, want(0, 2));
+        assert_eq!(ids[1].1, want(3, 5));
+    }
+
+    /// A block that draws nothing (it starts below the pane) takes no number.
+    #[test]
+    fn a_bar_that_draws_nothing_takes_no_number() {
+        let mut pane = Marked::new(vec![(0..2, 0), (100..102, 1), (3..5, 1)]);
+        let (ids, _) = marked_frame(&accesskit_ctx(), &mut pane, &Palette::default(), vec![]);
+        let names: Vec<&str> = ids.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["pane.mark.0", "pane.mark.1"], "{ids:?}");
+        assert!(ids[1].1.top() < 100.0, "the second drawn bar is the third block: {ids:?}");
+    }
+
+    /// The bars are filled with the palette's two colours exactly: opaque,
+    /// not dimmed.
+    #[test]
+    fn the_bars_are_filled_with_the_palettes_colours() {
+        let (ok, failed) = (Color32::from_rgb(1, 2, 3), Color32::from_rgb(4, 5, 6));
+        let pal = Palette { mark_ok: ok, mark_failed: failed, ..Palette::default() };
+        let mut pane = Marked::new(vec![(0..2, 0), (3..5, 7)]);
+        let (_, shapes) = marked_frame(&accesskit_ctx(), &mut pane, &pal, vec![]);
+        let bars: Vec<Color32> = shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.rect.width() == 2.0 && r.rect.left() == 2.0 => Some(r.fill),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bars, [ok, failed]);
+    }
+
+    /// A press on a bar and a drag from it still select in the pane: the bar
+    /// senses hover only, so it does not take the press from the pane.
+    #[test]
+    fn a_drag_from_a_bar_still_selects() {
+        use egui::{Event, Modifiers, PointerButton};
+        let ctx = accesskit_ctx();
+        let mut pane = Marked::new(vec![(0..4, 0)]);
+        let pal = Palette::default();
+        let on_bar = egui::pos2(3.0, 20.0);
+        let btn = |pressed| Event::PointerButton { pos: on_bar, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        marked_frame(&ctx, &mut pane, &pal, vec![Event::PointerMoved(on_bar)]);
+        marked_frame(&ctx, &mut pane, &pal, vec![btn(true)]);
+        for x in [40.0, 80.0, 120.0] {
+            marked_frame(&ctx, &mut pane, &pal, vec![Event::PointerMoved(egui::pos2(x, 22.0))]);
+        }
+        let selects = pane.selects.borrow();
+        assert!(selects.iter().any(|(_, start)| *start), "a selection began: {selects:?}");
+    }
+
+    /// On the alternate screen the bars are not drawn, so none is registered.
+    #[test]
+    fn no_bar_is_registered_on_the_alternate_screen() {
+        let mut pane = Marked::new(vec![(0..2, 0)]);
+        pane.alt_screen = true;
+        let (ids, _) = marked_frame(&accesskit_ctx(), &mut pane, &Palette::default(), vec![]);
+        assert!(ids.is_empty(), "{ids:?}");
     }
 
     /// One frame of the pane at `time`, in a font of `size`, and what it

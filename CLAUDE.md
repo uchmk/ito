@@ -13,7 +13,7 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 
 | クレート | 中身 | 主に使う側 |
 |---|---|---|
-| `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示） | kura |
+| `ito-pane` | ターミナルのペイン（PTY・ConPTY、キーの変換、OSC、egui の表示。プロンプトの印のバーはテストの ID `pane.mark.N`（N は画面の上から）、色は `Palette::mark_ok`・`mark_failed`） | kura |
 | `ito-layout` | 矩形をペインに分ける木と、egui の仕切り。`panels` の機能で、幅を変えられる egui のパネル（`Panels::show`: 中身が少なくても縮まない・ドラッグした大きさを `state_dir` の `panels.toml` に覚える） | kura、yagura、michi、fumi |
 | `ito-i18n` | 画面の文言をキーで引く。言語の設定（`common.toml`）を全アプリで共有する。`set_in_force(lang)` / `in_force()`: いま効いている言語（`--keys` の Shot の付属 JSON が読む。アプリは起動時と言語を変えたときに呼ぶ） | 全アプリ |
 | `ito-keys` | yazi のキーの書き方（`<C-a>`・`<A-S-Up>`。`C` は macOS で Cmd）。機能 `egui`: `from_egui`・`from_clipboard`、1 フレームのイベントをキーと文字と IME の順に読む `read(events, now, took)` → `Input::{Key, Text, Ime(ImeEvent)}`（Alt+文字の文字を落とす・macOS の Option は `took` が取ったときだけ落とす（`read_for(.., mac)`）・AltGr と Alt+テンキー（同じフレームで数字→Alt を離す→Text）は残してキーにしない・Cut/Copy/Paste を和音に戻す。数字キーも Shift を持つ（`<A-S-5>` ≠ `<A-5>`）。`quit_shortcuts` の注意つき） | yagura |
@@ -87,9 +87,9 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 **新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
 
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
-見た目の行の検査の道具もここにある: `visual-check.py`（check spec と実行の folder → `machine/assertions.json`）と `evidence.py`（実行の folder・manifest・verdict）。どれも標準ライブラリだけの Python で、ito は自己検査（`--self-test`）と `scripts/check-schemas.py`（`docs/schemas/*.v1.json` と例、両スクリプトが出す実物の検査）で確かめる。規則は [docs/visual-test.md](docs/visual-test.md)。
+見た目の行の検査の道具もここにある: `visual-check.py`（check spec と実行の folder → `machine/assertions.json`）、`evidence.py`（実行の folder・manifest・verdict）、`make-canary.py`（実際の回を写して測る値を壊し、検査が FAIL と言うか確かめる。種類は spec の横の `<行>.canary.toml`）。どれも標準ライブラリだけの Python で、ito は自己検査（`--self-test`）と `scripts/check-schemas.py`（`docs/schemas/*.v1.json` と例、両スクリプトが出す実物の検査）で確かめる。規則は [docs/visual-test.md](docs/visual-test.md)。
 アプリの `scripts/lanes.sh sync` が、固定した `rev` のここから自分の `scripts/` へバイト単位で同じものを写し、`lanes.sh check` は写しが違えば落ちる。
-アプリごとの値（名前・クレート・実行ファイル・`--keys` の環境変数・状態のフォルダー・TODO の印）はアプリの `scripts/lanes.conf` から読むので、
+アプリごとの値（名前・クレート・実行ファイル・`--keys` の環境変数・倍率の環境変数 `scale_env=`・状態のフォルダー・TODO の印）はアプリの `scripts/lanes.conf` から読むので、
 ここにアプリの名前を書き込まない。
 `scripts/lanes/workflows/*.yml` はワークフローの雛形（`{{app}}`・`{{crate}}`・`{{bin}}`）で、アプリの `lanes.conf` の `workflows=` に並べたものを `lanes.sh sync` が `.github/workflows/` に書き、`check` が違いを落とす（並べないアプリは自分のワークフローのまま）。ここではアプリに対して走らせられないので、verify.sh と CI は構文と `merge-lanes.py --self-test`、pwsh の
 `check-ps1.ps1` だけを見る。直したら push し、使う側の `rev` を上げて `scripts/lanes.sh sync` を流す。

@@ -368,9 +368,11 @@ expect = { present = false }
 [[point]]
 id = "ok-bar"
 snap = "after-dir"
-target = "pane.mark[0]"          # dir のプロンプトの印。行の y は state から
-expect = { color_token = { token = "ok", delta_e_max = 3, min_fraction = 0.95, inset_px = 1 } }
+target = "pane.mark.0"           # dir のプロンプトの印（下の注）
+expect = { color_token = { token = "success", delta_e_max = 3, min_fraction = 0.95, inset_px = 1 } }
 ```
+
+`pane.mark.N` は `ito-pane` が描いた印のバー（成功は `Palette::mark_ok`、失敗は `mark_failed`）。`N` はその瞬間の画面の上からの位置（0 から）で、スクロールすると同じ印の番号が変わる。描かれていない印は番号を取らず、全画面のプログラムの間（代替画面）は 1 つも登録しない。
 
 ### check spec の読み方（version 1。`visual-check.py` が読む）
 
@@ -446,11 +448,42 @@ schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`
    `evidence.py new` で folder を作り、run id を環境変数（`lanes.conf` の `keys_env` から `_DONE` を除いて `_RUN_ID` を付けた名前）に入れて、`lanes.conf` の `isolate=` の変数ごとに空のフォルダーを渡して走らせる。
    どの終わり方でも（失敗・時間切れ・殺した場合も）アプリが残したものを止め、`isolate` を消し、`evidence.py manifest` を呼ぶ。出力の最後の行が folder（以下の `<dir>`）。
    `lanes.conf` に `isolate=` が要る。置き場所は `evidence=`（Windows は `-EvidenceRoot`、Linux は `--evidence-root` でも渡せる）。終了コードの 5 は証拠なし（走らせる前に断った、`manifest` を書けなかった）、6 はアプリは成功したが manifest が合格でない。
+   `lanes.conf` に `scale_env=`（アプリの倍率の環境変数の名前。kura は `KURA_SCALE`）があれば、spec の `window.pixels_per_point` をその変数でアプリに渡す。`--spec` を複数渡して倍率が違う、変数名が `keys_env`・`*_RUN_ID`・`isolate=` と重なる、のどちらも `evidence.py new` が folder を作る前に断る。
+   上書きしたかは manifest の `scale_override` に残る。spec から渡せば `{ env, value, source: "spec" }`、spec から渡せず（`--spec` が無いなど）その変数が手で設定されていれば `source: "environment"`、どちらでもなければ `null`。実機の倍率で撮った回と、上書きした回を取り違えないため。
 2. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
 3. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。
 4. main モデルが verdict を読み、`mark` と `decided_by` を書く。
 
 `evidence.py check --run <dir>` は folder が壊れていないかだけ見る。
+
+### カナリア（`make-canary.py`）
+
+検査が本当に見ているかを、製品のコードを変えずに確かめる。実際の回の folder を写して測る値を 1 つ壊し、`visual-check.py` が FAIL（終了コード 1）と言えばそのカナリアは合格。PASS は検査が変化を見ていない、ERROR は値ではなく証拠を壊した、なのでどちらも不合格。
+
+`python3 scripts/make-canary.py --run <dir> --spec tests/visual/<行>.toml <種類>...`（`--canaries <file>` で別のデータ）。写しは `<dir>/canary/<種類>/<run id>/` に作り、元の回には触らない（`evidence.py` の一覧にも入らない）。書き換えたファイルの sha256（`state_before`・`state_after`・`png_sha256`）は写しの中で入れ直す。種類を作る前に、元の回をまず使い捨ての写しで検査し、PASS でなければ何も作らずに終了コード 2 で止まる（もともと FAIL の回では、どのカナリアも FAIL して良く見えてしまうため）。
+
+種類はコードではなくデータで、既定は spec の横の `tests/visual/<行>.canary.toml`。spec と分けているのは、あとからカナリアを足しても spec の SHA を動かさないため（spec は実行の前にコミットする）。
+
+```toml
+[[canary]]
+name = "thumb-gone"
+
+[[canary.edit]]                  # 1 つ以上。書いた順に当てる
+snap = "top"                     # <Snap:> の名前（before と after の両方を同じに）。<State:> なら state = "名前"。どちらか 1 つ
+op = "drop"
+target = "spot.scroll.thumb"
+```
+
+| `op` | キー | すること |
+|---|---|---|
+| `drop` | `target` | その test_id の `ui[]` の項目を消す |
+| `shift` | `target`・`dx`・`dy` | `rect_px` をずらす |
+| `set_text` | `target`・`value` | `text` を変える（`label` があれば一緒に） |
+| `copy_from` | `target`・`from` | 元の回の `state/<from>.json` の項目を `ui[]` に足す |
+| `set` | `path`・`value` か `clear = true` | `overlay.*`・`app_state.*` を変える（最後のキーは元からあるもの）。`clear` は null |
+| `paint` | `snap`・`rect` か `target`・`token` か `rgb` | `shots/<snap>.png` のその矩形を不透明な色で塗る |
+
+終了コードは 0（全部 FAIL した）、1（FAIL にならなかったものがある）、2（使い方かデータの問題、または元の回が PASS でない。何も写さない）。回の中身と合わないもの（`target` が無い、`path` が無いなど）はその種類だけ不合格で、その folder を作らず、ほかの種類は続ける。
 
 ### vision の出力（案。Tier 2 は未実装で、vision.v1 の schema はまだ無い）
 
@@ -553,7 +586,7 @@ schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`
 | 49.4 | 画素の色とトークン | 帯の色を入れ替えた画像で FAIL |
 | 54.18 | テーマの画素（Tier 1）と、Vision の盲検・突き合わせ・カナリア（Tier 2 の影運用） | 検索欄だけ暗い地に塗った画像を Vision が FAIL にする |
 
-**パイロットの合格:** 各行 3 回続けて同じ結果、カナリアの回はすべて FAIL、証拠が欠けない、持ち主が結果に同意する。カナリアは製品のコードを変えずに、同じ回の画像と state をスクリプトで書き換えて作る。
+**パイロットの合格:** 各行 3 回続けて同じ結果、カナリアの回はすべて FAIL、証拠が欠けない、持ち主が結果に同意する。カナリアは製品のコードを変えずに、同じ回の画像と state を [`make-canary.py`](#d7) で書き換えて作る。
 
 <a id="d9"></a>
 

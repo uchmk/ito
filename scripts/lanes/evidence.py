@@ -267,7 +267,7 @@ def read_spec(path):
         points.append((pid, list(ex)))
     if errors:
         return None, errors
-    return {"row": row, "tier": tier, "points": points}, []
+    return {"row": row, "tier": tier, "points": points, "pixels_per_point": w["pixels_per_point"]}, []
 
 
 # ---------------------------------------------------------------- new
@@ -301,6 +301,45 @@ def foreign_path(p, name=os.name):
     return "\\" in p or (p[:1].isalpha() and p[1:2] == ":")
 
 
+SCALE_ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+def scale_for_run(conf, specs):
+    """scale_env= in lanes.conf is set: check it and the specs' pixels_per_point.
+
+    Returns the text of the first spec's scale (None with no spec), or 2 after an `err(...)`. Nothing is made yet."""
+    name = conf["scale_env"]
+    if not SCALE_ENV_RE.match(name):
+        err("scale_env=%s in scripts/lanes.conf is not an environment variable name (A-Z 0-9 _, not starting with a digit)" % name)
+        return 2
+    keys_env = conf.get("keys_env", "")
+    taken = {}
+    if keys_env:
+        taken[keys_env] = "keys_env"
+        if keys_env.endswith("_DONE"):
+            taken[keys_env[: -len("_DONE")] + "_RUN_ID"] = "the run-id variable"
+    for v in conf.get("isolate", "").split():
+        taken[v] = "an isolate= variable"
+    for other, what in taken.items():
+        if other.upper() == name.upper():  # Windows environment names are case-insensitive
+            err("scale_env=%s in scripts/lanes.conf is the same variable as %s (%s): the scale would overwrite it or the reverse"
+                % (name, what, other))
+            return 2
+    first = None
+    for s in specs:
+        info, errs = read_spec(s)
+        if errs:
+            err("spec %s: %s (scale_env is set, so the spec's window is read before the run)" % (s, "; ".join(errs)))
+            return 2
+        ppp = info["pixels_per_point"]
+        if first is None:
+            first = (s, ppp)
+        elif ppp != first[1]:
+            err("the specs disagree on window.pixels_per_point: %s has %s, %s has %s; one run has one scale" % (first[0], first[1], s, ppp))
+            return 2
+    return None if first is None else str(first[1])
+
+
 def cmd_new(a):
     conf = read_conf()
     parent = a.evidence or conf.get("evidence")
@@ -332,6 +371,11 @@ def cmd_new(a):
         if why:
             err(why)
             return 2
+    scale = None
+    if conf.get("scale_env"):
+        scale = scale_for_run(conf, a.spec)
+        if isinstance(scale, int):
+            return scale
     intents = []
     for s in a.spec:
         top, rel = repo_info(s)
@@ -364,6 +408,9 @@ def cmd_new(a):
     env = conf.get("keys_env", "")
     if env.endswith("_DONE"):
         print("env=" + env[: -len("_DONE")] + "_RUN_ID")
+    if scale is not None:
+        print("scale_env=" + conf["scale_env"])
+        print("scale=" + scale)
     return 0
 
 
@@ -469,6 +516,12 @@ def cmd_manifest(a):
             problems.append("partial file present: %s" % rel)
         sha, size = sha_size(os.path.join(run, rel))
         files.append({"path": rel, "sha256": sha, "size": size})
+    given = [a.scale_env, a.scale_value, a.scale_source]
+    scale_override = None
+    if all(v is not None for v in given):
+        scale_override = {"env": a.scale_env, "value": a.scale_value, "source": a.scale_source}
+    elif any(v is not None for v in given):
+        problems.append("scale override: --scale-env, --scale-value and --scale-source must be given together")
     manifest = {
         "schema": "manifest.v1",
         "tool": TOOL,
@@ -490,6 +543,7 @@ def cmd_manifest(a):
         "scenarios": scenarios,
         "specs": specs,
         "envs": [envs[k] for k in sorted(envs)],
+        "scale_override": scale_override,
         "files": files,
         "problems": problems,
     }
@@ -854,6 +908,9 @@ def build_parser():
     m.add_argument("--scenario", action="append", default=[])
     m.add_argument("--spec", action="append", default=[])
     m.add_argument("--app-commit")
+    m.add_argument("--scale-env")
+    m.add_argument("--scale-value")
+    m.add_argument("--scale-source", choices=["spec", "environment"])
     c = sub.add_parser("check")
     c.add_argument("--run", required=True)
     v = sub.add_parser("verdict")
@@ -1252,6 +1309,84 @@ def t_new(st):
     st.commit(spec)
     rc, _, e = st.call(["new", "--evidence", ev2, "--run-id", "g4", "--spec", spec])
     ex(rc == 0, "committed spec passes: %s" % e)
+    t_new_scale(st)
+
+
+def t_new_scale(st):
+    """scale_env= in lanes.conf: the lane sets the app's scale from the spec, and every refusal comes before the run folder."""
+    ex = st.expect
+    conf = os.path.join(SCRIPT_DIR, "lanes.conf")
+    nspec = [0]
+
+    def mkspec(ppp, text=None):
+        nspec[0] += 1
+        p = os.path.join(st.repo, "tests", "visual", "scale%d.toml" % nspec[0])
+        body = text if text is not None else SPEC_TEMPLATE.format(row="sc%d" % nspec[0], tier=1).replace(
+            "pixels_per_point = 1.5", "pixels_per_point = %s" % ppp)
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        st.commit(p)
+        return p
+
+    def lane(conf_text, specs, tag):
+        with open(conf, "w", newline="") as f:
+            f.write(conf_text)
+        ev = os.path.join(st.tmp, "ev-scale-" + tag)
+        args = ["new", "--evidence", ev, "--run-id", "r-" + tag]
+        for s in specs:
+            args += ["--spec", s]
+        rc, out, e = st.call(args)
+        made = os.path.isdir(ev) and bool(os.listdir(ev))
+        return rc, out.split("\n"), e, made
+
+    base = "bin=demo\nkeys_env=DEMO_KEYS_DONE\nisolate=DEMO_HOME DEMO_CFG\n"
+    s15, s15b, s2, s20 = mkspec("1.5"), mkspec("1.5"), mkspec("2"), mkspec("2.0")
+    try:
+        # with the key and a spec: both lines, the first spec's number as Python prints it
+        rc, out, e, made = lane(base + "scale_env=DEMO_SCALE\n", [s15], "ok")
+        ex(rc == 0 and made and "scale_env=DEMO_SCALE" in out and "scale=1.5" in out, "scale_env + spec prints both lines: %s %s %s" % (rc, out, e))
+        rc, out, e, _ = lane(base + "scale_env=DEMO_SCALE\n", [s2], "int")
+        ex(rc == 0 and "scale=2" in out, "an integer scale prints as 2: %s %s" % (out, e))
+        # without the key: neither line, and a spec is not even read (a spec read_spec rejects still gets its run)
+        rc, out, e, _ = lane(base, [s15], "nokey")
+        ex(rc == 0 and not any(l.startswith(("scale_env=", "scale=")) for l in out), "no scale_env -> no scale lines: %s" % out)
+        bad = mkspec(None, text="spec = 1\nrow = \"x\"\n")
+        rc, out, e, made = lane(base, [bad], "nokey-bad")
+        ex(rc == 0 and made, "no scale_env -> the spec is not read by new: %s %s" % (rc, e))
+        # with the key and no spec: no lines (nothing to take the scale from)
+        rc, out, e, _ = lane(base + "scale_env=DEMO_SCALE\n", [], "nospec")
+        ex(rc == 0 and not any(l.startswith(("scale_env=", "scale=")) for l in out), "scale_env without a spec -> no scale lines: %s" % out)
+        # specs that agree (2 and 2.0 are equal) are accepted; the first one's text is printed
+        rc, out, e, _ = lane(base + "scale_env=DEMO_SCALE\n", [s15, s15b], "agree")
+        ex(rc == 0 and "scale=1.5" in out, "two specs at 1.5: %s %s" % (out, e))
+        rc, out, e, _ = lane(base + "scale_env=DEMO_SCALE\n", [s2, s20], "agree2")
+        ex(rc == 0 and "scale=2" in out, "2 and 2.0 agree: %s %s" % (out, e))
+        # specs that disagree: refused, names both specs and values, no folder
+        rc, out, e, made = lane(base + "scale_env=DEMO_SCALE\n", [s15, s2], "disagree")
+        ex(rc == 2 and not made and "disagree" in e and os.path.basename(s15) in e and os.path.basename(s2) in e and "1.5" in e,
+           "disagreeing specs are refused with no folder: rc %s made %s %s" % (rc, made, e))
+        # a spec read_spec rejects is refused when the key is set
+        rc, out, e, made = lane(base + "scale_env=DEMO_SCALE\n", [bad], "badspec")
+        ex(rc == 2 and not made and os.path.basename(bad) in e, "a rejected spec is refused with scale_env: rc %s made %s %s" % (rc, made, e))
+        # a bad name
+        for i, name in enumerate(("demo_scale", "1SCALE", "A-B", "A B", "A=B")):
+            rc, out, e, made = lane(base + "scale_env=%s\n" % name, [s15], "badname%d" % i)
+            ex(rc == 2 and not made, "scale_env=%r is refused with no folder: rc %s made %s" % (name, rc, made))
+        # the same variable as one the lane sets, in any letter case
+        for i, name in enumerate(("DEMO_KEYS_DONE", "DEMO_KEYS_RUN_ID", "DEMO_HOME", "DEMO_CFG")):
+            rc, out, e, made = lane(base + "scale_env=%s\n" % name, [s15], "clash%d" % i)
+            ex(rc == 2 and not made and "same variable" in e, "scale_env=%s clashes: rc %s made %s %s" % (name, rc, made, e))
+        # the other letter case: the conf names are lower or mixed case, the scale name (upper case only) still clashes
+        lower = "bin=demo\nkeys_env=demo_keys_DONE\nisolate=Demo_Home demo_cfg\n"
+        for i, name in enumerate(("DEMO_KEYS_DONE", "DEMO_KEYS_RUN_ID", "DEMO_HOME", "DEMO_CFG")):
+            rc, out, e, made = lane(lower + "scale_env=%s\n" % name, [s15], "clashcase%d" % i)
+            ex(rc == 2 and not made and "same variable" in e, "scale_env=%s clashes in another case: rc %s made %s %s" % (name, rc, made, e))
+        # a keys_env without _DONE has no run-id variable, so that name is free
+        rc, out, e, _ = lane("bin=demo\nkeys_env=DEMO_KEYS\nscale_env=DEMO_KEYS_RUN_ID\n", [s15], "norunid")
+        ex(rc == 0, "keys_env without _DONE has no run-id variable to clash with: rc %s %s" % (rc, e))
+    finally:
+        if os.path.exists(conf):
+            os.remove(conf)
 
 
 def t_manifest(st):
@@ -1268,6 +1403,30 @@ def t_manifest(st):
     ex(len(m["envs"]) == 1 and m["envs"][0]["theme"] == "dark", "envs from shots/*.json: %s" % m["envs"])
     ex(m["specs"] == [{"path": "tests/visual/%s.toml" % c.row, "sha256": sha256_bytes(read_bytes(c.spec_path))}], "specs entry")
     c.emit("clean")
+    ex(m["scale_override"] is None, "no --scale-* -> scale_override null: %r" % (m.get("scale_override", "absent"),))
+
+    # scale override: all three arguments are recorded as the text handed to the app; a partial set is a problem and records null
+    for src in ("spec", "environment"):
+        cs = st.case("scale-" + src)
+        rc, ms = cs.manifest(extra=["--scale-env", "DEMO_SCALE", "--scale-value=1.5", "--scale-source", src])
+        ex(rc == 0 and ms["problems"] == [] and ms["scale_override"] == {"env": "DEMO_SCALE", "value": "1.5", "source": src},
+           "scale_override %s: rc %s %s" % (src, rc, ms and (ms["scale_override"], ms["problems"])))
+    cs = st.case("scale-dash")
+    rc, ms = cs.manifest(extra=["--scale-env", "DEMO_SCALE", "--scale-value=-1", "--scale-source", "spec"])
+    ex(rc == 0 and ms["scale_override"] == {"env": "DEMO_SCALE", "value": "-1", "source": "spec"}, "a value starting with - is one token: rc %s" % rc)
+    for i, part in enumerate((["--scale-env", "DEMO_SCALE"], ["--scale-value=1.5"], ["--scale-source", "spec"],
+                              ["--scale-env", "DEMO_SCALE", "--scale-value=1.5"])):
+        cs = st.case("scale-partial%d" % i)
+        rc, ms = cs.manifest(extra=part)
+        ex(rc == 1 and ms["scale_override"] is None and any("scale override" in p for p in ms["problems"]),
+           "partial scale set %s -> null and a problem: rc %s %s" % (part, rc, ms and (ms["scale_override"], ms["problems"])))
+    # an old manifest (no scale_override) is still read back by check
+    co = st.case("scale-old")
+    rc, mo = co.manifest()
+    del mo["scale_override"]
+    co.put_json("manifest.json", mo)
+    ro, mp = check_run(co.run)
+    ex(ro is not None and not any("scale_override" in p for p in mp), "check does not require scale_override: %s" % (mp,))
 
     def bad(name, want, tier=1, populate=None, after=None, **mk):
         cc = st.case(name, populate=False)

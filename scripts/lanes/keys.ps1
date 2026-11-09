@@ -231,7 +231,7 @@ if ($Evidence) {
     try { $r = Invoke-Evidence $newArgs }
     catch { Write-Warning "keys.ps1: evidence.py new could not run: $($_.Exception.Message)"; exit 5 }
     $kv = @{}
-    foreach ($l in $r.Lines) { if ($l -match '^(run_id|dir|env)=(.*)$') { $kv[$Matches[1]] = $Matches[2] } }
+    foreach ($l in $r.Lines) { if ($l -match '^(run_id|dir|env|scale_env|scale)=(.*)$') { $kv[$Matches[1]] = $Matches[2] } }
     if ($r.Code -ne 0 -or -not $kv['run_id'] -or -not $kv['dir'] -or -not $kv['env']) {
         $r.Lines | ForEach-Object { Write-Warning "evidence.py: $_" }
         Write-Warning 'keys.ps1: evidence.py new did not make a run folder; nothing was run'
@@ -240,6 +240,18 @@ if ($Evidence) {
     $rid = $kv['run_id']
     $Out = $kv['dir']
     $runEnv = $kv['env']
+}
+# The app's scale override (scale_env= in lanes.conf), evidence runs only. `new` hands over the first spec's
+# pixels_per_point (source spec); with no spec the variable may already be set by hand (source environment).
+# Either way it goes to the manifest, so a run on an overridden scale cannot pass for one on a real screen.
+$scaleOverride = $null
+if ($Evidence) {
+    if ($kv['scale_env'] -and $kv['scale']) {
+        $scaleOverride = @{ Env = $kv['scale_env']; Value = $kv['scale']; Source = 'spec' }
+    } elseif ($conf['scale_env']) {
+        $have = [Environment]::GetEnvironmentVariable($conf['scale_env'])
+        if ($have) { $scaleOverride = @{ Env = $conf['scale_env']; Value = $have; Source = 'environment' } }
+    }
 }
 if (-not $Out) { $Out = Join-Path ([IO.Path]::GetTempPath()) ("$name-keys-" + [guid]::NewGuid().ToString('N').Substring(0, 8)) }
 $done = Join-Path $Out 'keys.done'
@@ -298,6 +310,7 @@ try {
         # In -Evidence the folder is new and evidence.py wrote .keys-run and pre\: nothing above runs, so nothing of theirs is touched.
         Set-LaneEnv $conf['keys_env'] $done
         if ($Evidence) { Set-LaneEnv $runEnv $rid }
+        if ($Evidence -and $scaleOverride -and $scaleOverride.Source -eq 'spec') { Set-LaneEnv $scaleOverride.Env $scaleOverride.Value }
         if ($Isolate) {
             $vars = @(($conf['isolate'] -split '\s+') | Where-Object { $_ })
             if (-not $vars) { throw 'keys.ps1: -Isolate needs isolate= in scripts\lanes.conf' }
@@ -410,6 +423,7 @@ try {
             $mArgs = @('manifest', '--run', $Out, '--exit-code', "$code", '--cleanup', $cleanup)
             if ($timedOut -or ($p -and $left -contains $p.Id)) { $mArgs += '--killed' }
             if ($notes.Count -gt 0) { $mArgs += @('--note', ($notes -join '; ')) }
+            if ($scaleOverride) { $mArgs += @('--scale-env', $scaleOverride.Env, "--scale-value=$($scaleOverride.Value)", '--scale-source', $scaleOverride.Source) }
             foreach ($s in $Spec) { $mArgs += @('--spec', $s) }
             foreach ($s in $Scenario) { $mArgs += @('--scenario', $s) }
             try {

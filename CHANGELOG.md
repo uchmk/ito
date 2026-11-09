@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.286.0] - 2026-11-09
+
+### 追加
+
+- `ito-pane`: プロンプトの印のバーにテストの ID `pane.mark.N` を付けた（#210）。`N` はその瞬間の画面の上からの位置（0 から）で、スクロールすると同じ印の番号が変わる。描かれない印は番号を取らず、全画面のプログラムの間（代替画面）は 1 つも登録しない。バーはクリックもドラッグも取らないので、バーの上から始めるドラッグは今までどおり選択になる。
+- `ito-pane`: `Palette` に `mark_ok`・`mark_failed` を足した（#210）。印のバーの色をテーマのトークンから渡せる。`ito-theme` の `Colors::palette` は `success` と `err` を渡す。
+- `scripts/lanes/make-canary.py`: カナリアを作る道具（#212）。実際の回の folder を `<run>/canary/<種類>/<run id>/` に写して測る値を壊し、`visual-check.py` が FAIL と言うことを確かめる（PASS も ERROR も不合格）。種類は spec の横の `<行>.canary.toml` のデータで、`drop`・`shift`・`set_text`・`copy_from`・`set`・`paint` を書く。製品のコードと元の回には触らない。種類を作る前に元の回を使い捨ての写しで検査し、PASS でなければ何も作らずに終了コード 2 で止まる（もともと FAIL の回では、どのカナリアも良く見えてしまうため）。手順は `docs/visual-test.md` の「カナリア」。
+- `lanes.conf` の `scale_env=`（#213）。アプリの倍率の環境変数の名前を書くと、`keys.ps1 -Evidence`・`xrun.sh --evidence` が spec の `window.pixels_per_point` をその変数でアプリに渡す。manifest の新しい欄 `scale_override`（`{ env, value, source }` か `null`）に残るので、上書きした回を実機の倍率の回と取り違えない。`--spec` 同士で倍率が違う・変数名が `keys_env` などと重なるときは `evidence.py new` が folder を作る前に断る。古い manifest も `evidence.py check` で読める。
+
+### 変更
+
+- `ito-pane`: 印のバーを不透明で塗る（#210）。これまでは不透明度を 0.8 倍にしていて、画素の色をトークンと比べられなかった。バーは少し濃く見える。幅は 2pt のまま。
+
+### 使う側がやること
+
+- `Palette { … }` を全部の欄で書いているなら `mark_ok`・`mark_failed` を足す（`..Default::default()` なら要らない）。kura は `palette(theme)` で `success` と `err` を渡す。
+- `rev` を上げて `scripts/lanes.sh sync` を流す（`FILES` に `make-canary.py` が増え、`evidence.py`・`keys.ps1`・`xrun.sh` の写しが変わる）。
+- 倍率の環境変数があるアプリは `lanes.conf` に `scale_env=<変数名>` を足す（kura は `KURA_SCALE`）。無いアプリはそのままでよい。
+
 ## [0.285.0] - 2026-11-09
 
 ### 追加

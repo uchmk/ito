@@ -360,6 +360,8 @@ impl Colors {
             cursor: self.run,
             on_cursor: self.bg,
             ansi: Some(self.ansi()),
+            mark_ok: self.success(),
+            mark_failed: self.err,
         }
     }
 
@@ -942,6 +944,15 @@ mod tests {
         assert_eq!((c.bg, c.panel, c.fg), (rgb(0x16181d), rgb(0x1b1e24), rgb(0xc8cdd8)));
         #[cfg(feature = "pane")]
         assert_eq!(c.palette().bg, Palette::default().bg, "the pane as before");
+    }
+
+    #[cfg(feature = "pane")]
+    #[test]
+    fn the_pane_marks_take_the_status_tokens() {
+        for t in builtin() {
+            let p = t.colors.palette();
+            assert_eq!((p.mark_ok, p.mark_failed), (t.colors.success(), t.colors.err), "{}", t.name);
+        }
     }
 
     #[test]

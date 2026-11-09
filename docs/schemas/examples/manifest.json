@@ -46,6 +46,11 @@
       "pixels_per_point": 1.5
     }
   ],
+  "scale_override": {
+    "env": "DEMO_SCALE",
+    "value": "1.5",
+    "source": "spec"
+  },
   "files": [
     {
       "path": ".keys-run",

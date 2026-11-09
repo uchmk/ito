@@ -166,6 +166,37 @@
         "$ref": "#/$defs/env"
       }
     },
+    "scale_override": {
+      "description": "The app's scale variable (scale_env= in lanes.conf) as the run set it: null when none was set. value is the exact text handed to the app; source is spec (the lane took it from the spec) or environment (it was already set by hand).",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "spec",
+                "environment"
+              ]
+            }
+          },
+          "required": [
+            "env",
+            "value",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "files": {
       "type": "array",
       "items": {
@@ -218,6 +249,7 @@
     "scenarios",
     "specs",
     "envs",
+    "scale_override",
     "files",
     "problems"
   ],

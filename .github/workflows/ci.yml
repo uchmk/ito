@@ -86,6 +86,7 @@ jobs:
       - run: python3 scripts/lanes/merge-lanes.py --self-test
       - run: python3 scripts/lanes/ito-first.py --self-test
       - run: python3 scripts/lanes/visual-check.py --self-test
+      - run: python3 scripts/lanes/make-canary.py --self-test
       - run: python3 scripts/lanes/evidence.py --self-test
       - run: python3 scripts/check-schemas.py
       - run: pwsh -NoProfile -File scripts/lanes/check-ps1.ps1

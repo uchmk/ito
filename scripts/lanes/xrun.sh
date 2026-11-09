@@ -97,6 +97,7 @@ else
 fi
 # Set before anything can fail, so the EXIT trap is safe under `set -u`.
 xvfb="" pid="" killed=0 pgid_bad=0 evpy="" notes=()
+scale_name="" scale_val="" scale_src=""
 # What a missing tool or setting ends with: with --evidence that is "no evidence" (5).
 refuse=2
 [ "$evidence" = 1 ] && refuse=5
@@ -187,6 +188,7 @@ on_exit() {
             for m in "${notes[@]}"; do n="${n:+$n; }$m"; done
             margs+=(--note "$n")
         fi
+        [ -n "$scale_src" ] && margs+=(--scale-env "$scale_name" "--scale-value=$scale_val" --scale-source "$scale_src")
         for m in ${specs[@]+"${specs[@]}"}; do margs+=(--spec "$m"); done
         for m in ${scenarios[@]+"${scenarios[@]}"}; do margs+=(--scenario "$m"); done
         PYTHONUTF8=1 python3 "$evpy" "${margs[@]}"
@@ -254,6 +256,8 @@ if [ "$evidence" = 1 ]; then
     rid=$(printf '%s\n' "$nout" | sed -n 's/^run_id=//p')
     out=$(printf '%s\n' "$nout" | sed -n 's/^dir=//p')
     run_env=$(printf '%s\n' "$nout" | sed -n 's/^env=//p')
+    new_scale_env=$(printf '%s\n' "$nout" | sed -n 's/^scale_env=//p')
+    new_scale=$(printf '%s\n' "$nout" | sed -n 's/^scale=//p')
     if [ "$nrc" != 0 ] || [ -z "$rid" ] || [ -z "$out" ] || [ -z "$run_env" ]; then
         printf '%s\n' "$nout" | sed 's/^/xrun: evidence.py: /' >&2
         echo "xrun: evidence.py new did not make a run folder; nothing was run" >&2
@@ -265,6 +269,15 @@ if [ "$evidence" = 1 ]; then
     [ -z "$held" ] || exit "$held"
     prep_folder
     envargs=("$keys_env=$out/keys.done" "$run_env=$rid")
+    # The app's scale override (scale_env= in lanes.conf): the first spec's pixels_per_point when `new` handed one over (source spec),
+    # else a value already set by hand (source environment). Either way it goes to the manifest.
+    conf_scale_env=$(conf scale_env)
+    if [ -n "$new_scale_env" ] && [ -n "$new_scale" ]; then
+        scale_name=$new_scale_env scale_val=$new_scale scale_src=spec
+        envargs+=("$scale_name=$scale_val")
+    elif [ -n "$conf_scale_env" ] && [ -n "${!conf_scale_env:-}" ]; then
+        scale_name=$conf_scale_env scale_val=${!conf_scale_env} scale_src=environment
+    fi
     for v in $isolate; do
         mkdir -p -- "$out/isolate/$v"
         envargs+=("$v=$out/isolate/$v")
