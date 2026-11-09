@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.287.1] - 2026-11-09
+
+### 修正
+
+- `scripts/lanes/keys.ps1`: `-Dir` がバックスラッシュで書いたドライブのルート（`C:\`）のとき、閉じる引用符がエスケープされて引数がつながり、`--keys` がアプリに届かないまま `-Timeout` まで待っていた。Windows のコマンドラインの規則どおりに、引用符の前と末尾のバックスラッシュを倍にして渡す。`-Keys` の `\"` と末尾の `\` も同じ規則で渡すようにした。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す。
+
 ## [0.287.0] - 2026-11-09
 
 ### 追加

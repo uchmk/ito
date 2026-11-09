@@ -266,6 +266,13 @@ function Set-LaneEnv {
     [Environment]::SetEnvironmentVariable($Name, $Value)
 }
 
+# One argument for the Windows command line. Backslashes before a quote or at the end are doubled, or they would escape the
+# quote: `"C:\"` does not end there, and the arguments after it run together.
+function ConvertTo-LaneArg {
+    param([string]$Value)
+    '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)\z', '$1$1') + '"'
+}
+
 $code = 0
 $exitCode = $null
 $notes = New-Object System.Collections.Generic.List[string]
@@ -322,7 +329,7 @@ try {
         }
 
         # One argument list, quoted by us: a `<Wait:1500>` or a space-bearing path survives.
-        $argList = @('"' + $(if ($Dir.Length -gt 3) { $Dir.TrimEnd('\') } else { $Dir }) + '"', '--keys', ('"' + $Keys.Replace('"', '\"') + '"'))
+        $argList = @((ConvertTo-LaneArg $(if ($Dir.Length -gt 3) { $Dir.TrimEnd('\') } else { $Dir })), '--keys', (ConvertTo-LaneArg $Keys))
         $p = Start-Process -FilePath $Bin -ArgumentList $argList -PassThru
         if ($Evidence) {
             # A child the app starts between Start-Process and the assignment escapes the job; the app starts
