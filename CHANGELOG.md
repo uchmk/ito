@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.284.1] - 2026-11-09
+
+### 修正
+
+- `scripts/lanes/evidence.py`: 自己検査が、自分で作ったシンボリックリンクを `os.rmdir` で消そうとして、Linux で落ちていた（`[Errno 20] Not a directory`）。`os.unlink` で消す。手元の Windows の `verify.sh` では通るので、CI でだけ赤かった。
+- ワークフロー: ito の Build と雛形（`scripts/lanes/workflows/` の `build.yml`・`release.yml`）の macOS のランナーを `macos-14` から `macos-15` にした。GitHub が `macos-14-arm64-us-default` を受け付けなくなり、macOS の 2 つのジョブが取り消されていた。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す（`evidence.py` の写しと、`workflows=` に並べた雛形が変わる）。
+
 ## [0.284.0] - 2026-11-08
 
 ### 変更

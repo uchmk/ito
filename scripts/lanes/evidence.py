@@ -1310,7 +1310,7 @@ def t_manifest(st):
     if linked:
         rc, m = cc.manifest()
         ex(rc == 1 and any("not followed: isolate" in p for p in m["problems"]), "symlink is a problem: %s" % (m and m["problems"]))
-        os.rmdir(os.path.join(cc.run, "isolate"))
+        os.unlink(os.path.join(cc.run, "isolate"))
 
 
 def t_check(st):
