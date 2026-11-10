@@ -15,7 +15,7 @@ ito のやること。`【人】` は持ち主の作業。
   - [x] `keys.ps1` / `xrun.sh` に `-Evidence`: folder を作り、run id を環境変数に入れ、どの終わり方でも manifest を書く。v0.279.0 で済んだ。
   - [ ] `xrun.sh --evidence` を本物の Linux で回す（v0.279.0 は Git Bash の上のスタブで確かめただけ。`setsid`・`ps`・グループへの kill）。アプリが `isolate=` と `evidence=` を足してからの Linux のレーンで。
   - [x] `merge-lanes.py`: 見た目の行の `[x]` を、候補の verdict が無いまま付けたら断る。v0.281.0 で済んだ。
-  - [ ] Vision（Tier 2）と、その `vision.v1` の schema。
+  - [ ] Vision（Tier 2）の実行と突き合わせのスクリプト（答えの形 `vision.v1` の schema は v0.289.0 で入った。Tier 2 は持ち主の承認待ちなので、作っても影運用で `[~]` のまま）。
   - [x] `env.wgpu_backend` / `env.font_set_sha256` を ito が埋める。v0.287.0 で済んだ（`wgpu_backend` はアプリが `set_wgpu_backend` を呼ぶ）。
   - [ ] 基準画像との比較（承認した基準画像と、証拠の鎖の中での置き場所）。
 - [ ] ito-keyscript の小さな直し（kura v0.158.0 が `pace::Pace` に載せ替えたときの指摘）。

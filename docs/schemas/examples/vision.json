@@ -1,0 +1,50 @@
+{
+  "schema": "vision.v1",
+  "row": "54.18",
+  "model": "example-vision-model",
+  "prompt_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "inputs": [
+    {
+      "id": "A",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "B",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "points": [
+    {
+      "id": "egui-light",
+      "image": "A",
+      "question": "検索欄とスクロールバーも明るい地か",
+      "verdict": "PASS",
+      "bbox_px": [
+        12,
+        8,
+        420,
+        36
+      ],
+      "saw": "検索欄の地は周りと同じ明るさ"
+    },
+    {
+      "id": "scrollbar-light",
+      "image": "B",
+      "question": "スクロールバーの地は明るいか",
+      "verdict": "PASS",
+      "bbox_px": [
+        1180,
+        40,
+        14,
+        600
+      ],
+      "saw": "スクロールバーの地は明るい"
+    }
+  ],
+  "unexpected": [],
+  "overall": "PASS",
+  "usage": {
+    "input_tokens": 2140,
+    "output_tokens": 180
+  }
+}

@@ -167,12 +167,13 @@ Vision の役は 3 つに絞る: (1) Tier 2 の行で、機械が測れない残
 
 ### 足すもの（案。どれもフェーズ 2 以降。自動テストの設計の判断 3〜5 は 2026-11-08 に決まった）
 
-**いまの状態（v0.281.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
+**いまの状態（v0.289.0）:** state JSON v1・矩形・`<Snap:>`・Shot の付属 JSON・`trace.jsonl`・`run.json` は v0.273.0〜v0.276.0 で入った。
 v0.277.0 で、検査（`visual-check.py`）、実行の folder・manifest・verdict（`evidence.py`）、全部の JSON の schema（`docs/schemas/*.v1.json`）が入った。
 v0.279.0 で、keys.ps1 の `-Evidence` と xrun.sh の `--evidence` が folder と manifest を自動で作るようになった。
 v0.281.0 で、merge-lanes.py が門番になった。PR のベースのブランチに `tests/visual/<row>.toml` がある行の新しい `[x]` は、仕様が正しくて `tier = 1` で、PR に `<row> tier1 [x] <…\verdict-<row>.json>` の行があるときだけマージする。
 門番の限界: 証拠はレーンの機械にあるので、GitHub Actions からは verdict の中身もハッシュも読めない（宣言の行だけを見る。本当に `auto-pass-candidate` だったかは、レーンの規則のまま）。仕様を持たない見た目の行も見分けられない。
-まだ無いもの: Vision（Tier 2）、基準画像との比較。どちらも [TODO.md](../TODO.md)。
+v0.289.0 で、Vision の答えの形（`docs/schemas/vision.v1.json`）が入った。形だけで、印・門番・verdict は変えない。
+まだ無いもの: Vision（Tier 2）の実行と突き合わせ、基準画像との比較。どちらも [TODO.md](../TODO.md)。
 
 | もの | どこ | 中身 |
 |---|---|---|
@@ -444,7 +445,7 @@ C:\dev\filer-evidence\20261108-101203-41_15-3f9a\
 ```
 
 **run id は `.` を含まない**（`^[A-Za-z0-9_-]{1,64}$`。行 `41.15` は `41_15` になる）。形は `<日付>-<時刻>-<行>-<乱数 4 桁>`。使い回さず、同じ名前の folder があれば `evidence.py new` は失敗する。
-schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`manifest`・`assertions`・`verdict` の各 `.v1.json`、例は `docs/schemas/examples/`。`scripts/check-schemas.py` が schema の書き方、例、両スクリプトの自己検査が出す実物を検査し、ito-keyscript のテストが Rust の書き手の出力を例と突き合わせる。
+schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`manifest`・`assertions`・`verdict`・`vision` の各 `.v1.json`、例は `docs/schemas/examples/`。`scripts/check-schemas.py` が schema の書き方、例、両スクリプトの自己検査が出す実物を検査し、ito-keyscript のテストが Rust の書き手の出力を例と突き合わせる。
 
 **実行の順（実機のセッション）:**
 
@@ -489,7 +490,7 @@ target = "spot.scroll.thumb"
 
 終了コードは 0（全部 FAIL した）、1（FAIL にならなかったものがある）、2（使い方かデータの問題、または元の回が PASS でない。何も写さない）。回の中身と合わないもの（`target` が無い、`path` が無いなど）はその種類だけ不合格で、その folder を作らず、ほかの種類は続ける。
 
-### vision の出力（案。Tier 2 は未実装で、vision.v1 の schema はまだ無い）
+### vision の出力（v0.289.0 から `docs/schemas/vision.v1.json`。Tier 2 は未実装で未承認）
 
 ```json
 {
@@ -509,6 +510,14 @@ target = "spot.scroll.thumb"
   "usage": { "input_tokens": 0, "output_tokens": 0 }
 }
 ```
+
+保存するのは呼ぶ側が埋めたあとの完成した記録で、`model`・`prompt_sha256`・`inputs[].sha256` は null にしない（subagent の生の答えはここが null で、それは保存しない）。`usage` は分からなければ null。
+
+- `inputs[].id` は盲検の名前。どのファイルか、カナリアか、切り抜きの原点は vision.v1 に書かず、呼ぶ側の記録に持って `sha256` でつなぐ。
+- `bbox_px` は渡した画像の中の画素で `[x, y, w, h]`（切り抜きなら切り抜きの中）。場所を答えられなければ null で、`PASS` と答えていても、その観点は `INCONCLUSIVE` と数える。`FAIL` は場所が無くても `FAIL` のまま（Vision は合格を止める側なので、下げない）。
+- 文字を読む観点では、`saw` に読んだ文字をそのまま書く（突き合わせが state の文字と比べる）。
+- `overall` は、`FAIL` の観点があれば `FAIL`、無くて `INCONCLUSIVE` の観点（場所が null の `PASS` を含む）があれば `INCONCLUSIVE`、どちらも無ければ `PASS`。
+- schema が決めるのは形だけで、印も門番も verdict も変えない（`evidence.py` の `vision_points` は `not implemented` のまま）。観点の `id` が重ならないこと、`image` が `inputs` の id を指すこと、`overall` が観点から決まることは schema では書けないので、突き合わせのスクリプトが見る（まだ無い）。
 
 ### verdict（v0.277.0 から。`verdict-<行>.json`、`docs/schemas/verdict.v1.json`）
 

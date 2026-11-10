@@ -28,7 +28,7 @@ KEYWORDS = {
     "enum", "const", "minItems", "maxItems", "minimum", "$defs", "$ref", "oneOf",
 }
 TYPES = {"string", "number", "integer", "boolean", "object", "array", "null"}
-NAMES = ["state", "shot", "trace", "run", "intent", "manifest", "assertions", "verdict"]
+NAMES = ["state", "shot", "trace", "run", "intent", "manifest", "assertions", "verdict", "vision"]
 
 
 def read_text(path):

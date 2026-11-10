@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.289.0] - 2026-11-10
+
+### 追加
+
+- Vision の答えの形 `docs/schemas/vision.v1.json` と例 2 つ（`docs/schemas/examples/vision.json`・`vision-inconclusive.json`）。`scripts/check-schemas.py` が検査する。形を決めただけで、印・門番・verdict は変えない（`evidence.py` の `vision_points` は `not implemented` のまま。Tier 2 は未承認）。
+
+### 使う側がやること
+
+- いま直すところは無い。Vision の答えをファイルに残すようになったら（kura の影運用）、保存の前に `model`・`prompt_sha256`・`inputs[].sha256` を埋める（`usage` は分からなければ null）。
+
 ## [0.288.0] - 2026-11-10
 
 ### 追加

@@ -1,0 +1,66 @@
+{
+  "schema": "vision.v1",
+  "row": "54.18",
+  "model": "example-vision-model",
+  "prompt_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "inputs": [
+    {
+      "id": "A",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "B",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "points": [
+    {
+      "id": "egui-light",
+      "image": "A",
+      "question": "検索欄とスクロールバーも明るい地か",
+      "verdict": "PASS",
+      "bbox_px": [
+        12,
+        8,
+        420,
+        36
+      ],
+      "saw": "検索欄の地は周りと同じ明るさ"
+    },
+    {
+      "id": "badge-position",
+      "image": "B",
+      "question": "通知のバッジは鐘の右上にあるか",
+      "verdict": "INCONCLUSIVE",
+      "bbox_px": null,
+      "saw": "どこか特定できなかった"
+    },
+    {
+      "id": "heading-text",
+      "image": "A",
+      "question": "見出しの文字は何か",
+      "verdict": "PASS",
+      "bbox_px": [
+        40,
+        96,
+        180,
+        28
+      ],
+      "saw": "ファイルの検索"
+    }
+  ],
+  "unexpected": [
+    {
+      "image": "B",
+      "bbox_px": [
+        600,
+        300,
+        120,
+        40
+      ],
+      "saw": "切れた文字が重なっている"
+    }
+  ],
+  "overall": "INCONCLUSIVE",
+  "usage": null
+}
