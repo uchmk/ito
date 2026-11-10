@@ -8,6 +8,7 @@
     evidence.py verdict --run DIR --spec tests/visual/<row>.toml [--replace] [--canaries F]
     evidence.py vision-prep --run DIR --spec tests/visual/<row>.toml [--canaries F]
     evidence.py vision-record --run DIR --image ID --answer RAW.json --model NAME [--input-tokens N --output-tokens N]
+    evidence.py mark --run DIR --row ROW --mark x|~ --decided-by TEXT [--replace]
     evidence.py --self-test [--emit DIR]
 
 Copied byte for byte into every app by lanes.sh sync: it reads nothing from ito's docs/. Stdlib only, Python 3.11+.
@@ -93,7 +94,7 @@ def read_json(path):
         return loads(read_bytes(path).decode("utf-8")), None
     except FileNotFoundError:
         return None, "missing"
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:  # RecursionError: JSON nested too deeply to parse
         return None, "unreadable: %s" % e
 
 
@@ -1087,6 +1088,21 @@ def cmd_vision_prep(a):
             return refuse("%s is %d x %d px; the long side must be at most %d" % (src, size[0], size[1], VISION_MAX_SIDE_PX))
     if len(images) > VISION_MAX_IMAGES:
         return refuse("%d images; at most %d fit the blind names A-Z" % (len(images), VISION_MAX_IMAGES))
+    for v in info["vision"]:
+        srel = "state/%s-before.json" % v["snap"]
+        state, swhy = read_json(os.path.join(run, "state", "%s-before.json" % v["snap"]))
+        ui = state.get("ui") if isinstance(state, dict) and isinstance(state.get("ui"), list) else None
+        pre = "vision point %s: target %s: " % (v["id"], v["target"])
+        if ui is None:
+            return refuse(pre + "%s %s" % (srel, swhy or "has no ui list"))
+        item = next((u for u in ui if isinstance(u, dict) and u.get("test_id") == v["target"]), None)
+        _, why = visible_rect(item)
+        if why:
+            hint = ""
+            if isinstance(item, dict) and item.get("visible") is None:
+                hint = "; a widget registered with ito_a11y::test_id has no visible, use test_id_in"
+            seen = "visible is %r" % (item.get("visible"),) if isinstance(item, dict) else "not in ui[]"
+            return refuse(pre + "%s (%s, %s)%s" % (why, srel, seen, hint))
     secrets.SystemRandom().shuffle(images)
     entries = {sn: [v for v in info["vision"] if v["snap"] == sn] for sn in snaps}
     key_images = []
@@ -1163,25 +1179,34 @@ def _rect(v):
     return v if isinstance(v, list) and len(v) == 4 and all(is_num(x) and abs(x) <= 2**31 for x in v) else None
 
 
+def visible_rect(item):
+    """-> (rect, None) for the part of a ui[] item that is on screen, or (None, why)."""
+    if not isinstance(item, dict):
+        return None, "the target is not in the state"
+    rect = _rect(item.get("rect_px"))
+    if item.get("visible") is not True or rect is None:
+        return None, "the target is not visible in the state"
+    l, t, r, b = rect
+    if item.get("clip_px") is not None:
+        clip = _rect(item.get("clip_px"))
+        if clip is None:
+            return None, "the target's clip_px is malformed"
+        l, t, r, b = max(l, clip[0]), max(t, clip[1]), min(r, clip[2]), min(b, clip[3])
+    if r <= l or b <= t:
+        return None, "the target's visible rect is empty"
+    return [l, t, r, b], None
+
+
 def bbox_mismatch(bbox, size, item, reads, saw):
     """None when the box sits on the state's rect of the target; else the reason."""
     x, y, w, h = bbox
     W, H = size
     if w <= 0 or h <= 0 or x + w > W or y + h > H:
         return "bbox %s is empty or outside the %d x %d image" % (bbox, W, H)
-    if not isinstance(item, dict):
-        return "the target is not in the state"
-    rect = _rect(item.get("rect_px"))
-    if item.get("visible") is not True or rect is None:
-        return "the target is not visible in the state"
+    rect, why = visible_rect(item)
+    if why:
+        return why
     l, t, r, b = rect
-    if item.get("clip_px") is not None:
-        clip = _rect(item.get("clip_px"))
-        if clip is None:
-            return "the target's clip_px is malformed"
-        l, t, r, b = max(l, clip[0]), max(t, clip[1]), min(r, clip[2]), min(b, clip[3])
-    if r <= l or b <= t:
-        return "the target's visible rect is empty"
     tol = max(8.0, 0.02 * max(W, H))
     bx0, by0, bx1, by1 = x, y, x + w, y + h
 
@@ -1519,13 +1544,23 @@ def cmd_verdict(a):
     screenshot = (not shot_why) if snaps else "n/a"
     # state_json
     st_why = []
+    settled_why = []
+    seen_state = {}
     for p in pts:
         n = p.get("snap") if p.get("snap") is not None else p.get("state")
         need = ["state/%s-before.json" % n, "state/%s-after.json" % n] if p.get("snap") is not None else ["state/%s.json" % n]
         for path in need:
             if not any(i.get("path") == path and in_manifest(i) for i in inputs_of(p)):
                 st_why.append("point %s: %s is not an input with the manifest's sha256" % (p.get("id"), path))
+            elif path not in seen_state:
+                doc, dwhy = read_json(os.path.join(run, *path.split("/")))
+                seen_state[path] = True
+                if not isinstance(doc, dict):
+                    settled_why.append("%s: %s" % (path, dwhy or "is not a JSON object"))
+                elif doc.get("settled") is not True:
+                    settled_why.append("%s: settled is %r" % (path, doc.get("settled")))
     state_json = bool(pts) and not st_why
+    settled = state_json and not settled_why
     errors_top = A.get("errors") if isinstance(A.get("errors"), list) else []
     machine_issues = sum(1 for p in pts if p.get("outcome") != "PASS") + len(errors_top)
     unconfirmed = len(errors_top)
@@ -1544,6 +1579,7 @@ def cmd_verdict(a):
         "assertions_match": asr_match,
         "screenshot": screenshot,
         "state_json": state_json,
+        "settled": settled,
         "same_run": same_run,
         "machine_issues": machine_issues,
         "vision_points": "n/a" if tier != 2 else vis_points,
@@ -1566,6 +1602,8 @@ def cmd_verdict(a):
         reasons.append("screenshot: " + "; ".join(shot_why))
     if not state_json:
         reasons.append("state_json: " + ("; ".join(st_why) or "no points"))
+    if settled_why:
+        reasons.append("settled: " + "; ".join(settled_why))
     if not same_run:
         reasons.append("same_run: " + "; ".join(same_why))
     if machine_issues:
@@ -1583,7 +1621,7 @@ def cmd_verdict(a):
     reasons += vis_reasons
     overall = A.get("overall")
     machine_ok = (
-        overall == "PASS" and screenshot in (True, "n/a") and state_json and machine_issues == 0 and unconfirmed == 0
+        overall == "PASS" and screenshot in (True, "n/a") and state_json and settled and machine_issues == 0 and unconfirmed == 0
         and cleanup == "PASS" and cond["rationale_saved"] and cond["run_problems"] == 0
     )
     vision_ok = cond["vision_points"] is True and cond["major_mismatch"] is False and cond["canary_caught"] is True
@@ -1635,6 +1673,69 @@ def cmd_verdict(a):
     return {"auto-pass-candidate": 0, "ai-pass-candidate": 0, "fail": 1}.get(result, 3)
 
 
+def cmd_mark(a):
+    run = os.path.abspath(a.run)
+    rid = os.path.basename(run)
+
+    def refuse(msg):
+        err("mark: " + msg)
+        return 2
+
+    if not os.path.isdir(run):
+        return refuse("run folder does not exist: %s" % a.run)
+    if "/" in a.row or "\\" in a.row:
+        return refuse("--row must be a row id, not a path")
+    path = os.path.join(run, "verdict-%s.json" % a.row)
+    name = os.path.basename(path)
+    doc, why = read_json(path)
+    if doc is None:
+        return refuse("%s %s" % (name, why))
+    if not isinstance(doc, dict):
+        return refuse("%s is not a JSON object" % name)
+    if doc.get("schema") != "verdict.v1":
+        return refuse("%s: schema is not verdict.v1" % name)
+    if doc.get("row") != a.row:
+        return refuse("%s: row is not %s" % (name, a.row))
+    if doc.get("run_id") != rid:
+        return refuse("%s: run_id is not the folder name" % name)
+    if "mark" not in doc or "decided_by" not in doc:
+        return refuse("%s has no mark / decided_by keys" % name)
+    if not a.decided_by.strip():
+        return refuse("--decided-by must not be blank")
+    if (doc["mark"] is not None or doc["decided_by"] is not None) and not a.replace:
+        return refuse("%s already has a mark or decided_by; pass --replace" % name)
+    if a.mark == "x":
+        if doc.get("result") not in ("auto-pass-candidate", "ai-pass-candidate"):
+            return refuse("--mark x needs a candidate result; the result is %r" % (doc.get("result"),))
+        m, problems = check_run(run)
+        if m is None:
+            return refuse("no readable manifest: %s" % problems[0])
+        if problems:
+            return refuse("the run folder has problems: " + "; ".join(problems[:5]))
+        # machine/ and vision/ are outside the manifest, so compare what the verdict read with what is there now
+        inputs = doc.get("inputs")
+        if not isinstance(inputs, list) or not inputs:
+            return refuse("%s has no inputs" % name)
+        for i in inputs:
+            p = i.get("path") if isinstance(i, dict) else None
+            if not isinstance(p, str) or "\\" in p or ":" in p or any(s in ("", ".", "..") for s in p.split("/")):
+                return refuse("%s: bad input path %r" % (name, p))
+            try:
+                got = sha256_bytes(read_bytes(os.path.join(run, *p.split("/"))))
+            except OSError as e:
+                return refuse("cannot read input %s: %s" % (p, e))
+            if got != i.get("sha256"):
+                return refuse("%s changed after the verdict was written" % p)
+    doc["mark"] = a.mark
+    doc["decided_by"] = a.decided_by
+    try:
+        write_atomic(path, dumps(doc))
+    except OSError as e:
+        return refuse("cannot write %s: %s" % (name, e))
+    print("%s: mark %s" % (name, a.mark))
+    return 0
+
+
 # ---------------------------------------------------------------- CLI
 
 
@@ -1677,6 +1778,12 @@ def build_parser():
     vr.add_argument("--model", required=True)
     vr.add_argument("--input-tokens", type=int)
     vr.add_argument("--output-tokens", type=int)
+    mk = sub.add_parser("mark")
+    mk.add_argument("--run", required=True)
+    mk.add_argument("--row", required=True)
+    mk.add_argument("--mark", required=True, choices=["x", "~"])
+    mk.add_argument("--decided-by", required=True)
+    mk.add_argument("--replace", action="store_true")
     return ap
 
 
@@ -1705,7 +1812,7 @@ def main(argv):
         sys.stderr.write(text)
         return 2
     return {"new": cmd_new, "manifest": cmd_manifest, "check": cmd_check, "verdict": cmd_verdict,
-            "vision-prep": cmd_vision_prep, "vision-record": cmd_vision_record}[a.cmd](a)
+            "vision-prep": cmd_vision_prep, "vision-record": cmd_vision_record, "mark": cmd_mark}[a.cmd](a)
 
 
 # ---------------------------------------------------------------- self-test
@@ -2505,7 +2612,7 @@ def t_vision(st):
         return st.call(args)
 
     def build(name, same_as=None, canary_text=None, shot_png=None, machine_mod=None, post_prep=None, answer_mod=None,
-              skip=(), post_record=None, bump_head=False, do_prep=True, do_record=True, tier=2, state_mod=None):
+              skip=(), post_record=None, bump_head=False, do_prep=True, do_record=True, tier=2, state_mod=None, state_raw=None):
         c = Case(st, name)
         if same_as is None:
             c.spec(tier)
@@ -2528,6 +2635,8 @@ def t_vision(st):
             sd = loads(read_bytes(sp).decode())
             state_mod(sd)
             c.put_json("state/top-before.json", sd)
+        for rel, data in (state_raw or {}).items():
+            c.put(rel, data)
         if shot_png is not None:
             c.put("shots/top.png", shot_png)
         c.manifest()
@@ -2574,7 +2683,7 @@ def t_vision(st):
 
     # ---- the good run
     got = build("t2-candidate")
-    v = judge("t2-candidate", got, "ai-pass-candidate", vision_points=True, major_mismatch=False, canary_caught=True)
+    v = judge("t2-candidate", got, "ai-pass-candidate", vision_points=True, major_mismatch=False, canary_caught=True, settled=True)
     if v:
         c = got[0]
         k = key_of(c)
@@ -2601,7 +2710,7 @@ def t_vision(st):
     c.assertions()
     _, v, _ = c.verdict()
     ex(v and v["result"] == "auto-pass-candidate" and v["conditions"]["vision_points"] == "n/a"
-       and v["conditions"]["canary_caught"] == "n/a" and v["conditions"]["major_mismatch"] is False, "tier 1 conditions: %s" % (v and v["conditions"]))
+       and v["conditions"]["canary_caught"] == "n/a" and v["conditions"]["major_mismatch"] is False and v["conditions"]["settled"] is True, "tier 1 conditions: %s" % (v and v["conditions"]))
     c = st.case("t3-na", tier=3)
     c.manifest()
     c.assertions()
@@ -2781,12 +2890,15 @@ def t_vision(st):
     judge("answers-unlistable", got, "undecidable", vision_points=False)
 
     # numbers too large to be measured end as undecidable, not as a traceback
-    def huge_rect(sd):
+    def huge_rect(c):  # after vision-prep, which refuses a target it cannot see; the verdict still has to survive it
+        sp = os.path.join(c.run, "state", "top-before.json")
+        sd = loads(read_bytes(sp).decode())
         for u in sd["ui"]:
             if isinstance(u, dict) and u.get("rect_px"):
                 u["rect_px"] = [10**400, 5.0, 60.0, 20.0]
+        c.put_json("state/top-before.json", sd)
 
-    judge("state-rect-huge", build("state-rect-huge", state_mod=huge_rect), "undecidable", major_mismatch=True)
+    judge("state-rect-huge", build("state-rect-huge", post_prep=huge_rect), "undecidable", major_mismatch=True)
     for nm, big in (("key-width-huge-int", 10**400), ("key-width-2-40", 2**40)):
         c, _, _ = build(nm, post_prep=lambda c, big=big: edit_key(c, lambda k: img_of(k, "shot").update(width_px=big)), do_record=False)
         rc, v, _ = c.verdict()
@@ -2889,6 +3001,205 @@ def t_vision(st):
     with open(default_canaries(c.spec_path), "a", newline="") as f:
         f.write("# uncommitted\n")
     refused("an uncommitted canary file", c, prep(c))
+
+    # vision-prep refuses a target the state does not show, before it writes anything
+    def target_item(sd):
+        return next(u for u in sd["ui"] if isinstance(u, dict) and u.get("test_id") == "title")
+
+    def set_item(**kw):
+        return lambda sd: target_item(sd).update(**kw)
+
+    def drop_item(sd):
+        sd["ui"] = [u for u in sd["ui"] if not (isinstance(u, dict) and u.get("test_id") == "title")]
+
+    def no_ui(sd):
+        del sd["ui"]
+
+    for nm, mod, frag in (
+        ("visible false", set_item(visible=False), "not visible in the state"),
+        ("visible null", set_item(visible=None), "use test_id_in"),
+        ("target absent", drop_item, "not in the state"),
+        ("clip disjoint", set_item(clip_px=[100.0, 40.0, 130.0, 60.0]), "visible rect is empty"),
+        ("clip malformed", set_item(clip_px=[1, 2]), "clip_px is malformed"),
+        ("state without ui", no_ui, "has no ui list"),
+    ):
+        c = build("prep-invisible-" + nm.replace(" ", "-"), state_mod=mod, do_prep=False, do_record=False)[0]
+        rc, _, e = prep(c)
+        ex(rc == 2 and "title" in e and "v-title" in e and frag in e and not os.path.exists(os.path.join(c.run, "vision")),
+           "prep refuses a target with %s: rc %s %s" % (nm, rc, e))
+    c = build("prep-state-unreadable", state_raw={"state/top-before.json": b"{not json"}, do_prep=False, do_record=False)[0]
+    rc, _, e = prep(c)
+    ex(rc == 2 and "title" in e and "unreadable" in e and not os.path.exists(os.path.join(c.run, "vision")),
+       "prep refuses an unreadable state: rc %s %s" % (rc, e))
+    # (the helper is also called directly: clip_px cuts the rect)
+    r_, e_ = visible_rect({"visible": True, "rect_px": [0, 0, 10, 10], "clip_px": [5, 5, 20, 20]})
+    ex(r_ == [5, 5, 10, 10] and e_ is None, "visible_rect clips: %s %s" % (r_, e_))
+
+    # ---- settled in the verdict
+    def t1(name, mod_state=None, raw=None):
+        c = st.case(name)
+        for rel, f in (mod_state or {}).items():
+            sd = loads(read_bytes(os.path.join(c.run, *rel.split("/"))).decode())
+            f(sd)
+            c.put_json(rel, sd)
+        for rel, data in (raw or {}).items():
+            c.put(rel, data)
+        c.manifest()
+        c.assertions()
+        rc, v, _ = c.verdict()
+        return c, rc, v
+
+    c, rc, v = t1("settled-ok")
+    ex(v and v["result"] == "auto-pass-candidate" and v["conditions"]["settled"] is True and list(v["conditions"])[3:5] == ["state_json", "settled"],
+       "settled-ok: %s" % (v and v["conditions"]))
+    for nm, kw in (
+        ("settled-false", {"mod_state": {"state/top-before.json": lambda sd: sd.update(settled=False)}}),
+        ("settled-null", {"mod_state": {"state/hello.json": lambda sd: sd.update(settled=None)}}),
+        ("settled-missing", {"mod_state": {"state/top-after.json": lambda sd: sd.pop("settled")}}),
+        ("settled-unreadable", {"raw": {"state/top-after.json": b"{not json"}}),
+        ("settled-not-object", {"raw": {"state/hello.json": b"[1]"}}),
+    ):
+        c, rc, v = t1(nm, **kw)
+        ex(v and v["result"] == "undecidable" and rc == 3 and v["conditions"]["settled"] is False
+           and any(r.startswith("settled:") for r in v["reasons"]), "%s: %s %s" % (nm, rc, v and (v["result"], v["reasons"])))
+        if v:
+            ex(v["conditions"]["state_json"] is True, "%s: state_json stays true" % nm)
+
+    # ---- mark
+    def marked(c, *extra, row=None, run=None):
+        return st.call(["mark", "--run", run or c.run, "--row", row or c.row, *extra])
+
+    def mark_args(mark, who="read it", *more):
+        return ["--mark", mark, "--decided-by", who, *more]
+
+    def vpath(c):
+        return os.path.join(c.run, "verdict-%s.json" % c.row)
+
+    def untouched(c, before, nm):
+        ex(read_bytes(vpath(c)) == before, "%s: the verdict file changed" % nm)
+
+    def mark_ok(nm, c):
+        before = read_bytes(vpath(c))
+        old = loads(before.decode())
+        rc, out, e = marked(c, *mark_args("x", "main read the shot"))
+        new, _ = read_json(vpath(c))
+        ex(rc == 0 and out.strip() == "verdict-%s.json: mark x" % c.row and new and new["mark"] == "x" and new["decided_by"] == "main read the shot"
+           and {k: v for k, v in new.items() if k not in ("mark", "decided_by")} == {k: v for k, v in old.items() if k not in ("mark", "decided_by")}
+           and list(new) == list(old), "%s: mark x rc %s %s %s" % (nm, rc, out, e))
+        c.emit(nm)
+
+    c_auto, rc, v = t1("mark-auto")
+    ex(v and v["result"] == "auto-pass-candidate", "mark-auto base is a candidate")
+    mark_ok("mark-auto", c_auto)
+    got_ai = build("mark-ai-base")
+    ex(got_ai[2] is not None and got_ai[2]["result"] == "ai-pass-candidate", "mark-ai base is a candidate")
+    mark_ok("mark-ai", got_ai[0])
+    # a second mark is refused, --replace takes it
+    before = read_bytes(vpath(c_auto))
+    rc, _, e = marked(c_auto, *mark_args("~", "again"))
+    ex(rc == 2 and e.startswith("mark: "), "second mark refused: rc %s %s" % (rc, e))
+    untouched(c_auto, before, "second mark")
+    rc, _, e = marked(c_auto, *mark_args("~", "changed my mind", "--replace"))
+    new, _ = read_json(vpath(c_auto))
+    ex(rc == 0 and new["mark"] == "~" and new["decided_by"] == "changed my mind", "mark --replace: rc %s %s" % (rc, e))
+    # x is only for a candidate; ~ is for any result
+    c_fail = st.case("mark-fail")
+    c_fail.manifest()
+    c_fail.assertions(lambda a: (a.update(overall="FAIL"), a["points"][0].update(outcome="FAIL"), a["points"][0]["checks"][0].update(outcome="FAIL")))
+    ex(c_fail.verdict()[1]["result"] == "fail", "mark-fail base is a fail")
+    c_und = st.case("mark-undecidable")
+    c_und.manifest(cleanup="FAIL")
+    c_und.assertions()
+    ex(c_und.verdict()[1]["result"] == "undecidable", "mark-und base is undecidable")
+    c_own = st.case("mark-owner", tier=3)
+    c_own.manifest()
+    c_own.assertions()
+    ex(c_own.verdict()[1]["result"] == "owner", "mark-owner base is owner")
+    for nm, cc in (("fail", c_fail), ("undecidable", c_und), ("owner", c_own)):
+        before = read_bytes(vpath(cc))
+        rc, _, e = marked(cc, *mark_args("x"))
+        ex(rc == 2 and e.startswith("mark: ") and repr(nm) in e, "mark x refused on %s and names the result: rc %s %s" % (nm, rc, e))
+        untouched(cc, before, "mark x on " + nm)
+    rc, _, e = marked(c_und, *mark_args("~", "not sure"))
+    new, _ = read_json(vpath(c_und))
+    ex(rc == 0 and new["mark"] == "~", "mark ~ on undecidable: rc %s %s" % (rc, e))
+    # other refusals leave the file alone
+    c, rc, v = t1("mark-refusals")
+    before = read_bytes(vpath(c))
+    rc, _, e = marked(c, *mark_args("x", "   "))
+    ex(rc == 2 and "decided-by" in e, "blank --decided-by: rc %s %s" % (rc, e))
+    rc, _, e = marked(c, *mark_args("x"), row="nope")
+    ex(rc == 2 and e.startswith("mark: "), "wrong --row: rc %s %s" % (rc, e))
+    rc, _, e = marked(c, *mark_args("x"), row="../" + c.row)
+    ex(rc == 2 and e.startswith("mark: "), "path --row: rc %s %s" % (rc, e))
+    rc, _, e = marked(c, *mark_args("x"), run=os.path.join(st.ev, "no-such-run"))
+    ex(rc == 2 and e.startswith("mark: "), "missing run: rc %s %s" % (rc, e))
+    untouched(c, before, "refusals")
+    # a verdict of another run folder, or of another shape
+    for nm, edit in (("run_id", lambda d: d.update(run_id="other")), ("schema", lambda d: d.update(schema="verdict.v0")),
+                     ("row", lambda d: d.update(row="other-row")),
+                     ("no-mark-key", lambda d: d.pop("mark")), ("no-decided-key", lambda d: d.pop("decided_by")),
+                     ("no-inputs", lambda d: d.pop("inputs")), ("empty-inputs", lambda d: d.update(inputs=[])),
+                     ("input-escapes", lambda d: d.update(inputs=[{"path": "../outside.json", "sha256": "0" * 64}])),
+                     ("input-absolute", lambda d: d.update(inputs=[{"path": "C:/outside.json", "sha256": "0" * 64}])),
+                     ("input-not-object", lambda d: d.update(inputs=["manifest.json"])),
+                     ("input-missing", lambda d: d.update(inputs=[{"path": "machine/none.json", "sha256": "0" * 64}]))):
+        c, rc, v = t1("mark-bad-" + nm)
+        d = loads(read_bytes(vpath(c)).decode())
+        edit(d)
+        c.put_json("verdict-%s.json" % c.row, d)
+        before = read_bytes(vpath(c))
+        rc, _, e = marked(c, *mark_args("x"))
+        ex(rc == 2 and e.startswith("mark: "), "mark refuses a verdict with bad %s: rc %s %s" % (nm, rc, e))
+        untouched(c, before, "bad " + nm)
+    c, rc, v = t1("mark-not-object")
+    c.put("verdict-%s.json" % c.row, "[1]\n")
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and e.startswith("mark: "), "mark refuses a verdict that is not an object: rc %s %s" % (rc, e))
+    c, rc, v = t1("mark-unreadable")
+    c.put("verdict-%s.json" % c.row, b"{nope")
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and e.startswith("mark: "), "mark refuses an unreadable verdict: rc %s %s" % (rc, e))
+    rc, _, e = marked(c, *mark_args("x"), row="missing-row")
+    ex(rc == 2 and "missing" in e, "missing verdict: rc %s %s" % (rc, e))
+    # the run folder no longer matches its manifest: x is refused
+    c, rc, v = t1("mark-manifest-broken")
+    with open(os.path.join(c.run, "state", "hello.json"), "ab") as f:
+        f.write(b"\n")
+    before = read_bytes(vpath(c))
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and e.startswith("mark: ") and "problems" in e, "mark x refused when the manifest no longer matches: rc %s %s" % (rc, e))
+    untouched(c, before, "broken manifest")
+    # what the verdict read changed afterwards, outside the manifest: x is refused, ~ is not
+    c, rc, v = t1("mark-stale-machine")
+    with open(os.path.join(c.run, "machine", "assertions.json"), "ab") as f:
+        f.write(b"\n")
+    before = read_bytes(vpath(c))
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and "machine/assertions.json changed" in e, "mark x refused when assertions changed: rc %s %s" % (rc, e))
+    untouched(c, before, "stale assertions")
+    rc, _, e = marked(c, *mark_args("~", "the evidence moved"))
+    ex(rc == 0, "mark ~ on a stale run: rc %s %s" % (rc, e))
+    c = build("mark-stale-vision")[0]
+    ans = sorted(os.listdir(os.path.join(c.run, "vision", "answers")))[0]
+    with open(os.path.join(c.run, "vision", "answers", ans), "ab") as f:
+        f.write(b"\n")
+    before = read_bytes(vpath(c))
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and "vision/answers/%s changed" % ans in e, "mark x refused when a Vision answer changed: rc %s %s" % (rc, e))
+    untouched(c, before, "stale answer")
+    # JSON nested too deeply to parse is unreadable, not a traceback
+    deep = b"[" * 200000
+    c = build("prep-state-deep", state_raw={"state/top-before.json": deep}, do_prep=False, do_record=False)[0]
+    rc, _, e = prep(c)
+    ex(rc == 2 and "title" in e and "unreadable" in e and not os.path.exists(os.path.join(c.run, "vision")),
+       "prep refuses a state nested too deeply: rc %s %s" % (rc, e))
+    c, rc, v = t1("settled-deep", raw={"state/top-after.json": deep})
+    ex(v and v["result"] == "undecidable" and v["conditions"]["settled"] is False, "settled-deep: %s" % (v and v["result"],))
+    c, rc, v = t1("mark-deep")
+    c.put("verdict-%s.json" % c.row, deep)
+    rc, _, e = marked(c, *mark_args("x"))
+    ex(rc == 2 and e.startswith("mark: ") and "unreadable" in e, "mark refuses a verdict nested too deeply: rc %s %s" % (rc, e))
 
     # ---- read_spec
     base = SPEC_TEMPLATE.format(row="rs", tier=2) + VISION_TEMPLATE

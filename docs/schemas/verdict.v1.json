@@ -45,6 +45,10 @@
         "state_json": {
           "type": "boolean"
         },
+        "settled": {
+          "description": "True when every state file the assertions read says settled.",
+          "type": "boolean"
+        },
         "same_run": {
           "type": "boolean"
         },
@@ -104,6 +108,7 @@
         "assertions_match",
         "screenshot",
         "state_json",
+        "settled",
         "same_run",
         "machine_issues",
         "vision_points",

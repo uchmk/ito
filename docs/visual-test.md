@@ -305,7 +305,7 @@ runner はどのアプリも ito から写した同じスクリプト: Windows �
 |---|---|
 | 1 | `expected_defined`（check spec が実行より前にコミットされ、`pre/intent.json` の sha256 と合う） |
 | 2 | `screenshot` |
-| 3 | `state_json` |
+| 3 | `state_json`、`settled`（読んだ state がすべて `settled: true`） |
 | 4 | `same_run` |
 | 5 | `assertions_match`（`assertions.json` が spec と実行の folder から作り直した結果と同じ）、`machine_issues`（FAIL と ERROR の数。0 であること） |
 | 6 | `vision_points`（Tier 1 と 3 は `"n/a"`。Tier 2 は真偽で、`true` が要る。[突き合わせの規則](#vision-cross)） |
@@ -316,7 +316,7 @@ runner はどのアプリも ito から写した同じスクリプト: Windows �
 | + | `canary_caught`（Tier 1 と 3 は `"n/a"`。Tier 2 は真偽で、`true` が要る） |
 
 `result` は `auto-pass-candidate`（Tier 1 で全条件がそろった）・`ai-pass-candidate`（Tier 2 で全条件がそろった）・`fail`（機械が FAIL）・`undecidable`（条件が欠けた）・`owner`（Tier 3）の 5 つ。
-**`assertions.json` だけでは行に印を付けない。verdict の `auto-pass-candidate`・`ai-pass-candidate` は「候補」で、`mark` と `decided_by` は main モデルだけが書く**（スクリプトは `null` のままにする）。
+**`assertions.json` だけでは行に印を付けない。verdict の `auto-pass-candidate`・`ai-pass-candidate` は「候補」で、`mark` と `decided_by` は main モデルだけが書く**（`evidence.py verdict` は `null` のままにする。main モデルが `evidence.py mark` で書く）。
 
 ### 判定不能（印を付けず、`[~]` の報告か持ち主へ）
 
@@ -463,7 +463,7 @@ schema は `docs/schemas/` の `state`・`shot`・`trace`・`run`・`intent`・`
 2. `python3 scripts/visual-check.py --spec tests/visual/<行>.toml --run <dir>` → `machine/assertions.json`。
 3. Tier 2 の行だけ: カナリアを作り（`make-canary.py --run <dir> --spec tests/visual/<行>.toml <種類>...`）、`evidence.py vision-prep --run <dir> --spec tests/visual/<行>.toml` を回す。`vision/input/` の画像 1 枚ごとに Vision の subagent を新しい文脈で 1 回呼び、答えを 1 枚ごとに `evidence.py vision-record --run <dir> --image <id> --answer <生の答えの JSON> --model <モデル>` で保存する。
 4. `evidence.py verdict --run <dir> --spec tests/visual/<行>.toml` → `verdict-<行>.json`（`result` は候補）。
-5. main モデルが verdict を読み、`mark` と `decided_by` を書く。
+5. main モデルが verdict を読み、`evidence.py mark --run <dir> --row <行> --mark x --decided-by "<読んだものと判断>"` で `mark` と `decided_by` を書く（`[~]` にするなら `--mark ~`。`x` は `result` が候補でない回と、verdict のあとで証拠が変わった回には書けない）。
 
 `evidence.py check --run <dir>` は folder が壊れていないかだけ見る。
 
@@ -533,7 +533,9 @@ target = "spot.scroll.thumb"
 
 **1 枚に 1 回の文脈。** 実の画像とカナリアを同じ文脈で見せると、見比べて当てられる。だから Vision の subagent は画像 1 枚ごとに新しく呼ぶ。渡すのは `vision/input/<id>.png` と `vision/input/<id>.md` のパスだけで、`vision/key.json` と `canary/` は見せない。
 
-- `evidence.py vision-prep --run <dir> --spec <spec> [--canaries <toml>]`: Tier 2 の spec だけ。spec とカナリアの toml（既定は spec の横の `<行>.canary.toml`）は、コミット済みで変更が無いこと。実の画像（`[[vision]]` の snap ごとに `shots/<snap>.png`）と、`vision` を持つカナリア全部の画像を、乱数で並べて `A`, `B`, … の名前で `vision/input/` に写し、画像ごとのプロンプト `<id>.md` と `vision/key.json` を書く。同じ snap なら、プロンプトの違いは画像の id だけ。カナリアが無い、どのカナリアの `vision` にも入っていない観点がある、長辺が 1568 px を超える、`vision/` がもうある、のどれかなら断る（終了コード 2。何も残さない）。
+**Vision を当てるのは 1 回。** 行の `[x]` の条件はどれも同じ回にそろうことで、回数の条件は無い。機械の測定を何回か回した行でも、Vision は `verdict` を書く 1 回にだけ当てる。当てる回は Vision の答えを見る前に決め、答えを見てから別の回に当て直さない（同じ版の別の回に悪い答えが残っていれば、[取り直しの規則](#vision-retake)でこの回も `undecidable` になる）。[パイロットの合格](#pilot-pass) の「3 回続けて同じ結果」は道具の安定を見る基準で、行の `[x]` の条件ではない。
+
+- `evidence.py vision-prep --run <dir> --spec <spec> [--canaries <toml>]`: Tier 2 の spec だけ。spec とカナリアの toml（既定は spec の横の `<行>.canary.toml`）は、コミット済みで変更が無いこと。実の画像（`[[vision]]` の snap ごとに `shots/<snap>.png`）と、`vision` を持つカナリア全部の画像を、乱数で並べて `A`, `B`, … の名前で `vision/input/` に写し、画像ごとのプロンプト `<id>.md` と `vision/key.json` を書く。同じ snap なら、プロンプトの違いは画像の id だけ。カナリアが無い、どのカナリアの `vision` にも入っていない観点がある、長辺が 1568 px を超える、`vision/` がもうある、観点の `target` が `state/<snap>-before.json` で見えていない（`visible` が `true` でない、見える矩形が空）、のどれかなら断る（終了コード 2。何も残さない）。
 - `evidence.py vision-record --run <dir> --image <id> --answer <生の答えの JSON> --model <モデル> [--input-tokens N --output-tokens N]`: 生の答えの `points`・`unexpected`・`overall` の形を確かめ、由来（`row`・`model`・`prompt_sha256`・`inputs`・`usage`）を埋めて `vision/answers/<id>.json` に書く。上書きはしない。
 
 <a id="vision-cross"></a>
@@ -586,6 +588,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
     "assertions_match": true,
     "screenshot": true,
     "state_json": true,
+    "settled": true,
     "same_run": true,
     "machine_issues": 0,
     "vision_points": "n/a",
@@ -624,7 +627,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
 }
 ```
 
-**書く人:** `assertions.json` は検査のスクリプト、`vision\*.json` は Vision の subagent、`verdict` の `result` までは突き合わせのスクリプト。`mark` と `decided_by` は main モデルだけが書く。 **PR の 1 行（kura の例）:** `41.15 tier1 [x] C:\dev\filer-evidence\20261107-101203-41.15\verdict-41.15.json`。**残す期間の案:** いまの印の根拠になっている回は残し、それ以外は 30 日で消す。
+**書く人:** `assertions.json` は検査のスクリプト、`vision\*.json` は Vision の subagent、`verdict` の `result` までは突き合わせのスクリプト。`mark` と `decided_by` は main モデルだけが `evidence.py mark` で書く。 **PR の 1 行（kura の例）:** `41.15 tier1 [x] C:\dev\filer-evidence\20261107-101203-41.15\verdict-41.15.json`。**残す期間の案:** いまの印の根拠になっている回は残し、それ以外は 30 日で消す。
 
 <a id="d8"></a>
 
@@ -647,6 +650,8 @@ You check one screenshot against fixed questions. The caller gives you two paths
 | 41.15 | UI 要素の矩形 | つまみの矩形を消した・ずらした state で FAIL |
 | 49.4 | 画素の色とトークン | 帯の色を入れ替えた画像で FAIL |
 | 54.18 | テーマの画素（Tier 1）と、Vision の盲検・突き合わせ・カナリア（Tier 2） | 検索欄だけ暗い地に塗った画像を Vision が FAIL にする |
+
+<a id="pilot-pass"></a>
 
 **パイロットの合格:** 各行 3 回続けて同じ結果、カナリアの回はすべて FAIL、証拠が欠けない、持ち主が結果に同意する。カナリアは製品のコードを変えずに、同じ回の画像と state を [`make-canary.py`](#d7) で書き換えて作る。
 

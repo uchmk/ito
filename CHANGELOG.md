@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.291.0] - 2026-11-10
+
+### 追加
+
+- `evidence.py mark`: main モデルが verdict に `mark` と `decided_by` を書く道具。`--mark x` は `result` が候補で、実行の folder が manifest と合い、verdict が読んだファイル（`inputs`）がそのあと変わっていないときだけ通る。2 つの欄のほかは変えない。書き直すときは `--replace`。
+- verdict の `conditions` に `settled`（読んだ state がすべて `settled: true`）を足した。`verdict.v1` の必須の欄。
+
+### 変更
+
+- `evidence.py vision-prep`: `[[vision]]` の `target` が `state/<snap>-before.json` で見えていなければ、Vision を呼ぶ前に断る（終了コード 2。何も残さない）。`visible` を持たない部品には `ito_a11y::test_id_in` で登録するよう知らせる。
+- `docs/visual-test.md`: Vision を当てるのは `verdict` を書く 1 回で、回数の条件は無いことを書いた。判定の結果は変わらないので版 3 のまま。
+
+### 使う側がやること
+
+- 規則のファイルは版 3 のまま。`rev` を上げて `scripts/lanes.sh sync` を流す。
+- verdict の `mark` と `decided_by` は手で書かず、`evidence.py mark` で書く。
+- `ito_a11y::test_id` だけで登録した部品（`ito-titlebar` の部品など。ito#214）を `target` にすると、`vision-prep` が断る。
+
 ## [0.290.1] - 2026-11-10
 
 ### 変更

@@ -13,6 +13,7 @@
     "assertions_match": true,
     "screenshot": true,
     "state_json": true,
+    "settled": true,
     "same_run": true,
     "machine_issues": 1,
     "vision_points": "n/a",
