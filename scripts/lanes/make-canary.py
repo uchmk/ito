@@ -72,7 +72,7 @@ OPS = {
     "paint": ({"rect", "target", "token", "rgb"}, set()),
 }
 EDIT_KEYS = {"snap", "state", "op", "target", "dx", "dy", "value", "from", "path", "clear", "rect", "token", "rgb"}
-CANARY_KEYS = {"name", "edit"}
+CANARY_KEYS = {"name", "edit", "vision"}
 SET_ROOTS = ("overlay", "app_state")
 
 Result = namedtuple("Result", "ok lines dest")
@@ -103,7 +103,12 @@ def load_checker():
 
 
 def is_num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:
+        return math.isfinite(v)
+    except OverflowError:
+        return False
 
 
 def check_edit(where, ed):
@@ -171,6 +176,11 @@ def check_edit(where, ed):
 
 def load_canaries(path):
     """-> {kind: [edit, ...]}. The whole file is validated, so a typo anywhere stops everything."""
+    return load_canaries_full(path)[0]
+
+
+def load_canaries_full(path):
+    """-> ({kind: [edit, ...]}, {kind: [vision id, ...]}). The second holds only the kinds that name `vision`."""
     try:
         with open(path, "rb") as f:
             doc = tomllib.load(f)
@@ -181,7 +191,7 @@ def load_canaries(path):
     unknown = sorted(set(doc) - {"canary"})
     if unknown:
         raise DataError("%s: unknown top-level key %s" % (path, ", ".join(unknown)))
-    out = {}
+    out, vision = {}, {}
     canaries = doc.get("canary", [])
     if not isinstance(canaries, list):
         raise DataError("%s: `canary` must be an array of tables" % path)
@@ -201,8 +211,17 @@ def load_canaries(path):
             raise DataError("%s: canary %s needs at least one [[canary.edit]]" % (path, name))
         for j, ed in enumerate(edits, 1):
             check_edit("%s: canary %s edit #%d" % (path, name, j), ed)
+        if "vision" in c:
+            ids = c["vision"]
+            if not isinstance(ids, list) or not ids or not all(isinstance(x, str) and x for x in ids) or len(set(ids)) != len(ids):
+                raise DataError("%s: canary %s: `vision` must be a non-empty list of distinct, non-empty strings" % (path, name))
+            if any(ed.get("op") != "paint" or "snap" not in ed for ed in edits):
+                raise DataError("%s: canary %s: a `vision` canary may only paint a picture (op = \"paint\" with `snap`)" % (path, name))
+            if len({ed["snap"] for ed in edits}) != 1:
+                raise DataError("%s: canary %s: a `vision` canary must paint one snap only" % (path, name))
+            vision[name] = ids
         out[name] = edits
-    return out
+    return out, vision
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -451,8 +470,9 @@ def check_copy(spec, dest):
         return p, None, e
 
 
-def process_kind(vc, run, spec, kind, edits, rehash=True):
-    """Make and check one kind. `rehash=False` is for the self-test only: it leaves the stale hashes in place."""
+def process_kind(vc, run, spec, kind, edits, rehash=True, vision=False):
+    """Make and check one kind. `rehash=False` is for the self-test only: it leaves the stale hashes in place.
+    `vision=True`: the kind is for Vision to fail, so the machine checker is not asked; the picture must differ from the real one."""
     run_id = os.path.basename(os.path.abspath(run))
     dest = os.path.join(run, "canary", kind, run_id)
     if os.path.exists(dest):
@@ -471,6 +491,22 @@ def process_kind(vc, run, spec, kind, edits, rehash=True):
     except OSError as e:
         shutil.rmtree(dest, ignore_errors=True)
         return Result(False, ["%s: not made: %s" % (kind, e)], dest)
+    if vision:
+        pngs = [(rel, data) for rel, data in files.items() if rel.endswith(".png")]
+        if not pngs:
+            shutil.rmtree(dest, ignore_errors=True)
+            return Result(False, ["%s: not made: no image was painted" % kind], dest)
+        for rel, data in pngs:
+            try:
+                with open(os.path.join(run, *rel.split("/")), "rb") as f:
+                    same = f.read() == data
+            except OSError:
+                shutil.rmtree(dest, ignore_errors=True)
+                return Result(False, ["%s: not made: cannot read the original image %s" % (kind, rel)], dest)
+            if same:
+                shutil.rmtree(dest, ignore_errors=True)
+                return Result(False, ["%s: not made: the paint changed nothing" % kind], dest)
+        return Result(True, ["%s: vision canary made (Vision must FAIL it)" % kind], dest)
     p, a, e = check_copy(spec, dest)
     if e is None:
         lines = ["%s: overall=%s exit=%d" % (kind, a["overall"], p.returncode)] + describe(a)
@@ -498,10 +534,26 @@ def run_tool(args):
         path = stem + ".canary.toml"
     if not os.path.isfile(path):
         raise DataError("no such canary file: %s" % path)
-    kinds = load_canaries(path)
+    kinds, vision = load_canaries_full(path)
     for k in args.kinds:
         if k not in kinds:
             raise DataError("%s: no canary named %r (has: %s)" % (path, k, ", ".join(kinds) or "none"))
+    if any(k in vision for k in args.kinds):
+        try:
+            with open(spec, "rb") as f:
+                spec_doc = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            raise DataError("cannot read the spec %s: %s" % (spec, e))
+        by_id = {v.get("id"): v.get("snap") for v in spec_doc.get("vision", []) if isinstance(v, dict)}
+        for k in args.kinds:
+            if k not in vision:
+                continue
+            snap = kinds[k][0]["snap"]
+            for vid in vision[k]:
+                if vid not in by_id:
+                    raise DataError("%s: canary %s names vision id %r, which the spec has no [[vision]] for" % (path, k, vid))
+                if by_id[vid] != snap:
+                    raise DataError("%s: canary %s paints snap %r but vision id %r is on snap %r" % (path, k, snap, vid, by_id[vid]))
     vc = load_checker()
     # The run must pass on its own first: on a run that already fails, every canary would "fail as it should".
     with tempfile.TemporaryDirectory(prefix="make-canary-base-") as tmp:
@@ -517,12 +569,15 @@ def run_tool(args):
         raise DataError("the run itself is not PASS: overall=%s exit=%d; a canary on it would prove nothing" % (a["overall"], p.returncode))
     worst = 0
     for k in args.kinds:
-        res = process_kind(vc, run, spec, k, kinds[k])
+        res = process_kind(vc, run, spec, k, kinds[k], vision=k in vision)
         for line in res.lines:
             print(line)
         if not res.ok:
             worst = 1
-    print("CANARY " + ("NOT ALL FAIL" if worst else "ALL FAIL (as they should)"))
+    if any(k in vision for k in args.kinds):
+        print("CANARY " + ("NOT ALL OK" if worst else "ALL OK (machine kinds FAIL, vision kinds made)"))
+    else:
+        print("CANARY " + ("NOT ALL FAIL" if worst else "ALL FAIL (as they should)"))
     return worst
 
 
@@ -835,6 +890,68 @@ def selftest():
         fails.append("a run that is not PASS: code %s, output %r, err %r" % (code, out[:200], err[:300]))
     if os.path.exists(os.path.join(run, "canary")) or tree_hashes(run, False) != before:
         fails.append("a run that is not PASS: the original run changed or a canary folder was made")
+
+    # 10. vision canaries: made without the machine checker, on one snap, naming spec [[vision]] ids
+    vspec = spec_thumb_present.replace("tier = 1", "tier = 2") + '\n[[vision]]\nid = "v1"\nsnap = "top"\ntarget = "spot.scroll.thumb"\nquestion = "Is it there?"\nfail_looks_like = "gone"\n'
+    vedit = 'snap = "top"\nop = "paint"\nrect = [270, 38, 281, 92]\nrgb = "f07178"'
+    all_ok = "CANARY ALL OK (machine kinds FAIL, vision kinds made)"
+
+    def vcanary(name, ids, *edits):
+        return canary(name, *edits).replace('name = "%s"\n' % name, 'name = "%s"\nvision = %s\n' % (name, ids), 1)
+
+    run, root = world()
+    before = tree_hashes(run)
+    code, out, err = tool(root, vspec, vcanary("vk", '["v1"]', vedit), ["vk"])
+    if code != 0 or "vk: vision canary made (Vision must FAIL it)" not in out or out.splitlines()[-1] != all_ok:
+        fails.append("vision kind: code %s output %r %r" % (code, out[:300], err[:200]))
+    if not os.path.isfile(os.path.join(run, "canary", "vk", "run1", "shots", "top.png")) or tree_hashes(run) != before:
+        fails.append("vision kind: no picture made or the original changed")
+    run, root = world()
+    code, out, err = tool(root, vspec, vcanary("vk", '["v1"]', vedit) + canary("mk", 'snap = "top"\nop = "drop"\ntarget = "spot.scroll.thumb"'), ["vk", "mk"])
+    if code != 0 or "mk: overall=FAIL exit=1" not in out or "vk: vision canary made" not in out or out.splitlines()[-1] != all_ok:
+        fails.append("vision and machine kinds together: code %s output %r" % (code, out[:400]))
+    run, root = world()
+    code, out, _ = tool(root, vspec, vcanary("vk", '["v1"]', 'snap = "top"\nop = "paint"\nrect = [500, 500, 600, 600]\nrgb = "ffffff"'), ["vk"])
+    if code != 1 or "vk: not made: " not in out or os.path.exists(os.path.join(run, "canary", "vk")) or out.splitlines()[-1] != "CANARY NOT ALL OK":
+        fails.append("vision kind that paints outside: code %s output %r" % (code, out[:300]))
+    bad_vision = {
+        "empty list": vcanary("bad", "[]", vedit),
+        "duplicate id": vcanary("bad", '["v1", "v1"]', vedit),
+        "empty id": vcanary("bad", '[""]', vedit),
+        "not a list": vcanary("bad", '"v1"', vedit),
+        "not a paint": vcanary("bad", '["v1"]', 'snap = "top"\nop = "drop"\ntarget = "spot.scroll.thumb"'),
+        "paint on a state": vcanary("bad", '["v1"]', 'state = "main"\nop = "paint"\ntarget = "t"\nrgb = "ffffff"'),
+        "two snaps": vcanary("bad", '["v1"]', vedit, 'snap = "other"\nop = "paint"\nrect = [0, 0, 5, 5]\nrgb = "ffffff"'),
+        "id not in the spec": vcanary("bad", '["ghost"]', vedit),
+    }
+    for label, text in bad_vision.items():
+        run, root = world()
+        code, out, err = tool(root, vspec, text, ["bad"])
+        if code != 2 or out or os.path.exists(os.path.join(run, "canary")):
+            fails.append("bad vision data (%s): code %s, output %r" % (label, code, out[:200]))
+    run, root = world()
+    other_snap = vspec.replace('snap = "top"\ntarget = "spot.scroll.thumb"\nquestion', 'snap = "other"\ntarget = "spot.scroll.thumb"\nquestion')
+    code, out, err = tool(root, other_snap, vcanary("bad", '["v1"]', vedit), ["bad"])
+    if code != 2 or os.path.exists(os.path.join(run, "canary")):
+        fails.append("a vision id on another snap than the paint: code %s" % code)
+
+    # process_kind called directly with a faked plan: the three ways a vision kind is not made
+    real_plan = globals()["plan_kind"]
+    try:
+        run, root = world()
+        with open(os.path.join(run, "shots", "top.png"), "rb") as f:
+            orig = f.read()
+        for label, plan in (
+            ("identical image", {"shots/top.png": orig}),
+            ("unreadable original", {"shots/ghost.png": orig}),
+            ("no png", {"shots/note.txt": b"x"}),
+        ):
+            globals()["plan_kind"] = lambda vc, r, e, plan=plan: (dict(plan), None)
+            res = process_kind(None, run, vspec, "vx", [], rehash=False, vision=True)
+            if res.ok or "not made" not in " ".join(res.lines) or os.path.exists(res.dest):
+                fails.append("vision kind (%s) must be not made and leave no folder: %r" % (label, res.lines))
+    finally:
+        globals()["plan_kind"] = real_plan
 
     shutil.rmtree(base, ignore_errors=True)
     if fails:

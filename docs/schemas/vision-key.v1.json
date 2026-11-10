@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/uchmk/ito/docs/schemas/vision-key.v1.json",
+  "title": "ito vision key v1",
+  "description": "Which blind Vision image is which: real shot or canary, and what each canary breaks. Written by evidence.py vision-prep. Kept outside vision/input so the judging context never sees it.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "vision-key.v1"
+    },
+    "row": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "string",
+      "description": "The git commit of the app the run was made from."
+    },
+    "spec_sha256": {
+      "type": "string"
+    },
+    "canaries_sha256": {
+      "type": "string"
+    },
+    "images": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The blind image id A..Z."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Of vision/input/<id>.png."
+          },
+          "prompt_sha256": {
+            "type": "string",
+            "description": "Of vision/input/<id>.md."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "shot",
+              "canary"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "The run-relative path of the picture this image is a copy of."
+          },
+          "snap": {
+            "type": "string"
+          },
+          "width_px": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height_px": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "breaks": {
+            "type": "array",
+            "description": "Vision ids a canary breaks (so Vision must answer FAIL there). Empty for a real shot.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "prompt_sha256",
+          "kind",
+          "source",
+          "snap",
+          "width_px",
+          "height_px",
+          "breaks"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "row",
+    "run_id",
+    "revision",
+    "spec_sha256",
+    "canaries_sha256",
+    "images"
+  ],
+  "additionalProperties": false
+}

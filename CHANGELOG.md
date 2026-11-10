@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.290.0] - 2026-11-10
+
+### 追加
+
+- Tier 2（AI 判定合格）の実行と突き合わせ。持ち主の決定（2026-11-10）で影運用の基準を外し、`docs/visual-test.md` を版 2 にした。自動実機テスト（`docs/autotest.md`）も同じ仕様に従う。
+  - check spec の `[[vision]]`（`id`・`snap`・`target`・`question`・`fail_looks_like`・`reads`）。`spec = 1` のまま。Tier 2 では窓の長辺が 1568 px まで。
+  - Vision のカナリア: `make-canary.py` の `[[canary]]` の `vision`（`paint` だけ。機械の FAIL は求めない）。
+  - `evidence.py vision-prep`（画像を盲検の名前で写し、1 枚ごとのプロンプトと `vision/key.json` を書く）と `vision-record`（生の答えに由来を埋めて `vision/answers/<id>.json` に書く）。画像 1 枚に Vision の subagent を 1 回（見比べて当てられないように）。
+  - `evidence.py verdict`: Tier 2 の `vision_points`（真偽）・`major_mismatch`・新しいキー `canary_caught` と、結果 `ai-pass-candidate`（終了コード 0）。機械の FAIL は `fail` のまま。同じ条件の別の回に悪い答えが残っていれば `undecidable`（取り直しで消さない）。
+  - `merge-lanes.py`: tier 2 の spec の行は `<row> tier2 [x] <…\verdict-<row>.json>` で門番を通す（行の tier は spec と一致が要る。tier 3 は断る）。
+  - schema: `docs/schemas/vision-key.v1.json` を追加、`verdict.v1.json` を更新（`result` に `ai-pass-candidate`、`vision_points` は `"n/a"` か真偽、`canary_caught` が必須）。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す。
+- 規則のファイルを `docs/visual-test.md` 版 2 の雛形に置き換える（kura は `docs/claude/lanes.md`・`.claude/windows-role.md`）。効くのは載せてから。
+- Vision の subagent を `docs/visual-test.md` の定義に合わせる（kura の `.claude/agents/vision.md` は、画像 1 枚に 1 回の形に）。
+- Tier 2 にする行は、`tests/visual/<行>.toml` に `tier = 2` と `[[vision]]`、`<行>.canary.toml` に `vision` つきのカナリアを足す。今ある `[~]` は、check spec を書いて測り直した回だけ `[x]` になる。
+
 ## [0.289.0] - 2026-11-10
 
 ### 追加

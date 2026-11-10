@@ -1,0 +1,35 @@
+{
+  "schema": "vision-key.v1",
+  "row": "54.18",
+  "run_id": "c54-ai-candidate",
+  "revision": "7d28f32a7d28f32a7d28f32a7d28f32a7d28f32a",
+  "spec_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "canaries_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "images": [
+    {
+      "id": "A",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "prompt_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "kind": "shot",
+      "source": "shots/top.png",
+      "snap": "top",
+      "width_px": 135,
+      "height_px": 63,
+      "breaks": []
+    },
+    {
+      "id": "B",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "prompt_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "kind": "canary",
+      "source": "canary/wrong-title/c54-ai-candidate/shots/top.png",
+      "snap": "top",
+      "width_px": 135,
+      "height_px": 63,
+      "breaks": [
+        "v-title",
+        "v-text"
+      ]
+    }
+  ]
+}

@@ -7,10 +7,6 @@
     {
       "id": "A",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    },
-    {
-      "id": "B",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   ],
   "points": [
@@ -29,7 +25,7 @@
     },
     {
       "id": "badge-position",
-      "image": "B",
+      "image": "A",
       "question": "通知のバッジは鐘の右上にあるか",
       "verdict": "INCONCLUSIVE",
       "bbox_px": null,

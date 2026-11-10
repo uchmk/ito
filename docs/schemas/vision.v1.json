@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/uchmk/ito/docs/schemas/vision.v1.json",
   "title": "ito vision v1",
-  "description": "One Vision opinion on a row's screenshots, as stored after the caller filled the provenance. An opinion, never a measurement: it changes no mark. Not checked here: point ids are unique, image names an inputs id, overall follows from points (FAIL if any point is FAIL, else INCONCLUSIVE if any is, counting a PASS with a null bbox_px, else PASS).",
+  "description": "One Vision opinion on a row's screenshots, as stored after the caller filled the provenance. An opinion, never a measurement: on its own it changes no mark. Tier 2 verdicts cross-check it against the machine's evidence (evidence.py). One answer covers one image. Not checked here: point ids are unique, image names an inputs id, overall follows from points (FAIL if any point is FAIL, else INCONCLUSIVE if any is, counting a PASS with a null bbox_px, else PASS).",
   "type": "object",
   "properties": {
     "schema": {

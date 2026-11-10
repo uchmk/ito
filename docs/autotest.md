@@ -26,7 +26,9 @@ kura v0.154.4 / main ・ 2026-11-08 更新（初版 2026-11-07、全アプリ向
 
 見た目だけで判断する行は `[~]` のまま、持ち主が `[x]` にする。subagent と runner は `[x]` を付けない。
 
-**2026-11-08 追記:** 見た目の行でも、期待値のすべてを同じ実行で機械が測った行（Tier 1）は「測って確かめた」行として `[x]` にしてよい（視覚テストのページの[変更 1](visual-test.md#rule) を承認）。各アプリの規則のファイルに入れるのは、ito の `docs/visual-test.md`（版 1）が push されてから。AI 判定（Tier 2）は影運用のままで、合格にはしない。
+**2026-11-08 追記:** 見た目の行でも、期待値のすべてを同じ実行で機械が測った行（Tier 1）は「測って確かめた」行として `[x]` にしてよい（視覚テストのページの[変更 1](visual-test.md#rule) を承認）。各アプリの規則のファイルに入れるのは、ito の `docs/visual-test.md`（版 1）が push されてから。
+
+**2026-11-10 追記:** 自動実機テストと視覚テストの共通の仕様として、AI（Vision）が正常と判断した行も `[x]` にする（視覚テストのページの[変更 2](visual-test.md#rule) を承認）。「正常と判断した」は、`tier = 2` の check spec を実行の前にコミットした行で、機械の前提がすべて PASS、Vision が全観点に場所つきで PASS、突き合わせが通り、同じ回のカナリアを FAIL にしたこと（`evidence.py verdict` の `ai-pass-candidate`）。機械の FAIL は Vision で覆さない。印を付けるのは実機のセッションの main モデルで、subagent と runner は付けない。各アプリの規則のファイルに入れるのは、ito の `docs/visual-test.md`（版 2）が push されてから。
 
 ### **決定** 2. 観測の契約
 
@@ -193,7 +195,7 @@ ito#203 は 3 段で進んでいる（持ち主の判断、2026-11-08）: 段 �
 3. **状態のアダプター**: `screen`・`overlay` の名前、`app`、`app_state` の中身、書き込みの待ちに答える口。
 4. **Test ID**: 自分の画面の部品に `<画面>.<部品>`。ito の部品（設定の画面・パレット・トースト）の ID は ito が付ける。
 5. **ハーネスと確かめ役**: 子を起こすアプリ（yagura のターミナル）は ito の確かめ役を使う。壊し方の自己テストも一緒に。
-6. **規則のファイル**: 機械で測った行の `[x]` の規則（変更 1）は承認済み（2026-11-08）。各アプリは載せるときに、視覚テストのページの [成果物 5](visual-test.md#rule) の雛形で自分の文を置き換える。Tier 2 はそのアプリで影運用の基準を満たしてから。載せるまでは今の規則のまま。
+6. **規則のファイル**: 機械で測った行の `[x]` の規則（変更 1）は承認済み（2026-11-08）。各アプリは載せるときに、視覚テストのページの [成果物 5](visual-test.md#rule) の雛形で自分の文を置き換える。Tier 2（変更 2）も承認済み（2026-11-10）で、同じ雛形に入っている。載せるまでは今の規則のまま。
 7. **順**: kura のパイロットが通ったら yagura・koyomi・michi・fude。4 つの順はパイロットのあとで決める。違いは準備だけ（2026-11-08 の `[~]` の行と規則の文: yagura 15 行・`.claude/windows-role.md` 53〜56 行、michi 337 行・`CLAUDE.md` 63 行、fude 5 行、koyomi 0 行。koyomi と fude は、載せるときに規則の文を足す）。tsumugi・minato は 2026-11-08 にメンテナンス対象から外した（代わりに Orca と Linear を使う）ので載せない。これから作るアプリも同じ形で載せる。
 
 ### kura でやること（最初に載せるアプリの例。Sonnet の subagent）
@@ -291,12 +293,13 @@ await = { source = "file", path = "config.toml", op = "contains", value = "-NoLo
 - 数値で測れるもの（コントラスト、寸法）は数値を優先
 - 基準・失敗例を先に決め、PASS / FAIL / INCONCLUSIVE と証拠の場所を返す
 - 機械の FAIL は覆せない
+- Tier 2 の行は、Vision の場所つきの PASS が機械の前提・突き合わせ・カナリアの検出と同じ回でそろえば `[x]` にする（[視覚テスト](visual-test.md) 版 2）。Vision の答えだけでは付けない
 
 - ピクセル差分は、同じ OS・GPU バックエンド・フォント・テーマ・DPI の基準画像だけと比べる。動的な領域はマスクし、閾値は先に固定する。
 - `@preview` の切り抜きだけでなく、全体の画像も残す。
 - テーマ × DPI は変更に関係する分を毎回、全組み合わせは定期的に。
 - 「ちらつかない」は短い画像列かフレーム時間で見る。
-- 同じ vision モデルを何度も呼んで未確認を消さない。
+- 同じ vision モデルを何度も呼んで未確認を消さない。回を作り直して悪い答えを消すことも同じ（`evidence.py verdict` が同じ条件の別の回を見て断る）。
 
 ## 6. 失敗の分類と修正ループ
 
@@ -336,7 +339,7 @@ await = { source = "file", path = "config.toml", op = "contains", value = "-NoLo
 | 1 | 偽の緑を閉じる（`--keys` を失敗側に倒す + 故障注入テスト）。**済み** v0.151.0（d0f778b）。TESTING の 25.17a・25.17b を足し、再テストは #507。v0.151.1 で CI の smoke（ubuntu、Xvfb）が `xrun.sh` 経由で成功・書けない State・拒む手順の 3 通りを確かめ、v0.151.2 でその smoke の読み方を直した |
 | 2 | 観測の契約。**設計確定** Codex と 6 ラウンドで合意。kura の stage 1 は v0.152.0〜v0.152.2 で入れた（再テスト #511）、ito#203 は閉じ、kura は v0.153.0〜v0.154.4 で取り込んだ。ito#204 は 1〜3 が入り残りは 4・6・8。全アプリで同じ意味にする実行の状態機械と適合テストも ito に（§1a）。前半（§2a）: Test ID・ID の手順・観測の世代・run の行・設定の書き込みの完了・57.2 / 57.3 の縦切り。後半: 状態 JSON v1、レーンの run ID の照合、テストモード |
 | 3 | 縦に通す 3 つのテスト（§11。57.2 / 57.3 はフェーズ 2 の前半で先に通す）。**範囲決定** 判断 4。今のユーザーで §9 のガードレールを掛けて回す（判断 3） |
-| 4 | 見た目 + 回帰。**範囲決定** パイロット 4 行（59.5・41.15・49.4・54.18）。Tier 1 は変更 1 の承認で使える（ito の `docs/visual-test.md` 版 1 が push されたあと）。Tier 2 は影運用（20 行以上・誤合格 0・カナリア 100 % を、アプリごとに数える） |
+| 4 | 見た目 + 回帰。**範囲決定** パイロット 4 行（59.5・41.15・49.4・54.18）。Tier 1 は変更 1 の承認で使える（ito の `docs/visual-test.md` 版 1 が push されたあと）。Tier 2 は変更 2 の承認（2026-11-10）で使える（`docs/visual-test.md` 版 2） |
 | 5 | 上限つきの修正ループ（§6 の上限、判断 5）。始める前に、専用の標準ユーザーか Windows Sandbox に移す（判断 3） |
 
 各フェーズに入る条件、出る条件、削るものの一覧を持つ。フェーズ 2 の前半の出る条件は、ハーネスが CI の Linux で通り、6 通りの壊し方でどれも失敗すること。
@@ -391,7 +394,7 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 3. CLAUDE.md、C:\dev\CLAUDE.md の「ito first」、kura の docs/claude/lanes.md の「[x] の規則（正）」、.claude/skills/dev-orchestra-kura/SKILL.md
 
 【決定済み】
-- 判断1（合格の権限）: 機械で測れる行は、実機セッションの main が runner の証拠（期待値すべて一致・未確認なし・後片付け PASS）を読んだあとだけ [x] を付けてよい。見た目だけの行は [~] のまま持ち主が [x] にする。subagent と runner は付けない。2026-11-08: 視覚テストの変更 1 を承認（同じ実行で機械が期待値を全部測った見た目の行は Tier 1 として [x] 可）。kura の lanes.md・windows-role.md への反映は ito の docs/visual-test.md（版 1）の push のあと。Tier 2（AI 判定）は影運用で、合格にしない。
+- 判断1（合格の権限）: 機械で測れる行は、実機セッションの main が runner の証拠（期待値すべて一致・未確認なし・後片付け PASS）を読んだあとだけ [x] を付けてよい。見た目だけの行は [~] のまま持ち主が [x] にする。subagent と runner は付けない。2026-11-08: 視覚テストの変更 1 を承認（同じ実行で機械が期待値を全部測った見た目の行は Tier 1 として [x] 可）。kura の lanes.md・windows-role.md への反映は ito の docs/visual-test.md（版 1）の push のあと。2026-11-10: 視覚テストの変更 2 を承認（Tier 2 の条件がそろった行は [x] 可。機械の FAIL は覆さない）。
 - 判断2（観測の契約）: 状態 JSON v1 と意味のある Test ID。失敗は閉じる方向に倒す。
 - 判断3（安全）: フェーズ 3・4 は今のユーザーで §9 のガードレールつき。フェーズ 5 の前に専用の標準ユーザーか Windows Sandbox。
 - 判断4（範囲）: §11 の 3 シナリオ + 見た目のパイロット 4 行（59.5・41.15・49.4・54.18）。
@@ -413,7 +416,7 @@ uchmk の自動実機テスト基盤（持ち主は ito。最初に載せるの�
 
 【次にやること】
 1. ito のセッションの push を待つ: ito#204 の残り（5・7）と ito#205（状態 JSON v1 は A として v0.275.0 で入った。Snap・Shot の付属 JSON・trace.jsonl は B として v0.276.0 で入り、残りは C（検査器・証拠・スキーマ）。ito#203 は閉じ、ito#204 の 1〜4・6・8 は入った）、2 つの設計の docs への移し（移したあとは ito の docs/autotest.md・docs/visual-test.md が正で、このページは写し）。ito のリポジトリは直接いじらない（メッセージか Issue で頼む）。
-2. ito の docs/visual-test.md（版 1）が push されたら、kura に変更 1 を入れる（視覚テストのページの #rule: docs/claude/lanes.md の 105 行の下に 1 項目と 113〜114 行の置き換え、.claude/windows-role.md 147 行、docs/claude/wintest-measure.md に矩形と画素の測り方、.claude/agents/wintest.md に機械の測定の証拠）→ PATCH の版・CHANGELOG・verify・scripts/push-main.sh。変更 2 の文は影運用の基準を満たしてから。
+2. ito の docs/visual-test.md（版 1）が push されたら、kura に変更 1 を入れる（視覚テストのページの #rule: docs/claude/lanes.md の 105 行の下に 1 項目と 113〜114 行の置き換え、.claude/windows-role.md 147 行、docs/claude/wintest-measure.md に矩形と画素の測り方、.claude/agents/wintest.md に機械の測定の証拠）→ PATCH の版・CHANGELOG・verify・scripts/push-main.sh。変更 2 の文も同じときに入れる（2026-11-10 に承認。版 2 を名指しする）。
 3. kura の残りの分（ID の手順・run の行・確かめ役は v0.153.0〜v0.154.0 で入った。ハーネス scripts/check-term-settings.sh と壊し方の自己テストは作業中で、まず State に `term args`・`term env names`・`terminal` の行）を Sonnet の subagent に仕様ファイルで渡す → audit → verify → main がコミット・push。
 4. ito#204（状態機械と適合テスト）は 1〜3 が v0.269.0・v0.271.0・v0.272.0、4・6・8 が v0.273.0（Shot は `shots/` に書き、`theme`・`lang` は効いていた値で頼んだ値は `*_requested`、`run.json` を Runner が書く）で入り、残りは 5・7。kura は自前の実行（src/script_run.rs）を ito の表に通し、形が決まったら寄せる。状態 JSON v1・矩形つきの Tree・Snap は ito#205 の A・B（v0.275.0・v0.276.0）で入り、検査器・証拠のフォルダ・スキーマは C。見た目のパイロットの前に要る。
 5. kura のパイロットが通ったら、yagura・koyomi・michi・fude のアダプター（lanes.conf の evidence= と visual_specs=、状態の中身、Test ID、ハーネス）と規則のファイル（成果物 5 の雛形）を、それぞれのセッションに頼む（順はパイロットのあとで決める）。これから作るアプリも同じ形で載せる。tsumugi・minato には頼まない（メンテナンス対象から外した）。

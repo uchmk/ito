@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/uchmk/ito/docs/schemas/verdict.v1.json",
   "title": "ito verdict v1",
-  "description": "verdict-<id>.json: written by evidence.py verdict. The result is a candidate; mark and decided_by are the main model's.",
+  "description": "verdict-<id>.json: written by evidence.py verdict. The result is a candidate; mark and decided_by are the main model's. ai-pass-candidate is a tier 2 candidate: the machine passed and Vision agreed; a machine FAIL is never overturned.",
   "type": "object",
   "properties": {
     "schema": {
@@ -24,6 +24,7 @@
       "type": "string",
       "enum": [
         "auto-pass-candidate",
+        "ai-pass-candidate",
         "fail",
         "undecidable",
         "owner"
@@ -51,14 +52,36 @@
           "type": "integer"
         },
         "vision_points": {
-          "type": "string",
-          "enum": [
-            "n/a",
-            "not implemented"
+          "description": "Tier 2: true when every Vision answer is stored, matches its key and the spec, and says PASS on the real shot. n/a on other tiers.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "n/a"
+              ]
+            },
+            {
+              "type": "boolean"
+            }
           ]
         },
         "major_mismatch": {
+          "description": "Tier 2: true when a Vision box or reading disagrees with the state JSON, or Vision reported something unexpected on the real shot.",
           "type": "boolean"
+        },
+        "canary_caught": {
+          "description": "Tier 2: true when Vision answered FAIL on every canary picture for the points that canary breaks. n/a on other tiers.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "n/a"
+              ]
+            },
+            {
+              "type": "boolean"
+            }
+          ]
         },
         "unconfirmed": {
           "type": "integer"
@@ -85,6 +108,7 @@
         "machine_issues",
         "vision_points",
         "major_mismatch",
+        "canary_caught",
         "unconfirmed",
         "cleanup",
         "rationale_saved",

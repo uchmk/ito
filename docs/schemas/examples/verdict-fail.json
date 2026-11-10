@@ -17,6 +17,7 @@
     "machine_issues": 1,
     "vision_points": "n/a",
     "major_mismatch": false,
+    "canary_caught": "n/a",
     "unconfirmed": 0,
     "cleanup": "PASS",
     "rationale_saved": true,

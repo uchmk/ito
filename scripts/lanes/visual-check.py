@@ -99,7 +99,12 @@ def isint(v):
 
 
 def isnum(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:
+        return math.isfinite(v)
+    except OverflowError:
+        return False
 
 
 def strict_eq(a, b):
@@ -1121,7 +1126,7 @@ def validate_spec(d):
     if not isinstance(d, dict):
         return ["the spec is not a table"]
     for k in d:
-        if k not in ("spec", "row", "tier", "fixtures", "theme", "lang", "window", "point"):
+        if k not in ("spec", "row", "tier", "fixtures", "theme", "lang", "window", "point", "vision"):
             errs.append("unknown key `%s`" % k)
     if not (isint(d.get("spec")) and d["spec"] == 1):
         errs.append("`spec` must be 1")
@@ -1189,6 +1194,59 @@ def validate_spec(d):
                 errs.append("%s: check `%s` needs `relative_to`" % (w, name))
             if c.snap and "snap" not in p:
                 errs.append("%s: check `%s` needs `snap` (a picture)" % (w, name))
+    errs += validate_vision(d, points)
+    return errs
+
+
+VISION_MAX_SIDE_PX = 1568
+VISION_KEYS = ("id", "snap", "target", "question", "fail_looks_like", "reads")
+
+
+def validate_vision(d, points):
+    """Problems with the [[vision]] tables (Tier 2 only; they are not evaluated here)."""
+    errs = []
+    vis = d.get("vision")
+    tier = d.get("tier")
+    if vis is None:
+        vis = []
+    if not isinstance(vis, list) or not all(isinstance(v, dict) for v in vis):
+        return ["`vision` must be a list of [[vision]] tables"]
+    if vis and tier in (1, 3):
+        errs.append("[[vision]] is only for tier 2 (this spec is tier %d)" % tier)
+    if tier == 2 and not vis:
+        errs.append("tier 2 needs at least one [[vision]] table")
+    snaps = {p.get("snap") for p in points if isinstance(p.get("snap"), str)}
+    seen = set()
+    for i, v in enumerate(vis):
+        vid = v.get("id")
+        w = "vision %s" % (vid if isinstance(vid, str) else "#%d" % (i + 1))
+        for k in v:
+            if k not in VISION_KEYS:
+                errs.append("%s: unknown key `%s`" % (w, k))
+        if not (isinstance(vid, str) and POINT_ID_RE.match(vid)):
+            errs.append("%s: `id` must match [A-Za-z0-9._-]+" % w)
+        elif vid in seen:
+            errs.append("%s: duplicate id" % w)
+        else:
+            seen.add(vid)
+        sn = v.get("snap")
+        if not (isinstance(sn, str) and NAME_RE.match(sn)):
+            errs.append("%s: `snap` must match [A-Za-z0-9_-]{1,64}" % w)
+        elif sn not in snaps:
+            errs.append("%s: `snap` %s is not the snap of any machine [[point]]" % (w, sn))
+        if not (isinstance(v.get("target"), str) and v["target"]):
+            errs.append("%s: `target` must be a non-empty test id" % w)
+        for k in ("question", "fail_looks_like"):
+            if not (isinstance(v.get(k), str) and v[k].strip()):
+                errs.append("%s: `%s` is required" % (w, k))
+        if "reads" in v and not isinstance(v["reads"], bool):
+            errs.append("%s: `reads` must be true or false" % w)
+    if tier == 2 and isinstance(d.get("window"), dict):
+        win = d["window"]
+        sz, ppp = win.get("size_pt"), win.get("pixels_per_point")
+        if isinstance(sz, list) and sz and all(isnum(x) for x in sz) and isnum(ppp):
+            if max(sz) * ppp > VISION_MAX_SIDE_PX + 1e-6:
+                errs.append("window: a tier 2 picture must be at most %d px on its long side (Vision downsizes larger ones)" % VISION_MAX_SIDE_PX)
     return errs
 
 
@@ -2135,6 +2193,17 @@ def build_cases():
     add(Case("spec-min-gt-max", "ERROR", HEAD + snap_point("right_gap_px = { min = 3, max = 1 }"), contains=["min > max"]))
     add(Case("spec-bad-window", "ERROR", SPEC_THUMB.replace("[200, 100]", "[200, 0]"), contains=["size_pt"]))
     add(Case("spec-bad-snap-name", "ERROR", HEAD + snap_point(THUMB_OK, snap="a/b"), contains=["snap"]))
+
+    def vis(vid="v1", snap="top", extra=""):
+        return '\n[[vision]]\nid = "%s"\nsnap = "%s"\ntarget = "spot.scroll.thumb"\nquestion = "Is it there?"\nfail_looks_like = "gone"\n%s' % (vid, snap, extra)
+
+    t2 = HEAD.replace("tier = 1", "tier = 2") + snap_point(THUMB_OK)
+    add(Case("spec-vision-tier1", "ERROR", SPEC_THUMB + vis(), contains=["only for tier 2"]))
+    add(Case("spec-vision-tier2-missing", "ERROR", t2, contains=["tier 2 needs at least one [[vision]]"]))
+    add(Case("spec-vision-unknown-key", "ERROR", t2 + vis(extra="bogus = 1\n"), contains=["unknown key `bogus`"]))
+    add(Case("spec-vision-duplicate-id", "ERROR", t2 + vis() + vis(), contains=["duplicate id"]))
+    add(Case("spec-vision-no-point-snap", "ERROR", t2 + vis(snap="other"), contains=["not the snap of any machine"]))
+    add(Case("spec-vision-window-too-big", "ERROR", (t2 + vis()).replace("[200, 100]", "[1100, 100]"), contains=["1568"]))
     return cases
 
 

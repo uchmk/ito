@@ -7,10 +7,6 @@
     {
       "id": "A",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    },
-    {
-      "id": "B",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   ],
   "points": [
@@ -29,7 +25,7 @@
     },
     {
       "id": "scrollbar-light",
-      "image": "B",
+      "image": "A",
       "question": "スクロールバーの地は明るいか",
       "verdict": "PASS",
       "bbox_px": [

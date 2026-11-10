@@ -15,9 +15,9 @@ a merge commit pinned to its head, and only when all of these hold:
   3. every new mark has its evidence: a line naming the row (or the key) in
      the pull request body -- in tsumugi the new report counts too -- and a
      `[~]` names its picture; a new `[x]` on a row with
-     tests/visual/<row>.toml on the base branch needs its Tier 1 verdict line
-     (`<row> tier1 [x] <folder>/verdict-<row>.json`), and only a Tier 1 spec
-     may be ticked `[x]`;
+     tests/visual/<row>.toml on the base branch needs its verdict line
+     (`<row> tier<N> [x] <folder>/verdict-<row>.json`, N the spec's tier), and
+     only a Tier 1 or Tier 2 spec may be ticked `[x]`;
   4. kura: TODO.md's "マージで止めている実機の PR" does not hold it;
   5. every check run on its head has finished, none failed, and the
      checklist job is among them;
@@ -344,9 +344,9 @@ def spec_tier(text, row):
     return tier if type(tier) is int and tier in (1, 2, 3) else None
 
 
-def has_verdict_line(lines, row):
-    """Whether a line is exactly `[- ]<row> tier1 [x] <folder>/verdict-<row>.json`."""
-    pat = re.compile(r"\s*(?:[-*] )?`?" + re.escape(row) + r"`?\s+tier1\s+\[x\]\s+(.+?)\s*")
+def has_verdict_line(lines, row, tier):
+    """Whether a line is exactly `[- ]<row> tier<tier> [x] <folder>/verdict-<row>.json`."""
+    pat = re.compile(r"\s*(?:[-*] )?`?" + re.escape(row) + r"`?\s+tier" + str(int(tier)) + r"\s+\[x\]\s+(.+?)\s*")
     for ln in lines:
         m = pat.fullmatch(ln)
         if not m:
@@ -361,7 +361,7 @@ def has_verdict_line(lines, row):
 
 
 def missing_verdicts(ticks, text, specs):
-    """The new `[x]` ticks on visual rows that lack a Tier 1 spec or its verdict line.
+    """The new `[x]` ticks on visual rows that lack a Tier 1 or Tier 2 spec or its verdict line.
 
     `ticks` is [(path, mark, id)]; `specs` is {row: tier or None} for the rows
     with a spec on the base (None: the spec is not valid)."""
@@ -373,10 +373,10 @@ def missing_verdicts(ticks, text, specs):
         tier = specs[rid]
         if tier is None:
             out.append(f"{rid} [x] ({path}): tests/visual/{rid}.toml on the base is not a valid check spec")
-        elif tier != 1:
-            out.append(f"{rid} [x] ({path}): its check spec is tier {tier}; only a tier 1 spec may be ticked [x] here")
-        elif not has_verdict_line(lines, rid):
-            out.append(f"{rid} [x] ({path}): no verdict line; add `{rid} tier1 [x] <folder>\\verdict-{rid}.json`")
+        elif tier not in (1, 2):
+            out.append(f"{rid} [x] ({path}): its check spec is tier {tier}; only a tier 1 or tier 2 spec may be ticked [x] here")
+        elif not has_verdict_line(lines, rid, tier):
+            out.append(f"{rid} [x] ({path}): no verdict line; add `{rid} tier{tier} [x] <folder>\\verdict-{rid}.json`")
     return out
 
 
@@ -1358,6 +1358,12 @@ def self_test():
     line = "{0} tier1 [x] C:\\e\\verdict-{0}.json"
     for rid in ("41.16", "41.17", "41.18"):
         assert missing_verdicts([("T.md", "x", rid)], line.format(rid), specs), rid
+    # tier 2 (41.17): the line must say tier2; tier 3 and an invalid spec stay refused with any line
+    line2 = "{0} tier2 [x] C:\\e\\verdict-{0}.json"
+    assert not missing_verdicts([("T.md", "x", "41.17")], line2.format("41.17"), specs)
+    assert missing_verdicts([("T.md", "x", "41.15")], line2.format("41.15"), specs)
+    for rid in ("41.16", "41.18"):
+        assert missing_verdicts([("T.md", "x", rid)], line2.format(rid), specs), rid
     assert not missing_verdicts([("T.md", "~", "41.15"), ("T.md", "x", "99.1"), ("TESTING-KEYS.md", "x", "<Esc>")], "", specs)
     mv = missing_verdicts([("T.md", "x", "41.17"), ("T.md", "x", "99.1"), ("T.md", "x", "41.15"), ("T.md", "x", "41.18")], "", specs)
     assert [m.split(" ")[0] for m in mv] == ["41.17", "41.15", "41.18"], mv

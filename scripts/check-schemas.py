@@ -28,7 +28,7 @@ KEYWORDS = {
     "enum", "const", "minItems", "maxItems", "minimum", "$defs", "$ref", "oneOf",
 }
 TYPES = {"string", "number", "integer", "boolean", "object", "array", "null"}
-NAMES = ["state", "shot", "trace", "run", "intent", "manifest", "assertions", "verdict", "vision"]
+NAMES = ["state", "shot", "trace", "run", "intent", "manifest", "assertions", "verdict", "vision", "vision-key"]
 
 
 def read_text(path):
@@ -247,7 +247,8 @@ def check_examples(schemas, errors):
     for f in sorted(os.listdir(EXAMPLES)):
         if not f.endswith(".json"):
             continue
-        name = f[:-5].split("-", 1)[0]
+        stem = f[:-5]
+        name = max((n for n in NAMES if stem == n or stem.startswith(n + "-")), key=len, default=stem.split("-", 1)[0])
         seen.add(name)
         check_file(schemas, name, os.path.join(EXAMPLES, f), "examples/" + f, errors, lines=(name == "trace"))
     for n in NAMES:
@@ -274,6 +275,10 @@ def emitted_kind(rel):
         return "trace"
     if base.endswith(".json") and parent == "shots":
         return "shot"
+    if base == "key.json" and parent == "vision":
+        return "vision-key"
+    if base.endswith(".json") and parent == "answers" and len(parts) > 2 and parts[-3] == "vision":
+        return "vision"
     if base.endswith(".json") and parent == "state":
         return "state"
     return None
