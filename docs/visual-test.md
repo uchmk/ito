@@ -1,13 +1,13 @@
 # 見た目の行を、証拠で合格にする
 
-> **version 2**（2026-11-10）。2026-11-08 に設計のページ（claude.ai の artifact）から移した。ここが正本。artifact は写し。
-> アプリの規則ファイルは「ito docs/visual-test.md, version 2」のように版で名指しする。判定の規則（Tier・自動合格の条件・判定不能の条件）を変えるときは版を上げる。版 1 からの違い: Tier 2（AI 判定合格）が効くようになった（影運用の基準を外した。2026-11-10 の持ち主の決定）。Tier 1 の判定は版 1 と同じ。
+> **version 3**（2026-11-10）。2026-11-08 に設計のページ（claude.ai の artifact）から移した。ここが正本。artifact は写し。
+> アプリの規則ファイルは「ito docs/visual-test.md, version 3」のように版で名指しする。判定の規則（Tier・自動合格の条件・判定不能の条件）を変えるときは版を上げる。版 1 からの違い: Tier 2（AI 判定合格）が効くようになった（影運用の基準を外した。2026-11-10 の持ち主の決定）。Tier 1 の判定は版 1 と同じ。版 2 からの違い: 高リスクの画面を、持ち主の承認が要る例外（[成果物 9](#d9)）から外した（同じ日の持ち主の決定）。
 
-uchmk · ito · 視覚テスト · 版 2 ・ 変更 1（Tier 1）は承認済み（2026-11-08）、変更 2（Tier 2）は承認済み（2026-11-10） · 2026-11-10
+uchmk · ito · 視覚テスト · 版 3 ・ 変更 1（Tier 1）は承認済み（2026-11-08）、変更 2（Tier 2）は承認済み（2026-11-10） · 2026-11-10
 
 AI Vision を「合格を決める目」にしない。事前に決めた観点を確かめる検査員として使い、機械の測定と同じ実行の証拠がそろったときだけ合格の候補にする。 **uchmk の全部のアプリ（kura・yagura・koyomi・michi・fude と、これから作るもの）で使う形**にする。tsumugi・minato は 2026-11-08 にメンテナンス対象から外した（代わりに Orca と Linear を使う）ので、この設計の対象にしない。契約・部品・規則の文は ito が持ち、アプリは自分の状態と Test ID と観点の表を出すだけ。 土台は [自動実機テスト基盤の設計（観測の契約）](autotest.md)で、その上に載る。
 
-> **この文書は調査と設計だけ**。どのアプリの規則のファイル（kura `docs/claude/lanes.md`、yagura `.claude/windows-role.md`、michi `CLAUDE.md`）も、`TESTING*.md` も、コードも変えていない。 規則の変更は [成果物 5 の案](#rule)。**2026-11-08 に持ち主が変更 1（機械が測った見た目の行）を承認した**（[持ち主の決定](#ask)）。効くのは、ito の `docs/visual-test.md`（版 1）が push され、そのアプリの規則のファイルに載せてから。**載せるまで、見た目だけの行（kura のいまの `[~]` の 15 行を含む）は、どのアプリでも `[x]` にしない**。**2026-11-10 に持ち主が変更 2（AI 判定合格）も承認した**。効くのは変更 1 と同じく、そのアプリの規則のファイルに版 2 を載せてから。
+> **この文書は調査と設計だけ**。どのアプリの規則のファイル（kura `docs/claude/lanes.md`、yagura `.claude/windows-role.md`、michi `CLAUDE.md`）も、`TESTING*.md` も、コードも変えていない。 規則の変更は [成果物 5 の案](#rule)。**2026-11-08 に持ち主が変更 1（機械が測った見た目の行）を承認した**（[持ち主の決定](#ask)）。効くのは、ito の `docs/visual-test.md`（版 1）が push され、そのアプリの規則のファイルに載せてから。**載せるまで、見た目だけの行（kura のいまの `[~]` の 15 行を含む）は、どのアプリでも `[x]` にしない**。**2026-11-10 に持ち主が変更 2（AI 判定合格）も承認した**。効くのは変更 1 と同じく、そのアプリの規則のファイルに版 3 を載せてから。
 
 <a id="sum"></a>
 
@@ -82,7 +82,7 @@ kura のあとの 4 つは、準備のほかに違いが無い。順は kura の
 
 1. ito: `docs/visual-test.md`（契約と規則の文）と、state JSON v1・check spec・証拠のスキーマ。[ito#203](https://github.com/uchmk/ito/issues/203)（閉じた）、[ito#204](https://github.com/uchmk/ito/issues/204)（実行の状態機械と適合テスト）、[ito#205](https://github.com/uchmk/ito/issues/205)（状態 JSON v1（v0.275.0 で ito 側）・`<Snap:>`・矩形つきの Tree。パイロットの前）。
 2. kura: 状態の書き出しを state JSON v1 にし、パイロットの 4 行（[成果物 8](#d8)）。ここで形を固める。
-3. ほかのアプリ: アダプター（`app_state` の中身・Test ID・`tests/visual/`・`lanes.conf` の 2 行）を足すだけで使える。規則のファイルへの参照は、変更 1・2 が承認済み（2026-11-10）なので、ito の `docs/visual-test.md`（版 2）の push のあと、各アプリに 1 項目ずつ。
+3. ほかのアプリ: アダプター（`app_state` の中身・Test ID・`tests/visual/`・`lanes.conf` の 2 行）を足すだけで使える。規則のファイルへの参照は、変更 1・2 が承認済み（2026-11-10）なので、ito の `docs/visual-test.md`（版 3）の push のあと、各アプリに 1 項目ずつ。
 
 <a id="gaps"></a>
 
@@ -173,7 +173,7 @@ v0.279.0 で、keys.ps1 の `-Evidence` と xrun.sh の `--evidence` が folder 
 v0.281.0 で、merge-lanes.py が門番になった。PR のベースのブランチに `tests/visual/<row>.toml` がある行の新しい `[x]` は、仕様が正しくて `tier = 1` で、PR に `<row> tier1 [x] <…\verdict-<row>.json>` の行があるときだけマージする。
 門番の限界: 証拠はレーンの機械にあるので、GitHub Actions からは verdict の中身もハッシュも読めない（宣言の行だけを見る。本当に `auto-pass-candidate` だったかは、レーンの規則のまま）。仕様を持たない見た目の行も見分けられない。
 v0.289.0 で、Vision の答えの形（`docs/schemas/vision.v1.json`）が入った。形だけで、印・門番・verdict は変えない。
-v0.290.0 で、Tier 2 が入った（版 2）。check spec の `[[vision]]`、Vision のカナリア（`[[canary]]` の `vision`）、`evidence.py vision-prep`・`vision-record`、verdict の `ai-pass-candidate`、門番の `<row> tier2 [x] <…\verdict-<row>.json>`。
+v0.290.0 で、Tier 2 が入った（版 2）。check spec の `[[vision]]`、Vision のカナリア（`[[canary]]` の `vision`）、`evidence.py vision-prep`・`vision-record`、verdict の `ai-pass-candidate`、門番の `<row> tier2 [x] <…\verdict-<row>.json>`。v0.290.1 で版 3（高リスクの画面を[成果物 9](#d9) の例外から外した。コードは同じ）。
 まだ無いもの: 基準画像との比較（[TODO.md](../TODO.md)）。
 
 | もの | どこ | 中身 |
@@ -657,13 +657,12 @@ You check one screenshot against fixed questions. The caller gives you two paths
 1. **基準画像を作る・更新する**（何が正しいかを決める行為）。
 2. **Tier 3 の観点**（好み・美しさ・Quiet Precision・情報の階層）。
 3. **判定不能**（INCONCLUSIVE、機械と Vision の食い違い、モデルの間の割れ）。
-4. **高リスクの画面**: 消す・上書き・Reset の確認、機械の設定を変える画面（サインイン時の起動）、権限やセキュリティの表示、初めて起動したときの画面。
-5. **大きなデザインの変更**（トークン、テーマ、レイアウト）。基準画像を作り直す。
-6. **機械の全体に効く操作が要る行**（54.19 の OS のテーマ、56.4 のレジストリ）: 測り方より先に、実行そのものに承認。
-7. **OS が描くもの**（通知、系のダイアログ、IME の候補、タイトルバー、タスク マネージャー）: アプリの state に無い。
-8. **段の格上げ**（3→2、2→1）と、check spec の閾値を緩めること。
-9. **初めて出る画面で、check spec がまだ無いもの**（観点を実行の前に書いていない）。
-10. Linux レーンの画素の判定は使わない（いまの規則のまま。CPU の描画は実機の代わりにならない）。
+4. **大きなデザインの変更**（トークン、テーマ、レイアウト）。基準画像を作り直す。
+5. **機械の全体に効く操作が要る行**（54.19 の OS のテーマ、56.4 のレジストリ）: 測り方より先に、実行そのものに承認。
+6. **OS が描くもの**（通知、系のダイアログ、IME の候補、タイトルバー、タスク マネージャー）: アプリの state に無い。
+7. **段の格上げ**（3→2、2→1）と、check spec の閾値を緩めること。
+8. **初めて出る画面で、check spec がまだ無いもの**（観点を実行の前に書いていない）。
+9. Linux レーンの画素の判定は使わない（いまの規則のまま。CPU の描画は実機の代わりにならない）。
 
 ### 独立レビュー（Claude の Vision ＋ Codex・ChatGPT）
 
@@ -706,7 +705,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
 
 形は 2 層。**共通の規則の文**（段の定義・自動合格の条件・証拠の形）は ito の `docs/visual-test.md` に版つきで置き、**各アプリの規則のファイル**は「どの版を、どの行に、どの段まで使うか」と「誰が付けるか」だけを書く。 共通の文を引くだけでは、いまの「見た目の行には付けない」と食い違う（[穴の表](#gaps)）。だから載せるアプリは自分の文を**置き換える**。**この文書の作成では、どのファイルも変えていない。**
 
-変更 1（2026-11-08）と変更 2（2026-11-10）は持ち主が承認した。各アプリの規則のファイルに入れるのは、ito の `docs/visual-test.md`（版 2）が push されてから（参照先が無いまま規則を書き換えない）。
+変更 1（2026-11-08）と変更 2（2026-11-10）は持ち主が承認した。各アプリの規則のファイルに入れるのは、ito の `docs/visual-test.md`（版 3）が push されてから（参照先が無いまま規則を書き換えない）。
 
 下は最初に載せる kura の案（正の `docs/claude/lanes.md` の「`[x]` の規則（正）」に 1 項目足し、1 文を置き換える。kura の細かい測り方は `wintest-measure.md` に足す）。ほかのアプリの雛形はその下。
 
@@ -714,7 +713,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
 
 105 行の項目の下に足す:
 
-> **案:** 見た目の行でも、期待値のすべてを**機械が測った**行は「測って確かめた」に入る。機械の測定は、同じ実行の state JSON の値・UI 要素の矩形・画素の値・持ち主が承認した基準画像との差で、閾値は実行の前に check spec に書いたもの。条件は ito の `docs/visual-test.md`（版 2）の「自動合格の条件」。**AI Vision の答えとモデル同士の一致は、測定に数えない。**
+> **案:** 見た目の行でも、期待値のすべてを**機械が測った**行は「測って確かめた」に入る。機械の測定は、同じ実行の state JSON の値・UI 要素の矩形・画素の値・持ち主が承認した基準画像との差で、閾値は実行の前に check spec に書いたもの。条件は ito の `docs/visual-test.md`（版 3）の「自動合格の条件」。**AI Vision の答えとモデル同士の一致は、測定に数えない。**
 
 113〜114 行を置き換える:
 
@@ -726,7 +725,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
 
 新しい項目:
 
-> **案:** **AI 判定合格**。check spec に `tier = 2` と観点（`[[vision]]`）が書かれた行は、`evidence.py verdict` が `ai-pass-candidate` を出したとき、実機のセッションの main モデルが証拠を読んで `[x]` を付ける。条件は同じ回に、機械の前提（同じ実行・settled・後片付け・機械の観点がすべて PASS）、Vision が全観点に場所つきで PASS、場所と読んだ文字が state と合う、カナリアを FAIL にした、のすべて。PR に `<行> tier2 [x] <フォルダー>\verdict-<行>.json` の 1 行を書く。Vision の答えだけ、モデル同士の一致だけでは付けない。判定不能・意見の割れ・高リスクの画面は `[~]` で持ち主へ。
+> **案:** **AI 判定合格**。check spec に `tier = 2` と観点（`[[vision]]`）が書かれた行は、`evidence.py verdict` が `ai-pass-candidate` を出したとき、実機のセッションの main モデルが証拠を読んで `[x]` を付ける。条件は同じ回に、機械の前提（同じ実行・settled・後片付け・機械の観点がすべて PASS）、Vision が全観点に場所つきで PASS、場所と読んだ文字が state と合う、カナリアを FAIL にした、のすべて。PR に `<行> tier2 [x] <フォルダー>\verdict-<行>.json` の 1 行を書く。Vision の答えだけ、モデル同士の一致だけでは付けない。判定不能・意見の割れは `[~]` で持ち主へ。
 
 ### 変えないもの
 
@@ -736,7 +735,7 @@ You check one screenshot against fixed questions. The caller gives you two paths
 
 ### 合わせて直すファイル（変更 1・2 を載せるとき）
 
-- `.claude/windows-role.md` 147 行: “Never tick an appearance row.” → “Never tick an appearance row on a look, yours or a model's. A row whose every expected value a machine measured in the same run (ito docs/visual-test.md, version 2) is a measured row. If you are unsure which kind a row is, it is an appearance row.”
+- `.claude/windows-role.md` 147 行: “Never tick an appearance row.” → “Never tick an appearance row on a look, yours or a model's. A row whose every expected value a machine measured in the same run (ito docs/visual-test.md, version 3) is a measured row. If you are unsure which kind a row is, it is an appearance row.”
 - `docs/claude/wintest-measure.md`: 矩形と画素の測り方を足す。
 - `.claude/agents/wintest.md`: 機械の検査の証拠を返す（印は付けない、は変えない）。Vision の subagent は[定義の正本](#vision-agent)を `.claude/agents/vision.md` に写す。
 - 印の形: 案 a に決めた（`[x]` のまま証拠に `tier` を書く。生成器を変えない）。案 b（別の印。ito の `ito-testcheck` の変更が要る）は使わない。
@@ -754,13 +753,13 @@ You check one screenshot against fixed questions. The caller gives you two paths
 
 **英語の雛形**（`.claude/windows-role.md` の “Never tick a look.” の段落を置き換える）:
 
-> **案:** Visual rows follow ito `docs/visual-test.md`, version 2, for the rows listed in `tests/visual/` only; on any conflict, that document wins over this file. A row whose every expected value a machine measured in the same run (Tier 1) is a measured row and you may tick it with the run's `verdict.json` named in the pull request. A `tier = 2` row whose verdict is `ai-pass-candidate` (machine preconditions, located Vision PASS, cross-check and canary caught, all in the same run) is ticked the same way (Tier 2). Never tick a row on a look alone, yours or a model's; a row with no check spec, one whose verdict is not a candidate, or one you are unsure about, is a look: mark it `[~]` as before, and the owner turns `[~]` into `[x]`.
+> **案:** Visual rows follow ito `docs/visual-test.md`, version 3, for the rows listed in `tests/visual/` only; on any conflict, that document wins over this file. A row whose every expected value a machine measured in the same run (Tier 1) is a measured row and you may tick it with the run's `verdict.json` named in the pull request. A `tier = 2` row whose verdict is `ai-pass-candidate` (machine preconditions, located Vision PASS, cross-check and canary caught, all in the same run) is ticked the same way (Tier 2). Never tick a row on a look alone, yours or a model's; a row with no check spec, one whose verdict is not a candidate, or one you are unsure about, is a look: mark it `[~]` as before, and the owner turns `[~]` into `[x]`.
 
 **日本語の雛形**（michi の `CLAUDE.md` 63 行の置き換えと、koyomi・fude・これから作るアプリで見た目の行の規則を日本語の `CLAUDE.md` に書くときに使う）:
 
-> **案:** 見た目の行は ito の `docs/visual-test.md`（版 2）に従い、対象は `tests/visual/` にある行だけ。食い違えば ito の文が勝つ。同じ実行で期待値のすべてを機械が測った行（Tier 1）は、実機のセッションが `verdict.json` を PR に書いて `[x]` にしてよい。`tier = 2` の行で verdict が `ai-pass-candidate` のもの（機械の前提・場所つきの Vision の PASS・突き合わせ・カナリアの検出が同じ回でそろった、AI 判定合格）も同じように `[x]` にする。check spec の無い行、verdict が候補でない行、迷う行は、目で見た行として `[~]` まで（`[x]` は持ち主）。
+> **案:** 見た目の行は ito の `docs/visual-test.md`（版 3）に従い、対象は `tests/visual/` にある行だけ。食い違えば ito の文が勝つ。同じ実行で期待値のすべてを機械が測った行（Tier 1）は、実機のセッションが `verdict.json` を PR に書いて `[x]` にしてよい。`tier = 2` の行で verdict が `ai-pass-candidate` のもの（機械の前提・場所つきの Vision の PASS・突き合わせ・カナリアの検出が同じ回でそろった、AI 判定合格）も同じように `[x]` にする。check spec の無い行、verdict が候補でない行、迷う行は、目で見た行として `[~]` まで（`[x]` は持ち主）。
 
-どのアプリでも変えないもの: subagent と runner は印を付けない。`[~]` の規則は Tier 3 にそのまま使う。Tier 2 は版 2 を規則のファイルに載せたアプリで効く（影運用の基準は 2026-11-10 に外した）。
+どのアプリでも変えないもの: subagent と runner は印を付けない。`[~]` の規則は Tier 3 にそのまま使う。Tier 2 は版 3 を規則のファイルに載せたアプリで効く（影運用の基準は 2026-11-10 に外した）。
 
 <a id="ask"></a>
 
@@ -787,5 +786,6 @@ You check one screenshot against fixed questions. The caller gives you two paths
 1. **変更 2（AI 判定合格）: 承認**。2026-11-08 の決定 2 の影運用の基準（20 行以上・誤合格 0・カナリアの検出 100 %）を外す。Tier 2 の条件がそろった行は `[x]` にする。[自動実機テストの設計](autotest.md)も同じ仕様に従う。
 2. **「AI が正常と判断した」の意味**: `evidence.py verdict` の `ai-pass-candidate`（事前の観点の check spec・機械の前提・場所つきの答え・突き合わせ・カナリアの検出が同じ回でそろった）。機械の FAIL は Vision で覆さない。印を付けるのは実機のセッションの main モデルのままで、subagent と runner は付けない。
 3. **変わらないもの**: check spec の無い行、Tier 3、基準画像、判定不能、[成果物 9](#d9) の例外は持ち主へ。今の `[~]` の行は遡らない（2026-11-08 の決定 7）。check spec を書いて測り直した回だけ `[x]` になる。
+4. **高リスクの画面（成果物 9 の元の 4）: 例外から外す（版 3）**。消す・上書き・Reset の確認、機械の設定を変える画面（サインイン時の起動）、権限やセキュリティの表示、初めて起動したときの画面も、Tier 2 の条件がそろえば `[x]` にする。外すかを持ち主に確かめ、「進めて」の答えで決めた。実行そのものに承認が要る行（機械の全体に効く操作）と、check spec がまだ無い画面は[成果物 9](#d9) のまま。独立レビュー（Codex・ChatGPT）は `[x]` の条件にしない（行って割れたら持ち主へ）。
 
 根拠に読んだもの: kura `docs/claude/lanes.md` 100〜131 行、`.claude/windows-role.md` 145〜174 行、`TESTING-CHECKS.md` の `[~]` の行、 kura `src/main.rs` の `raw_input_hook`・`take_shot`・`state_report`、`src/app.rs` のトースト、 yagura `.claude/windows-role.md` の規則の段落、michi `CLAUDE.md` 63 行（2026-11-08 に足した）（tsumugi・minato の規則と Shot も読んだが、2026-11-08 にメンテナンス対象から外した）、 ito `ito-keyscript`（`Runner`・`tree_text`・`failed_report`・Shot の付属 JSON）、`ito-window`、`ito-notify`、`scripts/lanes/keys.ps1`・`xrun.sh`、 前の設計（8VZmtoXgfxC544itHX8SK9）、Codex の設計レビュー（6 回と、全アプリ向けの 1 回）。

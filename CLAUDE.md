@@ -5,7 +5,7 @@ uchmk のアプリが使う共有のクレートを集めたリポジトリ。�
 tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていたが、2026-11-08 にメンテナンス対象から外した。下の表の「主に使う側」には入れない（「全アプリ」は kura・yagura・koyomi・michi・fude の全部）。
 
 デザインの原則は [docs/design-principles.md](docs/design-principles.md)、撮って確かめる手順は [docs/visual-review.md](docs/visual-review.md)（`ito-keyscript::review`: 撮影の JSON・`compare`・`crop`・`matrix`）。
-実機の自動テストの設計（観測の契約・状態・Test ID・証拠）は [docs/autotest.md](docs/autotest.md)、見た目の行を証拠で合格にする規則は [docs/visual-test.md](docs/visual-test.md)（version 1。アプリの規則のファイルが版で名指しする。判定の規則を変えたら版を上げる）。
+実機の自動テストの設計（観測の契約・状態・Test ID・証拠）は [docs/autotest.md](docs/autotest.md)、見た目の行を証拠で合格にする規則は [docs/visual-test.md](docs/visual-test.md)（version 3。アプリの規則のファイルが版で名指しする。判定の規則を変えたら版を上げる）。
 
 **画面を作るときは、先に [docs/design-guide.md](docs/design-guide.md)（「こういうときはこのクレート」の早見表。ボタン・印・空の一覧・確認・Markdown の欄など）を見る。**
 
