@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.291.1] - 2026-11-11
+
+### 修正
+
+- `ito-titlebar`: パレットの箱・テーマの札・ベル・最小化／最大化／閉じるのテストの ID を `ito_a11y::test_id_in` で登録するようにした。状態の JSON に `clip_px` と `visible` が出るので、視覚テストの `[[vision]]` の `target` にできる（ito#214）。名前・描画・操作は変わらない。
+
+### 使う側がやること
+
+- `rev` を上げるだけ。タイトルバーの部品を `target` にした `vision-prep` が断られなくなる。
+
 ## [0.291.0] - 2026-11-10
 
 ### 追加

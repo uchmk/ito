@@ -245,7 +245,7 @@ fn search_box(ui: &mut Ui, r: Rect, compact: bool, words: &Words<'_>) -> bool {
     let c = ito_theme::colors();
     let p = ui.painter().clone();
     let resp = ui.interact(r, ui.id().with("titlebar-search"), Sense::CLICK).on_hover_text(words.search);
-    ito_a11y::test_id(&resp, "titlebar.search");
+    ito_a11y::test_id_in(ui, &resp, "titlebar.search", None);
     p.rect_filled(r, BOX_RADIUS, if resp.hovered() { c.hover() } else { c.panel });
     p.rect_stroke(r, BOX_RADIUS, Stroke::new(1.0, c.border), egui::StrokeKind::Inside);
     let glass = Pos2::new(r.left() + 15.0, r.center().y - 1.0);
@@ -304,7 +304,7 @@ pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>
         return ThemeTag { clicked: false, end: rect.left() };
     }
     let resp = ui.interact(r, ui.id().with("titlebar-theme"), Sense::CLICK).on_hover_text(words.hover);
-    ito_a11y::test_id(&resp, "titlebar.theme");
+    ito_a11y::test_id_in(ui, &resp, "titlebar.theme", None);
     let p = ui.painter().clone();
     if resp.hovered() {
         p.rect_filled(r, 6.0, c.hover());
@@ -321,7 +321,7 @@ pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>
 fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> egui::Response {
     let c = ito_theme::colors();
     let resp = ui.interact(rect, ui.id().with("titlebar-bell"), Sense::CLICK).on_hover_text(spec.words.bell);
-    ito_a11y::test_id(&resp, "titlebar.bell");
+    ito_a11y::test_id_in(ui, &resp, "titlebar.bell", None);
     let p = ui.painter_at(rect.expand(6.0));
     if resp.hovered() {
         p.rect_filled(rect, 6.0, c.selection().gamma_multiply(0.5));
@@ -365,7 +365,7 @@ fn caption_buttons(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> Option<WindowOp>
     for (k, (op, words, name)) in ops.into_iter().enumerate() {
         let r = Rect::from_min_size(rect.min + Vec2::new(k as f32 * CAPTION_W, 0.0), Vec2::new(CAPTION_W, rect.height()));
         let resp = ui.interact(r, ui.id().with(("titlebar-caption", k)), Sense::CLICK).on_hover_text(words);
-        ito_a11y::test_id(&resp, name);
+        ito_a11y::test_id_in(ui, &resp, name, None);
         let p = ui.painter();
         let hot = resp.hovered();
         let close = op == WindowOp::Close;
@@ -503,6 +503,12 @@ mod tests {
             assert_eq!(names.iter().filter(|x| *x == n).count(), 1, "{n} in {names:?}");
         }
         assert_eq!(names.len(), want.len(), "{names:?}");
+        // Each carries the Ui's clip, so the state JSON can say it is visible (`clip_px`, `visible`).
+        for e in &found {
+            let clip = e.clip.unwrap_or_else(|| panic!("{} has no clip", e.name));
+            assert!(clip.intersect(e.rect).is_positive(), "{} at {:?} is outside its clip {clip:?}", e.name, e.rect);
+            assert_eq!(e.elided, None, "{}", e.name);
+        }
         let bell = found.iter().find(|e| e.name == "titlebar.bell").unwrap();
         assert_eq!(bell.rect, out.bell_rect.expect("a bell"));
     }
