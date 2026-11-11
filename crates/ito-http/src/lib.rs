@@ -7,7 +7,7 @@
 //!   fingerprint ([`client`]).
 //! - **A bearer token on every request**, compared in constant time; a missing or wrong one is a 401 before the body
 //!   is read and before the handler is called. The token is never logged ([`token_from_secret`] reads it from
-//!   `ito-secret`).
+//!   `ito-secret`). A token may be kept only as its SHA-256 ([`Config::token_hash_named`], [`new_token`], [`token_hash`]).
 //! - **Limits:** the head, the body (`max_body`, 413 before it is read), connections at once (`max_connections`, 503),
 //!   and a read timeout per connection.
 //! - JSON in and out, HTTP/1.1, one request per connection (`Connection: close`), no chunked bodies.
@@ -65,11 +65,15 @@ pub struct Config {
     /// Also listen on `::1` (same port). A machine without IPv6 loopback just goes without.
     pub ipv6: bool,
     /// The bearer token every request must send (its name, in [`Request::who`], is `"default"`). May be empty only
-    /// when `tokens` has one.
+    /// when `tokens` or `token_hashes` has one.
     pub token: String,
     /// More tokens, each with a name the handler learns through [`Request::who`] (a role, an audit trail).
     /// Add them with [`Config::token_named`]. The name must not be empty.
     pub tokens: Vec<(String, String)>,
+    /// Tokens kept only as their SHA-256 ([`token_hash`]: 64 lowercase hex characters), each with a name the handler
+    /// learns through [`Request::who`], like `tokens`. Add them with [`Config::token_hash_named`]. Only for tokens made
+    /// by [`new_token`]. The name must not be empty.
+    pub token_hashes: Vec<(String, String)>,
     /// Exact paths a `GET` may fetch with no token (the page that signs in: `/`, `/app.js`). The handler is called
     /// with `who` `None`; anything with data behind it must check `who` itself.
     pub public: Vec<String>,
@@ -80,7 +84,7 @@ pub struct Config {
     /// How long a session lasts (default 8 hours).
     pub session_ttl: Duration,
     /// A second listener on the tailnet only, where Tailscale's whois says who is calling ([`tailnet`]). `None`
-    /// (the default) opens nothing. With it, `token` and `tokens` may all be empty.
+    /// (the default) opens nothing. With it, `token`, `tokens` and `token_hashes` may all be empty.
     pub tailnet: Option<Tailnet>,
     /// Largest body accepted, in bytes (default 64 KiB).
     pub max_body: usize,
@@ -98,6 +102,7 @@ impl Config {
             ipv6: false,
             token: token.into(),
             tokens: Vec::new(),
+            token_hashes: Vec::new(),
             public: Vec::new(),
             sessions: false,
             session_ttl: Duration::from_secs(8 * 3600),
@@ -111,6 +116,12 @@ impl Config {
     /// One more token, known to the handler as `name`.
     pub fn token_named(mut self, name: impl Into<String>, token: impl Into<String>) -> Self {
         self.tokens.push((name.into(), token.into()));
+        self
+    }
+
+    /// One more token, given only as its [`token_hash`], known to the handler as `name`.
+    pub fn token_hash_named(mut self, name: impl Into<String>, hash: impl Into<String>) -> Self {
+        self.token_hashes.push((name.into(), hash.into()));
         self
     }
 
@@ -129,6 +140,7 @@ impl std::fmt::Debug for Config {
             .field("ipv6", &self.ipv6)
             .field("token", &"***")
             .field("tokens", &self.tokens.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
+            .field("token_hashes", &self.token_hashes.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
             .field("tailnet", &self.tailnet)
             .finish_non_exhaustive()
     }
@@ -284,11 +296,26 @@ impl Server {
         handler: impl Fn(Request) -> Response + Send + Sync + 'static,
         log: impl Fn(&LogLine) + Send + Sync + 'static,
     ) -> io::Result<Server> {
-        if cfg.token.is_empty() && cfg.tokens.is_empty() && cfg.tailnet.is_none() {
+        if cfg.token.is_empty() && cfg.tokens.is_empty() && cfg.token_hashes.is_empty() && cfg.tailnet.is_none() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the token is empty"));
         }
         if cfg.tokens.iter().any(|(name, token)| name.is_empty() || token.is_empty()) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "a named token has an empty name or value"));
+        }
+        let empty_hash = token_hash("");
+        for (name, hash) in &cfg.token_hashes {
+            let bad = if name.is_empty() {
+                Some("a token hash has an empty name".to_string())
+            } else if hash.len() != 64 || !hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                Some(format!("the token hash for `{name}` is not 64 lowercase hex characters"))
+            } else if *hash == empty_hash {
+                Some(format!("the token hash for `{name}` is the hash of an empty token"))
+            } else {
+                None
+            };
+            if let Some(msg) = bad {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
+            }
         }
         #[cfg(feature = "tls")]
         let mut identity = None;
@@ -641,6 +668,7 @@ enum Auth {
 }
 
 /// The name of the token `given` is, if any. Every token is compared, so the time does not tell which one is close.
+/// A hashed token is compared the same way, as the SHA-256 of `given` against each stored hash.
 fn token_name(cfg: &Config, given: &[u8]) -> Option<String> {
     let mut found = None;
     if !cfg.token.is_empty() && ct_eq(given, cfg.token.as_bytes()) {
@@ -649,6 +677,14 @@ fn token_name(cfg: &Config, given: &[u8]) -> Option<String> {
     for (name, token) in &cfg.tokens {
         if ct_eq(given, token.as_bytes()) && found.is_none() {
             found = Some(name.clone());
+        }
+    }
+    if !cfg.token_hashes.is_empty() {
+        let given_hash = token_hash_bytes(given);
+        for (name, hash) in &cfg.token_hashes {
+            if ct_eq(given_hash.as_bytes(), hash.as_bytes()) && found.is_none() {
+                found = Some(name.clone());
+            }
         }
     }
     found
@@ -675,10 +711,27 @@ fn session_who(shared: &Shared, id: &str) -> Option<String> {
     }
 }
 
-fn new_session(shared: &Shared, who: &str) -> io::Result<String> {
+/// A new token: 32 random bytes from the OS, as 64 lowercase hex characters. `Err` when the OS gives no randomness.
+pub fn new_token() -> io::Result<String> {
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(|e| io::Error::other(e.to_string()))?;
-    let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(raw.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The SHA-256 of `token` as 64 lowercase hex characters: what [`Config::token_hash_named`] takes, and what the
+/// listener compares. A plain SHA-256 is safe for a token from [`new_token`] (256 random bits); it is not for a
+/// password a person chose, which needs a salted, slow hash.
+pub fn token_hash(token: &str) -> String {
+    token_hash_bytes(token.as_bytes())
+}
+
+fn token_hash_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn new_session(shared: &Shared, who: &str) -> io::Result<String> {
+    let id = new_token()?;
     let mut map = shared.sessions.lock().map_err(|_| io::Error::other("session table poisoned"))?;
     let now = Instant::now();
     map.retain(|_, (_, until)| *until > now);
@@ -1076,6 +1129,95 @@ mod tests {
         assert!(Server::start(Config::new(0, ""), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
         assert!(Server::start(Config::new(0, TOKEN).token_named("", "x"), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
         assert!(Server::start(Config::new(0, TOKEN).token_named("n", ""), |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+    }
+
+    #[test]
+    fn token_hash_and_new_token() {
+        assert_eq!(token_hash("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(token_hash(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        let (a, b) = (new_token().unwrap(), new_token().unwrap());
+        assert_eq!(a.len(), 64);
+        assert!(a.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_hashed_token_lets_its_owner_in_and_nobody_else() {
+        let t = new_token().unwrap();
+        let hash = token_hash(&t);
+        let srv = start_with(Config::new(0, "").token_hash_named("alice", hash.clone()));
+        let (st, body) = call(srv.port(), &req("GET", "/x", Some(&t), ""));
+        assert_eq!((st, body["who"].as_str()), (200, Some("alice")));
+        assert_eq!(call(srv.port(), &req("GET", "/x", Some("wrong"), "")).0, 401);
+        assert_eq!(call(srv.port(), &req("GET", "/x", None, "")).0, 401);
+        assert_eq!(call(srv.port(), "GET /x HTTP/1.1\r\nAuthorization: Bearer \r\n\r\n").0, 401);
+        assert_eq!(call(srv.port(), &req("GET", "/x", Some(&hash), "")).0, 401);
+    }
+
+    #[test]
+    fn plain_and_hashed_tokens_each_have_their_own_name() {
+        let hashed = new_token().unwrap();
+        let cfg = Config::new(0, "plain-one").token_named("bob", "b-token").token_hash_named("alice", token_hash(&hashed));
+        let srv = start_with(cfg);
+        for (t, who) in [("plain-one", "default"), ("b-token", "bob"), (hashed.as_str(), "alice")] {
+            let (st, body) = call(srv.port(), &req("GET", "/x", Some(t), ""));
+            assert_eq!((st, body["who"].as_str()), (200, Some(who)), "{t}");
+        }
+    }
+
+    #[test]
+    fn bad_token_hashes_are_refused_without_naming_the_hash() {
+        let good = token_hash("abc");
+        let cases = [
+            ("alice", good[..63].to_string()),
+            ("alice", format!("{good}0")),
+            ("alice", good.to_uppercase()),
+            ("alice", format!("g{}", &good[1..])),
+            ("alice", token_hash("")),
+            ("", good.clone()),
+        ];
+        for (name, hash) in cases {
+            let cfg = Config::new(0, "").token_hash_named(name, hash.clone());
+            let err =
+                Server::start(cfg, |_| Response::ok(serde_json::Value::Null), |_| {}).err().unwrap_or_else(|| panic!("accepted {name:?}"));
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+            assert!(!err.to_string().contains(&hash), "{err}");
+        }
+        let ok = Server::start(Config::new(0, "").token_hash_named("alice", good), |_| Response::ok(serde_json::Value::Null), |_| {});
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn debug_shows_the_name_of_a_hashed_token_not_the_hash() {
+        let hash = token_hash("abc");
+        let shown = format!("{:?}", Config::new(0, TOKEN).token_hash_named("alice", hash.clone()));
+        assert!(shown.contains("alice") && !shown.contains(&hash), "{shown}");
+    }
+
+    #[test]
+    fn token_name_takes_plain_tokens_first_and_never_matches_an_empty_one() {
+        let t = new_token().unwrap();
+        let cfg = Config::new(0, t.clone()).token_named("bob", t.clone()).token_hash_named("alice", token_hash(&t));
+        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("default"));
+        let cfg = Config::new(0, "").token_named("bob", t.clone()).token_hash_named("alice", token_hash(&t));
+        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("bob"));
+        let cfg = Config::new(0, "").token_hash_named("carol", token_hash("x")).token_hash_named("alice", token_hash(&t));
+        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("alice"));
+        assert_eq!(token_name(&cfg, b""), None);
+        assert_eq!(token_name(&cfg, token_hash(&t).as_bytes()), None);
+    }
+
+    #[test]
+    fn a_session_can_be_signed_in_with_a_hashed_token() {
+        let t = new_token().unwrap();
+        let mut cfg = Config::new(0, "").token_hash_named("alice", token_hash(&t));
+        cfg.sessions = true;
+        let srv = start_with(cfg);
+        let out = call_text(srv.port(), &req("POST", "/session", Some(&t), ""));
+        assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+        let cookie = cookie_of(&out);
+        let (st, body) = call(srv.port(), &format!("GET /x HTTP/1.1\r\nCookie: {cookie}\r\n\r\n"));
+        assert_eq!((st, body["who"].as_str()), (200, Some("alice")));
     }
 
     #[test]

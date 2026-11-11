@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.292.0] - 2026-11-12
+
+### 追加
+
+- `ito-http`: トークンを SHA-256 のハッシュだけで持てるようにした（koyomi の依頼）。`Config::token_hash_named(name, hash)` で足し、受けたトークンを 1 回ハッシュして、全部のハッシュと定時間で比べる（平文のトークンと同じく、どれに近いかが時間に出ない）。通れば `Request::who` は `name`。平文の `token`・`tokens` と一緒に使え、比べる順は `token`・`tokens`・`token_hashes`。
+- `ito_http::new_token()`: OS の乱数 32 バイトを小文字の 16 進 64 文字にした新しいトークン。`ito_http::token_hash(token)`: 待ち受けが比べるのと同じ SHA-256 の小文字の 16 進。
+- `Server::start` は、ハッシュが小文字の 16 進 64 文字でないもの・空のトークンのハッシュ・名前が空のものを `InvalidInput` で断る。メッセージと `Debug` に出すのは名前だけ。
+
+### 変更
+
+- `ito-http`: `sha2` を機能 `tls` の外の、いつもの依存にした（純 Rust）。
+
+### 使う側がやること
+
+- `Config` に公開の欄 `token_hashes: Vec<(String, String)>` が増えた。`Config::new` と組み立ての関数で作っていれば何もしなくてよい。`Config { … }` と欄を並べて作っているなら `token_hashes: Vec::new()` を足す。
+- 塩なしの速いハッシュなので、`new_token` で作った乱数のトークンにだけ使う。人が決めたパスワードには使わない。
+- `Config` は `Server::start` のときに固まる。動いている間にトークンを足す・消すには、`Server::stop` で止めて、新しい `Config` で `Server::start` し直す。
+
 ## [0.291.2] - 2026-11-11
 
 ### 修正
