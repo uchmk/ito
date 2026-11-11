@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.291.2] - 2026-11-11
+
+### 修正
+
+- アプリの雛形の `ci.yml`: Windows の clippy を Linux の `clippy` から外し、`windows-latest` の `clippy-windows` で回すようにした。`ring`・`aws-lc-sys` を引くアプリ（koyomi など）で、Linux の上の msvc 向けのビルドが毎回落ちていた（ito#216）。ito 自身の CI と同じ形（v0.262.5）。
+- `CLAUDE.md` の CI の clippy の説明を今の形に直した。
+
+### 使う側がやること
+
+- `ci.yml` はアプリのもので、`lanes.sh sync` は書かない。`ring`・`aws-lc-sys` を引くアプリは、自分の `ci.yml` に同じ直しを写す（`clippy` から `x86_64-pc-windows-msvc` の `rustup target add` と clippy の行を外し、`clippy-windows` の job を足す）。`rev` を上げる必要はない。
+- いま Linux の clippy が通っているアプリ（kura など）は、そのままでもよい。
+
 ## [0.291.1] - 2026-11-11
 
 ### 修正

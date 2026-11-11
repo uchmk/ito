@@ -41,9 +41,9 @@ jobs:
       - run: cargo build --locked --workspace --all-features
       - run: cargo test --workspace --all-features
 
-  # Linux, Windows and macOS, all from this Linux runner (as scripts/verify.sh
-  # does): clippy only type-checks and links nothing, so it needs no macOS
-  # runner. objc2 compiles a little Objective-C for macOS, so that clippy goes
+  # Linux and macOS from this Linux runner (Windows has its own job below):
+  # clippy only type-checks and links nothing, so it needs no macOS runner.
+  # objc2 compiles a little Objective-C for macOS, so that clippy goes
   # through cargo-zigbuild, whose zig is a C compiler for macOS. It and zig
   # come from PyPI, into a venv (the runner's Python may refuse pip, PEP 668)
   # whose bin goes on PATH.
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin
+      - run: rustup target add aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -62,8 +62,20 @@ jobs:
           echo "$RUNNER_TEMP/zigbuild/bin" >> "$GITHUB_PATH"
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy --workspace --all-targets --all-features --target x86_64-pc-windows-msvc -- -D warnings
       - run: cargo-zigbuild clippy --workspace --all-targets --all-features --target aarch64-apple-darwin -- -D warnings
+
+  # Windows clippy runs on a Windows runner: crates such as ring and
+  # aws-lc-sys (pulled in by the ito crates that speak TLS or SSH) compile C
+  # and assembly for msvc, which needs lib.exe and NASM (not on Linux), and
+  # zig has no libc headers for the msvc target. As ito's own CI does.
+  clippy-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # ito first: the app uses the ito crates and does not carry its own copy of
   # what they do (scripts/ito-first.py; exceptions in scripts/ito-first.allow).

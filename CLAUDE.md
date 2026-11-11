@@ -113,7 +113,8 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
   `use_small_heuristics = "Max"`）で、手で整形していた形（`Self { a, b, c }` を 1 行）に近い。CI と verify.sh が `cargo fmt --check` で見る。
   切り出しの後に 1 回だけ全体を整形したコミットは `.git-blame-ignore-revs` に載せてある（`git config blame.ignoreRevsFile .git-blame-ignore-revs`）。
 - clippy は `--all-targets -- -D warnings` で警告ゼロを保つ。検証は CI と同じ stable で回す。
-  CI の `clippy` も Linux の機械から Linux・`x86_64-pc-windows-msvc`・`aarch64-apple-darwin` の 3 つを見る（macOS は 2026-10-16 から、verify.sh と同じく cargo-zigbuild で）。
+  CI の `clippy` は Linux の機械から Linux と `aarch64-apple-darwin` を見る（macOS は 2026-10-16 から、verify.sh と同じく cargo-zigbuild で）。
+  Windows は `clippy-windows`（windows-latest）で見る（ring・aws-lc-sys が msvc 向けに C とアセンブリをビルドし、Linux では落ちるため。v0.262.5 から。アプリの雛形の `ci.yml` も v0.291.2 から同じ形）。
   macOS で C が要るのは objc2-exception-helper（wry が objc2 の `exception` を入れ、`setURLSchemeHandler` の呼び出しを包む）だけ。
   Rust の代わりは無い（stable の Rust は Objective-C の例外を捕まえられない）ので、Mac の外では zig を C のコンパイラーにする。
 - `Build`（`.github/workflows/build.yml`、2026-10-16 から）は main への push で、全部のクレートとそのテスト・例を 6 つのターゲット
