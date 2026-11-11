@@ -12,7 +12,11 @@ fail=0
 say() { printf '%-6s %s\n' "$1" "$2"; [ "$1" = NG ] && fail=1; }
 
 out=$(gh release view "$tag" --repo "$repo" --json tagName 2>&1) || { echo "NG     no release $tag: $out"; exit 1; }
-names=$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' | grep -E '\.(zip|tar\.gz)$' | sort)
+assets=$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' | sort)
+# What CI builds (counted below), and what the SHA-256 table lists: those plus
+# packages uploaded by hand. Keep `listed` in step with release-sums.sh.
+names=$(printf '%s\n' "$assets" | grep -E '\.(zip|tar\.gz)$')
+listed=$(printf '%s\n' "$assets" | grep -E '\.(zip|tar\.gz|deb|rpm|msi|dmg)$')
 body=$(gh release view "$tag" --repo "$repo" --json body --jq .body)
 
 # 1. Six assets: Windows x64 / ARM64 (.zip), macOS and Linux x64 / ARM64 (.tar.gz);
@@ -24,10 +28,11 @@ zips=$(printf '%s\n' "$names" | grep -c '\.zip$' || true)
 if [ "$n" -eq "$want" ] && [ "$zips" -eq 2 ]; then say OK "assets: $want (2 zip + $tar tar.gz)"; else say NG "assets: $n ($zips zip); want $want = 2 zip + $tar tar.gz"; fi
 
 # 2. The SHA-256 table (release-sums.yml, called from release.yml or run by hand)
-# is in the notes, with a row for every asset. Without it, run the workflow.
+# is in the notes, with a row for every package (a .deb uploaded after the
+# workflow ran needs it run again). Without it, run the workflow.
 if printf '%s' "$body" | grep -q '^<!-- checksums -->'; then
-  missing=$(printf '%s\n' "$names" | while read -r f; do [ -n "$f" ] && ! printf '%s' "$body" | grep -qF "\`$f\`" && echo "$f"; done)
-  if [ -z "$missing" ]; then say OK "SHA-256 table: a row for every asset"; else say NG "SHA-256 table: no row for: $(echo $missing)"; fi
+  missing=$(printf '%s\n' "$listed" | while read -r f; do [ -n "$f" ] && ! printf '%s' "$body" | grep -qF "\`$f\`" && echo "$f"; done)
+  if [ -z "$missing" ]; then say OK "SHA-256 table: a row for every package"; else say NG "SHA-256 table: no row for: $(echo $missing)"; fi
 else
   say NG "SHA-256 table: not in the notes (gh workflow run release-sums.yml -f tag=$tag; gh run watch; gh run view --log-failed)"
 fi

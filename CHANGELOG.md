@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.292.1] - 2026-11-12
+
+### 修正
+
+- `scripts/lanes/release-sums.sh`: SHA-256 の表に `.deb`・`.rpm`・`.msi`・`.dmg` も載せる（koyomi の依頼、#217）。これまでは `.zip` と `.tar.gz` だけで、手で上げた `koyomi_0.37.0_amd64.deb` などの行が無かった。中身の一覧は今までどおり Windows の zip だけ。
+- `scripts/lanes/release-check.sh`: 表に全部の行があるかの確認も同じ拡張子を見る（`.deb` の行が抜けていれば NG）。資産の数（2 zip + 4 tar.gz）は今までどおり CI が作るものだけを数える。
+
+### 使う側がやること
+
+- `rev` を上げて `scripts/lanes.sh sync` を流す。`.deb` などを手で上げたリリースは `gh workflow run release-sums.yml -f tag=<tag>` で表を作り直す（手で上げたのが表を作った後なら、今後も同じく回し直す）。
+
 ## [0.292.0] - 2026-11-12
 
 ### 追加
