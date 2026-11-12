@@ -11,8 +11,11 @@
 //!
 //! The app owns the words and the colours ([`Style`]) and the keys: it reads
 //! its own keymap for Enter/Esc/`y`/`n` and calls [`show`] only to draw and to
-//! hear a click. A button is drawn but never clipped away while still clickable
-//! (a row that runs past the edge wraps instead).
+//! hear a click. So egui's own keyboard focus is nobody's while a question is
+//! up: Tab cannot hand it to a widget behind the dim (whose Enter would press
+//! it along with the answer), and the choices here never take it. A button is
+//! drawn but never clipped away while still clickable (a row that runs past the
+//! edge wraps instead).
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{vec2, Align2, Color32, Context, CursorIcon, FontId, Id, Order, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
@@ -139,12 +142,27 @@ pub fn width(screen: f32) -> f32 {
 
 /// Draw the question over everything and return the index of the button
 /// clicked this frame, if any. The keys are the app's to read.
+///
+/// Whatever has egui's keyboard focus when this returns loses it (and the
+/// frame is drawn again without its focus ring), and a Tab this frame moves it
+/// no further, so it does not reach a widget behind and last to the next Enter.
+/// Focus the app gives back after this call, in the frame the answer comes, is
+/// kept; given before it, it is dropped. The question's choices never take the
+/// focus (an Enter would answer twice): they are pressed by the mouse or an
+/// AccessKit click, and offer no AccessKit focus.
+///
+/// Left to egui, for widgets drawn before this call: a Tab and an Enter in the
+/// one frame can still press one. And in the first frame of a question, if one
+/// of them still has the focus from before, a Tab or a Shift+Tab can pass it on
+/// to another widget, which may hold it at the start of the next frame (and be
+/// pressed by an Enter there) until this call drops it.
 pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
     let screen = ctx.content_rect();
     let mut clicked = None;
     // Under the box and over the app, taking the mouse so nothing behind is hit.
+    // Not focusable: Tab does not stop on it.
     egui::Area::new(Id::new("ito-confirm-dim")).order(Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
-        let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click_and_drag());
+        let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::CLICK | Sense::DRAG);
         ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(140));
     });
     let w = width(screen.width());
@@ -222,7 +240,9 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                                 first.leading_space = MARK_ROOM;
                             }
                         }
-                        let mut b = egui::Button::new(job).fill(bg).corner_radius(BUTTON_RADIUS);
+                        // `CLICK` alone, not focusable: the app's `focus` is the
+                        // keyboard's, and a second, egui one would answer Enter too.
+                        let mut b = egui::Button::new(job).fill(bg).corner_radius(BUTTON_RADIUS).sense(Sense::CLICK);
                         if q.focus == Some(i) {
                             b = b.stroke(Stroke::new(2.0, style.accent.unwrap_or(style.text)));
                         } else if n > 0 && !primary {
@@ -252,6 +272,28 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
             StrokeKind::Outside,
         );
     });
+    // Nothing keeps the focus under the question: a Tab this frame may have
+    // given it to a widget behind, drawn before this call. And the Tab stops
+    // here, so a widget drawn after this call does not take it by itself (one
+    // that had the focus before this call may still pass it on: see below).
+    let dropped = ctx.memory_mut(|m| {
+        m.move_focus(egui::FocusDirection::None);
+        match m.focused() {
+            Some(id) => {
+                m.surrender_focus(id);
+                true
+            }
+            None => false,
+        }
+    });
+    // That widget was drawn with its focus ring: draw it again without, now.
+    // On a Tab too: a widget that had the focus before this call can pass it
+    // on to the next one drawn, after this call, which loses it here in the
+    // next frame. `raw`: the app may have consumed the Tab, egui saw it.
+    let tab = ctx.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, pressed: true, .. })));
+    if dropped || tab {
+        ctx.request_repaint();
+    }
     clicked
 }
 
@@ -345,7 +387,8 @@ fn card(ui: &mut Ui, c: &Card, focused: bool, recommended: bool, badge: &str, st
     if !chips.is_empty() {
         h += 5.0 + chips_h;
     }
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, h.max(34.0)), Sense::click());
+    // Not focusable, as the buttons: the app's `focus` is the keyboard's.
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, h.max(34.0)), Sense::CLICK);
     let resp = resp.on_hover_cursor(CursorIcon::PointingHand);
     let p = ui.painter();
     let (mut fill, mut line) = if red {
@@ -677,5 +720,121 @@ mod tests {
             got = got.or(card_rects(&ctx, &q, 800.0, ev).1);
         }
         assert_eq!(got, Some(2));
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    /// Where an app's own button sits in the frame, relative to the question.
+    #[derive(Clone, Copy, Debug)]
+    enum Behind {
+        None,
+        Before,
+        After,
+    }
+
+    /// One frame with a button of the app's behind the question: whether that
+    /// button was pressed, the answer, and who holds egui's focus afterwards.
+    fn frame(ctx: &Context, q: &Question, behind: Behind, events: Vec<egui::Event>) -> (bool, Option<usize>, Option<Id>) {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let (mut pressed, mut out) = (false, None);
+        let mut o = ctx.run_ui(input, |ui| {
+            if matches!(behind, Behind::Before) {
+                pressed = ui.button("Connect to kei").clicked();
+            }
+            out = show(ui.ctx(), q, &style());
+            if matches!(behind, Behind::After) {
+                pressed = ui.button("Connect to kei").clicked();
+            }
+        });
+        o.textures_delta.clear();
+        (pressed, out, ctx.memory(|m| m.focused()))
+    }
+
+    /// koyomi: Tab moved egui's focus to a status-bar button behind the
+    /// question, and the next Enter pressed it along with the answer. Here
+    /// from a question already up, with nothing focused from before it.
+    #[test]
+    fn tab_leaves_no_focus_behind_the_question_or_on_its_choices() {
+        let buttons = vec!["Keep editing".to_owned(), "Discard".to_owned()];
+        let cs = cards();
+        let with_buttons = Question { title: "Discard the changes?", buttons: &buttons, focus: Some(1), ..Default::default() };
+        let with_cards = Question { title: "Reset?", cards: &cs, buttons: &buttons, focus: Some(0), ..Default::default() };
+        let (none, shift) = (egui::Modifiers::NONE, egui::Modifiers::SHIFT);
+        for q in [&with_buttons, &with_cards] {
+            for behind in [Behind::None, Behind::Before, Behind::After] {
+                let ctx = Context::default();
+                for _ in 0..2 {
+                    frame(&ctx, q, behind, vec![]);
+                }
+                let mut steps = vec![];
+                for m in [none, none, shift, none, none, none, shift] {
+                    steps.push(vec![key(egui::Key::Tab, m)]);
+                }
+                for arrow in [egui::Key::ArrowDown, egui::Key::ArrowRight, egui::Key::ArrowUp] {
+                    steps.push(vec![key(egui::Key::Tab, none)]);
+                    steps.push(vec![key(arrow, none)]);
+                }
+                for events in steps {
+                    let (pressed, out, focused) = frame(&ctx, q, behind, events.clone());
+                    assert_eq!((pressed, out, focused), (false, None, None), "{behind:?} {events:?}");
+                    // The frame `show` asked for, with the focus ring gone.
+                    let (pressed, out, focused) = frame(&ctx, q, behind, vec![]);
+                    assert_eq!((pressed, out, focused), (false, None, None), "repaint after {behind:?} {events:?}");
+                    let (pressed, out, focused) = frame(&ctx, q, behind, vec![key(egui::Key::Enter, none)]);
+                    assert_eq!((pressed, out, focused), (false, None, None), "Enter after {behind:?} {events:?}");
+                }
+            }
+            // A Tab and an Enter in the one frame: no choice of the question
+            // takes the focus, nor a widget drawn after it. (One drawn before
+            // it still can: see `show`.)
+            for behind in [Behind::None, Behind::After] {
+                let ctx = Context::default();
+                for _ in 0..2 {
+                    frame(&ctx, q, behind, vec![]);
+                }
+                let tab_enter = vec![key(egui::Key::Tab, none), key(egui::Key::Enter, none)];
+                assert_eq!(frame(&ctx, q, behind, tab_enter), (false, None, None), "Tab+Enter, {behind:?}");
+            }
+        }
+    }
+
+    /// The focus is dropped while the question is drawn, not after it: focus
+    /// the app gives back with the answer stays, and Tab works again at once.
+    #[test]
+    fn focus_given_back_with_the_answer_is_kept() {
+        let buttons = vec!["Keep editing".to_owned()];
+        let q = Question { title: "Discard the changes?", buttons: &buttons, ..Default::default() };
+        let ctx = Context::default();
+        let input =
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))), ..Default::default() };
+        let mut id = None;
+        for asking in [true, true, true, false, false] {
+            let mut o = ctx.run_ui(input.clone(), |ui| {
+                let r = ui.button("Editor");
+                id = Some(r.id);
+                if asking {
+                    show(ui.ctx(), &q, &style());
+                    // As in the frame the answer comes (the last one with the
+                    // question): the app hands the focus back after `show`.
+                    ui.ctx().memory_mut(|m| m.request_focus(r.id));
+                }
+            });
+            o.textures_delta.clear();
+        }
+        assert_eq!(ctx.memory(|m| m.focused()), id);
+        // And with the question gone, Tab moves egui's focus as before.
+        ctx.memory_mut(|m| m.surrender_focus(id.unwrap()));
+        let tab = egui::RawInput { events: vec![key(egui::Key::Tab, egui::Modifiers::NONE)], ..input };
+        let mut o = ctx.run_ui(tab, |ui| {
+            let _ = ui.button("Editor");
+        });
+        o.textures_delta.clear();
+        assert_eq!(ctx.memory(|m| m.focused()), id);
     }
 }
