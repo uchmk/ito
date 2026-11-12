@@ -143,11 +143,21 @@ pub fn width(screen: f32) -> f32 {
 /// Draw the question over everything and return the index of the button
 /// clicked this frame, if any. The keys are the app's to read.
 ///
-/// Whatever has egui's keyboard focus when this returns loses it (and the
-/// frame is drawn again without its focus ring), and a Tab this frame moves it
-/// no further, so it does not reach a widget behind and last to the next Enter.
-/// Focus the app gives back after this call, in the frame the answer comes, is
-/// kept; given before it, it is dropped. The question's choices never take the
+/// A widget behind the question, in the app's panels and windows
+/// (`Order::Background` and `Order::Middle`), that has egui's keyboard focus
+/// when this returns loses it (and the frame is drawn again without its focus
+/// ring), and a Tab this frame moves the focus no further, so it does not
+/// reach a widget behind and last to the next Enter. A widget in an overlay
+/// the app draws over its panels and windows (`Order::Foreground` and up),
+/// such as ito-palette's field opened over the question, keeps it and takes
+/// what is typed: one drawn before this call, or drawn in the last frame
+/// (one first drawn after this call, that already has the focus, is not
+/// known yet and loses it). So does one in an overlay that
+/// was open before the question and is now under its dim (an egui popup or
+/// menu, ito-notices' list): close those when the question opens, or take
+/// their focus off. Focus the app gives back after this
+/// call, in the frame the answer comes, is kept; given before it, to a widget
+/// behind, it is dropped. The question's choices never take the
 /// focus (an Enter would answer twice): they are pressed by the mouse or an
 /// AccessKit click, and offer no AccessKit focus.
 ///
@@ -155,7 +165,11 @@ pub fn width(screen: f32) -> f32 {
 /// one frame can still press one. And in the first frame of a question, if one
 /// of them still has the focus from before, a Tab or a Shift+Tab can pass it on
 /// to another widget, which may hold it at the start of the next frame (and be
-/// pressed by an Enter there) until this call drops it.
+/// pressed by an Enter there) until this call drops it, when it is behind.
+/// A Tab from a widget that keeps the focus, in an overlay, can likewise pass
+/// it on to a widget behind drawn after this call: it holds it for the rest of
+/// that frame (a Tab and an Enter in the one frame can press it) and loses it
+/// here in the next.
 pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
     let screen = ctx.content_rect();
     let mut clicked = None;
@@ -272,20 +286,29 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
             StrokeKind::Outside,
         );
     });
-    // Nothing keeps the focus under the question: a Tab this frame may have
-    // given it to a widget behind, drawn before this call. And the Tab stops
-    // here, so a widget drawn after this call does not take it by itself (one
-    // that had the focus before this call may still pass it on: see below).
-    let dropped = ctx.memory_mut(|m| {
+    // Nothing behind the question keeps the focus: a Tab this frame may have
+    // given it to a widget there, drawn before this call. Behind is the app's
+    // panels and windows (and the question's own layers); a widget in an
+    // overlay over those, `Foreground` and up, such as ito-palette's field
+    // drawn over the question, keeps it. One drawn in neither this frame nor
+    // the last is not over the question: it loses it. The layer's `Order`
+    // decides, not where the layer sorts against the dim: a palette opened in
+    // the question's first frame, drawn before this call, sorts under the dim
+    // in that frame, and a click on the dim moves the dim to the top.
+    // And the Tab stops here, so a widget drawn after this call does not take
+    // it by itself (one that had the focus before this call, behind or in an
+    // overlay, may still pass it on: see below and `show`'s doc).
+    let own = |l: egui::LayerId| l.id == Id::new("ito-confirm") || l.id == Id::new("ito-confirm-dim");
+    let behind = ctx
+        .memory(|m| m.focused())
+        .filter(|&id| ctx.read_response(id).is_none_or(|r| r.layer_id.order < Order::Foreground || own(r.layer_id)));
+    ctx.memory_mut(|m| {
         m.move_focus(egui::FocusDirection::None);
-        match m.focused() {
-            Some(id) => {
-                m.surrender_focus(id);
-                true
-            }
-            None => false,
+        if let Some(id) = behind {
+            m.surrender_focus(id);
         }
     });
+    let dropped = behind.is_some();
     // That widget was drawn with its focus ring: draw it again without, now.
     // On a Tab too: a widget that had the focus before this call can pass it
     // on to the next one drawn, after this call, which loses it here in the
@@ -836,5 +859,134 @@ mod tests {
         });
         o.textures_delta.clear();
         assert_eq!(ctx.memory(|m| m.focused()), id);
+    }
+
+    /// One frame of koyomi's: a button in the app's panel, then the palette
+    /// over a question, both drawn before `show`. Whether the button was
+    /// pressed, the palette's answer, and who holds egui's focus afterwards.
+    fn palette_frame(
+        ctx: &Context,
+        q: &Question,
+        view: &mut ito_palette::View,
+        events: Vec<egui::Event>,
+    ) -> (bool, Option<ito_palette::Answer<u8>>, Option<Id>) {
+        let c = Color32::GRAY;
+        let look = ito_palette::Style { panel: c, border: c, text: c, dim: c, selected_bg: c, selected_text: c, hit: c, accent: c };
+        let words = ito_palette::Words { hint: "", none: "", header: "", footer: "" };
+        let entries = [ito_palette::Entry::new("One", "", 1), ito_palette::Entry::new("Gamma", "", 2)];
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let (mut pressed, mut answer) = (false, None);
+        let mut o = ctx.run_ui(input, |ui| {
+            pressed = ui.button("Connect to kei").clicked();
+            answer = ito_palette::show(ui.ctx(), view, &entries, &look, &words);
+            show(ui.ctx(), q, &style());
+        });
+        o.textures_delta.clear();
+        (pressed, answer, ctx.memory(|m| m.focused()))
+    }
+
+    /// koyomi: with the question dropping all focus, ito-palette's field over
+    /// it (drawn before `show` in the frame) lost the focus every frame, and
+    /// nothing typed reached it. It keeps it now. A Tab stays in the field
+    /// (it locks the focus, so egui does not move it on) and does not reach
+    /// the panel's button behind.
+    #[test]
+    fn a_palette_over_the_question_keeps_its_field() {
+        let buttons = vec!["Keep editing".to_owned(), "Open".to_owned()];
+        let q = Question { title: "Open in the browser?", buttons: &buttons, focus: Some(1), ..Default::default() };
+        let field = Some(Id::new("ito-palette-query"));
+        let ctx = Context::default();
+        let mut view = ito_palette::View::new();
+        for _ in 0..4 {
+            palette_frame(&ctx, &q, &mut view, vec![]);
+        }
+        assert_eq!(palette_frame(&ctx, &q, &mut view, vec![egui::Event::Paste("ga".into())]), (false, None, field));
+        assert_eq!(palette_frame(&ctx, &q, &mut view, vec![egui::Event::Text("mm".into())]), (false, None, field));
+        assert_eq!(view.query, "gamm");
+        for m in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+            assert_eq!(palette_frame(&ctx, &q, &mut view, vec![key(egui::Key::Tab, m)]), (false, None, field), "{m:?}");
+            assert_eq!(palette_frame(&ctx, &q, &mut view, vec![]), (false, None, field), "repaint after {m:?}");
+        }
+        // The palette answers without drawing its field, and egui lets the
+        // focus of a widget not drawn go: nothing has it, the button neither.
+        let enter = palette_frame(&ctx, &q, &mut view, vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        assert_eq!(enter, (false, Some(ito_palette::Answer::Pick(2)), None));
+    }
+
+    /// Behind the question is the app's panels and windows; an overlay over
+    /// them (`Foreground` and up) keeps the focus the app gives it before `show`.
+    #[test]
+    fn only_the_focus_behind_the_question_is_dropped() {
+        let buttons = vec!["Keep editing".to_owned()];
+        let q = Question { title: "Discard the changes?", buttons: &buttons, ..Default::default() };
+        let input =
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))), ..Default::default() };
+        for (order, kept) in [(Order::Background, false), (Order::Middle, false), (Order::Foreground, true), (Order::Tooltip, true)] {
+            let ctx = Context::default();
+            let mut id = None;
+            for _ in 0..3 {
+                let mut o = ctx.run_ui(input.clone(), |ui| {
+                    egui::Area::new(Id::new("the app's")).order(order).show(ui.ctx(), |ui| {
+                        let r = ui.button("Connect to kei");
+                        r.request_focus();
+                        id = Some(r.id);
+                    });
+                    show(ui.ctx(), &q, &style());
+                });
+                o.textures_delta.clear();
+            }
+            assert_eq!(ctx.memory(|m| m.focused()) == id, kept, "{order:?}");
+        }
+    }
+
+    /// 0.292.2's Tab case, from an overlay: a Tab in a widget the question keeps (one that
+    /// does not lock the focus) moves it on to the next widget, and when that
+    /// one is behind the question, drawn before `show`, it loses it in the
+    /// same frame, so the next Enter presses nothing.
+    #[test]
+    fn a_tab_from_an_overlay_does_not_leave_the_focus_behind() {
+        let buttons = vec!["Keep editing".to_owned()];
+        let q = Question { title: "Discard the changes?", buttons: &buttons, ..Default::default() };
+        let ctx = Context::default();
+        let frame = |events: Vec<egui::Event>, focus: bool| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))),
+                events,
+                ..Default::default()
+            };
+            let (mut pressed, mut over) = (false, None);
+            let mut o = ctx.run_ui(input, |ui| {
+                egui::Area::new(Id::new("the app's overlay")).order(Order::Foreground).show(ui.ctx(), |ui| {
+                    let r = ui.button("Search");
+                    if focus {
+                        r.request_focus();
+                    }
+                    over = Some(r.id);
+                });
+                pressed = ui.button("Connect to kei").clicked();
+                show(ui.ctx(), &q, &style());
+            });
+            o.textures_delta.clear();
+            (pressed, over, ctx.memory(|m| m.focused()))
+        };
+        let mut over = None;
+        for _ in 0..3 {
+            let (pressed, id, focused) = frame(vec![], true);
+            assert!(!pressed);
+            assert_eq!(focused, id, "the overlay keeps the focus it is given");
+            over = id;
+        }
+        assert!(over.is_some());
+        let none = egui::Modifiers::NONE;
+        let (pressed, _, focused) = frame(vec![key(egui::Key::Tab, none)], false);
+        assert_eq!((pressed, focused), (false, None), "Tab");
+        let (pressed, _, focused) = frame(vec![], false);
+        assert_eq!((pressed, focused), (false, None), "repaint after Tab");
+        let (pressed, _, focused) = frame(vec![key(egui::Key::Enter, none)], false);
+        assert_eq!((pressed, focused), (false, None), "Enter after Tab");
     }
 }

@@ -12,3 +12,6 @@ egui = "0.36"
 ito-diff = { path = "../ito-diff" }
 ito-prefs = { path = "../ito-prefs" }
 ito-theme = { path = "../ito-theme" }
+
+[dev-dependencies]
+ito-palette = { path = "../ito-palette" }
