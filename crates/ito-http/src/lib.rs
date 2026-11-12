@@ -8,6 +8,8 @@
 //! - **A bearer token on every request**, compared in constant time; a missing or wrong one is a 401 before the body
 //!   is read and before the handler is called. The token is never logged ([`token_from_secret`] reads it from
 //!   `ito-secret`). A token may be kept only as its SHA-256 ([`Config::token_hash_named`], [`new_token`], [`token_hash`]).
+//! - **Who may come in can change while it runs:** [`Server::set_access`] swaps the tokens and the tailnet logins and tags
+//!   ([`Access`]) without closing a socket; a browser session stays only while its token still signs in as the same name.
 //! - **Limits:** the head, the body (`max_body`, 413 before it is read), connections at once (`max_connections`, 503),
 //!   and a read timeout per connection.
 //! - JSON in and out, HTTP/1.1, one request per connection (`Connection: close`), no chunked bodies.
@@ -146,6 +148,85 @@ impl std::fmt::Debug for Config {
     }
 }
 
+/// Who may come in: the part of [`Config`] a running [`Server`] can swap ([`Server::set_access`]).
+#[derive(Clone, Default)]
+pub struct Access {
+    /// As [`Config::token`] (its name is `"default"`).
+    pub token: String,
+    /// As [`Config::tokens`]: name and token.
+    pub tokens: Vec<(String, String)>,
+    /// As [`Config::token_hashes`]: name and SHA-256 hex.
+    pub token_hashes: Vec<(String, String)>,
+    /// As [`Tailnet::logins`]. Only for a server started with [`Config::tailnet`].
+    pub tailnet_logins: Vec<(String, String)>,
+    /// As [`Tailnet::tags`]. Only for a server started with [`Config::tailnet`].
+    pub tailnet_tags: Vec<(String, String)>,
+}
+
+impl Access {
+    /// The access `cfg` would start a server with: a copy of its tokens, token hashes and (with [`Config::tailnet`])
+    /// the tailnet logins and tags. Nothing is checked here; [`Server::set_access`] checks.
+    pub fn of(cfg: &Config) -> Access {
+        let (tailnet_logins, tailnet_tags) = match &cfg.tailnet {
+            Some(t) => (t.logins.clone(), t.tags.clone()),
+            None => (Vec::new(), Vec::new()),
+        };
+        Access {
+            token: cfg.token.clone(),
+            tokens: cfg.tokens.clone(),
+            token_hashes: cfg.token_hashes.clone(),
+            tailnet_logins,
+            tailnet_tags,
+        }
+    }
+}
+
+impl std::fmt::Debug for Access {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Access")
+            .field("token", &if self.token.is_empty() { "" } else { "***" })
+            .field("tokens", &self.tokens.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
+            .field("token_hashes", &self.token_hashes.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>())
+            .field("tailnet_logins", &self.tailnet_logins)
+            .field("tailnet_tags", &self.tailnet_tags)
+            .finish()
+    }
+}
+
+/// The checks on who may come in, for [`Server::start`] and [`Server::set_access`]. `tailnet`: the server has (was
+/// started with) a tailnet listener.
+fn check_access(access: &Access, tailnet: bool) -> io::Result<()> {
+    let invalid = |msg: String| Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
+    if !tailnet && (!access.tailnet_logins.is_empty() || !access.tailnet_tags.is_empty()) {
+        return invalid("this server has no tailnet listener".into());
+    }
+    if access.token.is_empty() && access.tokens.is_empty() && access.token_hashes.is_empty() && !tailnet {
+        return invalid("the token is empty".into());
+    }
+    if access.tokens.iter().any(|(name, token)| name.is_empty() || token.is_empty()) {
+        return invalid("a named token has an empty name or value".into());
+    }
+    let empty_hash = token_hash("");
+    for (name, hash) in &access.token_hashes {
+        if name.is_empty() {
+            return invalid("a token hash has an empty name".into());
+        } else if hash.len() != 64 || !hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+            return invalid(format!("the token hash for `{name}` is not 64 lowercase hex characters"));
+        } else if *hash == empty_hash {
+            return invalid(format!("the token hash for `{name}` is the hash of an empty token"));
+        }
+    }
+    if tailnet {
+        if access.tailnet_logins.is_empty() && access.tailnet_tags.is_empty() {
+            return invalid("the tailnet listener has no login or tag to let in".into());
+        }
+        if access.tailnet_logins.iter().chain(&access.tailnet_tags).any(|(k, w)| k.is_empty() || w.is_empty()) {
+            return invalid("a tailnet login or tag has an empty name".into());
+        }
+    }
+    Ok(())
+}
+
 /// The token kept as `name` for `app` in the OS credential store. `Err` when the store fails or there is none
 /// (the message says which); blocks, so call it off the UI thread.
 pub fn token_from_secret(app: &str, name: &str) -> io::Result<String> {
@@ -263,13 +344,24 @@ struct TailState {
 type Handler = dyn Fn(Request) -> Response + Send + Sync;
 type Log = dyn Fn(&LogLine) + Send + Sync;
 
+/// A signed-in browser.
+struct Session {
+    who: String,
+    /// The SHA-256 of the bearer token that signed it in: it is kept only while that token still signs in as `who`.
+    hash: String,
+    until: Instant,
+}
+
 struct Shared {
+    /// The listener's setup. Its tokens and the tailnet's logins and tags are cleared: they live in `access`.
     cfg: Config,
+    /// Who may come in. Lock order: `sessions` first, then this. Never take `sessions` while holding a guard of this.
+    access: RwLock<Arc<Access>>,
     handler: Box<Handler>,
     log: Box<Log>,
     active: AtomicUsize,
-    /// Signed-in browsers: the random id in the cookie → who and until when.
-    sessions: Mutex<HashMap<String, (String, Instant)>>,
+    /// Signed-in browsers: the random id in the cookie → the session.
+    sessions: Mutex<HashMap<String, Session>>,
     /// What the `Host` header may be on the tailnet listener: this PC's addresses and names.
     hosts: RwLock<Vec<String>>,
     /// How the tailnet listener is doing (it opens in the background when Tailscale is not up yet).
@@ -296,27 +388,9 @@ impl Server {
         handler: impl Fn(Request) -> Response + Send + Sync + 'static,
         log: impl Fn(&LogLine) + Send + Sync + 'static,
     ) -> io::Result<Server> {
-        if cfg.token.is_empty() && cfg.tokens.is_empty() && cfg.token_hashes.is_empty() && cfg.tailnet.is_none() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "the token is empty"));
-        }
-        if cfg.tokens.iter().any(|(name, token)| name.is_empty() || token.is_empty()) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "a named token has an empty name or value"));
-        }
-        let empty_hash = token_hash("");
-        for (name, hash) in &cfg.token_hashes {
-            let bad = if name.is_empty() {
-                Some("a token hash has an empty name".to_string())
-            } else if hash.len() != 64 || !hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
-                Some(format!("the token hash for `{name}` is not 64 lowercase hex characters"))
-            } else if *hash == empty_hash {
-                Some(format!("the token hash for `{name}` is the hash of an empty token"))
-            } else {
-                None
-            };
-            if let Some(msg) = bad {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
-            }
-        }
+        let mut cfg = cfg;
+        let access = Access::of(&cfg);
+        check_access(&access, cfg.tailnet.is_some())?;
         #[cfg(feature = "tls")]
         let mut identity = None;
         let mut listeners;
@@ -342,12 +416,6 @@ impl Server {
             }
         }
         if let Some(t) = &cfg.tailnet {
-            if t.logins.is_empty() && t.tags.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "the tailnet listener has no login or tag to let in"));
-            }
-            if t.logins.iter().chain(&t.tags).any(|(k, w)| k.is_empty() || w.is_empty()) {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "a tailnet login or tag has an empty name"));
-            }
             if let Some(bad) = t.addrs.iter().find(|a| !tailnet::is_tailnet_ip(**a)) {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{bad} is not a tailnet address")));
             }
@@ -357,8 +425,17 @@ impl Server {
             Some(id) => (Some(id.fingerprint()), Some(id.server_config()?)),
             None => (None, None),
         };
+        // The access lives in `Shared::access` only, so no code can read a stale copy from the config.
+        cfg.token = String::new();
+        cfg.tokens = Vec::new();
+        cfg.token_hashes = Vec::new();
+        if let Some(t) = &mut cfg.tailnet {
+            t.logins = Vec::new();
+            t.tags = Vec::new();
+        }
         let shared = Arc::new(Shared {
             cfg,
+            access: RwLock::new(Arc::new(access)),
             handler: Box::new(handler),
             log: Box::new(log),
             active: AtomicUsize::new(0),
@@ -394,6 +471,27 @@ impl Server {
             stop,
             threads,
         })
+    }
+
+    /// Swap who may come in, without closing a socket. It replaces the whole policy (it is not merged into the old
+    /// one), and is checked like [`Server::start`] checks the config: `Err` (`InvalidInput`) for an empty token set
+    /// on a server without a tailnet listener, a bad named token or token hash, bad tailnet logins or tags, or tailnet
+    /// logins or tags for a server started without [`Config::tailnet`]. On `Err` nothing changes: the old access and
+    /// every session stay. Calls are serialized.
+    ///
+    /// Requests already let in are not cancelled: they finish with the access that let them in. The sockets, port,
+    /// TLS, tailnet addresses and the rest of the config are not touched. A browser session stays only while its
+    /// token still signs in as the same name under the new access (a removed name or a remade token ends it).
+    pub fn set_access(&self, access: Access) -> io::Result<()> {
+        check_access(&access, self.shared.cfg.tailnet.is_some())?;
+        let access = Arc::new(access);
+        let poisoned = |what: &str| io::Error::other(format!("{what} lock poisoned"));
+        // Lock order: sessions, then access. Both are held before anything changes.
+        let mut sessions = self.shared.sessions.lock().map_err(|_| poisoned("session table"))?;
+        let mut slot = self.shared.access.write().map_err(|_| poisoned("access"))?;
+        *slot = access.clone();
+        sessions.retain(|_, s| name_of_hash(&access, &s.hash).as_deref() == Some(s.who.as_str()));
+        Ok(())
     }
 
     /// The port in use (what the system picked when `Config::port` was 0).
@@ -622,7 +720,7 @@ fn serve(s: TcpStream, shared: &Shared, kind: Kind, peer: SocketAddr) {
             let via = match &auth {
                 Auth::No => Via::Denied,
                 Auth::Public => Via::Public,
-                Auth::Bearer => Via::Token,
+                Auth::Bearer(_) => Via::Token,
                 Auth::Cookie(_) => Via::Session,
                 Auth::Tailnet => Via::Tailscale,
             };
@@ -653,38 +751,71 @@ fn refuse(status: u16, message: &'static str) -> Refused {
 }
 
 /// How a request got in.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum Auth {
     /// Not at all: a 401 (the body was not read).
     No,
     /// A `GET` of a [`Config::public`] path.
     Public,
-    /// A bearer token.
-    Bearer,
+    /// A bearer token, with its SHA-256 hex.
+    Bearer(String),
     /// A session cookie, with its id.
     Cookie(String),
     /// Tailscale's whois, on the tailnet listener.
     Tailnet,
 }
 
+// By hand: the token's hash and the cookie id are credentials.
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Auth::No => f.write_str("No"),
+            Auth::Public => f.write_str("Public"),
+            Auth::Bearer(_) => f.write_str("Bearer(..)"),
+            Auth::Cookie(_) => f.write_str("Cookie(..)"),
+            Auth::Tailnet => f.write_str("Tailnet"),
+        }
+    }
+}
+
 /// The name of the token `given` is, if any. Every token is compared, so the time does not tell which one is close.
 /// A hashed token is compared the same way, as the SHA-256 of `given` against each stored hash.
-fn token_name(cfg: &Config, given: &[u8]) -> Option<String> {
+fn token_name(access: &Access, given: &[u8]) -> Option<String> {
     let mut found = None;
-    if !cfg.token.is_empty() && ct_eq(given, cfg.token.as_bytes()) {
+    if !access.token.is_empty() && ct_eq(given, access.token.as_bytes()) {
         found = Some("default".to_string());
     }
-    for (name, token) in &cfg.tokens {
+    for (name, token) in &access.tokens {
         if ct_eq(given, token.as_bytes()) && found.is_none() {
             found = Some(name.clone());
         }
     }
-    if !cfg.token_hashes.is_empty() {
+    if !access.token_hashes.is_empty() {
         let given_hash = token_hash_bytes(given);
-        for (name, hash) in &cfg.token_hashes {
+        for (name, hash) in &access.token_hashes {
             if ct_eq(given_hash.as_bytes(), hash.as_bytes()) && found.is_none() {
                 found = Some(name.clone());
             }
+        }
+    }
+    found
+}
+
+/// The name a token with SHA-256 `hash` signs in as under `access`: [`token_name`]'s order (the default token, the
+/// named tokens, the hashes), each compared.
+fn name_of_hash(access: &Access, hash: &str) -> Option<String> {
+    let mut found = None;
+    if !access.token.is_empty() && ct_eq(token_hash(&access.token).as_bytes(), hash.as_bytes()) {
+        found = Some("default".to_string());
+    }
+    for (name, token) in &access.tokens {
+        if ct_eq(token_hash(token).as_bytes(), hash.as_bytes()) && found.is_none() {
+            found = Some(name.clone());
+        }
+    }
+    for (name, h) in &access.token_hashes {
+        if ct_eq(h.as_bytes(), hash.as_bytes()) && found.is_none() {
+            found = Some(name.clone());
         }
     }
     found
@@ -702,7 +833,7 @@ const MAX_SESSIONS: usize = 256;
 fn session_who(shared: &Shared, id: &str) -> Option<String> {
     let mut map = shared.sessions.lock().ok()?;
     match map.get(id) {
-        Some((who, until)) if *until > Instant::now() => Some(who.clone()),
+        Some(s) if s.until > Instant::now() => Some(s.who.clone()),
         Some(_) => {
             map.remove(id);
             None
@@ -730,18 +861,25 @@ fn token_hash_bytes(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn new_session(shared: &Shared, who: &str) -> io::Result<String> {
+/// A session for `who`, signed in with the token whose SHA-256 is `hash`. `Ok(None)`: that token no longer signs in as
+/// `who` (the access changed meanwhile), so nothing was added or evicted.
+fn new_session(shared: &Shared, who: &str, hash: &str) -> io::Result<Option<String>> {
     let id = new_token()?;
+    // Lock order: sessions, then access (set_access holds both while it swaps).
     let mut map = shared.sessions.lock().map_err(|_| io::Error::other("session table poisoned"))?;
+    let current = shared.access.read().map(|a| Arc::clone(&a)).map_err(|_| io::Error::other("access lock poisoned"))?;
+    if name_of_hash(&current, hash).as_deref() != Some(who) {
+        return Ok(None);
+    }
     let now = Instant::now();
-    map.retain(|_, (_, until)| *until > now);
+    map.retain(|_, s| s.until > now);
     if map.len() >= MAX_SESSIONS {
-        if let Some(oldest) = map.iter().min_by_key(|(_, (_, until))| *until).map(|(k, _)| k.clone()) {
+        if let Some(oldest) = map.iter().min_by_key(|(_, s)| s.until).map(|(k, _)| k.clone()) {
             map.remove(&oldest);
         }
     }
-    map.insert(id.clone(), (who.to_string(), now + shared.cfg.session_ttl));
-    Ok(id)
+    map.insert(id.clone(), Session { who: who.to_string(), hash: hash.to_string(), until: now + shared.cfg.session_ttl });
+    Ok(Some(id))
 }
 
 fn cookie_header(secure: bool, value: &str, max_age: u64) -> String {
@@ -760,9 +898,11 @@ fn session_call(shared: &Shared, req: &Request, auth: Auth, kind: Kind) -> Respo
     };
     let who = req.who.clone().unwrap_or_default();
     match (req.method.as_str(), auth) {
-        ("POST", Auth::Bearer) => match new_session(shared, &who) {
-            Ok(id) => Response::ok(serde_json::json!({ "who": who }))
+        ("POST", Auth::Bearer(hash)) => match new_session(shared, &who, &hash) {
+            Ok(Some(id)) => Response::ok(serde_json::json!({ "who": who }))
                 .with_header("Set-Cookie", &cookie_header(secure, &id, shared.cfg.session_ttl.as_secs())),
+            // The token was taken away between the check and now.
+            Ok(None) => Response::error(401, "sign in with the bearer token"),
             Err(_) => Response::error(500, "could not make a session"),
         },
         ("POST", _) => Response::error(401, "sign in with the bearer token"),
@@ -811,12 +951,18 @@ fn read_request(s: &mut Wire, shared: &Shared, kind: Kind, peer: SocketAddr) -> 
         headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
     }
     let header = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+    // One snapshot of who may come in, for the whole request (a slow whois or body read keeps the access the request
+    // started with). The guard is gone at the end of this statement. A poisoned lock lets nobody in by token or whois.
+    let access: Option<Arc<Access>> = shared.access.read().map(|a| Arc::clone(&a)).ok();
     let bearer = header("authorization")
         .and_then(|v| v.split_once(' '))
         .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-        .and_then(|(_, t)| token_name(&shared.cfg, t.trim().as_bytes()));
+        .and_then(|(_, t)| {
+            let name = token_name(access.as_deref()?, t.trim().as_bytes())?;
+            Some((name, token_hash_bytes(t.trim().as_bytes())))
+        });
     let (mut auth, mut who) = match bearer {
-        Some(name) => (Auth::Bearer, Some(name)),
+        Some((name, hash)) => (Auth::Bearer(hash), Some(name)),
         None => (Auth::No, None),
     };
     if auth == Auth::No && shared.cfg.sessions {
@@ -831,9 +977,12 @@ fn read_request(s: &mut Wire, shared: &Shared, kind: Kind, peer: SocketAddr) -> 
         }
     }
     if auth == Auth::No && kind == Kind::Tailnet {
-        if let Some(t) = &shared.cfg.tailnet {
+        if let (Some(t), Some(access)) = (&shared.cfg.tailnet, &access) {
             // Failing to ask, not knowing the peer and not listing it all end the same way: no `who`, a 401.
-            let found = tailnet::whois_within(&t.whois, peer, Duration::from_secs(3)).ok().flatten().and_then(|id| t.who(&id));
+            let found = tailnet::whois_within(&t.whois, peer, Duration::from_secs(3))
+                .ok()
+                .flatten()
+                .and_then(|id| tailnet::who_of(&access.tailnet_logins, &access.tailnet_tags, &id));
             if let Some(name) = found {
                 // The peer's address says who it is, so any page the person has open could make it call: the same
                 // two guards as a cookie, and the Host must be this PC's (a rebound name would carry another).
@@ -1198,13 +1347,13 @@ mod tests {
     fn token_name_takes_plain_tokens_first_and_never_matches_an_empty_one() {
         let t = new_token().unwrap();
         let cfg = Config::new(0, t.clone()).token_named("bob", t.clone()).token_hash_named("alice", token_hash(&t));
-        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("default"));
+        assert_eq!(token_name(&Access::of(&cfg), t.as_bytes()).as_deref(), Some("default"));
         let cfg = Config::new(0, "").token_named("bob", t.clone()).token_hash_named("alice", token_hash(&t));
-        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("bob"));
+        assert_eq!(token_name(&Access::of(&cfg), t.as_bytes()).as_deref(), Some("bob"));
         let cfg = Config::new(0, "").token_hash_named("carol", token_hash("x")).token_hash_named("alice", token_hash(&t));
-        assert_eq!(token_name(&cfg, t.as_bytes()).as_deref(), Some("alice"));
-        assert_eq!(token_name(&cfg, b""), None);
-        assert_eq!(token_name(&cfg, token_hash(&t).as_bytes()), None);
+        assert_eq!(token_name(&Access::of(&cfg), t.as_bytes()).as_deref(), Some("alice"));
+        assert_eq!(token_name(&Access::of(&cfg), b""), None);
+        assert_eq!(token_name(&Access::of(&cfg), token_hash(&t).as_bytes()), None);
     }
 
     #[test]
@@ -1487,5 +1636,264 @@ mod tests {
         let mut cfg = Config::new(0, TOKEN);
         cfg.tailnet = Some(t);
         assert!(Server::start(cfg, |_| Response::ok(serde_json::Value::Null), |_| {}).is_err());
+    }
+
+    fn sessions_server(cfg: Config) -> Server {
+        let mut cfg = cfg;
+        cfg.sessions = true;
+        cfg.timeout = Duration::from_secs(3);
+        start_with(cfg)
+    }
+
+    fn sign_in(port: u16, token: &str) -> String {
+        let out = call_text(port, &req("POST", "/session", Some(token), ""));
+        assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+        cookie_of(&out)
+    }
+
+    fn with_cookie(port: u16, cookie: &str) -> (u16, serde_json::Value) {
+        call(port, &format!("GET /x HTTP/1.1\r\nCookie: {cookie}\r\n\r\n"))
+    }
+
+    fn who_with(port: u16, token: &str) -> (u16, Option<String>) {
+        let (st, body) = call(port, &req("GET", "/x", Some(token), ""));
+        (st, body["who"].as_str().map(String::from))
+    }
+
+    fn status_of(out: &str) -> u16 {
+        out.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
+    }
+
+    #[test]
+    fn set_access_swaps_who_may_come_in_and_keeps_the_port() {
+        let (old_hash_token, new_hash_token) = (new_token().unwrap(), new_token().unwrap());
+        let cfg = Config::new(0, "old-default").token_named("n1", "n1-tok").token_hash_named("h1", token_hash(&old_hash_token));
+        let srv = start_with(cfg);
+        let port = srv.port();
+        assert_eq!(who_with(port, "old-default"), (200, Some("default".into())));
+        assert_eq!(who_with(port, &old_hash_token), (200, Some("h1".into())));
+        let access = Access {
+            token: "new-default".into(),
+            tokens: vec![("n1".into(), "n1-tok".into()), ("n2".into(), "n2-tok".into())],
+            token_hashes: vec![("h2".into(), token_hash(&new_hash_token))],
+            ..Access::default()
+        };
+        srv.set_access(access).unwrap();
+        assert_eq!(srv.port(), port);
+        assert_eq!(who_with(port, "old-default").0, 401);
+        assert_eq!(who_with(port, &old_hash_token).0, 401);
+        assert_eq!(who_with(port, "new-default"), (200, Some("default".into())));
+        assert_eq!(who_with(port, "n1-tok"), (200, Some("n1".into())));
+        assert_eq!(who_with(port, "n2-tok"), (200, Some("n2".into())));
+        assert_eq!(who_with(port, &new_hash_token), (200, Some("h2".into())));
+    }
+
+    #[test]
+    fn a_bad_access_is_refused_and_nothing_changes() {
+        let srv = sessions_server(Config::new(0, TOKEN));
+        let port = srv.port();
+        let cookie = sign_in(port, TOKEN);
+        let good = token_hash("abc");
+        let hash_case = |name: &str, hash: String| Access { token_hashes: vec![(name.into(), hash)], ..Access::default() };
+        let named = "a named token has an empty name or value";
+        let no_tailnet = "this server has no tailnet listener";
+        let cases: Vec<(Access, &str)> = vec![
+            (Access::default(), "the token is empty"),
+            (Access { tokens: vec![("".into(), "x".into())], ..Access::default() }, named),
+            (Access { tokens: vec![("n".into(), "".into())], ..Access::default() }, named),
+            (hash_case("", good.clone()), "a token hash has an empty name"),
+            (hash_case("alice", good[..63].to_string()), "not 64 lowercase hex characters"),
+            (hash_case("alice", good.to_uppercase()), "not 64 lowercase hex characters"),
+            (hash_case("alice", token_hash("")), "the hash of an empty token"),
+            (Access { token: TOKEN.into(), tailnet_logins: vec![("a@b.c".into(), "owner".into())], ..Access::default() }, no_tailnet),
+            (Access { token: TOKEN.into(), tailnet_tags: vec![("tag:x".into(), "x".into())], ..Access::default() }, no_tailnet),
+        ];
+        for (access, message) in cases {
+            let err = srv.set_access(access.clone()).expect_err(message);
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{message}");
+            assert!(err.to_string().contains(message), "{err}");
+            for (_, h) in &access.token_hashes {
+                assert!(!err.to_string().contains(h.as_str()), "{err}");
+            }
+            assert_eq!(who_with(port, TOKEN), (200, Some("default".into())), "{message}");
+            assert_eq!(with_cookie(port, &cookie).0, 200, "{message}");
+        }
+    }
+
+    #[test]
+    fn sessions_stay_only_while_their_token_signs_in_as_the_same_name() {
+        let carol = new_token().unwrap();
+        let cfg = Config::new(0, "dan-tok")
+            .token_named("alice", "a-tok")
+            .token_named("bob", "b-tok")
+            .token_named("erin", "e-tok")
+            .token_hash_named("carol", token_hash(&carol));
+        let srv = sessions_server(cfg);
+        let port = srv.port();
+        let signed: [(&str, &str); 5] =
+            [("alice", "a-tok"), ("bob", "b-tok"), ("carol", carol.as_str()), ("dan", "dan-tok"), ("erin", "e-tok")];
+        let cookies: Vec<(&str, String)> = signed.iter().map(|(who, tok)| (*who, sign_in(port, tok))).collect();
+        let access = Access {
+            token: "dan-tok".into(),
+            tokens: vec![("alice".into(), "a-tok".into()), ("bob".into(), "b-new".into())],
+            token_hashes: vec![("erin".into(), token_hash("e-tok"))],
+            ..Access::default()
+        };
+        srv.set_access(access).unwrap();
+        let status = |who: &str| with_cookie(port, &cookies.iter().find(|(w, _)| *w == who).unwrap().1).0;
+        assert_eq!((status("alice"), status("dan"), status("erin")), (200, 200, 200));
+        assert_eq!((status("bob"), status("carol")), (401, 401));
+        // A kept session still stands for the same name.
+        let (_, body) = with_cookie(port, &cookies[4].1);
+        assert_eq!(body["who"].as_str(), Some("erin"));
+        // Bob's old token is refused; he signs in again with the new one.
+        assert_eq!(status_of(&call_text(port, &req("POST", "/session", Some("b-tok"), ""))), 401);
+        let again = sign_in(port, "b-new");
+        assert_eq!(with_cookie(port, &again).0, 200);
+    }
+
+    #[test]
+    fn a_session_ends_when_its_token_now_signs_in_under_another_name() {
+        let srv = sessions_server(Config::new(0, "").token_named("alice", "t-tok"));
+        let port = srv.port();
+        let cookie = sign_in(port, "t-tok");
+        assert_eq!(with_cookie(port, &cookie).0, 200);
+        // The same token, now also the default token, which comes first: it signs in as "default".
+        let access = Access { token: "t-tok".into(), tokens: vec![("alice".into(), "t-tok".into())], ..Access::default() };
+        srv.set_access(access).unwrap();
+        assert_eq!(with_cookie(port, &cookie).0, 401);
+        assert_eq!(who_with(port, "t-tok"), (200, Some("default".into())));
+    }
+
+    #[test]
+    fn a_sign_in_whose_token_was_taken_away_makes_no_session() {
+        let srv = sessions_server(Config::new(0, "").token_named("alice", "a-tok"));
+        let port = srv.port();
+        let cookie = sign_in(port, "a-tok");
+        // (a) a session, then an access without its name: the cookie is dead.
+        srv.set_access(Access { tokens: vec![("bob".into(), "b-tok".into())], ..Access::default() }).unwrap();
+        assert_eq!(with_cookie(port, &cookie).0, 401);
+        srv.set_access(Access { tokens: vec![("alice".into(), "a-tok".into())], ..Access::default() }).unwrap();
+        // (b) a (who, hash) that the current access does not sign in as: nothing is added and nothing evicted.
+        let sh = &srv.shared;
+        {
+            let mut map = sh.sessions.lock().unwrap();
+            map.clear();
+            let base = Instant::now() + Duration::from_secs(3600);
+            for i in 0..MAX_SESSIONS {
+                let until = base + Duration::from_secs(i as u64);
+                map.insert(format!("id{i}"), Session { who: "alice".into(), hash: token_hash("a-tok"), until });
+            }
+        }
+        assert_eq!(new_session(sh, "alice", &token_hash("other")).unwrap(), None);
+        assert_eq!(new_session(sh, "bob", &token_hash("a-tok")).unwrap(), None);
+        {
+            let map = sh.sessions.lock().unwrap();
+            assert_eq!(map.len(), MAX_SESSIONS);
+            assert!(map.contains_key("id0"));
+        }
+        // A valid pair still gets in (and evicts the oldest, as before).
+        assert!(new_session(sh, "alice", &token_hash("a-tok")).unwrap().is_some());
+        let map = sh.sessions.lock().unwrap();
+        assert_eq!(map.len(), MAX_SESSIONS);
+        assert!(!map.contains_key("id0"));
+    }
+
+    #[test]
+    fn a_request_in_flight_finishes_with_the_access_that_let_it_in() {
+        let mut cfg = Config::new(0, "").token_named("old", "old-tok").token_named("keep", "keep-tok");
+        cfg.timeout = Duration::from_secs(5);
+        let srv = start_with(cfg);
+        let port = srv.port();
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        s.write_all(b"POST /x HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer old-tok\r\nContent-Length: 10\r\n\r\n12345").unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        srv.set_access(Access { tokens: vec![("keep".into(), "keep-tok".into())], ..Access::default() }).unwrap();
+        s.write_all(b"67890").unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+        assert!(out.contains(r#""who":"old""#), "{out}");
+        assert_eq!(who_with(port, "old-tok").0, 401);
+        assert_eq!(who_with(port, "keep-tok"), (200, Some("keep".into())));
+    }
+
+    fn tcall_body(ip: IpAddr, port: u16, raw: &str) -> (u16, serde_json::Value) {
+        let mut s = TcpStream::connect((ip, port)).unwrap();
+        s.write_all(raw.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        let body = out.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+        (status_of(&out), serde_json::from_str(body).unwrap_or(serde_json::Value::Null))
+    }
+
+    fn tail_access(logins: &[(&str, &str)], tags: &[(&str, &str)]) -> Access {
+        let own = |l: &[(&str, &str)]| l.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        Access { token: TOKEN.into(), tailnet_logins: own(logins), tailnet_tags: own(tags), ..Access::default() }
+    }
+
+    #[test]
+    fn set_access_swaps_the_tailnet_logins_and_tags() {
+        let who_handler = |r: Request| Response::ok(serde_json::json!({ "who": r.who }));
+        // A login that is let in, then removed; the listener stays where it is.
+        let Some((srv, ip, _)) = tail_server(Fake(Some(alice()), false), who_handler) else { return };
+        let port = srv.tailnet_port().unwrap();
+        let get = format!("GET /x HTTP/1.1\r\nHost: {ip}:{port}\r\n\r\n");
+        assert_eq!(tcall_body(ip, port, &get).1["who"].as_str(), Some("owner"));
+        srv.set_access(tail_access(&[], &[("tag:ha", "standby")])).unwrap();
+        assert_eq!(tcall(ip, port, &get), 401);
+        assert_eq!(srv.tailnet_port(), Some(port));
+        // The token still works there, and logins and tags both empty is refused.
+        let with_token = format!("GET /x HTTP/1.1\r\nHost: {ip}\r\nAuthorization: Bearer {TOKEN}\r\n\r\n");
+        assert_eq!(tcall(ip, port, &with_token), 200);
+        let err = srv.set_access(tail_access(&[], &[])).unwrap_err().to_string();
+        assert!(err.contains("the tailnet listener has no login or tag to let in"), "{err}");
+        let err = srv.set_access(tail_access(&[("", "x")], &[])).unwrap_err().to_string();
+        assert!(err.contains("a tailnet login or tag has an empty name"), "{err}");
+        assert_eq!(tcall(ip, port, &with_token), 200);
+        srv.stop();
+
+        // A tag renamed to another `who`.
+        let ha = tailnet::Identity { login: None, tags: vec!["tag:ha".into()], node: String::new() };
+        let Some((srv, ip, _)) = tail_server(Fake(Some(ha), false), who_handler) else { return };
+        let port = srv.tailnet_port().unwrap();
+        let get = format!("GET /x HTTP/1.1\r\nHost: {ip}:{port}\r\n\r\n");
+        assert_eq!(tcall_body(ip, port, &get).1["who"].as_str(), Some("standby"));
+        srv.set_access(tail_access(&[], &[("tag:ha", "renamed")])).unwrap();
+        assert_eq!(tcall_body(ip, port, &get).1["who"].as_str(), Some("renamed"));
+        srv.stop();
+
+        // A tagged node whose login is also listed is still judged by its tags only.
+        let both = tailnet::Identity { login: Some("alice@example.com".into()), tags: vec!["tag:other".into()], node: String::new() };
+        let Some((srv, ip, _)) = tail_server(Fake(Some(both), false), who_handler) else { return };
+        let port = srv.tailnet_port().unwrap();
+        srv.set_access(tail_access(&[("alice@example.com", "owner")], &[("tag:ha", "standby")])).unwrap();
+        assert_eq!(tcall(ip, port, &format!("GET /x HTTP/1.1\r\nHost: {ip}:{port}\r\n\r\n")), 401);
+        srv.stop();
+    }
+
+    #[test]
+    fn access_config_and_auth_debug_hide_the_secrets() {
+        let (hash, cookie) = (token_hash("sentinel"), "SENTINEL-COOKIE");
+        let access = Access {
+            token: "SENTINEL-DEFAULT".into(),
+            tokens: vec![("viewer".into(), "SENTINEL-NAMED".into())],
+            token_hashes: vec![("alice".into(), hash.clone())],
+            tailnet_logins: vec![("a@b.c".into(), "owner".into())],
+            tailnet_tags: vec![("tag:x".into(), "standby".into())],
+        };
+        let shown = format!("{access:?}");
+        for secret in ["SENTINEL-DEFAULT", "SENTINEL-NAMED", hash.as_str()] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
+        for name in ["viewer", "alice", "a@b.c", "owner", "tag:x", "standby"] {
+            assert!(shown.contains(name), "{shown}");
+        }
+        let cfg = Config::new(0, "SENTINEL-DEFAULT").token_named("viewer", "SENTINEL-NAMED").token_hash_named("alice", hash.clone());
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("SENTINEL") && !shown.contains(&hash), "{shown}");
+        let shown = format!("{:?} {:?}", Auth::Bearer(hash.clone()), Auth::Cookie(cookie.into()));
+        assert!(!shown.contains(&hash) && !shown.contains(cookie), "{shown}");
     }
 }

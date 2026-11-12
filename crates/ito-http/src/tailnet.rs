@@ -97,12 +97,18 @@ impl Tailnet {
 
     /// The `who` for `id`, or `None` when it is not on the list.
     pub fn who(&self, id: &Identity) -> Option<String> {
-        if !id.tags.is_empty() {
-            return self.tags.iter().find(|(t, _)| id.tags.iter().any(|x| x.eq_ignore_ascii_case(t))).map(|(_, w)| w.clone());
-        }
-        let login = id.login.as_deref()?;
-        self.logins.iter().find(|(l, _)| l.eq_ignore_ascii_case(login)).map(|(_, w)| w.clone())
+        who_of(&self.logins, &self.tags, id)
     }
+}
+
+/// The `who` for `id` under these logins and tags: a node with tags is judged by tags only, the first match in list
+/// order wins, names are compared without case.
+pub(crate) fn who_of(logins: &[(String, String)], tags: &[(String, String)], id: &Identity) -> Option<String> {
+    if !id.tags.is_empty() {
+        return tags.iter().find(|(t, _)| id.tags.iter().any(|x| x.eq_ignore_ascii_case(t))).map(|(_, w)| w.clone());
+    }
+    let login = id.login.as_deref()?;
+    logins.iter().find(|(l, _)| l.eq_ignore_ascii_case(login)).map(|(_, w)| w.clone())
 }
 
 /// Is `ip` in the tailnet's ranges: `100.64.0.0/10` (CGNAT) or `fd7a:115c:a1e0::/48`?
