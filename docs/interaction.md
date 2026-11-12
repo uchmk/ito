@@ -19,7 +19,7 @@
 |---|---|
 | Default | — |
 | Hover | `Colors::hover` |
-| Focus | `ito_prefs::focus_ring(ui, &response)` |
+| Focus | `ito_prefs::focus_ring(ui, &response)`（部品の外へ `FOCUS_ROOM` の 3 pt。egui の既定の縦の間隔と同じなので、それより詰めて並べるときは空ける。スクロールの領域の端で切られる辺は、部品の内側に寄る） |
 | Pressed | 共通の定義なし |
 | Selected | `Colors::chosen`・`Colors::selection` |
 | Disabled | egui の標準。`--keys` の `<Disabled:文字>` で読める |

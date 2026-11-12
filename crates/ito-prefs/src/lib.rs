@@ -858,11 +858,59 @@ pub fn switch(ui: &mut egui::Ui, l: Look, on: bool) -> bool {
     resp.clicked()
 }
 
+/// How far [`focus_ring`] reaches out of its widget, in points: a gap of 1.5
+/// and a stroke of 1.5. It is egui's default vertical item spacing, so two
+/// widgets laid out with that spacing (or more) never get each other's ring.
+/// Leave this much round a widget that has a ring when laying it closer.
+pub const FOCUS_ROOM: f32 = RING_GAP + RING_WIDTH;
+
+const RING_GAP: f32 = 1.5;
+const RING_WIDTH: f32 = 1.5;
+
 /// A ring round the control that has the keys, so Tab shows where it is.
+///
+/// It reaches [`FOCUS_ROOM`] out of the widget. A side the ui's clip would
+/// cut (a widget flush with the top of a scroll area) gives up its gap and is
+/// drawn just inside the widget's edge, so a widget inside the clip always
+/// gets its whole ring. A side whose widget edge is itself out of the clip
+/// (scrolled partly out of view) is left alone, so no line is drawn across the
+/// widget. A widget too thin for the ring inside its clip gets the ring
+/// outside, cut as it falls.
 pub fn focus_ring(ui: &egui::Ui, r: &egui::Response) {
     if r.has_focus() {
-        ui.painter().rect_stroke(r.rect.expand(3.0), 8.0, egui::Stroke::new(1.5, ito_theme::colors().run), egui::StrokeKind::Outside);
+        let rect = ring_rect(r.rect, ui.clip_rect(), ui.ctx().pixels_per_point());
+        ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(RING_WIDTH, ito_theme::colors().run), egui::StrokeKind::Outside);
     }
+}
+
+/// The rect whose outside stroke is the focus ring of `widget` in `clip`.
+fn ring_rect(widget: egui::Rect, clip: egui::Rect, pixels_per_point: f32) -> egui::Rect {
+    let r = ring_in_clip(widget, clip, pixels_per_point);
+    if r.is_positive() {
+        r
+    } else {
+        widget.expand(RING_GAP)
+    }
+}
+
+fn ring_in_clip(widget: egui::Rect, clip: egui::Rect, pixels_per_point: f32) -> egui::Rect {
+    // Half a pixel more than the stroke: egui rounds the rect to pixels
+    // before it strokes it.
+    let room = RING_WIDTH + 0.5 / pixels_per_point.max(0.1);
+    let mut r = widget.expand(RING_GAP);
+    if widget.top() >= clip.top() {
+        r.min.y = r.min.y.max(clip.top() + room);
+    }
+    if widget.left() >= clip.left() {
+        r.min.x = r.min.x.max(clip.left() + room);
+    }
+    if widget.bottom() <= clip.bottom() {
+        r.max.y = r.max.y.min(clip.bottom() - room);
+    }
+    if widget.right() <= clip.right() {
+        r.max.x = r.max.x.min(clip.right() - room);
+    }
+    r
 }
 
 /// A list to pick one of: the value picked, when it changed.
@@ -1512,6 +1560,69 @@ mod tests {
         let to_light = flip_theme(("system", "nord", "paper"), false);
         assert_eq!((to_dark.len(), to_dark[0].key, to_dark[0].value.as_str()), (1, "theme", "\"nord\""));
         assert_eq!(to_light[0].value, "\"paper\"");
+    }
+
+    #[test]
+    fn the_ring_reaches_focus_room_out_and_moves_in_only_where_the_clip_cuts_it() {
+        let r = |x0, y0, x1, y1| egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1));
+        let w = r(50.0, 50.0, 150.0, 76.0);
+        // Free: the gap all round, so the outside of the stroke is FOCUS_ROOM out.
+        assert_eq!(ring_rect(w, r(0.0, 0.0, 400.0, 300.0), 1.0).expand(RING_WIDTH), w.expand(FOCUS_ROOM));
+        // Flush with every side of the clip: each side moves in, the stroke and half a pixel inside the clip.
+        assert_eq!(ring_rect(w, w, 1.0), w.shrink(RING_WIDTH + 0.5));
+        assert_eq!(ring_rect(w, w, 1.25), w.shrink(RING_WIDTH + 0.4), "half a pixel at 125 %");
+        // Scrolled partly out at the top: that side stays where it was (no line across the widget).
+        let got = ring_rect(w, r(0.0, 51.0, 400.0, 300.0), 1.0);
+        assert_eq!(got, w.expand(RING_GAP));
+        // Out at the left, flush at the right: only the right moves in.
+        let got = ring_rect(w, r(60.0, 0.0, 150.0, 300.0), 1.0);
+        assert_eq!((got.min.x, got.max.x), (w.min.x - RING_GAP, w.max.x - RING_WIDTH - 0.5));
+        // A clip inside the widget on every side: nothing moves.
+        assert_eq!(ring_rect(w, w.shrink(5.0), 1.0), w.expand(RING_GAP));
+        // Wholly above or below the clip: nothing moves (and nothing of it shows).
+        assert_eq!(ring_rect(w, r(0.0, 100.0, 400.0, 300.0), 1.0), w.expand(RING_GAP));
+        assert_eq!(ring_rect(w, r(0.0, 0.0, 400.0, 40.0), 1.0), w.expand(RING_GAP));
+        // A widget too thin for a ring inside a clip that fits it: the ring outside, as the clip cuts it.
+        let thin = r(0.0, 0.0, 40.0, 2.0);
+        assert_eq!(ring_rect(thin, thin, 1.0), thin.expand(RING_GAP));
+    }
+
+    /// A button flush with the top of a scroll area, with the keys, and a label right under it (egui's spacing):
+    /// the ring is whole inside the scroll area's clip and stays off the label.
+    #[test]
+    fn a_ring_at_the_top_of_a_scroll_area_is_whole_and_keeps_off_the_text_below() {
+        let ctx = egui::Context::default();
+        let (mut button, mut label) = (egui::Rect::NOTHING, egui::Rect::NOTHING);
+        let mut ring = None;
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let b = ui.button("Day");
+                        b.request_focus();
+                        focus_ring(ui, &b);
+                        button = b.rect;
+                        label = ui.label("A note right under it").rect;
+                    });
+                });
+            });
+            ring = out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Rect(s) if s.stroke_kind == egui::StrokeKind::Outside && s.stroke.width == RING_WIDTH => {
+                    Some((s.rect, c.clip_rect))
+                }
+                _ => None,
+            });
+            out.textures_delta.clear();
+        }
+        let (ring, clip) = ring.expect("a focus ring was painted");
+        assert!(button.top() - FOCUS_ROOM < clip.top(), "the button is flush with the clip: {button:?} in {clip:?}");
+        assert!(ring.top() - RING_WIDTH >= clip.top(), "the top of the ring is cut: {ring:?} in {clip:?}");
+        assert!(ring.top() <= button.top() + RING_WIDTH + 0.5, "the ring went too far into the button");
+        assert!(ring.bottom() + RING_WIDTH <= label.top(), "the ring crosses the label: {ring:?} over {label:?}");
     }
 
     /// One frame with AccessKit on: a `select` with three options; the test IDs it registered, in order.
