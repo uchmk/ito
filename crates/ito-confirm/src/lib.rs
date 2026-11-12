@@ -13,7 +13,9 @@
 //! its own keymap for Enter/Esc/`y`/`n` and calls [`show`] only to draw and to
 //! hear a click. So egui's own keyboard focus is nobody's while a question is
 //! up: Tab cannot hand it to a widget behind the dim (whose Enter would press
-//! it along with the answer), and the choices here never take it. A button is
+//! it along with the answer), and the choices here never take it. The choice
+//! the app's `focus` names is told to AccessKit as the window's active
+//! descendant instead, so a screen reader reads it as the focused one. A button is
 //! drawn but never clipped away while still clickable (a row that runs past the
 //! edge wraps instead).
 
@@ -99,7 +101,8 @@ pub struct Question<'a> {
     /// The keys that answer, shown dim under the buttons; empty for none.
     pub hint: &'a str,
     /// The button the keyboard is on (the app moves it with Tab / Shift+Tab and
-    /// answers Enter itself); drawn with an outline in `Style::accent`/`text`.
+    /// answers Enter itself); drawn with an outline in `Style::accent`/`text`,
+    /// and told to AccessKit as the window's active descendant.
     pub focus: Option<usize>,
     /// The button that carries on with what is asked (drawn solid green with
     /// bold white text, as the primary button of a GitHub form); the others
@@ -159,7 +162,10 @@ pub fn width(screen: f32) -> f32 {
 /// call, in the frame the answer comes, is kept; given before it, to a widget
 /// behind, it is dropped. The question's choices never take the
 /// focus (an Enter would answer twice): they are pressed by the mouse or an
-/// AccessKit click, and offer no AccessKit focus.
+/// AccessKit click. The one [`Question::focus`] names is told to AccessKit as
+/// the window's active descendant, so with egui's focus on nobody a screen
+/// reader (and ito-keyscript's tree) reads it as the focused one, while egui's
+/// own focus stays nobody's: the choices themselves give no click on Enter.
 ///
 /// Left to egui, for widgets drawn before this call: a Tab and an Enter in the
 /// one frame can still press one. And in the first frame of a question, if one
@@ -263,6 +269,9 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
                             b = b.stroke(Stroke::new(1.0, style.border));
                         }
                         let r = ui.add(b);
+                        if q.focus == Some(i) {
+                            name_chosen(ui.ctx(), r.id);
+                        }
                         if let Some(m) = mark {
                             let at = egui::pos2(r.rect.left() + ui.spacing().button_padding.x + 7.0, r.rect.center().y);
                             ito_prefs::mark(ui.painter(), egui::Rect::from_center_size(at, vec2(14.0, 14.0)), m, fg);
@@ -318,6 +327,12 @@ pub fn show(ctx: &Context, q: &Question, style: &Style) -> Option<usize> {
         ctx.request_repaint();
     }
     clicked
+}
+
+/// Tell AccessKit that the choice `id` is the window's active descendant (ARIA's
+/// `aria-activedescendant`), without giving it egui's focus. Nothing when AccessKit is off.
+fn name_chosen(ctx: &Context, id: Id) {
+    ctx.accesskit_node_builder(egui::accesskit_root_id(), |root| root.set_active_descendant(id.accesskit_id()));
 }
 
 /// A button's text with its key cap after it, in one line of text.
@@ -413,6 +428,11 @@ fn card(ui: &mut Ui, c: &Card, focused: bool, recommended: bool, badge: &str, st
     // Not focusable, as the buttons: the app's `focus` is the keyboard's.
     let (rect, resp) = ui.allocate_exact_size(vec2(w, h.max(34.0)), Sense::CLICK);
     let resp = resp.on_hover_cursor(CursorIcon::PointingHand);
+    // A node of its own, so it is a named button in the tree and can be the active descendant.
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &c.title));
+    if focused {
+        name_chosen(ui.ctx(), resp.id);
+    }
     let p = ui.painter();
     let (mut fill, mut line) = if red {
         (DANGER_BG.gamma_multiply(0.22), DANGER_TEXT.gamma_multiply(0.55))
@@ -988,5 +1008,183 @@ mod tests {
         assert_eq!((pressed, focused), (false, None), "repaint after Tab");
         let (pressed, _, focused) = frame(vec![key(egui::Key::Enter, none)], false);
         assert_eq!((pressed, focused), (false, None), "Enter after Tab");
+    }
+
+    /// One frame with AccessKit on: the answer and the tree egui built.
+    fn ak_frame(ctx: &Context, q: &Question, events: Vec<egui::Event>) -> (Option<usize>, egui::accesskit::TreeUpdate) {
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = None;
+        let mut o = ctx.run_ui(input, |ui| out = show(ui.ctx(), q, &style()));
+        o.textures_delta.clear();
+        (out, o.platform_output.accesskit_update.expect("AccessKit is on"))
+    }
+
+    fn root_id() -> egui::accesskit::NodeId {
+        egui::accesskit_root_id().accesskit_id()
+    }
+
+    /// The root's active descendant in `update`.
+    fn active(update: &egui::accesskit::TreeUpdate) -> Option<egui::accesskit::NodeId> {
+        update.nodes.iter().find(|(id, _)| *id == root_id()).expect("the root is in the tree").1.active_descendant()
+    }
+
+    /// The button node whose label starts with `text`.
+    fn button_named(update: &egui::accesskit::TreeUpdate, text: &str) -> egui::accesskit::NodeId {
+        let found: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.starts_with(text)))
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(found.len(), 1, "one button `{text}`: {found:?}");
+        found[0]
+    }
+
+    /// Settle the layout, then give the frame `ak_frame` draws.
+    fn settled(ctx: &Context, q: &Question) -> (Option<usize>, egui::accesskit::TreeUpdate) {
+        for _ in 0..2 {
+            ak_frame(ctx, q, vec![]);
+        }
+        ak_frame(ctx, q, vec![])
+    }
+
+    /// ito#218: the choice the app's `focus` names is the window's active
+    /// descendant, and egui's own focus stays nobody's.
+    #[test]
+    fn the_chosen_button_is_the_active_descendant_and_egui_focus_stays_off() {
+        let buttons = vec!["Cancel".to_owned(), "Discard".to_owned()];
+        let keys = vec!["Esc".to_owned(), "Enter".to_owned()];
+        for (focus, text) in [(0, "Cancel"), (1, "Discard")] {
+            let q = Question { title: "T", buttons: &buttons, keys: &keys, focus: Some(focus), ..Default::default() };
+            let ctx = Context::default();
+            let (out, update) = settled(&ctx, &q);
+            assert_eq!(out, None);
+            assert_eq!(update.focus, root_id());
+            assert_eq!(active(&update), Some(button_named(&update, text)), "{text}");
+            assert_eq!(ctx.memory(|m| m.focused()), None);
+        }
+    }
+
+    #[test]
+    fn the_chosen_card_or_button_after_the_cards_is_named() {
+        let cs = cards();
+        let buttons = vec!["Cancel".to_owned(), "Other".to_owned()];
+        let n = cs.len();
+        let mut want: Vec<(usize, &str)> = cs.iter().enumerate().map(|(i, c)| (i, c.title.as_str())).collect();
+        want.push((n, "Cancel"));
+        want.push((n + 1, "Other"));
+        for (focus, text) in want {
+            let q = Question { title: "T", cards: &cs, buttons: &buttons, focus: Some(focus), ..Default::default() };
+            let ctx = Context::default();
+            let (_, update) = settled(&ctx, &q);
+            assert_eq!(update.focus, root_id());
+            assert_eq!(active(&update), Some(button_named(&update, text)), "{focus} {text}");
+            assert_eq!(ctx.memory(|m| m.focused()), None);
+        }
+    }
+
+    #[test]
+    fn no_focus_or_one_out_of_range_names_nothing() {
+        let cs = cards();
+        let buttons = vec!["Cancel".to_owned()];
+        for focus in [None, Some(9)] {
+            let q = Question { title: "T", cards: &cs, buttons: &buttons, focus, ..Default::default() };
+            let ctx = Context::default();
+            let (_, update) = settled(&ctx, &q);
+            assert_eq!(active(&update), None, "{focus:?}");
+        }
+    }
+
+    /// egui rebuilds the root every pass: nothing stale is left when the
+    /// focus moves, goes, or the question does.
+    #[test]
+    fn the_active_descendant_follows_the_focus_and_is_gone_with_the_question() {
+        let buttons = vec!["Cancel".to_owned(), "Discard".to_owned()];
+        let ctx = Context::default();
+        for focus in [Some(0), Some(1), None] {
+            let q = Question { title: "T", buttons: &buttons, focus, ..Default::default() };
+            let (_, update) = settled(&ctx, &q);
+            let want = focus.map(|i| button_named(&update, ["Cancel", "Discard"][i]));
+            assert_eq!(active(&update), want, "{focus:?}");
+        }
+        let input =
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))), ..Default::default() };
+        let mut o = ctx.run_ui(input, |_| {});
+        o.textures_delta.clear();
+        let update = o.platform_output.accesskit_update.expect("AccessKit is on");
+        assert_eq!(active(&update), None, "no question drawn");
+    }
+
+    /// The choices give no click of their own on Enter: the app's keys answer.
+    #[test]
+    fn enter_answers_nothing_by_itself() {
+        let cs = cards();
+        let buttons = vec!["Cancel".to_owned()];
+        for focus in [0, cs.len()] {
+            let q = Question { title: "T", cards: &cs, buttons: &buttons, focus: Some(focus), ..Default::default() };
+            let ctx = Context::default();
+            settled(&ctx, &q);
+            for k in [egui::Key::Enter, egui::Key::Space] {
+                let (out, _) = ak_frame(&ctx, &q, vec![key(k, egui::Modifiers::NONE)]);
+                assert_eq!(out, None, "{k:?}");
+                assert_eq!(ctx.memory(|m| m.focused()), None, "{k:?}");
+            }
+        }
+    }
+
+    /// With ito-palette's field over the question the tree's focus is that
+    /// field; the root's active descendant is not read then.
+    #[test]
+    fn a_palette_over_the_question_keeps_the_tree_focus() {
+        let buttons = vec!["Keep editing".to_owned(), "Open".to_owned()];
+        let q = Question { title: "T", buttons: &buttons, focus: Some(1), ..Default::default() };
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        let mut view = ito_palette::View::new();
+        for _ in 0..4 {
+            palette_frame(&ctx, &q, &mut view, vec![]);
+        }
+        let c = Color32::GRAY;
+        let look = ito_palette::Style { panel: c, border: c, text: c, dim: c, selected_bg: c, selected_text: c, hit: c, accent: c };
+        let words = ito_palette::Words { hint: "", none: "", header: "", footer: "" };
+        let entries = [ito_palette::Entry::new("One", "", 1)];
+        let input =
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(800.0, 600.0))), ..Default::default() };
+        let mut o = ctx.run_ui(input, |ui| {
+            ito_palette::show(ui.ctx(), &mut view, &entries, &look, &words);
+            show(ui.ctx(), &q, &style());
+        });
+        o.textures_delta.clear();
+        let update = o.platform_output.accesskit_update.expect("AccessKit is on");
+        let field = Id::new("ito-palette-query");
+        assert_eq!(ctx.memory(|m| m.focused()), Some(field));
+        assert_eq!(update.focus, field.accesskit_id());
+        assert_ne!(update.focus, root_id());
+    }
+
+    /// An AccessKit click on a choice answers its index (cards first).
+    #[test]
+    fn an_accesskit_click_answers_the_card_or_button() {
+        let cs = cards();
+        let buttons = vec!["Cancel".to_owned()];
+        let q = Question { title: "T", cards: &cs, buttons: &buttons, focus: Some(0), ..Default::default() };
+        let ctx = Context::default();
+        let (_, update) = settled(&ctx, &q);
+        for (index, text) in [(1, "Keep the files"), (cs.len(), "Cancel")] {
+            let target = button_named(&update, text);
+            let click = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            });
+            let (out, _) = ak_frame(&ctx, &q, vec![click]);
+            assert_eq!(out, Some(index), "{text}");
+        }
     }
 }

@@ -1181,7 +1181,48 @@ fn touches_real_settings(path: &Path, scripted: bool, custom: bool, base: Option
 /// over it. A crash or a full disk leaves the old file whole. The file beside
 /// it is named for this process and write (`<file>.uchmk-<pid>-<n>.new`), so
 /// two apps (or two threads) writing the same file never share one.
+///
+/// On Windows, a rename that another program blocks for a moment (a virus
+/// scanner, an indexer, a reader that opened the file without sharing its
+/// deletion) is tried again for up to half a second, so a write that fails
+/// there can take that long to return the error.
 pub fn write_atomic(path: &Path, bytes: impl AsRef<[u8]>) -> Result<(), String> {
+    write_atomic_with(path, bytes.as_ref(), &mut |attempt| match RENAME_WAITS.get(attempt) {
+        Some(d) => {
+            std::thread::sleep(*d);
+            true
+        }
+        None => false,
+    })
+}
+
+/// The waits before each new try of a blocked rename (half a second in all).
+/// Short on purpose: some callers wait for `write_atomic` synchronously.
+const RENAME_WAITS: [Duration; 6] = [
+    Duration::from_millis(10),
+    Duration::from_millis(20),
+    Duration::from_millis(40),
+    Duration::from_millis(80),
+    Duration::from_millis(160),
+    Duration::from_millis(190),
+];
+
+/// Whether `e` from a rename is the kind another program's open file causes
+/// for a moment: access denied, a sharing violation or a lock violation.
+#[cfg(windows)]
+fn rename_blocked(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// POSIX renames are not blocked by open files.
+#[cfg(not(windows))]
+fn rename_blocked(_: &std::io::Error) -> bool {
+    false
+}
+
+/// [`write_atomic`] with the waiting given: `wait(attempt)` (0, 1, ...) is
+/// called when the rename is blocked and returns whether to try again.
+fn write_atomic_with(path: &Path, bytes: &[u8], wait: &mut dyn FnMut(usize) -> bool) -> Result<(), String> {
     use std::io::Write;
     if touches_real_settings(
         path,
@@ -1203,10 +1244,16 @@ pub fn write_atomic(path: &Path, bytes: impl AsRef<[u8]>) -> Result<(), String> 
     let aside = PathBuf::from(aside);
     let written = (|| {
         let mut f = std::fs::File::create(&aside)?;
-        f.write_all(bytes.as_ref())?;
+        f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&aside, path)
+        let mut attempt = 0;
+        loop {
+            match std::fs::rename(&aside, path) {
+                Err(e) if rename_blocked(&e) && wait(attempt) => attempt += 1,
+                done => return done,
+            }
+        }
     })();
     if let Err(e) = written {
         let _ = std::fs::remove_file(&aside);
@@ -1307,6 +1354,57 @@ zzz = 1
         let d = std::env::temp_dir().join(format!("ito-common-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    /// Windows only: a target opened without sharing blocks the rename.
+    #[cfg(windows)]
+    fn blocked_target(label: &str) -> (PathBuf, std::fs::File) {
+        use std::os::windows::fs::OpenOptionsExt;
+        let d = dir(label);
+        std::fs::create_dir_all(&d).unwrap();
+        let target = d.join("t.txt");
+        std::fs::write(&target, "old").unwrap();
+        let h = std::fs::OpenOptions::new().read(true).share_mode(0).open(&target).unwrap();
+        (target, h)
+    }
+
+    #[cfg(windows)]
+    fn no_aside_left(target: &Path) -> bool {
+        std::fs::read_dir(target.parent().unwrap()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".new"))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_blocked_for_a_moment_is_tried_again() {
+        let (target, h) = blocked_target("rename-moment");
+        let mut handle = Some(h);
+        let mut calls = 0;
+        let r = write_atomic_with(&target, b"new", &mut |_| {
+            calls += 1;
+            handle = None;
+            true
+        });
+        assert_eq!(r, Ok(()));
+        assert!(calls >= 1, "the rename was not blocked: calls = {calls}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+        assert!(no_aside_left(&target));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_blocked_for_good_fails_and_leaves_the_old_file() {
+        let (target, h) = blocked_target("rename-good");
+        let mut calls = 0;
+        let r = write_atomic_with(&target, b"new", &mut |i| {
+            calls += 1;
+            i < 2
+        });
+        let e = r.unwrap_err();
+        assert_eq!(calls, 3);
+        assert!(e.contains("t.txt"), "{e}");
+        drop(h);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old");
+        assert!(no_aside_left(&target));
     }
 
     /// The folders follow `<APP>_CONFIG_HOME` and `<APP>_STATE_HOME` (an app

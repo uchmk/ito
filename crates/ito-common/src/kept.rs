@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -36,6 +37,9 @@ pub fn copy_old(old: &Path, new: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+/// The waits before each new try of a save that failed.
+const SAVE_RETRY_WAITS: [Duration; 3] = [Duration::from_millis(250), Duration::from_secs(1), Duration::from_secs(4)];
+
 /// Writes one file, newest save first. Cloning shares the order, so the
 /// clones are one writer.
 #[derive(Clone, Debug)]
@@ -44,9 +48,9 @@ pub struct Writer {
     on: bool,
     /// The number the next save takes.
     next: Arc<AtomicU64>,
-    /// The number of the save that is on the disk. Held while writing, so
-    /// two saves never write at once and a late older one finds a newer
-    /// one done and gives up.
+    /// The number of the newest save that is on the disk (a failed one does
+    /// not count). Held while writing, so two saves never write at once and
+    /// a late older one finds a newer one done and gives up.
     done: Arc<Mutex<u64>>,
 }
 
@@ -62,8 +66,11 @@ impl Writer {
     }
 
     /// Write `text` on a thread of its own. If a save made after this one is
-    /// written first, this one is dropped; the file always ends as the last
-    /// call made it.
+    /// written first, this one is dropped. A save that cannot be written is
+    /// tried three more times, after waits of 0.25 s, 1 s and 4 s, unless a
+    /// newer one is written first. So the file ends as the last call made it,
+    /// or, if that one could not be written in time (or the app ended first),
+    /// as the newest one that was.
     pub fn save(&self, text: String) {
         if !self.on {
             return;
@@ -71,12 +78,19 @@ impl Writer {
         let n = self.next.fetch_add(1, Ordering::SeqCst);
         let w = self.clone();
         let _ = std::thread::Builder::new().name("ito-kept".into()).spawn(move || {
-            let _ = w.write(n, &text);
+            let _ = w.write_retrying(n, &text, &mut |attempt| match SAVE_RETRY_WAITS.get(attempt) {
+                Some(d) => {
+                    std::thread::sleep(*d);
+                    true
+                }
+                None => false,
+            });
         });
     }
 
     /// [`save`](Self::save) without the thread, for the app closing: the
-    /// file is written when this returns.
+    /// file is written when this returns. A failure is returned and not tried
+    /// again here.
     pub fn save_now(&self, text: String) -> Result<(), String> {
         if !self.on {
             return Ok(());
@@ -98,8 +112,23 @@ impl Writer {
         if n < *done {
             return Ok(());
         }
+        crate::write_atomic(&self.path, text)?;
         *done = n;
-        crate::write_atomic(&self.path, text)
+        Ok(())
+    }
+
+    /// [`write`](Self::write), and again after each `wait(attempt)` (0, 1,
+    /// ...) that returns true, until it is `Ok` (which includes a newer save
+    /// being on the disk) or `wait` returns false. The lock is not held while
+    /// waiting.
+    fn write_retrying(&self, n: u64, text: &str, wait: &mut dyn FnMut(usize) -> bool) -> Result<(), String> {
+        let mut attempt = 0;
+        loop {
+            match self.write(n, text) {
+                Err(_) if wait(attempt) => attempt += 1,
+                done => return done,
+            }
+        }
     }
 }
 
@@ -151,6 +180,81 @@ mod tests {
         off.save("n = 1\n".into());
         assert!(off.save_now("n = 1\n".into()).is_ok());
         assert!(!off.path().exists());
+    }
+
+    /// A writer whose folder is a file, so every write fails until `fix`.
+    fn blocked(name: &str) -> (Writer, PathBuf) {
+        let d = dir(name);
+        std::fs::create_dir_all(&d).unwrap();
+        let b = d.join("blocker");
+        std::fs::write(&b, "x").unwrap();
+        (Writer::new(b.join("state.toml"), true), b)
+    }
+
+    fn fix(b: &Path) {
+        let _ = std::fs::remove_file(b);
+        let _ = std::fs::create_dir_all(b);
+    }
+
+    #[test]
+    fn a_failed_save_leaves_the_order_open() {
+        let (w, b) = blocked("failed-order");
+        let (old, new) = (w.next.fetch_add(1, Ordering::SeqCst), w.next.fetch_add(1, Ordering::SeqCst));
+        assert!(w.write(new, "n = 2\n").is_err());
+        assert_eq!(*w.done.lock().unwrap(), 0);
+        fix(&b);
+        w.write(old, "n = 1\n").unwrap();
+        assert_eq!(read::<S>(w.path()), Some(S { n: 1 }));
+        w.write(new, "n = 2\n").unwrap();
+        assert_eq!(read::<S>(w.path()), Some(S { n: 2 }));
+        w.write(old, "n = 1\n").unwrap();
+        assert_eq!(read::<S>(w.path()), Some(S { n: 2 }));
+    }
+
+    #[test]
+    fn a_save_that_fails_is_tried_again() {
+        let (w, b) = blocked("retry");
+        let n = w.next.fetch_add(1, Ordering::SeqCst);
+        let mut calls = 0;
+        let r = w.write_retrying(n, "n = 7\n", &mut |i| {
+            calls += 1;
+            fix(&b);
+            i < 3
+        });
+        assert_eq!(r, Ok(()));
+        assert_eq!(calls, 1);
+        assert_eq!(read::<S>(w.path()), Some(S { n: 7 }));
+    }
+
+    #[test]
+    fn a_retry_gives_way_to_a_newer_save() {
+        let (w, b) = blocked("retry-newer");
+        let (old, new) = (w.next.fetch_add(1, Ordering::SeqCst), w.next.fetch_add(1, Ordering::SeqCst));
+        let mut calls = 0;
+        let r = w.write_retrying(old, "n = 1\n", &mut |_| {
+            calls += 1;
+            if calls == 1 {
+                fix(&b);
+                w.write(new, "n = 2\n").unwrap();
+            }
+            true
+        });
+        assert_eq!(r, Ok(()));
+        assert_eq!(read::<S>(w.path()), Some(S { n: 2 }));
+    }
+
+    #[test]
+    fn a_retry_gives_up_when_the_waits_run_out() {
+        let (w, _b) = blocked("retry-out");
+        let n = w.next.fetch_add(1, Ordering::SeqCst);
+        let mut calls = 0;
+        let r = w.write_retrying(n, "n = 1\n", &mut |_| {
+            calls += 1;
+            calls < 3
+        });
+        assert!(r.is_err());
+        assert_eq!(calls, 3);
+        assert_eq!(*w.done.lock().unwrap(), 0);
     }
 
     #[test]

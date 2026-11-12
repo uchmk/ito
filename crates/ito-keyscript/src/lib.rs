@@ -201,7 +201,8 @@ pub enum Step {
     /// a longer line). Actions are as for [`Step::Clipboard`].
     ClipboardHas(String),
     /// `<Enabled:text>`, `<Disabled:text>`, `<Focused:text>`, `<Checked:text>`, `<Unchecked:text>`: the one thing with that
-    /// text (as `<Click:text>` finds it) is in that state. Waits a few seconds, like `<Assert:>`.
+    /// text (as `<Click:text>` finds it) is in that state. Waits a few seconds, like `<Assert:>`. Focused includes the
+    /// window's active descendant (as for a screen reader).
     Is {
         prop: Prop,
         text: String,
@@ -235,7 +236,7 @@ pub enum IdCheck {
     Present(String),
     /// `<Id:!name>`: no widget has the ID (a hidden one is still there).
     Absent(String),
-    /// `<FocusedId:name>`
+    /// `<FocusedId:name>`: the widget holds the focus, or is the window's active descendant (as for a screen reader).
     Focused(String),
     /// `<EnabledId:name>`
     Enabled(String),
@@ -675,7 +676,8 @@ pub struct Item {
     /// Where it is, in points.
     pub rect: egui::Rect,
     pub disabled: bool,
-    /// The node holds the keyboard focus.
+    /// The node holds the keyboard focus. The window's active descendant counts too when the window itself has the
+    /// focus (as a screen reader reads it): `ito-confirm` names the app's chosen answer that way.
     pub focused: bool,
     /// A check box, switch or toggle button: whether it is on.
     pub toggled: Option<bool>,
@@ -725,7 +727,8 @@ pub struct IdNode {
     pub layer: egui::LayerId,
     /// Enabled, as the widget said and as the tree says.
     pub enabled: bool,
-    /// It holds the keyboard focus.
+    /// It holds the keyboard focus. The window's active descendant counts too when the window itself has the focus
+    /// (as a screen reader reads it).
     pub focused: bool,
     /// Its value (a text field's contents), if the tree has one.
     pub value: Option<String>,
@@ -749,6 +752,7 @@ fn join_ids(
     ctx: &egui::Context,
     entries: Vec<ito_a11y::TestIdEntry>,
     update: &egui::accesskit::TreeUpdate,
+    focus: egui::accesskit::NodeId,
     viewport_rect: egui::Rect,
 ) -> BTreeMap<String, Result<IdNode, String>> {
     let mut by_name_nodes: BTreeMap<&str, Vec<egui::accesskit::NodeId>> = BTreeMap::new();
@@ -814,7 +818,7 @@ fn join_ids(
                 interact_rect,
                 layer: entry.layer,
                 enabled,
-                focused: node_id == update.focus,
+                focused: node_id == focus,
                 value: node.value().map(String::from),
                 hidden,
                 click_at,
@@ -826,6 +830,16 @@ fn join_ids(
         out.insert(name.to_owned(), result);
     }
     out
+}
+
+/// The node that has the focus in `update`, as accesskit_consumer (what the platform adapters use) resolves it:
+/// `update.focus`, or, when that node names an active descendant that is in `update`, that descendant (one step).
+/// `ito-confirm` sets the window's active descendant to the answer the app has chosen, so a screen reader and this
+/// crate read it as the focused one. For egui's whole per-pass trees, not an incremental resolver; it says nothing
+/// about whether the native window has the focus.
+fn focus_of(update: &egui::accesskit::TreeUpdate) -> egui::accesskit::NodeId {
+    let named = update.nodes.iter().find(|(id, _)| *id == update.focus).and_then(|(_, n)| n.active_descendant());
+    named.filter(|d| update.nodes.iter().any(|(id, _)| id == d)).unwrap_or(update.focus)
 }
 
 /// The point to press to click the widget, or the first reason it cannot be clicked.
@@ -903,12 +917,13 @@ impl egui::Plugin for Tap {
         let mut items: Vec<Item> = Vec::new();
         let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
         let mut tree = Vec::new();
+        let focus = focus_of(update);
         if let Some(root) = update.tree.as_ref().map(|t| t.root) {
-            dump(&nodes, root, update.focus, 0, &mut tree);
+            dump(&nodes, root, focus, 0, &mut tree);
         }
         self.tree = tree;
         for (id, node) in &update.nodes {
-            let focused = *id == update.focus && update.focus != update.tree.as_ref().map_or(update.focus, |t| t.root);
+            let focused = *id == focus && focus != update.tree.as_ref().map_or(focus, |t| t.root);
             let toggled = toggled(node);
             let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
             let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
@@ -927,7 +942,7 @@ impl egui::Plugin for Tap {
         // `cumulative_pass_nr_for` has counted this pass already, so a widget that recorded N is in pass N + 1.
         let pass = self.pass_nr;
         let entries: Vec<_> = entries.into_iter().filter(|e| e.pass + 1 == pass).collect();
-        self.ids = join_ids(ctx, entries, update, rect);
+        self.ids = join_ids(ctx, entries, update, focus, rect);
         self.viewport_rect = Some(rect);
         self.minimized = info.minimized;
         self.focused = info.focused;
@@ -1079,8 +1094,8 @@ fn dump(
 }
 
 /// `<Tree:name>`'s file: the window as the AccessKit tree has it, one line per named node, indented under its parent:
-/// `button "確かめた" focused`, `switch "…" checked`, `text "Name" value="…"`. Then the messages `announce`d, as
-/// `announced: …` lines.
+/// `button "確かめた" focused` (the window's active descendant counts as focused, as for a screen reader),
+/// `switch "…" checked`, `text "Name" value="…"`. Then the messages `announce`d, as `announced: …` lines.
 pub fn tree_text(ctx: &egui::Context) -> String {
     let tree = ctx.with_plugin::<Tap, _>(|t| t.tree.clone()).unwrap_or_default();
     tree_file(&tree)
@@ -4481,6 +4496,93 @@ mod tests {
         assert_eq!(node.click_at, Ok(node.interact_rect.center()));
         assert!(obs.id("other").unwrap().is_none());
         assert_eq!(IdCheck::Present("b".into()).check(&obs), Ok(()));
+    }
+
+    /// A tree by hand: a window root with `children`, then the given (id, role, label) nodes, all with bounds.
+    fn hand_tree(active: Option<u64>, focus: u64, nodes: &[(u64, egui::accesskit::Role, &str)]) -> egui::accesskit::TreeUpdate {
+        use egui::accesskit::{Node, NodeId, Rect, Role, Tree};
+        let mut root = Node::new(Role::Window);
+        if let Some(a) = active {
+            root.set_active_descendant(NodeId(a));
+        }
+        root.set_children(nodes.iter().map(|(id, _, _)| NodeId(*id)).collect::<Vec<_>>());
+        let mut all = vec![(NodeId(1), root)];
+        for (i, (id, role, label)) in nodes.iter().enumerate() {
+            let mut n = Node::new(*role);
+            n.set_label(*label);
+            n.set_bounds(Rect { x0: 0.0, y0: 20.0 * i as f64, x1: 80.0, y1: 20.0 * i as f64 + 18.0 });
+            all.push((NodeId(*id), n));
+        }
+        egui::accesskit::TreeUpdate {
+            nodes: all,
+            tree: Some(Tree::new(NodeId(1))),
+            tree_id: egui::accesskit::TreeId::ROOT,
+            focus: NodeId(focus),
+        }
+    }
+
+    fn dump_lines(update: &egui::accesskit::TreeUpdate) -> Vec<String> {
+        let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
+        let mut out = Vec::new();
+        dump(&nodes, update.tree.as_ref().unwrap().root, focus_of(update), 0, &mut out);
+        out
+    }
+
+    /// ito#218: the window's active descendant is the focused node when the window has the focus (the root),
+    /// one step, as accesskit_consumer resolves it.
+    #[test]
+    fn the_windows_active_descendant_is_the_focus() {
+        use egui::accesskit::{NodeId, Role};
+        let nodes = [(2, Role::Button, "キャンセル"), (3, Role::Button, "作り直す")];
+        let update = hand_tree(Some(2), 1, &nodes);
+        assert_eq!(focus_of(&update), NodeId(2));
+        let lines = dump_lines(&update);
+        assert!(lines.iter().any(|l| l.trim() == "button \"キャンセル\" focused"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.trim() == "button \"作り直す\""), "{lines:?}");
+        // An active descendant that is not in the tree: the focus stays the root, and no node is focused.
+        let update = hand_tree(Some(9), 1, &nodes);
+        assert_eq!(focus_of(&update), NodeId(1));
+        assert!(dump_lines(&update).iter().all(|l| !l.contains("focused")));
+        // No active descendant: unchanged.
+        let update = hand_tree(None, 1, &nodes);
+        assert_eq!(focus_of(&update), NodeId(1));
+        // A field that has the focus, and no active descendant on it: it stays the focused one, whatever the root names.
+        let nodes = [(2, Role::Button, "キャンセル"), (3, Role::TextInput, "検索")];
+        let update = hand_tree(Some(2), 3, &nodes);
+        assert_eq!(focus_of(&update), NodeId(3));
+        let lines = dump_lines(&update);
+        assert!(lines.iter().any(|l| l.trim() == "text \"検索\" focused"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.trim() == "button \"キャンセル\""), "{lines:?}");
+    }
+
+    /// The three readers of the focus (the tree dump, the items `<Focused:>` and `<Click:>` read, and the test IDs)
+    /// all take the window's active descendant, in a real pass.
+    #[test]
+    fn dump_items_and_test_ids_read_the_active_descendant_as_focused() {
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            let a = button(ui, "a");
+            button(ui, "b");
+            ui.ctx().accesskit_node_builder(egui::accesskit_root_id(), |root| root.set_active_descendant(a.id.accesskit_id()));
+        });
+        assert!(obs.id("a").unwrap().unwrap().focused);
+        assert!(!obs.id("b").unwrap().unwrap().focused);
+        let focused: Vec<String> = items(&ctx).into_iter().filter(|i| i.focused).map(|i| i.text).collect();
+        assert_eq!(focused, ["a"]);
+        let tree = tree_text(&ctx);
+        assert!(tree.lines().any(|l| l.trim() == "button \"a\" focused"), "{tree}");
+        assert!(tree.lines().any(|l| l.trim() == "button \"b\""), "{tree}");
+    }
+
+    #[test]
+    fn without_an_active_descendant_nothing_is_focused() {
+        let ctx = egui::Context::default();
+        let obs = seen(&ctx, |ui| {
+            button(ui, "a");
+        });
+        assert!(!obs.id("a").unwrap().unwrap().focused);
+        assert!(items(&ctx).iter().all(|i| !i.focused));
+        assert!(!tree_text(&ctx).contains("focused"));
     }
 
     #[test]

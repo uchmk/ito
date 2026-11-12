@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.293.1] - 2026-11-12
+
+### 修正
+
+- `ito-common`: `kept::Writer` が、書けなかった保存を捨てていて、ファイルが 1 つ前の内容のまま残ることがあった（ito#215、koyomi の依頼。GitHub の Windows の runner で、2 つの窓が 1 つの Writer で交互に保存するテストが最後の保存を失った）。
+  - 書く前に「書いた」と覚えていたのを、書けたあとでだけ覚えるようにした。いちばん新しい保存が失敗しても、まだ書いていない 1 つ前の保存は書けるし、新しい保存も書き直せる。
+  - `save` のスレッドは、書けなかったら 0.25 秒・1 秒・4 秒あけて 3 回まで書き直す（その間に新しい保存が書かれたら、そこでやめる）。ファイルは最後の呼び出しの内容か、それが書けないまま終わった（またはアプリが先に終わった）ときは、書けたうちのいちばん新しい内容になる。`save_now` は書き直さずに、失敗をそのまま返す（下の `write_atomic` の rename のやり直しはある）。
+- `ito-common`: `write_atomic` は、Windows で別のプログラムがファイルを開いていて rename が一時的に止められたとき（エラー 5・32・33。ウイルス スキャナー・インデクサー・削除の共有なしで開いた読み手）、最大 0.5 秒の間に 6 回やり直す。ずっと止められているときは、その分だけ遅れてエラーを返す。ほかの OS は今までどおり 1 回。
+- `ito-confirm`: 質問のどの答えが選ばれているか（`Question::focus`。Enter が押すもの）が、AccessKit の木に出ていなかった（ito#218、koyomi の依頼）。選ばれている答えを、窓（AccessKit の木の根）の active descendant（ARIA の `aria-activedescendant`）として伝える。egui のフォーカスは今までどおり誰にも持たせないので、答えが自分で Enter に反応して二重に答えることはない。egui のフォーカスがどこにも無いとき、スクリーンリーダーは選ばれている答えをフォーカスとして読む（質問の上のパレットの欄にフォーカスがあるときは、その欄のまま）。カードにも名前つきのボタンのノードを付けた（今までは木に出ていなかった）。
+- `ito-keyscript`: `--keys` の木（`<Tree:>`）の `focused`・`<Focused:>`・`<FocusedId:>`・`Item::focused`・`IdNode::focused` は、窓の active descendant も、窓がフォーカスを持つときはフォーカスとして読む（AccessKit のプラットフォームのアダプターと同じ 1 段の解決）。ito-confirm の質問では `button "キャンセル" focused` になる。
+
+### 使う側がやること
+
+- ito の `rev` を上げる。API は変わらない。
+- `kept::Writer` を Windows で回さないようにしていたテスト（koyomi の `#[cfg_attr(windows, ignore)]`）は、戻してよい。
+- ito-confirm の質問の答えに `focused` を求める行（koyomi の TESTING.md の 131.5 など）は、`--keys` の木・`<Focused:>`・`<FocusedId:>` で確かめられる。カードも、題を名前にした `button` として木に出るようになった。
+- 台本が変わりうるところ: 質問の間は選ばれている答えが `focused` になる。木（`<Tree:>`）を丸ごと比べている台本や、答えがフォーカスされていないことを見る行は、合わせて直す。カードの題と同じ文字が窓のほかの所にあると、`<Click:文字>` などが「more than one thing」で落ちるようになる（テストの ID で押す）。
+
 ## [0.293.0] - 2026-11-12
 
 ### 追加
