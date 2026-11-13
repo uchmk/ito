@@ -3,6 +3,19 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.298.0] - 2026-11-13
+
+### 追加
+
+- `ito-fileops`（新しいクレート）: シェルを使わない手元のファイルの仕事（ito#225）。古いファイルの掃除・フォルダーを空にする・robocopy の形のコピー・決まったファイルを送る仕事に。どれも止まるのでワーカースレッドか子プロセスから。止める旗と、1 歩ずつの `Event`（ログ用）を受け、どう終わったかを `End::{Done, Stopped, Failed(Error)}` で返す（止まっても失敗しても、したことは結果に残る）。
+  - `delete_old(folder, pattern, older_than, now, &stop, on) -> Deleted`: `folder` の直下の、名前が合い最後の書き込みが `now - older_than` より前のふつうのファイルを消す。下のフォルダーには入らない。リンクと特殊なファイルは消さない（`Skipped`）。
+  - `empty(folder, &stop, on) -> Emptied`: 中を全部消す（隠し・システムも）。フォルダーは残る。中のリンク・ジャンクションはリンクとして消し、指す先は触らない。空のパス・リンク・ドライブや共有の先頭は断る（`Error::Unsafe`）。
+  - `copy_tree(from, into, pattern, &TreeOptions, &stop, on) -> TreeResult`: `robocopy <from> <into> [<pattern>] /E /R:1 /W:1` の形。大きさと書き込み時刻が同じものは飛ばし、`into` だけにあるものは残し、失敗したファイルは待ってやり直してから数えて続ける。`TreeResult::robocopy_code()` は robocopy の終了コード（0x01・0x02・0x04・0x08・0x10）。`TreeOptions { retries, wait, time_tolerance }`。Windows はデータ・属性・代替ストリームと 3 つの時刻、Unix は中身・権限・2 つの時刻を写す。重なる 2 つの根は断る（`Unsafe::Overlap`）。`into` の中のリンクは一覧のときと書く直前に見て、書き通さない（`Mismatch`）。
+  - `copy_matching(from, into, verify, &stop, on) -> Matched`: `from` の名前の `*` `?` に合うファイルを、`into` の `.<名前>.<16 桁>.part` に書いてから名前替えで置く（失敗しても書きかけの的は残らない）。`verify` で読んだ SHA-256 と書いたものを読み戻した SHA-256 を比べ、違えば `Error::Mismatch`、コピー中に元が変われば `SourceChanged`。止める旗はファイルの中でも見て、止まれば的はそのまま。的がリンク・元と同じファイルなら断る。
+  - 名前の `*` `?` は名前だけに、Windows は大文字小文字を区別せず、`.*` で終わる型は点の無い名前も取る（`FindFirstFile` と同じ）。Unicode でない名前は `*` にだけ合う（ほかは `Skip::NotUnicode`）。
+  - `Error`（`#[non_exhaustive]`）: `Io { path, doing: Doing, source }`・`Mismatch`・`SourceChanged`・`Unsafe { path, why: Unsafe }`。`words(lang)` は人に見せる文（OS の言葉は `ito-common::ioerror::words`、OS の文は入れない）、`Display` はログ用（OS のコードと文）。
+  - 読み取り専用の属性（Unix は書き込みの権限）は、書く・消すために外したら、失敗したときに戻す（戻せなければ `Event::CleanupFailed`）。
+
 ## [0.297.0] - 2026-11-13
 
 ### 追加
