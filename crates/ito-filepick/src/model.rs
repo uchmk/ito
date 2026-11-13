@@ -439,7 +439,8 @@ impl Picker {
         self.desc = descending;
         self
     }
-    /// The name box's first text; it is also selected in the first listing when it is there.
+    /// The name box's first text; it is also selected in the first listing when it is there, except in `Mode::SaveFile`,
+    /// where the name box holds it and nothing is selected.
     pub fn file_name(mut self, name: &str) -> Self {
         self.first_name = Some(name.to_owned());
         self.name = name.to_owned();

@@ -724,6 +724,19 @@ pub(crate) fn tone_look(c: &ito_theme::Colors, tone: Tone, hot: bool) -> (Color3
     }
 }
 
+/// What `IconButton::show` lays out, worked out once so `size` and `show` cannot drift.
+struct Measured {
+    galley: std::sync::Arc<egui::Galley>,
+    chip: Option<std::sync::Arc<egui::Galley>>,
+    chip_w: f32,
+    /// Mark, words and chip with their gaps, without the padding.
+    content: f32,
+    size: Vec2,
+    glyph: f32,
+    pad: f32,
+    gap: f32,
+}
+
 /// A quiet outlined button with a [`Mark`] and words, and optionally a [`Tone`], the key that does the same (a small chip at
 /// the right), the full width of the column, or the mark after the words (a Send button).
 #[derive(Clone, Copy, Debug)]
@@ -736,11 +749,24 @@ pub struct IconButton<'a> {
     wide: bool,
     mark_last: bool,
     drag: bool,
+    min_size: Vec2,
+    text_size: Option<f32>,
 }
 
 impl<'a> IconButton<'a> {
     pub fn new(mark: Mark, words: &'a str) -> Self {
-        IconButton { mark, words, said: words, tone: Tone::Plain, key: None, wide: false, mark_last: false, drag: false }
+        IconButton {
+            mark,
+            words,
+            said: words,
+            tone: Tone::Plain,
+            key: None,
+            wide: false,
+            mark_last: false,
+            drag: false,
+            min_size: Vec2::ZERO,
+            text_size: None,
+        }
     }
 
     /// The spoken name, and the tip when it differs from the words.
@@ -779,25 +805,52 @@ impl<'a> IconButton<'a> {
         self
     }
 
-    pub fn show(self, ui: &mut Ui) -> Response {
-        let c = ito_theme::colors();
-        let font = egui::TextStyle::Body.resolve(ui.style());
+    /// The size of the words in points, in the proportional family; by default the body style of the `Ui`, which does not
+    /// follow `ito_theme`'s text zoom (pass `ito_theme::zoomed(ctx, 12.5)` for words that do). `size` and `show` both use it.
+    pub fn text_size(mut self, points: f32) -> Self {
+        self.text_size = Some(points);
+        self
+    }
+
+    /// At least this big. When the button is wider than its mark, words and key chip, they are centred as one group (with
+    /// [`wide`](Self::wide) the content stays at the left and the chip at the right edge, as without a minimum). The height is
+    /// the larger of the usual one and `size.y`.
+    pub fn min_size(mut self, size: Vec2) -> Self {
+        self.min_size = size;
+        self
+    }
+
+    /// The size [`show`](Self::show) takes before [`wide`](Self::wide) stretches it, [`min_size`](Self::min_size) included, so
+    /// a layout can set a slot first. Measure with the same `Ui` style and zoom as the `Ui` that shows it.
+    pub fn size(&self, ui: &Ui) -> Vec2 {
+        self.measure(ui).size
+    }
+
+    fn measure(&self, ui: &Ui) -> Measured {
+        let font = self.text_size.map_or_else(|| egui::TextStyle::Body.resolve(ui.style()), egui::FontId::proportional);
         let galley = ui.painter().layout_no_wrap(self.words.to_owned(), font, Color32::PLACEHOLDER);
         let chip =
             self.key.map(|k| ui.painter().layout_no_wrap(k.to_owned(), egui::FontId::proportional(z(ui, 10.5)), Color32::PLACEHOLDER));
         let (glyph, pad, gap) = (z(ui, 14.0), z(ui, 10.0), z(ui, 6.0));
         let chip_w = chip.as_ref().map_or(0.0, |g| (g.size().x + z(ui, 10.0)).max(z(ui, 18.0)));
-        let mut w = pad + glyph + gap + galley.size().x + pad;
+        let mut content = glyph + gap + galley.size().x;
         if chip.is_some() {
-            w += gap + chip_w;
+            content += gap + chip_w;
         }
+        let height = ui.spacing().interact_size.y.max(z(ui, 26.0)).max(self.min_size.y);
+        let size = Vec2::new((pad + content + pad).max(self.min_size.x), height);
+        Measured { galley, chip, chip_w, content, size, glyph, pad, gap }
+    }
+
+    pub fn show(self, ui: &mut Ui) -> Response {
+        let c = ito_theme::colors();
+        let Measured { galley, chip, chip_w, content, mut size, glyph, pad, gap } = self.measure(ui);
         if self.wide {
             let room = ui.available_width();
             if room.is_finite() {
-                w = w.max(room);
+                size.x = size.x.max(room);
             }
         }
-        let size = Vec2::new(w, ui.spacing().interact_size.y.max(z(ui, 26.0)));
         let (rect, r) = ui.allocate_exact_size(size, if self.drag { Sense::click_and_drag() } else { Sense::click() });
         let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
         let r = if self.said != self.words { r.on_hover_text(self.said) } else { r };
@@ -810,7 +863,7 @@ impl<'a> IconButton<'a> {
             p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
             let cy = rect.center().y;
             let glyph_at = |x: f32| Rect::from_center_size(Pos2::new(x + glyph / 2.0, cy), Vec2::splat(glyph));
-            let mut x = rect.left() + pad;
+            let mut x = if self.wide { rect.left() + pad } else { rect.left() + (rect.width() - content) / 2.0 };
             let text_w = galley.size().x;
             let text_pos = |x: f32| Pos2::new(x, cy - galley.size().y / 2.0);
             if self.mark_last {
@@ -924,5 +977,53 @@ mod tests {
         assert!((danger - plain).abs() < 0.5, "{danger} {plain}");
         assert!((wide - room).abs() < 1.0, "{wide} {room}");
         assert!(heights.iter().all(|h| (h - heights[0]).abs() < 0.01), "{heights:?}");
+    }
+
+    #[test]
+    fn size_grows_with_the_words_and_min_size_wins_when_larger() {
+        let (mut short, mut long, mut keyed, mut floor, mut shown) = (Vec2::ZERO, Vec2::ZERO, Vec2::ZERO, Vec2::ZERO, Vec2::ZERO);
+        let mut plain = Vec2::ZERO;
+        let mut inside = true;
+        run(|ui| {
+            short = IconButton::new(Mark::Save, "Go").size(ui);
+            long = IconButton::new(Mark::Save, "Save everything").size(ui);
+            keyed = IconButton::new(Mark::Save, "Go").key("S").size(ui);
+            let b = IconButton::new(Mark::Save, "Go").min_size(Vec2::new(200.0, 40.0));
+            floor = b.size(ui);
+            let r = b.show(ui);
+            shown = r.rect.size();
+            // The bigger button still starts inside the Ui.
+            let left = ui.min_rect().left();
+            inside = r.rect.left() >= left;
+            let p = IconButton::new(Mark::Save, "Go");
+            plain = p.size(ui);
+            let pr = p.show(ui);
+            assert!((pr.rect.size() - plain).abs().max_elem() < 0.01);
+        });
+        assert!(long.x > short.x && keyed.x > short.x, "{short:?} {long:?} {keyed:?}");
+        assert_eq!(floor, Vec2::new(200.0, 40.0));
+        assert!((shown - floor).abs().max_elem() < 0.01, "{shown:?} {floor:?}");
+        assert!(inside && plain.y < 40.0);
+        // A minimum smaller than the content changes nothing.
+        let mut same = false;
+        run(|ui| {
+            same = IconButton::new(Mark::Save, "Go").min_size(Vec2::new(10.0, 10.0)).size(ui) == IconButton::new(Mark::Save, "Go").size(ui)
+        });
+        assert!(same);
+    }
+
+    #[test]
+    fn a_text_size_sets_the_size_and_size_matches_show() {
+        fn is_copy<T: Copy>() {}
+        is_copy::<IconButton>();
+        let (mut plain, mut big, mut shown) = (Vec2::ZERO, Vec2::ZERO, Vec2::ZERO);
+        run(|ui| {
+            plain = IconButton::new(Mark::Save, "Save").size(ui);
+            let b = IconButton::new(Mark::Save, "Save").text_size(30.0);
+            big = b.size(ui);
+            shown = b.show(ui).rect.size();
+        });
+        assert!(big.x > plain.x, "{plain:?} {big:?}");
+        assert!((shown - big).abs().max_elem() < 0.01, "{shown:?} {big:?}");
     }
 }

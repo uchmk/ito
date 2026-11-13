@@ -118,6 +118,15 @@ fn at<R>(ui: &mut Ui, r: Rect, layout: Layout, f: impl FnOnce(&mut Ui) -> R) -> 
     ui.scope_builder(UiBuilder::new().max_rect(r).layout(layout), f).inner
 }
 
+/// The foot's last row, worked out once for its height and its drawing.
+struct FootPlan {
+    ok_w: f32,
+    cancel_w: f32,
+    check_w: f32,
+    /// The check box sits above the buttons rather than beside them.
+    own_row: bool,
+}
+
 fn ltr() -> Layout {
     Layout::left_to_right(Align::Center)
 }
@@ -197,6 +206,7 @@ impl Picker {
             title: &title,
             body: &body,
             buttons: &buttons,
+            marks: &[Some(Mark::Save), Some(Mark::Close)],
             primary: Some(0),
             danger: true,
             focus: Some(self.ui.replace_focus),
@@ -403,10 +413,41 @@ impl Picker {
         self.filter_shown() && row_w * 0.35 < SELECT_W
     }
 
-    fn footer_height(&self, ctx: &Context, row_w: f32) -> f32 {
-        let s = |v: f32| sc(ctx, v);
+    fn footer_height(&self, ui: &Ui, row_w: f32, words: &Words) -> f32 {
+        let s = |v: f32| sc(ui.ctx(), v);
         let stacked = if self.filter_stacked(row_w) { s(4.0) + s(30.0) } else { 0.0 };
-        s(30.0) + stacked + s(4.0) + s(18.0) + s(4.0) + s(30.0)
+        let own_row = if self.foot_plan(ui, row_w, words).own_row { s(4.0) + s(30.0) } else { 0.0 };
+        s(30.0) + stacked + s(4.0) + s(18.0) + s(4.0) + s(30.0) + own_row
+    }
+
+    /// The OK button: the mark of what it does, the words of the mode, at least 76 wide and as high as the row.
+    fn ok_button<'a>(&self, ctx: &Context, words: &'a Words) -> ito_prefs::IconButton<'a> {
+        let (mark, text) = match self.mode() {
+            Mode::OpenFolder => (Mark::Folder, &words.choose),
+            Mode::SaveFile if !self.opens_folder() => (Mark::Save, &words.save),
+            Mode::SaveFile => (Mark::Folder, &words.open),
+            _ => (Mark::File, &words.open),
+        };
+        ito_prefs::IconButton::new(mark, text).tone(Tone::Primary).text_size(z(ctx, 12.5)).min_size(vec2(sc(ctx, 76.0), sc(ctx, 30.0)))
+    }
+
+    fn cancel_button<'a>(&self, ctx: &Context, words: &'a Words) -> ito_prefs::IconButton<'a> {
+        ito_prefs::IconButton::new(Mark::Close, &words.cancel)
+            .tone(Tone::Plain)
+            .text_size(z(ctx, 12.5))
+            .min_size(vec2(sc(ctx, 76.0), sc(ctx, 30.0)))
+    }
+
+    /// The widths of the foot's last row and whether the check box needs a row of its own above the buttons. The one place
+    /// that decides it, for `footer_height` and `footer` alike.
+    fn foot_plan(&self, ui: &Ui, row_w: f32, words: &Words) -> FootPlan {
+        let ctx = ui.ctx();
+        let s = |v: f32| sc(ctx, v);
+        let ok_w = self.ok_button(ctx, words).size(ui).x;
+        let cancel_w = self.cancel_button(ctx, words).size(ui).x;
+        let check_w = s(24.0) + text_w(ui, &words.show_hidden, FontId::proportional(z(ctx, 12.5))) + s(8.0);
+        let own_row = check_w + s(12.0) + ok_w + s(8.0) + cancel_w > row_w;
+        FootPlan { ok_w, cancel_w, check_w, own_row }
     }
 
     fn contents(&mut self, ui: &mut Ui, outer: Rect, look: &Look) {
@@ -417,7 +458,7 @@ impl Picker {
         let tool_r = Rect::from_min_size(pos2(inner.min.x, title_r.max.y + s(8.0)), vec2(inner.width(), s(30.0)));
         // A path error takes a line under the bar and pushes the body down while it shows.
         let err_h = if self.path_error().is_some() { s(20.0) } else { 0.0 };
-        let foot_h = self.footer_height(&ctx, inner.width());
+        let foot_h = self.footer_height(ui, inner.width(), look.words);
         let foot_r = Rect::from_min_max(pos2(inner.min.x, outer.max.y - s(12.0) - foot_h), pos2(inner.max.x, outer.max.y - s(12.0)));
         let body_top = tool_r.max.y + err_h + s(8.0);
         let body_r = Rect::from_min_max(pos2(inner.min.x, body_top), pos2(inner.max.x, (foot_r.min.y - s(8.0)).max(body_top + s(32.0))));
@@ -1107,12 +1148,13 @@ impl Picker {
             self.ui.said_note.clear();
         }
 
-        // Row C: hidden items, and the buttons.
+        // Row C: hidden items, and the buttons (on a row of their own when the two do not fit side by side).
+        let plan = self.foot_plan(ui, r.width(), words);
         let row_c = Rect::from_min_size(pos2(r.min.x, row_b.max.y + s(4.0)), vec2(r.width(), row_h));
+        let row_d = if plan.own_row { Rect::from_min_size(pos2(r.min.x, row_c.max.y + s(4.0)), vec2(r.width(), row_h)) } else { row_c };
         let checked = self.hidden_shown();
         let font = FontId::proportional(z(&ctx, 12.5));
-        let tw = text_w(ui, &words.show_hidden, font.clone());
-        let check_r = Rect::from_min_size(pos2(row_c.min.x, row_c.min.y + s(3.0)), vec2(s(24.0) + tw + s(8.0), s(24.0)));
+        let check_r = Rect::from_min_size(pos2(row_c.min.x, row_c.min.y + s(3.0)), vec2(plan.check_w, s(24.0)));
         let resp =
             ui.interact(check_r, Id::new((self.id().to_owned(), "hidden")), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         let bx = Rect::from_min_size(pos2(check_r.min.x, check_r.center().y - s(8.0)), Vec2::splat(s(16.0)));
@@ -1134,23 +1176,15 @@ impl Picker {
         }
 
         // The drawn boxes are the slots: Cancel ends at the footer's right edge, 8 apart, each at least 76 wide.
-        let ok_text = match self.mode() {
-            Mode::OpenFolder => &words.choose,
-            Mode::SaveFile if !self.opens_folder() => &words.save,
-            _ => &words.open,
-        };
-        let pad = ui.spacing().button_padding.x * 2.0 + 10.0;
-        let ok_w = (text_w(ui, ok_text, font.clone()) + pad).max(s(76.0));
-        let cancel_w = (text_w(ui, &words.cancel, font) + pad).max(s(76.0));
-        let cancel_r = Rect::from_min_size(pos2(row_c.max.x - cancel_w, row_c.min.y), vec2(cancel_w, row_h));
-        let ok_r = Rect::from_min_size(pos2(cancel_r.min.x - s(8.0) - ok_w, row_c.min.y), vec2(ok_w, row_h));
-        let look_p = ito_prefs::Look { c, q: "" };
+        let cancel_r = Rect::from_min_size(pos2(row_d.max.x - plan.cancel_w, row_d.min.y), vec2(plan.cancel_w, row_h));
+        let ok_r = Rect::from_min_size(pos2(cancel_r.min.x - s(8.0) - plan.ok_w, row_d.min.y), vec2(plan.ok_w, row_h));
         let can = self.can_accept();
-        // Centre on the cross axis: egui places a button's words by the layout's horizontal align.
-        let fill = Layout::top_down(Align::Center).with_cross_justify(true);
-        let ok = at(ui, ok_r, fill, |ui| ui.add_enabled_ui(can, |ui| ito_prefs::button_with(ui, look_p, ok_text, Tone::Primary)).inner);
+        let (ok_button, cancel_button) = (self.ok_button(&ctx, words), self.cancel_button(&ctx, words));
+        // Centre on the cross axis, in case the app's interact size makes a button taller than the row.
+        let centred = Layout::left_to_right(Align::Center);
+        let ok = at(ui, ok_r, centred, |ui| ui.add_enabled_ui(can, |ui| ok_button.show(ui)).inner);
         self.put_id(&ok, "ok");
-        let cancel = at(ui, cancel_r, fill, |ui| ito_prefs::button_with(ui, look_p, &words.cancel, Tone::Plain));
+        let cancel = at(ui, cancel_r, centred, |ui| cancel_button.show(ui));
         self.put_id(&cancel, "cancel");
         if ok.clicked() {
             self.accept();

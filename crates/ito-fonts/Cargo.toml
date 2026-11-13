@@ -9,8 +9,10 @@ repository.workspace = true
 
 [features]
 # `register`: put the face in an egui `FontDefinitions`.
-egui = ["dep:egui"]
+egui = ["dep:egui", "dep:skrifa"]
 
 [dependencies]
 ito-common = { path = "../ito-common" }
 egui = { version = "0.36", optional = true }
+# Keep this on the skrifa version epaint uses, so the vertical metrics are read the same way egui reads them.
+skrifa = { version = "0.44", optional = true, default-features = false, features = ["std"] }

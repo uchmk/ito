@@ -923,3 +923,57 @@ fn save_double_click_on_a_file_asks_and_the_list_behind_is_dead() {
     h.press(replace, Modifiers::NONE);
     assert!(matches!(h.done, Some(Done::Picked(_))), "{:?}", h.done);
 }
+
+#[test]
+fn the_foot_buttons_have_room_in_every_mode_language_and_width() {
+    for mode in [Mode::OpenFile, Mode::OpenFiles, Mode::OpenFolder, Mode::SaveFile] {
+        for ja in [false, true] {
+            for width in [1000.0, 250.0] {
+                let mut h = H::sized(posix(mode), width, 600.0, 1.0);
+                if ja {
+                    h.words = Words::ja();
+                }
+                h.answer(sample());
+                let what = format!("{mode:?} ja {ja} width {width}");
+                let (ok, cancel, check) = (h.rect("ok"), h.rect("cancel"), h.rect("hidden"));
+                for (name, r) in [("ok", ok), ("cancel", cancel)] {
+                    assert!(r.width() >= 76.0 - 0.5 && r.height() >= 30.0 - 0.5, "{what}: {name} {r:?}");
+                    assert!(inside(&h, name), "{what}: {name} {r:?} outside the window");
+                }
+                assert!(inside(&h, "hidden"), "{what}: hidden {check:?} outside the window");
+                assert!(
+                    !ok.intersects(cancel) && !ok.intersects(check) && !cancel.intersects(check),
+                    "{what}: {ok:?} {cancel:?} {check:?}"
+                );
+                if width < 300.0 {
+                    assert!(check.max.y <= ok.min.y + 0.5, "{what}: the check box takes its own row: {check:?} {ok:?}");
+                } else {
+                    assert!(check.max.x <= ok.min.x, "{what}: side by side: {check:?} {ok:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_disabled_ok_does_not_click() {
+    let mut h = H::new(posix(Mode::SaveFile));
+    h.answer(sample());
+    assert!(!h.p.can_accept());
+    h.click("ok");
+    h.frames(2);
+    assert!(h.done.is_none());
+    assert!(h.p.replace_question().is_none());
+}
+
+#[test]
+fn the_foot_words_follow_the_text_zoom() {
+    let width = |zoom: f32| {
+        let mut h = H::sized(posix(Mode::OpenFile), 2000.0, 1200.0, zoom);
+        h.answer(sample());
+        h.rect("ok").width()
+    };
+    // The 76-wide floor is scaled too, so compare against the floor's growth.
+    let (one, big) = (width(1.0), width(1.5));
+    assert!((big - one * 1.5).abs() <= 1.0, "{one} at 1.0, {big} at 1.5");
+}
