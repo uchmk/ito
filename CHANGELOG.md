@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.299.0] - 2026-11-13
+
+### 追加
+
+- 新しいクレート `ito-filepick`（#228）: 別の PC のファイル・フォルダーを選ぶダイアログ。一覧はアプリが渡し、ダイアログはディスクに触らない。
+  - `Picker::new(id, Mode, Style)` に `start`・`places`・`filters`・`filter_index`・`sort`・`file_name`・`title`・`show_hidden` を付けて作る。`Mode` は `OpenFile`・`OpenFiles`・`OpenFolder`。
+  - 毎フレーム `take()`（窓なし）か `show(ctx, &Look)`（機能 `egui`）が `Shown { want, done }` を返す。`Want::List { ticket, path }` が来たら、アプリがワーカーでそのフォルダーを一覧にして `set_listing(ticket, Ok(Listing))` か `Err(理由)` で答える。生きているのは新しい ticket だけ。
+  - `Listing` は `truncated`（途中で切った）・`left_out`（出せなかった数）を持つ。そのときは、打った名前が一覧に無くても「無い」とは言わず `InputError::NotAmongShown` にする。
+  - パスは文字のまま、`Style::{Windows, Posix}` で読む（ダイアログを動かす PC の OS に依らない）。ドライブ相対（`C:foo`）・共有のない UNC（`\\nas`）などは `PathError`。
+  - 名前の欄にパス（`../x/y.txt`・`D:\a\b.txt`）を打てば、そのフォルダーを開いてから選ぶ。
+  - 並べ替え・フィルター（最後に「すべてのファイル」）・隠しファイル・型の先読み・戻る/進む/上・最新の情報に更新。
+  - 文言は `Words`（`en`・`ja`）。
+  - 窓（機能 `egui`）: 場所の列・パンくず（長ければ `…`、押すとパスを打てる）・一覧（名前・更新日時・種類・大きさ）・名前の欄・フィルター・開く/キャンセル、読み込み中の表示、エラーの行。キーで全部操作でき、窓が小さければ詰める。テストの ID は `{Picker の id}.path`・`.list`・`.edit` など。
+  - 機能 `serde`: `Entry`・`Kind`・`Listing` を JSON にできる（エンジンが送るため）。
+
+### 使う側がやること
+
+- 別の PC のファイルを選ぶアプリ（koyomi）: `ito-filepick = { git = …, rev = …, features = ["egui"] }` を足す。この PC のファイルなら、今までどおり `ito-dialog`（OS のダイアログ）を使う。
+
 ## [0.298.1] - 2026-11-13
 
 ### 修正

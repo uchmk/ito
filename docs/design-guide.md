@@ -77,6 +77,7 @@
 | **検索・置換のバー**（Ctrl+F / Ctrl+H） | `ito-find`（`FindBar`） |
 | 行の差分（ガターの変更表示、保存前の比較） | `ito-diff` |
 | 外のプログラムで開く（`$EDITOR`、diff ツール） | `ito-openin` |
+| 別の PC のファイル・フォルダーを選ぶ（一覧はアプリが渡す） | `ito-filepick`（`Picker::show`。この PC なら `ito-dialog`） |
 | PNG・PDF・印刷に書き出す | `ito-export` |
 | フォルダーの変更を受ける | `ito-watch` |
 
