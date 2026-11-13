@@ -1,8 +1,8 @@
 name: Release checksums
 
 # The SHA-256 of every asset of a release, and of every file inside each
-# Windows zip, written onto the release page. `release.yml` calls this once all
-# six assets are attached; it can also be started by hand from the Actions tab
+# Windows zip, written onto the release page. `release.yml` calls this once the
+# built assets are attached; it can also be started by hand from the Actions tab
 # for a release that is already out (a release made before this ran needed that).
 #
 # Re-running replaces the section rather than adding a second one.

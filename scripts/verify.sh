@@ -78,7 +78,8 @@ run python3 scripts/lanes/evidence.py --self-test
 run python3 scripts/check-schemas.py
 run bash -n scripts/lanes/lanes.sh
 if command -v pwsh >/dev/null; then run pwsh -NoProfile -File scripts/lanes/check-ps1.ps1; fi
-# The workflow templates: every {{token}} is one lanes.sh fills, and each renders to YAML.
+# The workflow templates: every {{token}} is one lanes.sh fills, every lanes: block is balanced,
+# and each renders to YAML for every combination (tui on/off x plain Linux on/off) through the real lanes.sh sync.
 run python3 -c '
 import glob, re, sys
 for f in glob.glob("scripts/lanes/workflows/*.yml"):
@@ -86,10 +87,62 @@ for f in glob.glob("scripts/lanes/workflows/*.yml"):
     for tok in set(re.findall(r"\{\{(\w+)\}\}", t)):
         if tok not in ("app", "crate", "bin", "tui_crate", "tui_bin"):
             sys.exit("%s: unknown token {{%s}}" % (f, tok))
-    try:
-        import yaml
-    except ImportError:
-        continue
-    yaml.safe_load(re.sub(r"\{\{(app|crate|bin|tui_crate|tui_bin)\}\}", "x", t))
+    stack = []
+    for n, line in enumerate(t.splitlines(), 1):
+        m = re.match(r"^ *# lanes:(begin|end) (\S+)$", line)
+        if m is None:
+            if "# lanes:" in line:
+                sys.exit("%s:%d: malformed lanes: marker" % (f, n))
+            continue
+        if m.group(1) == "begin":
+            stack.append(m.group(2))
+        elif not stack or stack.pop() != m.group(2):
+            sys.exit("%s:%d: lanes:end %s without its begin" % (f, n, m.group(2)))
+    if stack:
+        sys.exit("%s: lanes:begin %s is never ended" % (f, stack[-1]))
 '
+render_combos() {
+    local root tmp d tui linux rc
+    root=$(pwd)
+    tmp=$(mktemp -d)
+    for tui in yes no; do
+        for linux in yes no; do
+            d="$tmp/$tui-$linux"
+            mkdir -p "$d/scripts"
+            cp scripts/lanes/lanes.sh "$d/scripts/lanes.sh"
+            { echo "app=x"; echo "crate=x"; echo "bin=x"; echo "workflows=$(cd scripts/lanes/workflows && ls *.yml | tr '\n' ' ')"
+              [ $tui = no ] || { echo "tui_crate=x-tui"; echo "tui_bin=x-tui"; }
+              [ $linux = yes ] || echo "release_linux=no"; } > "$d/scripts/lanes.conf"
+            (cd "$d" && git init -q . && ITO_DIR="$root" bash scripts/lanes.sh sync >/dev/null && ITO_DIR="$root" bash scripts/lanes.sh check >/dev/null) || { echo "lanes: render tui=$tui linux=$linux failed"; rm -rf "$tmp"; return 1; }
+        done
+    done
+    python3 - "$tmp" <<'PY'
+import glob, sys
+files = [f.replace("\\", "/") for f in glob.glob(sys.argv[1] + "/*/.github/workflows/*.yml")]  # Windows Python joins with backslashes
+for f in files:
+    if "# lanes:" in open(f, encoding="utf-8").read():
+        sys.exit("%s: a lanes: marker is left" % f)
+releases = [f for f in files if f.endswith("/release.yml")]
+if len(releases) != 4:
+    sys.exit("lanes: release.yml was written in %d of the 4 combinations" % len(releases))
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)  # Without PyYAML only the YAML part is skipped.
+for f in files:
+    d = yaml.safe_load(open(f, encoding="utf-8").read())
+    if f.endswith("/release.yml"):
+        tui, linux = f.split("/")[-4].split("-")
+        jobs = d["jobs"]
+        if ("tui" in jobs) != (tui == "yes") or ("tui" in jobs["sums"]["needs"]) != (tui == "yes"):
+            sys.exit("%s: tui job and sums.needs disagree" % f)
+        names = [e["name"] for e in jobs["unix"]["strategy"]["matrix"]["include"]]
+        if (("linux-x64" in names) != (linux == "yes")) or ("macos-arm64" not in names):
+            sys.exit("%s: unix matrix is %s" % (f, names))
+PY
+    rc=$?
+    rm -rf "$tmp"
+    return $rc
+}
+run render_combos
 echo "ALL OK: $tests"

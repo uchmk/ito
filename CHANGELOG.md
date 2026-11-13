@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.296.0] - 2026-11-13
+
+### 追加
+
+- `ito-common`: `ioerror`: `std::io::Error` を、窓の言語の短い言葉にする（ito#221）。`problem(&e) -> Problem`（`NotFound`・`NoPermission`・`InUse`（ほかのプログラムが開いている・ロック。Windows の 32・33）・`AlreadyExists`・`DiskFull`・`QuotaExceeded`・`ReadOnly`・`NameTooLong`・`BadName`・`NotEmpty`・`IsFolder`・`NotFolder`・`NotReady`・`TooLarge`・`OtherDrive`・`Network`・`TimedOut`・`BadData`・`CutShort`・`Other`。`#[non_exhaustive]`）、`words(&e, lang)`（「見つかりません」「ほかのプログラムが使っています」のような、アプリの文の中に入れる短い言葉。終わりに「。」を付けない。OS の文は入れない。わからないものは「予期しないエラーです（OS のコード N）」）、`Problem::words(lang)`、ログ用の `detail(&e)`（「os error 3: …」。std が付ける「(os error N)」は外す）。OS ごとに番号の意味が違う（Windows の 32 は使用中、Unix の 32 は EPIPE）ので、番号は OS ごとの表で読み、残りは `ErrorKind` で読む。`io::Error::new(kind, 内の io::Error)` で包んだものは、`problem`・`words`・`detail` のどれも 1 段だけ中を読む。
+- lanes: ワークフローの雛形に、書くか書かないかを切り替えるところ（`# lanes:begin <名前>`〜`# lanes:end <名前>` の行で囲む）。切れていれば印ごと書かず、入っていれば印の行だけ消すので、書いたワークフローに印は残らない。対になっていない印は `lanes.sh` が落とす。
+- lanes: `lanes.conf` の `release_linux=no` で、release.yml の `unix` から Linux の 2 つ（`linux-x64`・`linux-arm64`）を書かない（ito#220）。macOS の 2 つは残る。tui の Linux には効かない（tui は Linux だけの別のもの）。無い・ほかの値は今までどおり。
+
+### 修正
+
+- lanes: `tui_crate` が無いアプリの release.yml に、飛ばされるだけの `tui` ジョブと `sums` の `needs: tui` を書かなくなった（ito#219）。`tui` のジョブの `if:` は要らなくなったので外した。
+- lanes: release.yml と release-sums.yml の「六つそろったら」のコメントを、Linux を書かないアプリでも合う形にした。
+- verify.sh: ワークフローの雛形を、tui あり・なし × linux あり・なしの 4 通り、本物の `lanes.sh sync` と `check` で書いて YAML として読み、印の残り・対になっていない印・tui のジョブと `sums.needs` の食い違い・`unix` の Linux の有無を落とす（PyYAML が無ければ YAML として読む部分だけ飛ばす）。
+
+### 使う側がやること
+
+- lanes を使うアプリ: `rev` を上げて `scripts/lanes.sh sync`。`tui_crate` の無いアプリは release.yml から `tui` ジョブが消える。Linux の tarball を出さないアプリ（koyomi）は `lanes.conf` に `release_linux=no` を足してから `sync`。tui のあるアプリ（yagura）は、書いたものの違いはコメントと `tui` の `if:` が消えることだけ。
+- io のエラーを画面に出しているところは、OS の文の代わりに `ito_common::ioerror::words(&e, lang)` を、ログには `detail(&e)` を使える。
+
 ## [0.295.0] - 2026-11-13
 
 ### 追加

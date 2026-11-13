@@ -23,6 +23,7 @@ pub mod bundle;
 pub mod dirwatch;
 pub mod filename;
 pub mod fonts;
+pub mod ioerror;
 pub mod kept;
 #[cfg(feature = "clock")]
 pub mod now;

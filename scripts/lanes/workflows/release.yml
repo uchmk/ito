@@ -9,7 +9,8 @@ name: Release
 # the last one has its tag: the notes start from the previous tag, and one not
 # made yet sends them back a release further, repeating it.
 #
-# Six files on two jobs (eight with a terminal version, on a third): Windows builds both its architectures on the one x64
+# Six files on two jobs (four with release_linux=no; two more with a terminal
+# version, on a third): Windows builds both its architectures on the one x64
 # runner; macOS and Linux build where they run, after the Windows job has made
 # the release.
 
@@ -210,12 +211,14 @@ jobs:
           - name: macos-x64
             os: macos-15
             target: x86_64-apple-darwin
+          # lanes:begin linux
           - name: linux-x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - name: linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+          # lanes:end linux
     name: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v7
@@ -255,12 +258,13 @@ jobs:
           files: dist/*.tar.gz
           fail_on_unmatched_files: true
 
+  # lanes:begin tui
   # The terminal version, for apps whose lanes.conf has tui_crate and tui_bin
-  # (the job is skipped otherwise): Linux only, as a second pair of .tar.gz
-  # beside the app's own, because a server has no window to open.
+  # (left out of the written workflow otherwise): Linux only, as a second pair
+  # of .tar.gz beside the app's own, because a server has no window to open.
+  # release_linux=no does not touch it.
   tui:
     needs: windows
-    if: ${{ '{{tui_crate}}' != '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -305,11 +309,17 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist/*.tar.gz
           fail_on_unmatched_files: true
+  # lanes:end tui
 
   # Every asset's SHA-256, and each Windows zip's files, onto the release
-  # page once all six are there (release-sums.yml; also runs by hand).
+  # page once the built assets are there (release-sums.yml; also runs by hand).
   sums:
+    # lanes:begin tui
     needs: [windows, unix, tui]
+    # lanes:end tui
+    # lanes:begin no-tui
+    needs: [windows, unix]
+    # lanes:end no-tui
     if: always() && needs.windows.result == 'success'
     uses: ./.github/workflows/release-sums.yml
     with:

@@ -19,7 +19,12 @@
 #
 # Workflows: ito's scripts/lanes/workflows/*.yml are templates with {{app}},
 # {{crate}} and {{bin}} (lanes.conf's values; {{tui_crate}} and {{tui_bin}} too,
-# empty unless the app has a terminal version). lanes.conf's `workflows=` names
+# empty unless the app has a terminal version). A template can mark blocks that
+# are left out: `# lanes:begin <name>` ... `# lanes:end <name>` on lines of their
+# own (the markers never reach the written file). The blocks: `tui` (kept when
+# lanes.conf has a non-empty tui_crate), `no-tui` (kept when it has not), and
+# `linux` (release.yml's two plain Linux tarballs; left out by `release_linux=no`,
+# anything else or absent keeps them). lanes.conf's `workflows=` names
 # the ones the app takes; sync writes them to .github/workflows/ with a header
 # line, and check fails when a written copy differs. An app that names none
 # keeps its own workflows.
@@ -56,10 +61,29 @@ workflows=$(conf workflows | tr ' ' '
 for w in $workflows; do
     [ -f "$src/workflows/$w" ] || { echo "lanes: scripts/lanes.conf names workflow $w, which ito's workflows/ does not have" >&2; exit 2; }
 done
-# One workflow, as it is written for this app.
+# One workflow, as it is written for this app. A block in a template is
+# `# lanes:begin <name>` ... `# lanes:end <name>` on lines of their own: the
+# block is deleted, markers included, when its switch is off, and only the two
+# marker lines are deleted when it is on, so a written workflow has none.
+# A template whose begins and ends do not pair up is refused before any of it
+# is cut (a lone begin would otherwise cut the file to its end).
+balanced() {
+    awk '/^ *# lanes:(begin|end) / { if ($2 == "lanes:begin") s[++d] = $3; else if (d > 0 && s[d] == $3) d--; else { bad = 1; exit } }
+        END { exit (bad || d > 0) }' "$1"
+}
+leave_out() { sed -e "/^ *# lanes:begin $1\$/,/^ *# lanes:end $1\$/d"; }
+keep_in() { sed -e "/^ *# lanes:begin $1\$/d" -e "/^ *# lanes:end $1\$/d"; }
 render() {
+    local tui=keep_in no_tui=leave_out linux=keep_in
+    [ -n "$(conf tui_crate)" ] || { tui=leave_out; no_tui=keep_in; }
+    [ "$(conf release_linux)" != no ] || linux=leave_out
+    balanced "$src/workflows/$1" || { echo "lanes: $1 has a lanes:begin and lanes:end that do not pair up" >&2; return 1; }
+    local out
+    out=$(sed -e "s/{{app}}/$(conf app)/g" -e "s/{{crate}}/$(conf crate)/g" -e "s/{{bin}}/$(conf bin)/g" -e "s/{{tui_crate}}/$(conf tui_crate)/g" -e "s/{{tui_bin}}/$(conf tui_bin)/g" "$src/workflows/$1" \
+        | $tui tui | $no_tui no-tui | $linux linux)
+    case "$out" in *'# lanes:'*) echo "lanes: $1 has a lanes: marker this lanes.sh does not know" >&2; return 1 ;; esac
     echo "# Source is uchmk/ito scripts/lanes/workflows/$1; written by scripts/lanes.sh sync, so edit ito's."
-    sed -e "s/{{app}}/$(conf app)/g" -e "s/{{crate}}/$(conf crate)/g" -e "s/{{bin}}/$(conf bin)/g" -e "s/{{tui_crate}}/$(conf tui_crate)/g" -e "s/{{tui_bin}}/$(conf tui_bin)/g" "$src/workflows/$1"
+    printf '%s\n' "$out"
 }
 
 case "${1:-}" in
