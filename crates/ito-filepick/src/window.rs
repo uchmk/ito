@@ -39,7 +39,7 @@ pub(crate) struct UiState {
     focus_path: bool,
     focus_list: bool,
     focus_name: bool,
-    name_id: Option<Id>,
+    pub(crate) name_id: Option<Id>,
     list_id: Option<Id>,
     pub(crate) path_id: Option<Id>,
     scroll_y: f32,
@@ -54,6 +54,12 @@ pub(crate) struct UiState {
     keep_caret: bool,
     composing: bool,
     foreign_focus: bool,
+    /// The name the replace question was last seen asking about (to notice it opening).
+    asked: Option<String>,
+    /// Which button of the replace question the keyboard is on: 0 Replace, 1 Cancel.
+    replace_focus: usize,
+    /// The question's title, to be announced once in the next drawn frame.
+    announce: Option<String>,
 }
 
 fn z(ctx: &Context, size: f32) -> f32 {
@@ -133,13 +139,104 @@ impl Picker {
             return self.take();
         }
         let mine = Modal::layer(self.id());
+        self.note_question(ctx, look);
         self.keys(ctx, mine);
         if self.is_done() {
             return self.take();
         }
         self.window(ctx, look);
+        self.note_question(ctx, look);
+        self.question(ctx, look);
         self.ui.foreign_focus = foreign_focus(ctx, mine);
         self.take()
+    }
+
+    // ---- The replace question ----
+
+    /// Notice the question opening: the keyboard goes to Cancel, the name box lets go of the focus, and the title is to be
+    /// announced.
+    fn note_question(&mut self, ctx: &Context, look: &Look) {
+        let now = self.replace_question().map(str::to_owned);
+        if now == self.ui.asked {
+            return;
+        }
+        if let Some(name) = &now {
+            self.ui.replace_focus = 1;
+            self.ui.focus_name = false;
+            self.ui.focus_list = false;
+            self.ui.announce = Some(look.words.replace_title.replace("{name}", name));
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+        }
+        self.ui.asked = now;
+    }
+
+    /// Draw the question over the dialog (outside its modal) and take a click on its buttons.
+    fn question(&mut self, ctx: &Context, look: &Look) {
+        let Some(name) = self.replace_question().map(str::to_owned) else { return };
+        let words = look.words;
+        let c = colors();
+        let style = ito_confirm::Style {
+            panel: c.panel,
+            border: c.border_strong(),
+            accent: Some(c.err),
+            title: c.strong(),
+            text: c.fg,
+            dim: c.dim,
+            warn: c.wait,
+            button_bg: c.bg,
+            button_text: c.fg,
+        };
+        let title = words.replace_title.replace("{name}", &name);
+        let body = [words.replace_body.clone()];
+        let buttons = [words.replace.clone(), words.cancel.clone()];
+        let q = ito_confirm::Question {
+            title: &title,
+            body: &body,
+            buttons: &buttons,
+            primary: Some(0),
+            danger: true,
+            focus: Some(self.ui.replace_focus),
+            ..Default::default()
+        };
+        match ito_confirm::show(ctx, &q, &style) {
+            Some(0) => self.answer_replace(true),
+            Some(_) => self.answer_no(),
+            None => {}
+        }
+    }
+
+    fn answer_no(&mut self) {
+        self.answer_replace(false);
+        self.ui.focus_name = true;
+    }
+
+    /// The keys while the question is open: Esc says no, Enter presses the button the keyboard is on, the arrows and Tab move
+    /// between the two. Every key and text event of the frame is dropped, so nothing reaches the name box or the list.
+    fn question_keys(&mut self, ctx: &Context) {
+        let none = Modifiers::NONE;
+        if take_key(ctx, none, Key::Escape) {
+            self.answer_no();
+        } else if take_key(ctx, none, Key::Enter) {
+            if self.ui.replace_focus == 0 {
+                self.answer_replace(true);
+            } else {
+                self.answer_no();
+            }
+        } else if take_key(ctx, none, Key::ArrowLeft) {
+            self.ui.replace_focus = 0;
+        } else if take_key(ctx, none, Key::ArrowRight) {
+            self.ui.replace_focus = 1;
+        } else if take_key(ctx, none, Key::Tab) || take_key(ctx, Modifiers::SHIFT, Key::Tab) {
+            self.ui.replace_focus = 1 - self.ui.replace_focus.min(1);
+        }
+        ctx.input_mut(|i| {
+            i.events
+                .retain(|e| !matches!(e, Event::Key { .. } | Event::Text(_) | Event::Ime(_) | Event::Paste(_) | Event::Copy | Event::Cut))
+        });
     }
 
     // ---- Keys ----
@@ -160,6 +257,12 @@ impl Picker {
         let focus = ctx.memory(|m| m.focused());
         // egui clears the focus on Escape before this runs, so the end of the last frame counts too.
         let over = self.ui.foreign_focus || foreign_focus(ctx, mine);
+        if self.replace_question().is_some() {
+            if top && !egui::Popup::is_any_open(ctx) && !over {
+                self.question_keys(ctx);
+            }
+            return;
+        }
         if !top || egui::Popup::is_any_open(ctx) || over || self.ui.composing {
             return;
         }
@@ -283,6 +386,9 @@ impl Picker {
             .backdrop_color(Color32::from_black_alpha(110))
             .show(ctx, |ui| {
                 let (outer, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
+                if self.replace_question().is_some() {
+                    ui.disable();
+                }
                 self.contents(ui, outer, look);
             });
     }
@@ -337,11 +443,31 @@ impl Picker {
         } else {
             None
         };
-        if let Some(id) = focus_id {
+        if self.replace_question().is_some() {
+            self.ui.started = true;
+        } else if let Some(id) = focus_id {
+            let first = !self.ui.started;
             ctx.memory_mut(|mem| mem.request_focus(id));
             self.ui.focus_list = false;
             self.ui.focus_name = false;
             self.ui.started = true;
+            if first && self.mode() == Mode::SaveFile && Some(id) == self.ui.name_id {
+                // Save as: the name is selected up to its extension, so typing replaces the stem.
+                let name = self.name();
+                let end = if crate::extension(name).is_some() {
+                    name.rfind('.').map_or(name.len(), |b| name[..b].chars().count())
+                } else {
+                    name.chars().count()
+                };
+                if let Some(mut st) = egui::TextEdit::load_state(&ctx, id) {
+                    let range = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end));
+                    st.cursor.set_char_range(Some(range));
+                    st.store(&ctx, id);
+                }
+            }
+        }
+        if let Some(text) = self.ui.announce.take() {
+            ito_a11y::announce(ui, &text);
         }
     }
 
@@ -925,8 +1051,12 @@ impl Picker {
             self.set_name(&text);
         }
         if resp.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) && !self.ui.composing && self.window_active(&ctx) {
-            self.accept();
-            self.ui.focus_name = true;
+            // Save as: Enter does what the button does, so a disabled button means Enter does nothing.
+            if self.mode() != Mode::SaveFile || self.can_accept() {
+                self.accept();
+            }
+            // A replace question that this Enter opened has the keyboard.
+            self.ui.focus_name = self.replace_question().is_none();
         }
         // The select has the width ito-prefs gives it, so its slot is that wide and ends at the footer's right edge; it is
         // centred on the name box's middle (the select of ito-prefs takes no height).
@@ -1004,7 +1134,11 @@ impl Picker {
         }
 
         // The drawn boxes are the slots: Cancel ends at the footer's right edge, 8 apart, each at least 76 wide.
-        let ok_text = if self.mode() == Mode::OpenFolder { &words.choose } else { &words.open };
+        let ok_text = match self.mode() {
+            Mode::OpenFolder => &words.choose,
+            Mode::SaveFile if !self.opens_folder() => &words.save,
+            _ => &words.open,
+        };
         let pad = ui.spacing().button_padding.x * 2.0 + 10.0;
         let ok_w = (text_w(ui, ok_text, font.clone()) + pad).max(s(76.0));
         let cancel_w = (text_w(ui, &words.cancel, font) + pad).max(s(76.0));
@@ -1020,6 +1154,7 @@ impl Picker {
         self.put_id(&cancel, "cancel");
         if ok.clicked() {
             self.accept();
+            self.ui.focus_name = self.ui.focus_name && self.replace_question().is_none();
         }
         if cancel.clicked() {
             self.cancel();

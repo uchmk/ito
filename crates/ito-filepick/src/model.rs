@@ -5,10 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use crate::path::{is_component, PathError, Style};
+use crate::path::{has_bad_char, is_component, is_device_name, PathError, Style};
 
 /// What the dialog picks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[non_exhaustive]
 pub enum Mode {
     /// One file.
     OpenFile,
@@ -16,6 +17,8 @@ pub enum Mode {
     OpenFiles,
     /// One folder.
     OpenFolder,
+    /// One file to write: an existing one or a new name. The picker only picks the path; it never writes.
+    SaveFile,
 }
 
 /// What a place in the places column is.
@@ -244,7 +247,39 @@ pub enum InputError {
     CannotOpen,
     /// Several quoted names were typed (Windows).
     OneName,
+    /// The name cannot be a file name (save mode).
+    BadName {
+        name: String,
+        why: NameFault,
+    },
+    /// The name is an existing folder, special item or unknown item in this folder (save mode).
+    CannotReplace {
+        name: String,
+    },
+    /// Windows: no item has exactly this name but several match it without case (save mode).
+    Ambiguous {
+        name: String,
+    },
     Path(PathError),
+}
+
+/// Why a name cannot be a file name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[non_exhaustive]
+pub enum NameFault {
+    /// A NUL or control character, or on Windows a character Windows does not allow in a name (`: * ? " < > |`).
+    Char,
+    /// A Windows device name such as `CON`, `nul.txt` or `COM1`.
+    Reserved,
+    /// Windows: the name ends with a dot.
+    Trailing,
+}
+
+/// Where a name is among the entries (save mode).
+enum Found {
+    At(usize),
+    Missing,
+    Ambiguous,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -314,6 +349,10 @@ pub struct Picker {
     finished: bool,
     ahead: String,
     ahead_at: Option<Instant>,
+    save_name: String,
+    confirm_replace: bool,
+    asking: Option<String>,
+    replaces: Option<bool>,
     #[cfg(feature = "egui")]
     pub(crate) ui: crate::window::UiState,
 }
@@ -367,6 +406,10 @@ impl Picker {
             finished: false,
             ahead: String::new(),
             ahead_at: None,
+            save_name: String::new(),
+            confirm_replace: true,
+            asking: None,
+            replaces: None,
             #[cfg(feature = "egui")]
             ui: Default::default(),
         }
@@ -400,6 +443,7 @@ impl Picker {
     pub fn file_name(mut self, name: &str) -> Self {
         self.first_name = Some(name.to_owned());
         self.name = name.to_owned();
+        self.save_name = name.to_owned();
         self.edited = !name.is_empty();
         self
     }
@@ -409,6 +453,12 @@ impl Picker {
     }
     pub fn show_hidden(mut self, on: bool) -> Self {
         self.hidden = on;
+        self
+    }
+    /// `SaveFile`: ask before picking an existing file (default `true`). With `false` an existing file is picked at once
+    /// and [`replaces`](Self::replaces) says `Some(true)`.
+    pub fn confirm_replace(mut self, on: bool) -> Self {
+        self.confirm_replace = on;
         self
     }
 
@@ -422,7 +472,8 @@ impl Picker {
 
     /// The answer to a [`Want::List`]. `false`: it was dropped (an old ticket, or the dialog is over).
     pub fn set_listing(&mut self, ticket: Ticket, listing: Result<Listing, String>) -> bool {
-        if self.finished || self.live != Some(ticket) {
+        // While the replace question is open the listing behind it stays as it is; the answer lists again if one was lost.
+        if self.locked() || self.live != Some(ticket) {
             return false;
         }
         self.live = None;
@@ -487,7 +538,11 @@ impl Picker {
         }
         if let Some(p) = self.pending.take() {
             if p.ticket == ticket && p.rev == self.rev {
-                self.lookup(&p.name);
+                if self.mode == Mode::SaveFile {
+                    self.save_lookup(&p.name);
+                } else {
+                    self.lookup(&p.name);
+                }
             }
         }
     }
@@ -652,7 +707,8 @@ impl Picker {
         let path = start.or_else(|| self.places.first().and_then(|p| resolved(&p.path.clone()))).unwrap_or_else(|| root.to_owned());
         self.request(path, Nav::Push, false);
         self.path_error = err;
-        self.select_first = self.first_name.clone();
+        // Save mode selects nothing at first: the name box holds the name.
+        self.select_first = self.first_name.clone().filter(|_| self.mode != Mode::SaveFile);
     }
 
     fn request(&mut self, path: String, nav: Nav, clear_name: bool) {
@@ -678,8 +734,15 @@ impl Picker {
         self.path_error = None;
         self.ahead.clear();
         if clear_name {
-            self.name.clear();
-            self.edited = false;
+            if self.mode == Mode::SaveFile {
+                // Navigation keeps the name; a plain name is what the box goes back to when typed text only navigates.
+                if self.plain_name() {
+                    self.save_name = self.typed().to_owned();
+                }
+            } else {
+                self.name.clear();
+                self.edited = false;
+            }
             self.rev += 1;
         }
         match nav {
@@ -700,7 +763,7 @@ impl Picker {
 
     /// Go to a place, a crumb, or a path the person edited (read against [`target`](Self::target)).
     pub fn go(&mut self, path: &str) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -710,7 +773,7 @@ impl Picker {
         }
     }
     pub fn up(&mut self) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -721,7 +784,7 @@ impl Picker {
         }
     }
     pub fn back(&mut self) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -732,7 +795,7 @@ impl Picker {
         }
     }
     pub fn forward(&mut self) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -744,7 +807,7 @@ impl Picker {
     }
     /// List the same folder again, keeping the selection and the cursor by name.
     pub fn refresh(&mut self) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -818,6 +881,15 @@ impl Picker {
 
     /// The name box's text for the selection: one name, or several quoted (for display only).
     fn write_name(&mut self) {
+        if self.mode == Mode::SaveFile {
+            // Only one file names the save; a folder or nothing leaves the typed name alone.
+            let files: Vec<usize> = self.selected.iter().copied().filter(|&i| self.entries[i].kind == Kind::File).collect();
+            if let [i] = files[..] {
+                self.name = self.entries[i].name.clone();
+                self.save_name = self.name.clone();
+            }
+            return;
+        }
         let names = self.selected_names();
         self.name = match names.len() {
             0 => String::new(),
@@ -843,7 +915,7 @@ impl Picker {
 
     /// The cursor goes to `row` and it is the only thing selected (when it can be picked).
     pub fn set_cursor(&mut self, row: usize) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -860,7 +932,7 @@ impl Picker {
 
     /// Move the cursor `by` rows (clamped). `extend` (many-file mode) selects from the anchor to the cursor.
     pub fn move_cursor(&mut self, by: isize, extend: bool) {
-        if self.finished || self.rows.is_empty() {
+        if self.locked() || self.rows.is_empty() {
             return;
         }
         self.begin();
@@ -888,7 +960,7 @@ impl Picker {
 
     /// A click on `row`. `toggle` (Ctrl/Cmd) and `extend` (Shift) work in many-file mode only.
     pub fn click(&mut self, row: usize, toggle: bool, extend: bool) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -913,7 +985,7 @@ impl Picker {
 
     /// Select every file shown (many-file mode).
     pub fn select_all(&mut self) {
-        if self.finished || self.mode != Mode::OpenFiles {
+        if self.locked() || self.mode != Mode::OpenFiles {
             return;
         }
         self.selected = self.rows.iter().copied().filter(|&i| self.entries[i].kind == Kind::File).collect();
@@ -922,7 +994,7 @@ impl Picker {
 
     /// A double click, or Enter, on `row`.
     pub fn open_row(&mut self, row: usize) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
@@ -932,6 +1004,16 @@ impl Picker {
             Kind::Dir => {
                 let name = e.name.clone();
                 self.go_into(&name);
+            }
+            Kind::File if self.mode == Mode::SaveFile => {
+                let name = e.name.clone();
+                self.error = None;
+                self.replace_flow(name);
+            }
+            Kind::Other | Kind::Unknown if self.mode == Mode::SaveFile => {
+                let name = e.name.clone();
+                self.save_name = name.clone();
+                self.error = Some(InputError::CannotReplace { name });
             }
             Kind::File if self.mode != Mode::OpenFolder => {
                 let paths = if self.mode == Mode::OpenFiles && self.selected.contains(&i) {
@@ -957,7 +1039,7 @@ impl Picker {
 
     /// The person typed in the name box.
     pub fn set_name(&mut self, text: &str) {
-        if self.finished || self.name == text {
+        if self.locked() || self.name == text {
             return;
         }
         self.name = text.to_owned();
@@ -969,8 +1051,11 @@ impl Picker {
 
     /// Whether [`accept`](Self::accept) would do anything (the main button is enabled).
     pub fn can_accept(&self) -> bool {
-        if self.finished {
+        if self.locked() {
             return false;
+        }
+        if self.mode == Mode::SaveFile {
+            return self.can_accept_save();
         }
         let ready = self.status == St::Ready;
         if !self.edited && !self.selected.is_empty() {
@@ -1001,11 +1086,15 @@ impl Picker {
 
     /// The main button, or Enter in the name box.
     pub fn accept(&mut self) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         self.begin();
         self.error = None;
+        if self.mode == Mode::SaveFile {
+            self.accept_save();
+            return;
+        }
         if !self.edited && !self.selected.is_empty() {
             self.accept_selection();
         } else {
@@ -1125,24 +1214,271 @@ impl Picker {
         self.want = None;
         self.live = None;
         self.pending = None;
+        self.asking = None;
     }
 
     pub fn cancel(&mut self) {
         self.finish(Done::Cancelled);
     }
 
-    // ---- Filter, sort, hidden ----
+    // ---- Saving ----
 
-    pub fn set_filter(&mut self, i: usize) {
+    /// No action of the model runs: the dialog is over, or the replace question is open (only `cancel` and
+    /// [`answer_replace`](Self::answer_replace) act then).
+    fn locked(&self) -> bool {
+        self.finished || self.asking.is_some()
+    }
+
+    /// `SaveFile`: whether the path picked is a file that was in the listing. `Some(true)`: it is, whether or not the
+    /// listing was complete. `Some(false)`: it is not and the listing was complete. `None`: it is not in an incomplete
+    /// listing (cut off, or items left out), the mode is not `SaveFile`, or nothing was picked (open, or cancelled).
+    /// Still readable after [`take`](Self::take) handed out the end. The listing is a snapshot: whoever writes the file
+    /// must check again when it writes.
+    pub fn replaces(&self) -> Option<bool> {
+        self.replaces
+    }
+
+    /// The name the replace question is about while it is open (`SaveFile`): the listing's spelling.
+    pub fn replace_question(&self) -> Option<&str> {
+        self.asking.as_deref()
+    }
+
+    /// Answer the replace question. `true`: pick the file ([`replaces`](Self::replaces) is `Some(true)`). `false`: close
+    /// the question; the name box keeps the name. Nothing happens when no question is open.
+    pub fn answer_replace(&mut self, yes: bool) {
         if self.finished {
             return;
         }
-        self.filter_i = i.min(self.filters.len());
+        let Some(name) = self.asking.take() else { return };
+        if yes {
+            self.replaces = Some(true);
+            let p = self.style.join(&self.target, &name);
+            self.finish(Done::Picked(vec![p]));
+        }
+    }
+
+    /// Whether the main button opens a folder (`SaveFile`: a folder is selected and nothing was typed since) rather than
+    /// saves.
+    pub fn opens_folder(&self) -> bool {
+        self.mode == Mode::SaveFile && self.open_case().is_some()
+    }
+
+    /// The one selected folder when nothing was typed since (`SaveFile`).
+    fn open_case(&self) -> Option<usize> {
+        if self.edited {
+            return None;
+        }
+        match self.selected.iter().copied().collect::<Vec<_>>()[..] {
+            [i] if self.entries[i].kind == Kind::Dir => Some(i),
+            _ => None,
+        }
+    }
+
+    /// The typed text is one name: not empty, no separator, not absolute, not `.` or `..`.
+    fn plain_name(&self) -> bool {
+        let t = self.typed();
+        !t.is_empty() && !self.style.has_sep(t) && !self.style.is_absolute(t) && t != "." && t != ".."
+    }
+
+    /// The text only navigates: it ends with a separator or its last component is `.` or `..`.
+    fn nav_only(&self, t: &str) -> bool {
+        let last = t.rsplit(|c| self.style.is_sep(c)).next().unwrap_or("");
+        t.chars().last().is_some_and(|c| self.style.is_sep(c)) || last == "." || last == ".."
+    }
+
+    fn can_accept_save(&self) -> bool {
+        if self.open_case().is_some() {
+            return true;
+        }
+        let t = self.typed();
+        if t.is_empty() {
+            return false;
+        }
+        self.nav_only(t) || self.style.has_sep(t) || self.style.is_absolute(t) || self.status == St::Ready
+    }
+
+    fn find(&self, name: &str) -> Found {
+        if let Some(i) = self.entries.iter().position(|e| e.name == name) {
+            return Found::At(i);
+        }
+        if self.style == Style::Windows {
+            let mut it = self.entries.iter().enumerate().filter(|(_, e)| self.style.same_name(&e.name, name)).map(|(i, _)| i);
+            match (it.next(), it.next()) {
+                (Some(i), None) => return Found::At(i),
+                (Some(_), Some(_)) => return Found::Ambiguous,
+                _ => {}
+            }
+        }
+        Found::Missing
+    }
+
+    /// The extension a save adds when the name has none: the first extension of filter `i`, if it is a plain one.
+    fn default_ext_of(&self, i: usize) -> Option<&str> {
+        let e = self.filters.get(i)?.extensions.first()?.as_str();
+        let bad = |c: char| matches!(c, '.' | '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | ' ') || c.is_control();
+        (!e.is_empty() && !e.chars().any(bad)).then_some(e)
+    }
+
+    /// `name` with its extension changed from filter `old` to filter `new`, when that applies.
+    fn swap_extension(&self, name: &str, old: usize, new: usize) -> Option<String> {
+        let had = self.filters.get(old).filter(|f| !f.extensions.is_empty())?;
+        extension(name).filter(|x| had.extensions.contains(x))?;
+        let to = self.default_ext_of(new)?;
+        // Cut at the dot in the name itself: the lowercased extension can be longer or shorter in bytes.
+        let (stem, _) = name.rsplit_once('.')?;
+        Some(format!("{stem}.{to}"))
+    }
+
+    fn accept_save(&mut self) {
+        if let Some(i) = self.open_case() {
+            let n = self.entries[i].name.clone();
+            self.go_into(&n);
+            return;
+        }
+        let text = self.typed().to_owned();
+        let style = self.style;
+        if text.is_empty() {
+            return;
+        }
+        if style == Style::Windows && text.contains('"') {
+            self.error = Some(InputError::BadName { name: text, why: NameFault::Char });
+            return;
+        }
+        if self.nav_only(&text) {
+            match style.resolve(&text, &self.target) {
+                Err(e) => self.error = Some(InputError::Path(e)),
+                Ok(p) => self.navigate_to(p),
+            }
+        } else if style.has_sep(&text) || style.is_absolute(&text) {
+            match style.resolve(&text, &self.target) {
+                Err(e) => self.error = Some(InputError::Path(e)),
+                Ok(p) => match style.parent(&p).zip(style.last_part(&p)) {
+                    Some((parent, last)) => {
+                        if self.status == St::Ready && style.same(&parent, &self.target) {
+                            self.save_lookup(&last);
+                        } else {
+                            self.request(parent, Nav::Push, false);
+                            self.name = last.clone();
+                            self.pending = Some(Pending { ticket: Ticket(self.next_ticket), name: last, rev: self.rev });
+                        }
+                    }
+                    // A root has no name to save.
+                    None => self.navigate_to(p),
+                },
+            }
+        } else if self.status == St::Ready {
+            self.save_lookup(&text);
+        }
+    }
+
+    /// Typed text that only navigates: the name box goes back to the saved name.
+    fn navigate_to(&mut self, p: String) {
+        self.name = self.save_name.clone();
+        if self.style.same(&p, &self.target) {
+            self.rev += 1;
+            self.pending = None;
+        } else {
+            self.request(p, Nav::Push, true);
+        }
+    }
+
+    fn save_lookup(&mut self, name: &str) {
+        if let Found::At(i) = self.find(name) {
+            if self.entries[i].kind == Kind::Dir {
+                let n = self.entries[i].name.clone();
+                self.name = self.save_name.clone();
+                self.go_into(&n);
+                return;
+            }
+        }
+        let add = self
+            .default_ext_of(self.filter_i.min(self.filters.len()))
+            .filter(|_| extension(name).is_none() && !name.starts_with('.') && !name.ends_with('.'));
+        let fin = match add {
+            Some(ext) => format!("{name}.{ext}"),
+            None => name.to_owned(),
+        };
+        self.name = fin.clone();
+        let why = if fin.chars().any(|c| c == '\0' || c.is_control()) {
+            Some(NameFault::Char)
+        } else if self.style == Style::Windows {
+            if has_bad_char(&fin) {
+                Some(NameFault::Char)
+            } else if is_device_name(&fin) {
+                Some(NameFault::Reserved)
+            } else if fin.ends_with('.') {
+                Some(NameFault::Trailing)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            self.error = Some(InputError::BadName { name: fin, why });
+            return;
+        }
+        match self.find(&fin) {
+            Found::At(i) => {
+                let e = &self.entries[i];
+                let n = e.name.clone();
+                if e.kind == Kind::File {
+                    self.replace_flow(n);
+                } else {
+                    self.name = n.clone();
+                    self.save_name = n.clone();
+                    self.error = Some(InputError::CannotReplace { name: n });
+                }
+            }
+            Found::Ambiguous => self.error = Some(InputError::Ambiguous { name: fin }),
+            Found::Missing => {
+                self.save_name = fin.clone();
+                self.replaces = if self.incomplete() { None } else { Some(false) };
+                let p = self.style.join(&self.target, &fin);
+                self.finish(Done::Picked(vec![p]));
+            }
+        }
+    }
+
+    /// An existing file `n` is the save: ask first, or pick at once.
+    fn replace_flow(&mut self, n: String) {
+        self.name = n.clone();
+        self.save_name = n.clone();
+        if self.confirm_replace {
+            self.asking = Some(n);
+        } else {
+            self.replaces = Some(true);
+            let p = self.style.join(&self.target, &n);
+            self.finish(Done::Picked(vec![p]));
+        }
+    }
+
+    // ---- Filter, sort, hidden ----
+
+    pub fn set_filter(&mut self, i: usize) {
+        if self.locked() {
+            return;
+        }
+        let (old, new) = (self.filter_i.min(self.filters.len()), i.min(self.filters.len()));
+        self.filter_i = new;
+        if self.mode == Mode::SaveFile && old != new {
+            let name = if self.plain_name() { self.swap_extension(self.typed(), old, new) } else { None };
+            let saved = self.swap_extension(&self.save_name, old, new);
+            if let Some(n) = name {
+                self.name = n;
+                self.rev += 1;
+                self.pending = None;
+                self.error = None;
+            }
+            if let Some(n) = saved {
+                self.save_name = n;
+            }
+        }
         self.rebuild_keep();
     }
     /// Sort by `by`; the same column again flips the order.
     pub fn set_sort(&mut self, by: Sort) {
-        if self.finished {
+        if self.locked() {
             return;
         }
         if by == self.sort {
@@ -1154,7 +1490,7 @@ impl Picker {
         self.rebuild_keep();
     }
     pub fn set_show_hidden(&mut self, on: bool) {
-        if self.finished || self.hidden == on {
+        if self.locked() || self.hidden == on {
             return;
         }
         self.hidden = on;
@@ -1166,7 +1502,7 @@ impl Picker {
     /// Committed text typed with the list focused: jump to the next name that starts with it. The prefix resets after one
     /// second; the same letter again goes on to the next name starting with it.
     pub fn type_ahead(&mut self, text: &str, now: Instant) {
-        if self.finished || self.rows.is_empty() || text.is_empty() || text.chars().any(char::is_control) {
+        if self.locked() || self.rows.is_empty() || text.is_empty() || text.chars().any(char::is_control) {
             return;
         }
         let t = text.to_lowercase();

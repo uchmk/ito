@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = []
 # `Picker::show`: the modal window.
-egui = ["dep:egui", "dep:chrono", "dep:ito-a11y", "dep:ito-common", "ito-common/clock", "dep:ito-keys", "dep:ito-prefs", "dep:ito-theme"]
+egui = ["dep:egui", "dep:chrono", "dep:ito-a11y", "dep:ito-common", "ito-common/clock", "dep:ito-confirm", "dep:ito-keys", "dep:ito-prefs", "dep:ito-theme"]
 # `Serialize` / `Deserialize` for `Entry`, `Kind`, `Listing`, `Place`, `PlaceKind` and `Style`, so an engine can send them as JSON.
 serde = ["dep:serde"]
 # `list_local`, `local_places`, `local_style`: an engine lists its own disk for a picker on another machine.
@@ -21,6 +21,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 egui = { version = "0.36", optional = true }
 ito-a11y = { path = "../ito-a11y", features = ["egui"], optional = true }
 ito-common = { path = "../ito-common", optional = true }
+ito-confirm = { path = "../ito-confirm", optional = true }
 ito-keys = { path = "../ito-keys", features = ["egui"], optional = true }
 ito-prefs = { path = "../ito-prefs", optional = true }
 ito-theme = { path = "../ito-theme", optional = true }

@@ -1,6 +1,6 @@
 //! The dialog's words. The model has none; the window asks here.
 
-use crate::model::{InputError, Kind};
+use crate::model::{InputError, Kind, NameFault};
 use crate::path::PathError;
 
 /// Every string the window shows. Build with [`Words::en`], [`Words::ja`] or [`Words::for_lang`], or fill the fields yourself.
@@ -55,6 +55,24 @@ pub struct Words {
     pub choose_folder_err: String,
     pub cannot_open: String,
     pub one_name: String,
+    /// The title of the save dialog.
+    pub save_file: String,
+    /// The save dialog's main button.
+    pub save: String,
+    /// The red button of the replace question.
+    pub replace: String,
+    /// `{name}`.
+    pub replace_title: String,
+    pub replace_body: String,
+    /// `{name}`.
+    pub cannot_replace: String,
+    /// `{name}`.
+    pub ambiguous: String,
+    /// `{name}`.
+    pub bad_char: String,
+    /// `{name}`.
+    pub reserved_name: String,
+    pub trailing: String,
     pub no_share: String,
     pub drive_relative: String,
     pub verbatim: String,
@@ -108,6 +126,16 @@ impl Words {
             choose_folder_err: s("Choose a folder, not a file."),
             cannot_open: s("This item cannot be opened."),
             one_name: s("Type one name."),
+            save_file: s("Save as"),
+            save: s("Save"),
+            replace: s("Replace"),
+            replace_title: s("Replace \"{name}\"?"),
+            replace_body: s("A file with this name is already in this folder. Saving replaces it."),
+            cannot_replace: s("\"{name}\" is not a file, so it cannot be replaced."),
+            ambiguous: s("Several items match \"{name}\". Type the name exactly as the list shows it."),
+            bad_char: s("\"{name}\" has a character that cannot be in a file name (: * ? \" < > |)."),
+            reserved_name: s("\"{name}\" is a name Windows keeps for a device. Choose another name."),
+            trailing: s("A file name cannot end with a dot."),
             no_share: s("A network path needs a server and a share."),
             drive_relative: s("A drive-relative path is not supported. Add a backslash after the drive."),
             verbatim: s("Paths starting with \\\\?\\ or \\\\.\\ are not supported."),
@@ -161,6 +189,16 @@ impl Words {
             choose_folder_err: s("ファイルではなくフォルダーを選んでください。"),
             cannot_open: s("この項目は開けません。"),
             one_name: s("名前は 1 つだけ入力してください。"),
+            save_file: s("名前を付けて保存"),
+            save: s("保存"),
+            replace: s("置き換える"),
+            replace_title: s("「{name}」を置き換えますか？"),
+            replace_body: s("このフォルダーには同じ名前のファイルが既にあります。保存すると置き換わります。"),
+            cannot_replace: s("「{name}」はファイルではないので、置き換えられません。"),
+            ambiguous: s("「{name}」に合う項目がいくつもあります。一覧のとおりに（大文字と小文字も）打ってください。"),
+            bad_char: s("「{name}」には、ファイル名に使えない文字（: * ? \" < > |）が入っています。"),
+            reserved_name: s("「{name}」は Windows が装置に使う名前です。別の名前にしてください。"),
+            trailing: s("ファイル名の終わりに「.」は使えません。"),
             no_share: s("ネットワークのパスにはサーバーと共有名が必要です。"),
             drive_relative: s("ドライブだけの相対パスは使えません。ドライブの後ろに \\ を付けてください。"),
             verbatim: s("\\\\?\\ や \\\\.\\ で始まるパスは使えません。"),
@@ -183,6 +221,7 @@ impl Words {
             crate::Mode::OpenFile => &self.open_file,
             crate::Mode::OpenFiles => &self.open_files,
             crate::Mode::OpenFolder => &self.choose_folder,
+            crate::Mode::SaveFile => &self.save_file,
         }
     }
 
@@ -195,6 +234,13 @@ impl Words {
             InputError::ChooseFolder => self.choose_folder_err.clone(),
             InputError::CannotOpen => self.cannot_open.clone(),
             InputError::OneName => self.one_name.clone(),
+            InputError::BadName { name, why } => match why {
+                NameFault::Char => self.bad_char.replace("{name}", name),
+                NameFault::Reserved => self.reserved_name.replace("{name}", name),
+                NameFault::Trailing => self.trailing.clone(),
+            },
+            InputError::CannotReplace { name } => self.cannot_replace.replace("{name}", name),
+            InputError::Ambiguous { name } => self.ambiguous.replace("{name}", name),
             InputError::Path(p) => self.path_error(p),
         }
     }

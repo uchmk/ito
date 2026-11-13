@@ -307,6 +307,32 @@ pub fn is_component(style: Style, name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains('\0') && !name.chars().any(|c| style.is_sep(c))
 }
 
+pub(crate) fn starts_ci(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+}
+
+/// Names Windows keeps for devices: `CON`, `PRN`, `AUX`, `NUL`, `COM0`..`COM9`, `LPT0`..`LPT9` (and the superscript digits)
+/// with or without an extension and with trailing dots and spaces, and `CONIN$`, `CONOUT$`, `CLOCK$` as a whole name.
+pub(crate) fn is_device_name(name: &str) -> bool {
+    let whole = name.trim_end_matches(['.', ' ']);
+    if ["CONIN$", "CONOUT$", "CLOCK$"].iter().any(|d| whole.eq_ignore_ascii_case(d)) {
+        return true;
+    }
+    let stem = name.split('.').next().unwrap_or("").trim_end_matches(['.', ' ']);
+    if ["CON", "PRN", "AUX", "NUL"].iter().any(|d| stem.eq_ignore_ascii_case(d)) {
+        return true;
+    }
+    ["COM", "LPT"].iter().any(|d| {
+        starts_ci(stem, d)
+            && matches!(&stem[d.len()..], "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}")
+    })
+}
+
+/// A character Windows does not allow in a name.
+pub(crate) fn has_bad_char(name: &str) -> bool {
+    name.chars().any(|c| matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|') || c < ' ')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +438,41 @@ mod tests {
         assert!(!is_component(W, "a/b"));
         for bad in ["", ".", "..", "a\0"] {
             assert!(!is_component(P, bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn device_names() {
+        for n in [
+            "CON",
+            "con",
+            "CON.txt",
+            "nul .txt",
+            "COM1",
+            "com9.log",
+            "COM\u{b9}",
+            "LPT0",
+            "CONIN$",
+            "conout$.",
+            "CLOCK$",
+            "prn",
+            "Aux.",
+            "com1.tar.gz",
+        ] {
+            assert!(is_device_name(n), "{n}");
+        }
+        for n in ["CONSOLE", "COM10", "LPT", "NULL.txt", "acon", ".txt", "a.con", "CONIN$x", "COM"] {
+            assert!(!is_device_name(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn bad_characters() {
+        for n in ["a:b", "a*", "a?", "a\"b", "<a", "a>", "a|b", "a\u{1}b", "a\tb"] {
+            assert!(has_bad_char(n), "{n:?}");
+        }
+        for n in ["ab", "a b", "日本語.txt", "a-b_c.d"] {
+            assert!(!has_bad_char(n), "{n:?}");
         }
     }
 }

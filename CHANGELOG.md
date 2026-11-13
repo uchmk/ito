@@ -3,6 +3,36 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.304.0] - 2026-11-13
+
+### 追加
+
+- `ito-filepick`: 保存の窓 `Mode::SaveFile`（「名前を付けて保存」。#238）。ダイアログはパスを選ぶだけで、書かない。
+  - 名前の欄に打った名前を、一覧（エンジンが渡したもの）と比べて決める。拡張子が無ければ、選んでいるフィルターの最初の拡張子を足す（`.` で始まる・終わる名前には足さない）。
+    フィルターを替えると、名前の拡張子が前のフィルターのものなら新しいフィルターのものに替える（「すべてのファイル」との行き来では替えない）。
+  - 同じ名前のファイルがあれば、置き換えてよいかを `ito-confirm` の重ね表示で聞く（題に名前・本文・赤い「置き換える」とキャンセル。キーの選択は最初はキャンセル。
+    ←→・Tab で動き、Enter で押す、Esc でキャンセル。聞いている間、後ろの窓は押せず、キーは名前の欄と一覧に届かない）。
+    `Picker::confirm_replace(false)` で聞かずに選ぶ。窓を自前で描くアプリは `replace_question()`・`answer_replace(bool)` で答える。
+  - `Picker::replaces() -> Option<bool>`: 選んだパスが一覧にあったファイルか（`Some(true)`）、無かったか（`Some(false)`）。一覧が切れていた・項目が抜けていたときに無かったものは `None`。
+    一覧はその時点の写しなので、書く側は書くときにもう一度確かめる。
+  - 打った名前を断る `InputError::BadName { name, why: NameFault }`（`NameFault::Char`: 制御文字、Windows では `: * ? " < > |`・`Reserved`: Windows の装置の名前 `CON`・`nul.txt`・`COM1` など・
+    `Trailing`: Windows で `.` で終わる名前）、`CannotReplace { name }`（フォルダー・特別な項目・種類のわからない項目）、`Ambiguous { name }`（Windows で、大文字と小文字だけが違う項目がいくつもあり、ぴったりのものが無い）。
+  - フォルダーの名前を打つ・フォルダーを 1 つ選んで（何も打たずに）押すと、そのフォルダーを開く（ボタンは「開く」になる。`opens_folder()`）。
+  - 最初の画面では、名前の欄の拡張子より前を選んでおく。
+  - `Words` に `save_file`・`save`・`replace`・`replace_title`・`replace_body`・`cannot_replace`・`ambiguous`・`bad_char`・`reserved_name`・`trailing`（en・ja）。
+  - 例 `filepick` に `--save`（`report` で Enter → `report.csv` があるので聞かれ、置き換えるを選ぶ）。
+
+### 変更
+
+- `ito-filepick`: `Mode` を `#[non_exhaustive]` にした。
+- `ito-filepick`（機能 `egui`）: `ito-confirm` に依る。
+
+### 使う側がやること
+
+- `Mode` で `match` しているなら `_` の腕を足す。
+- `Words` を `Words { .. }` の形で全部の欄を書いて作っているなら、上の 10 の欄を足す（`Words::en()`・`ja()`・`for_lang` から作っていれば何もしない）。
+- koyomi: 保存先の「参照…」は `Picker::new(id, Mode::SaveFile, style)`。`Done::Picked` のパスと `replaces()` を見て、書くときにもう一度確かめる。
+
 ## [0.303.0] - 2026-11-13
 
 ### 追加

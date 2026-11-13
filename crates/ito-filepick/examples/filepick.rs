@@ -4,6 +4,9 @@
 //! No window is opened (the workspace has no `eframe`): frames run on a bare `egui::Context` with scripted keys, and the log
 //! says what the dialog asked for and how it ended. Run: `cargo run -p ito-filepick --example filepick --features egui`.
 //!
+//! With `--save`, the dialog is Save as: a CSV / Text filter, the name `report`, a file `report.csv` and a folder `data.csv` in the
+//! start folder. The script presses Enter on `report` (it becomes `report.csv`, which exists), so the replace question opens; it answers Replace and prints `replaces()`.
+//!
 //! With feature `local` and `--local`, the engine lists this machine's real disk with `list_local` instead (it starts at
 //! home, with `local_places()`), and the run only opens the dialog and prints what it shows.
 
@@ -27,6 +30,8 @@ fn engine(wants: mpsc::Receiver<(Ticket, String)>, replies: mpsc::Sender<Reply>)
             _ => (
                 60,
                 Ok(Listing::new(vec![
+                    Entry::file("report.csv").size(2048),
+                    Entry::dir("data.csv"),
                     Entry::dir("big"),
                     Entry::dir("broken"),
                     Entry::dir("capped"),
@@ -82,6 +87,9 @@ fn main() {
     #[cfg(not(feature = "local"))]
     thread::spawn(move || engine(want_rx, reply_tx));
 
+    if std::env::args().any(|a| a == "--save") {
+        return save_demo(want_tx, reply_rx);
+    }
     let mut picker = Picker::new("demo", Mode::OpenFile, Style::Posix)
         .start("/")
         .places(vec![Place::new("Root", "/", PlaceKind::Root), Place::new("Big", "/big", PlaceKind::Folder)])
@@ -195,4 +203,55 @@ fn main() {
         picker.can_accept(),
         picker.target()
     );
+}
+
+/// Save as against the same fake engine: a new name saves at once, `report` asks first and Replace picks the file.
+fn save_demo(wants: mpsc::Sender<(Ticket, String)>, replies: mpsc::Receiver<Reply>) {
+    let mut picker = Picker::new("demo", Mode::SaveFile, Style::Posix)
+        .start("/")
+        .file_name("report")
+        .filters(vec![Filter::new("CSV", &["csv"]), Filter::new("Text", &["txt", "md"])]);
+    let (words, clock) = (Words::en(), ito_common::Clock::default());
+    let look = Look { words: &words, clock: &clock, lang: "en" };
+    let ctx = Context::default();
+    let mut step = 0;
+    for frame in 0..300 {
+        while let Ok((ticket, answer)) = replies.try_recv() {
+            println!("frame {frame}: engine answered {ticket} ({})", if answer.is_ok() { "listing" } else { "error" });
+            picker.set_listing(ticket, answer);
+        }
+        let mut events = vec![];
+        if frame == 30 && step == 0 {
+            // The listing is in: Enter on the default name `report` (-> report.csv) asks before replacing.
+            events.push(Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            step = 1;
+        }
+        if frame == 40 && step == 1 {
+            println!("frame {frame}: question {:?}, replaces {:?}", picker.replace_question(), picker.replaces());
+            picker.answer_replace(true);
+            step = 2;
+        }
+        let input = RawInput { time: Some(frame as f64 * 0.016), events, ..Default::default() };
+        let mut shown = Default::default();
+        let mut out = ctx.run_ui(input, |ui| shown = picker.show(ui.ctx(), &look));
+        out.textures_delta.clear();
+        let ito_filepick::Shown { want, done } = shown;
+        if let Some(Want::List { ticket, path }) = want {
+            println!("frame {frame}: dialog wants {path} as {ticket}");
+            wants.send((ticket, path)).expect("the engine is gone");
+        }
+        match done {
+            Some(Done::Picked(paths)) => return println!("frame {frame}: picked {paths:?}, replaces {:?}", picker.replaces()),
+            Some(Done::Cancelled) => return println!("frame {frame}: cancelled"),
+            None => {}
+        }
+        thread::sleep(Duration::from_millis(16));
+    }
+    println!("the script ended without a result: name {:?} question {:?}", picker.name(), picker.replace_question());
 }

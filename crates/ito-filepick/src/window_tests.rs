@@ -26,6 +26,8 @@ struct H {
     screen: egui::Vec2,
     /// When the last frame asked to be drawn again.
     repaint: std::time::Duration,
+    /// The labelled buttons of the last frame's accessibility tree, with their screen rectangles.
+    buttons: Vec<(String, Rect)>,
 }
 
 fn key(key: Key, modifiers: Modifiers) -> Event {
@@ -68,6 +70,7 @@ impl H {
             sent_mods: Modifiers::NONE,
             screen,
             repaint: std::time::Duration::MAX,
+            buttons: Vec::new(),
         };
         // The first frames only learn the modal layer.
         for _ in 0..frames {
@@ -102,6 +105,20 @@ impl H {
             }
         });
         out.textures_delta.clear();
+        if let Some(update) = &out.platform_output.accesskit_update {
+            self.buttons = update
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.role() == egui::accesskit::Role::Button)
+                .filter_map(|(_, n)| {
+                    let b = n.bounds()?;
+                    Some((
+                        n.label()?.to_owned(),
+                        Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)),
+                    ))
+                })
+                .collect();
+        }
         self.repaint = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(std::time::Duration::MAX, |v| v.repaint_delay);
         if let Some(w) = shown.want {
             self.wants.push(w);
@@ -747,4 +764,162 @@ fn the_filter_popup_takes_down_enter_and_escape() {
     h.key(Key::Escape);
     assert!(!egui::Popup::is_any_open(&h.ctx));
     assert!(h.done.is_none(), "the dialog stays");
+}
+
+// ---- Save as ----
+
+fn save_picker() -> Picker {
+    Picker::new("t", Mode::SaveFile, Style::Posix)
+        .start("/home/u")
+        .file_name("report")
+        .filters(vec![Filter::new("CSV", &["csv"]), Filter::new("Text", &["txt"])])
+}
+
+fn save_ready() -> H {
+    let mut h = H::new(save_picker());
+    h.answer(vec![Entry::file("report.csv").size(10), Entry::file("other.csv"), Entry::dir("sub")]);
+    h
+}
+
+impl H {
+    /// The question's button whose label starts with `text`.
+    fn qbutton(&self, text: &str) -> Rect {
+        let found: Vec<_> = self.buttons.iter().filter(|(l, _)| l.starts_with(text)).collect();
+        // The dialog's own Cancel is under the question too: the question's is the one beside Replace.
+        let near = self.buttons.iter().find(|(l, _)| l == "Replace").map(|(_, r)| r.center().y);
+        let found: Vec<_> = match near {
+            Some(y) if found.len() > 1 => found.into_iter().filter(|(_, r)| (r.center().y - y).abs() < 20.0).collect(),
+            _ => found,
+        };
+        assert_eq!(found.len(), 1, "one `{text}` button: {:?}", self.buttons);
+        found[0].1
+    }
+
+    /// Put a name in the box the way the model does (typing replaces the selected stem).
+    fn set_save_name(&mut self, name: &str) {
+        self.p.set_name(name);
+        self.frames(3);
+    }
+}
+
+#[test]
+fn save_window_says_save_as_and_save() {
+    let h = save_ready();
+    assert_eq!(h.p.name(), "report");
+    assert!(h.buttons.iter().any(|(l, _)| l.starts_with("Save")), "{:?}", h.buttons);
+    assert!(!h.buttons.iter().any(|(l, _)| l.starts_with("Open")), "{:?}", h.buttons);
+}
+
+#[test]
+fn save_window_selects_the_stem_of_the_name() {
+    let mut p = save_picker().file_name("report.final.csv");
+    p.set_name("report.final.csv");
+    let mut h = H::new(p);
+    h.answer(vec![]);
+    let id = h.p.ui.name_id.expect("the name box was drawn");
+    let st = egui::TextEdit::load_state(&h.ctx, id).expect("the name box has a state");
+    let r = st.cursor.char_range().expect("a selection");
+    let (p, q) = (r.primary.index, r.secondary.index);
+    let (a, b) = (usize::from(p.min(q)), usize::from(p.max(q)));
+    assert_eq!((a, b), (0, "report.final".chars().count()));
+}
+
+#[test]
+fn save_enter_in_the_name_box_opens_the_question_and_esc_answers_no() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    assert_eq!(h.p.name(), "report.csv");
+    h.key(Key::Enter);
+    assert_eq!(h.p.replace_question(), Some("report.csv"));
+    assert!(h.done.is_none());
+    h.key(Key::Escape);
+    assert_eq!(h.p.replace_question(), None);
+    assert!(h.done.is_none(), "Esc closed only the question");
+    // The name box has the keyboard again.
+    h.text("x");
+    assert!(h.p.name().contains('x'), "{:?}", h.p.name());
+}
+
+#[test]
+fn save_question_enter_defaults_to_cancel() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    h.key(Key::Enter);
+    assert_eq!(h.p.replace_question(), Some("report.csv"));
+    h.key(Key::Enter);
+    assert_eq!(h.p.replace_question(), None);
+    assert!(h.done.is_none());
+    assert_eq!(h.p.name(), "report.csv");
+}
+
+#[test]
+fn save_question_left_then_enter_replaces() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    h.key(Key::Enter);
+    h.key(Key::ArrowLeft);
+    h.key(Key::Enter);
+    assert_eq!(h.done, Some(Done::Picked(vec!["/home/u/report.csv".to_owned()])));
+    assert_eq!(h.p.replaces(), Some(true));
+}
+
+#[test]
+fn save_question_swallows_the_enter_and_text_of_the_same_frame() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    h.frame(vec![plain(Key::Enter), Event::Text("zz".to_owned())]);
+    h.frames(2);
+    assert_eq!(h.p.name(), "report.csv", "no text reached the name box");
+    h.key(Key::Enter);
+    assert_eq!(h.p.replace_question(), None, "the second Enter pressed Cancel, not the first one's fall-through");
+    assert_eq!(h.p.name(), "report.csv");
+    assert!(h.done.is_none());
+}
+
+#[test]
+fn save_question_is_drawn_and_its_buttons_take_real_clicks() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    h.key(Key::Enter);
+    let replace = h.qbutton("Replace").center();
+    h.press(replace, Modifiers::NONE);
+    assert_eq!(h.done, Some(Done::Picked(vec!["/home/u/report.csv".to_owned()])));
+}
+
+#[test]
+fn save_question_cancel_button_keeps_the_dialog() {
+    let mut h = save_ready();
+    h.set_save_name("report.csv");
+    h.key(Key::Enter);
+    let cancel = h.qbutton("Cancel").center();
+    h.press(cancel, Modifiers::NONE);
+    assert_eq!(h.p.replace_question(), None);
+    assert!(h.done.is_none());
+    assert_eq!(h.p.name(), "report.csv");
+}
+
+#[test]
+fn save_double_click_on_a_file_asks_and_the_list_behind_is_dead() {
+    let mut h = save_ready();
+    let pos = h.rect("row.2").center();
+    h.frame(vec![Event::PointerMoved(pos)]);
+    for _ in 0..2 {
+        h.frame(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.frame(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+    }
+    h.frames(2);
+    let asked = h.p.replace_question().map(str::to_owned);
+    assert!(asked.is_some(), "{:?}", h.p.name());
+    assert!(h.done.is_none());
+    // A real click on another row behind the question changes nothing.
+    let other = h.rect("row.1").center();
+    assert_ne!(other, pos);
+    let before = (h.p.name().to_owned(), h.p.selected_count());
+    h.press(other, Modifiers::NONE);
+    assert_eq!(h.p.replace_question().map(str::to_owned), asked);
+    assert_eq!((h.p.name().to_owned(), h.p.selected_count()), before);
+    // Replace via a real click.
+    let replace = h.qbutton("Replace").center();
+    h.press(replace, Modifiers::NONE);
+    assert!(matches!(h.done, Some(Done::Picked(_))), "{:?}", h.done);
 }
