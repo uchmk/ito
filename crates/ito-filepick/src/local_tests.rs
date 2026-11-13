@@ -331,3 +331,183 @@ fn list_error_words() {
     assert!(!other.words("ja").contains("SENTINEL-OS-TEXT"));
     assert!(!other.to_string().contains("SENTINEL-OS-TEXT"));
 }
+
+// ---- ListOptions: links, the network and devices ----
+
+use crate::{check_local, list_local_with, local_places_with, ListOptions};
+
+/// Makes a symbolic link; `None` (and a note) when the account may not make them.
+fn make_symlink(target: &Path, link: &Path, dir: bool) -> Option<()> {
+    #[cfg(windows)]
+    let r = if dir { std::os::windows::fs::symlink_dir(target, link) } else { std::os::windows::fs::symlink_file(target, link) };
+    #[cfg(unix)]
+    let r = {
+        let _ = dir;
+        std::os::unix::fs::symlink(target, link)
+    };
+    match r {
+        Ok(()) => Some(()),
+        Err(e) if e.raw_os_error() == Some(1314) => {
+            eprintln!("note: no right to make symbolic links here (os error 1314); skipping those asserts");
+            None
+        }
+        Err(e) => panic!("symlink: {e}"),
+    }
+}
+
+fn at_of(e: ListError) -> String {
+    match e {
+        ListError::Link { at } => at,
+        other => panic!("not Link: {other:?}"),
+    }
+}
+
+#[test]
+fn check_local_fail_closed_and_last_may_be_missing() {
+    let f = Fixture::new();
+    let strict = ListOptions::strict(10);
+    match check_local(&f.path("missing").join("x").to_string_lossy(), &strict) {
+        Err(ListError::Io(e)) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
+        other => panic!("{other:?}"),
+    }
+    assert!(check_local(&f.path("new.zip").to_string_lossy(), &strict).is_ok());
+    // list_local_with on a missing last item gets its error from read_dir.
+    assert!(matches!(list_local_with(&f.path("new.zip").to_string_lossy(), &strict), Err(ListError::Io(_))));
+    #[cfg(unix)]
+    assert!(check_local("/", &strict).is_ok());
+    #[cfg(windows)]
+    {
+        let root = format!("{}\\", &f.text()[..2]);
+        assert!(check_local(&root, &strict).is_ok(), "the system drive must classify as local");
+    }
+}
+
+#[test]
+fn places_with_default_options_equal_places() {
+    assert_eq!(local_places_with(&ListOptions::new(10)), local_places());
+    // Strict never adds a place.
+    let all = local_places();
+    assert!(local_places_with(&ListOptions::strict(10)).iter().all(|p| all.contains(p)));
+}
+
+#[test]
+fn strict_does_not_follow_link_entries() {
+    let f = Fixture::new();
+    fs::create_dir(f.path("real")).unwrap();
+    f.file("data.txt", b"12345");
+    let Some(()) = make_symlink(&f.path("real"), &f.path("dlink"), true) else { return };
+    make_symlink(&f.path("data.txt"), &f.path("flink"), false).unwrap();
+    let strict = list_local_with(&f.text(), &ListOptions::strict(100)).unwrap();
+    let by = |n: &str| strict.entries.iter().find(|e| e.name == n).unwrap().clone();
+    let (d, fl) = (by("dlink"), by("flink"));
+    assert!(d.link && fl.link);
+    assert_eq!((d.size, d.modified, fl.size, fl.modified), (None, None, None, None));
+    if cfg!(windows) {
+        assert_eq!((d.kind, fl.kind), (Kind::Dir, Kind::File));
+    } else {
+        assert_eq!((d.kind, fl.kind), (Kind::Unknown, Kind::Unknown));
+    }
+    // Not links: unchanged.
+    assert_eq!(by("data.txt").size, Some(5));
+    // The default listing follows.
+    let dflt = f.find("flink");
+    assert_eq!((dflt.kind, dflt.size, dflt.link), (Kind::File, Some(5), true));
+    assert_eq!(f.find("dlink").kind, Kind::Dir);
+}
+
+#[test]
+fn strict_refuses_a_path_through_a_symlink() {
+    let f = Fixture::new();
+    fs::create_dir(f.path("real")).unwrap();
+    fs::create_dir(f.path("real").join("sub")).unwrap();
+    let Some(()) = make_symlink(&f.path("real"), &f.path("link"), true) else { return };
+    let strict = ListOptions::strict(100);
+    let link = f.path("link").to_string_lossy().into_owned();
+    let sep = std::path::MAIN_SEPARATOR;
+    for p in [link.clone(), format!("{link}{sep}sub")] {
+        assert_eq!(at_of(check_local(&p, &strict).unwrap_err()), link, "{p}");
+        assert_eq!(at_of(list_local_with(&p, &strict).unwrap_err()), link, "{p}");
+    }
+    #[cfg(unix)]
+    for p in [format!("{link}/"), format!("{link}/."), format!("{link}/../x")] {
+        assert_eq!(at_of(check_local(&p, &strict).unwrap_err()), link, "{p}");
+    }
+    #[cfg(unix)]
+    {
+        // `real/../real` is not a link: it lists.
+        let real = f.path("real").to_string_lossy().into_owned();
+        assert!(list_local_with(&format!("{real}/../real"), &strict).is_ok());
+    }
+    // Allowed when links in the path are allowed.
+    assert!(list_local_with(&link, &ListOptions::strict(100).links_in_path(true)).is_ok());
+}
+
+#[cfg(windows)]
+mod windows_rules {
+    use super::*;
+
+    #[test]
+    fn devices_and_bad_names_are_always_refused() {
+        let f = Fixture::new();
+        let t = f.text();
+        for opts in [ListOptions::new(10), ListOptions::strict(10)] {
+            assert!(matches!(check_local(&format!("{t}\\NUL"), &opts), Err(ListError::Device { .. })));
+            assert!(matches!(check_local(&format!("{t}\\COM1"), &opts), Err(ListError::Device { .. })));
+            assert!(matches!(check_local(&format!("{t}\\a:b"), &opts), Err(ListError::Name { .. })));
+        }
+        assert!(matches!(list_local(&format!("{t}\\NUL"), 10), Err(ListError::Device { .. })));
+        assert!(matches!(list_local(&format!("{t}\\COM1"), 10), Err(ListError::Device { .. })));
+        assert!(matches!(list_local(&format!("{t}\\a:b"), 10), Err(ListError::Name { .. })));
+    }
+
+    #[test]
+    fn check_local_returns_the_absolute_form() {
+        let f = Fixture::new();
+        fs::create_dir(f.path("real")).unwrap();
+        let t = f.text();
+        let want = format!("{t}\\real");
+        assert_eq!(check_local(&format!("{}/real", t.replace('\\', "/")), &ListOptions::new(1)).unwrap(), want);
+        assert_eq!(check_local(&format!("{t}\\real."), &ListOptions::new(1)).unwrap(), want);
+        assert!(list_local(&format!("{t}\\real."), 10).is_ok());
+    }
+
+    fn junction(f: &Fixture, link: &str, target: &str) {
+        let out = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(f.path(link)).arg(f.path(target)).output().unwrap();
+        assert!(out.status.success(), "mklink /J: {}", String::from_utf8_lossy(&out.stdout));
+    }
+
+    #[test]
+    fn junctions() {
+        let f = Fixture::new();
+        fs::create_dir(f.path("real")).unwrap();
+        fs::write(f.path("real").join("inner.txt"), b"abc").unwrap();
+        fs::create_dir(f.path("real").join("sub")).unwrap();
+        junction(&f, "junc", "real");
+        let t = f.text();
+        let dflt = f.find("junc");
+        assert_eq!((dflt.link, dflt.kind), (true, Kind::Dir));
+        assert!(dflt.modified.is_some());
+        let strict = list_local_with(&t, &ListOptions::strict(100)).unwrap();
+        let j = strict.entries.iter().find(|e| e.name == "junc").unwrap();
+        assert_eq!((j.link, j.kind, j.size, j.modified), (true, Kind::Dir, None, None));
+        let junc = format!("{t}\\junc");
+        assert_eq!(at_of(list_local_with(&junc, &ListOptions::strict(10)).unwrap_err()), junc);
+        assert_eq!(at_of(list_local_with(&format!("{junc}\\sub"), &ListOptions::strict(10)).unwrap_err()), junc);
+        let names = |l: crate::Listing| l.entries.into_iter().map(|e| e.name).collect::<Vec<_>>();
+        assert!(names(list_local(&junc, 10).unwrap()).contains(&"inner.txt".to_owned()));
+        // Win32 drops `junc\..` as text, so this is `real`.
+        let l = list_local_with(&format!("{junc}\\..\\real"), &ListOptions::strict(10)).unwrap();
+        assert!(names(l).contains(&"inner.txt".to_owned()));
+    }
+
+    #[test]
+    fn unc_is_refused_by_name_without_waiting() {
+        let start = std::time::Instant::now();
+        let r = check_local(r"\\ito-test.invalid\share\x", &ListOptions::strict(10));
+        let took = start.elapsed();
+        eprintln!("UNC Network check took {took:?}");
+        assert!(matches!(r, Err(ListError::Network)), "{r:?}");
+        assert!(took < std::time::Duration::from_secs(2));
+        assert!(matches!(list_local_with(r"\\ito-test.invalid\share", &ListOptions::new(1).network(false)), Err(ListError::Network)));
+    }
+}

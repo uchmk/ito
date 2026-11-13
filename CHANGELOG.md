@@ -3,6 +3,35 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.303.0] - 2026-11-13
+
+### 追加
+
+- `ito-filepick`（機能 `local`）: 別の PC の窓に、エンジンの PC を通してさらに別の PC を見せないための選び方 `ListOptions`（#237）。
+  - `ListOptions::new(max)`（3 つとも ON。`list_local` と同じ）と `strict(max)`（3 つとも OFF。別の PC の窓に答えるエンジンはこちら）。
+    1 つずつは `follow_links(bool)`・`links_in_path(bool)`・`network(bool)`。
+    - `follow_links` が OFF: リンクの項目を開かない（`link: true`・`size` と `modified` は `None`・`kind` は Windows ではリンク自身の属性から、ほかは `Unknown`）。
+    - `links_in_path` が OFF: パスそのもの・上のフォルダーがリンク（シンボリックリンク・ジャンクション・マウントしたフォルダー）か、`subst` のドライブなら `ListError::Link { at }`。
+      上から順に `symlink_metadata` で見る（最後の 1 つは無くてよい。それより上の読めないものは `Io`）。
+    - `network` が OFF: UNC と、共有に割り当てたドライブ（`net use`・共有への `subst`）・種類のわからないドライブを、何も開かずに `ListError::Network`。
+      ドライブの種類は `QueryDosDeviceW` の DOS デバイスの名前で見る（ファイル システムに触らない。`GetDriveTypeW` はドライブを開くことがあり、`subst` も見分けられないので使わない）。
+      Unix はパスから見分けられないので何も断らない。
+  - `list_local_with(path, &ListOptions)`・確かめるだけの `check_local(path, &ListOptions) -> Result<String, ListError>`（読むときと同じ形のパスを返す。確かめた瞬間のことだけ）・
+    場所の列 `local_places_with(&ListOptions)`（断るドライブと、そこにあるホームを出さない。ホームは名前だけで確かめる）。
+  - `ListError` に `Device { name }`・`Name { name }`・`Network`・`Link { at }` と、その `words(lang)`。
+  - 守るのは「名前で別の PC へ行かせない」ことだけ。OneDrive のような、ファイル システムが自分で取りに行くもの・Unix のネットワークのマウント・確かめている間の入れ替えは防げない（モジュールの文書に書いた）。
+  - 例 `filepick` に `--strict`（`--local` と一緒に。`ListOptions::strict` で開く）。
+
+### 変更
+
+- `ito-filepick`: Windows の `list_local` は、オプションによらず、Windows の装置の名前（`C:\x\NUL`・`CON.txt`・`COM1` など）を `ListError::Device`、
+  名前に使えない文字（`a:b` のストリーム・`*` など）を `ListError::Name` で断る。読むのは絶対の形（`/` を `\` に、`..` と末尾の `.`・空白を Win32 のとおりに落とした形）。
+
+### 使う側がやること
+
+- koyomi: 別の PC の窓に答えるエンジンは `list_local_with(path, &ListOptions::strict(max))` と `local_places_with(&ListOptions::strict(0))` にする。
+  `ListError` は `#[non_exhaustive]` のままなので、`match` は今の形で通る（新しい理由は `words(lang)` で出せる）。
+
 ## [0.302.0] - 2026-11-13
 
 ### 追加

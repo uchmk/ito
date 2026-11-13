@@ -49,7 +49,12 @@ fn engine(wants: mpsc::Receiver<(Ticket, String)>, replies: mpsc::Sender<Reply>)
 #[cfg(feature = "local")]
 fn local_engine(wants: mpsc::Receiver<(Ticket, String)>, replies: mpsc::Sender<Reply>) {
     for (ticket, path) in wants {
-        let answer = ito_filepick::list_local(&path, 5000).map_err(|e| e.words("en"));
+        let options = if std::env::args().any(|a| a == "--strict") {
+            ito_filepick::ListOptions::strict(5000)
+        } else {
+            ito_filepick::ListOptions::new(5000)
+        };
+        let answer = ito_filepick::list_local_with(&path, &options).map_err(|e| e.words("en"));
         if replies.send((ticket, answer)).is_err() {
             return;
         }
@@ -83,7 +88,9 @@ fn main() {
         .filters(vec![Filter::new("Text", &["txt", "md"])]);
     #[cfg(feature = "local")]
     if local {
-        let places = ito_filepick::local_places();
+        let strict = std::env::args().any(|a| a == "--strict");
+        let places =
+            if strict { ito_filepick::local_places_with(&ito_filepick::ListOptions::strict(5000)) } else { ito_filepick::local_places() };
         let home = places.iter().find(|p| p.kind == PlaceKind::Home).or(places.first()).map(|p| p.path.clone());
         let style = ito_filepick::local_style();
         picker = Picker::new("demo", Mode::OpenFile, style).start(&home.unwrap_or_else(|| style.default_root().to_owned())).places(places);

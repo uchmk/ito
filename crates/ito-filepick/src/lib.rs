@@ -16,7 +16,7 @@ mod window;
 mod words;
 
 #[cfg(feature = "local")]
-pub use local::{list_local, local_places, local_style, ListError};
+pub use local::{check_local, list_local, list_local_with, local_places, local_places_with, local_style, ListError, ListOptions};
 pub use model::{
     extension, format_size, natural_cmp, Done, Entry, Filter, InputError, Kind, Listing, Mode, Picker, Place, PlaceKind, Shown, Sort,
     Status, Ticket, Want,
