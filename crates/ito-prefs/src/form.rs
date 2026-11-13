@@ -84,8 +84,9 @@ pub fn form_label(ui: &mut Ui, l: Look, label: &str, need: Need, note: &str, wor
 }
 
 /// The frame of a field: `c.bg`, a 1px border (the error colour for an error, the accent while it has the keys, with a
-/// soft glow round it), radius 6. `body` draws inside and returns whether it has the keys.
-fn framed<R>(ui: &mut Ui, error: bool, width: Option<f32>, body: impl FnOnce(&mut Ui) -> (R, bool)) -> (R, bool, Response) {
+/// soft glow round it), radius 6. `body` draws inside and returns what it made, whether it has the keys and whether the
+/// field is in error (decided after the content, from what was just typed, so the border is right in the same frame).
+fn framed<R>(ui: &mut Ui, width: Option<f32>, body: impl FnOnce(&mut Ui) -> (R, bool, bool)) -> (R, bool, bool, Response) {
     let c = ito_theme::colors();
     let w = width.unwrap_or_else(|| ui.available_width());
     ui.scope(|ui| {
@@ -97,7 +98,7 @@ fn framed<R>(ui: &mut Ui, error: bool, width: Option<f32>, body: impl FnOnce(&mu
             .inner_margin(egui::Margin::symmetric(8, 5))
             .begin(ui);
         frame.content_ui.set_min_width((w - 18.0).max(0.0));
-        let (out, focused) = body(&mut frame.content_ui);
+        let (out, focused, error) = body(&mut frame.content_ui);
         frame.frame.stroke = Stroke::new(
             1.0,
             if error {
@@ -113,7 +114,7 @@ fn framed<R>(ui: &mut Ui, error: bool, width: Option<f32>, body: impl FnOnce(&mu
             let tint = if error { c.err } else { c.run };
             ui.painter().rect_stroke(resp.rect.expand(1.5), 7.5, Stroke::new(2.0, mix(c.bg, tint, 0.3)), StrokeKind::Outside);
         }
-        (out, focused, resp)
+        (out, focused, error, resp)
     })
     .inner
 }
@@ -183,6 +184,12 @@ impl<'a> InputField<'a> {
 
     /// The field; its response is the text edit's (`changed()`, `lost_focus()`).
     pub fn show(self, ui: &mut Ui, text: &mut String) -> Response {
+        self.show_with(ui, text, &|_| false)
+    }
+
+    /// [`show`](Self::show), with `late`: a check of the text as it is after this frame's typing. When it says yes the
+    /// field is in error (as with [`error`](Self::error)) in this same frame.
+    pub(crate) fn show_with(self, ui: &mut Ui, text: &mut String, late: &dyn Fn(&str) -> bool) -> Response {
         let c = ito_theme::colors();
         let id = Id::new(("ito-input", self.id));
         let size = z(ui, 13.0);
@@ -192,7 +199,7 @@ impl<'a> InputField<'a> {
         } else {
             ui.painter().layout_no_wrap(self.unit.to_owned(), FontId::proportional(z(ui, 12.0)), c.dim).size().x + 8.0
         };
-        let (edit, _, _) = framed(ui, self.error, self.width, |ui| {
+        let (edit, _, error, _) = framed(ui, self.width, |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let mut out = None;
             ui.horizontal(|ui| {
@@ -218,12 +225,13 @@ impl<'a> InputField<'a> {
             });
             let r = out.expect("the edit is drawn");
             let focused = r.has_focus();
-            (r, focused)
+            let error = self.error || late(text);
+            (r, focused, error)
         });
         let name = self.name;
         let enabled = edit.enabled();
         edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, name));
-        if self.error {
+        if error {
             ui.ctx().accesskit_node_builder(edit.id, |n| n.set_invalid(egui::accesskit::Invalid::True));
         }
         edit
@@ -288,7 +296,7 @@ impl<'a> CodeBox<'a> {
         let digits = text.lines().count().max(1).to_string().len().max(2);
         let char_w = ui.painter().layout_no_wrap("0".into(), font.clone(), c.dim).size().x;
         let gutter = digits as f32 * char_w + 16.0;
-        let (edit, _, _) = framed(ui, self.error, None, |ui| {
+        let (edit, _, _, _) = framed(ui, None, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             if !self.title.is_empty() || !self.aside.is_empty() {
                 ui.horizontal(|ui| {
@@ -339,7 +347,7 @@ impl<'a> CodeBox<'a> {
                 });
             let r = out.expect("the editor is drawn");
             let focused = r.has_focus();
-            (r, focused)
+            (r, focused, self.error)
         });
         let name = self.name;
         let enabled = edit.enabled();

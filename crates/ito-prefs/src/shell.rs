@@ -5,7 +5,7 @@
 use egui::RichText;
 use std::collections::BTreeMap;
 
-use crate::{button_with, field, focus_ring, keyed_row, section, sep, take_keys, z, Drafts, Look, Tone};
+use crate::{button_with, field, focus_ring, keyed_row, section, sep, take_keys, z, Drafts, Look, PairWords, Pairs, PairsEditor, Tone};
 
 /// The card's words, in one language.
 pub struct ShellWords {
@@ -21,7 +21,16 @@ pub struct ShellWords {
     pub edit_n: &'static str,
     pub add: &'static str,
     pub remove: &'static str,
+    /// The head of the value column, and the grey text of an empty value box.
     pub value: &'static str,
+    /// The head of the name column.
+    pub name: &'static str,
+    /// Shown while there is no variable.
+    pub empty: &'static str,
+    /// A value with no name.
+    pub missing: &'static str,
+    /// A name used by an earlier variable.
+    pub twice: &'static str,
     pub bad_name: &'static str,
     pub save: &'static str,
     pub cancel: &'static str,
@@ -39,7 +48,11 @@ pub const SHELL_EN: ShellWords = ShellWords {
     edit_n: "Edit ({n})",
     add: "Add",
     remove: "Remove",
-    value: "value",
+    value: "Value",
+    name: "Name",
+    empty: "None yet",
+    missing: "Enter a name",
+    twice: "This name is used above",
     bad_name: "A name cannot hold = or a space",
     save: "Save",
     cancel: "Cancel",
@@ -58,6 +71,10 @@ pub const SHELL_JA: ShellWords = ShellWords {
     add: "追加",
     remove: "削除",
     value: "値",
+    name: "名前",
+    empty: "まだありません",
+    missing: "名前を入れてください",
+    twice: "同じ名前が上にあります",
     bad_name: "名前に = と空白は使えません",
     save: "保存",
     cancel: "取り消し",
@@ -92,34 +109,13 @@ pub struct Shell<'a> {
 /// The variables being edited; the app keeps one across frames.
 #[derive(Default)]
 pub struct ShellEdit {
-    vars: Option<Vec<EnvRow>>,
-    /// The key the next added row gets.
-    next: u32,
-}
-
-/// One variable being edited. The key is fixed for the row's life (removing another row does not renumber it), so its test IDs
-/// (`settings.shell.env.row.<key>.name`) keep naming the same row.
-struct EnvRow {
-    key: u32,
-    name: String,
-    value: String,
+    vars: Option<Pairs>,
 }
 
 impl ShellEdit {
     /// Opens the editor on `env`: its rows get keys `0..len`, in name order.
-    fn open(&mut self, env: &BTreeMap<String, String>) {
-        let rows: Vec<EnvRow> =
-            env.iter().enumerate().map(|(k, (n, v))| EnvRow { key: k as u32, name: n.clone(), value: v.clone() }).collect();
-        self.next = rows.len() as u32;
-        self.vars = Some(rows);
-    }
-
-    /// Adds an empty row with a new key; nothing while the editor is shut.
-    fn add(&mut self) {
-        if let Some(vars) = &mut self.vars {
-            vars.push(EnvRow { key: self.next, name: String::new(), value: String::new() });
-            self.next += 1;
-        }
+    pub(crate) fn open(&mut self, env: &BTreeMap<String, String>) {
+        self.vars = Some(Pairs::new(env.iter().map(|(n, v)| (n.as_str(), v.as_str()))));
     }
 }
 
@@ -192,85 +188,56 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
             }
         }
         let mut done = false;
-        let mut adding = false;
         if let Some(vars) = &mut edit.vars {
-            let mut gone = None;
-            for row in vars.iter_mut() {
-                let key = row.key;
-                ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut row.name)
-                            .hint_text("NAME")
-                            .desired_width(160.0)
-                            .font(egui::FontId::monospace(z(ui, 12.5))),
-                    );
-                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.name"));
-                    ui.label("=");
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut row.value)
-                            .hint_text(w.value)
-                            .desired_width(280.0)
-                            .font(egui::FontId::monospace(z(ui, 12.5))),
-                    );
-                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.value"));
-                    let r = ui.small_button(w.remove);
-                    ito_a11y::test_id(&r, &format!("settings.shell.env.row.{key}.remove"));
+            let bad = |n: &str| bad_name(n).then(|| w.bad_name.to_owned());
+            let words = PairWords {
+                name: w.name,
+                value: w.value,
+                add: w.add,
+                remove: w.remove,
+                empty: w.empty,
+                missing: w.missing,
+                twice: w.twice,
+            };
+            let shown = PairsEditor::new("settings.shell.env", words)
+                .hints("NAME", w.value)
+                .mono_names()
+                .mono_values()
+                .check(&bad)
+                .unique(cfg!(windows))
+                .show(ui, vars);
+            ui.add_space(ito_theme::scale::space::SM);
+            // Cancel then Save at the right, in the order they read and Tab goes.
+            let foot = egui::vec2(ui.available_width(), z(ui, 30.0));
+            ui.allocate_ui_with_layout(foot, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let key = ui.unique_id().with("env-foot");
+                let width = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(ui.available_width());
+                let height = foot.y;
+                let drawn = ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let r = button_with(ui, l, w.cancel, Tone::Plain);
+                    ito_a11y::test_id(&r, "settings.shell.env.cancel");
                     if r.clicked() {
-                        gone = Some(key);
+                        done = true;
+                    }
+                    let b = egui::Button::new(RichText::new(w.save).size(z(ui, 12.5)))
+                        .corner_radius(ito_theme::scale::radius::CONTROL)
+                        .min_size(egui::vec2(0.0, z(ui, 30.0)));
+                    let r = ui.add_enabled(shown.valid, b);
+                    take_keys(ui, &r);
+                    focus_ring(ui, &r);
+                    ito_a11y::test_id(&r, "settings.shell.env.save");
+                    if r.clicked() {
+                        out.extend(env_changes(now.env, &vars.pairs()));
+                        done = true;
                     }
                 });
-            }
-            if let Some(key) = gone {
-                vars.retain(|r| r.key != key);
-            }
-            let bad = vars.iter().any(|r| bad_name(r.name.trim()));
-            ui.horizontal(|ui| {
-                let r = button_with(ui, l, w.add, Tone::Plain);
-                ito_a11y::test_id(&r, "settings.shell.env.add");
-                if r.clicked() {
-                    // The row is added after the list is drawn, so draw again to show it.
-                    adding = true;
+                let used = drawn.response.rect.width();
+                if (used - width).abs() > 0.5 {
+                    ui.data_mut(|d| d.insert_temp(key, used));
                     ui.ctx().request_repaint();
                 }
-                if bad {
-                    ui.label(egui::RichText::new(w.bad_name).size(z(ui, 12.0)).color(l.c.err));
-                }
-                // Cancel then Save at the right, in the order they read and Tab goes.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let key = ui.unique_id().with("env-foot");
-                    let width = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(ui.available_width());
-                    let height = ui.available_height();
-                    let shown =
-                        ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            let r = button_with(ui, l, w.cancel, Tone::Plain);
-                            ito_a11y::test_id(&r, "settings.shell.env.cancel");
-                            if r.clicked() {
-                                done = true;
-                            }
-                            let b = egui::Button::new(RichText::new(w.save).size(z(ui, 12.5)))
-                                .corner_radius(ito_theme::scale::radius::CONTROL)
-                                .min_size(egui::vec2(0.0, z(ui, 30.0)));
-                            let r = ui.add_enabled(!bad, b);
-                            take_keys(ui, &r);
-                            focus_ring(ui, &r);
-                            ito_a11y::test_id(&r, "settings.shell.env.save");
-                            if r.clicked() {
-                                let pairs = vars.iter().map(|r| (r.name.clone(), r.value.clone())).collect::<Vec<_>>();
-                                out.extend(env_changes(now.env, &pairs));
-                                done = true;
-                            }
-                        });
-                    let used = shown.response.rect.width();
-                    if (used - width).abs() > 0.5 {
-                        ui.data_mut(|d| d.insert_temp(key, used));
-                        ui.ctx().request_repaint();
-                    }
-                });
             });
             ui.add_space(ito_theme::scale::space::SM);
-        }
-        if adding {
-            edit.add();
         }
         if done {
             edit.vars = None;
@@ -351,7 +318,7 @@ mod tests {
     }
 
     fn keys(edit: &ShellEdit) -> Vec<u32> {
-        edit.vars.as_ref().map_or_else(Vec::new, |v| v.iter().map(|r| r.key).collect())
+        edit.vars.as_ref().map_or_else(Vec::new, |v| v.rows().map(|r| r.0).collect())
     }
 
     #[test]
@@ -383,10 +350,10 @@ mod tests {
             assert!(has(&names, n), "{n} in {names:?}");
         }
 
-        edit.add();
-        edit.add();
+        edit.vars.as_mut().unwrap().add();
+        edit.vars.as_mut().unwrap().add();
         assert_eq!(keys(&edit), [0, 1, 2, 3]);
-        edit.vars.as_mut().unwrap().retain(|r| r.key != 1);
+        edit.vars.as_mut().unwrap().remove(1);
         let names = frame(&ctx, &mut drafts, &mut edit, &now);
         assert_eq!(keys(&edit), [0, 2, 3]);
         assert!(has(&names, "settings.shell.env.row.0.name") && has(&names, "settings.shell.env.row.2.name"));
@@ -396,6 +363,122 @@ mod tests {
         edit.vars = None;
         let names = frame(&ctx, &mut drafts, &mut edit, &now);
         assert!(!has(&names, "settings.shell.env.add"));
+    }
+
+    /// One frame of the card with `events`; the changes it returns.
+    fn step(ctx: &egui::Context, drafts: &mut Drafts, edit: &mut ShellEdit, now: &Shell, events: Vec<egui::Event>) -> Vec<ShellChange> {
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+            ..Default::default()
+        };
+        input.events = events;
+        let mut got = Vec::new();
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                got = shell_card(ui, Look { c: ito_theme::colors(), q: "" }, &SHELL_EN, drafts, edit, now);
+            });
+        });
+        out.textures_delta.clear();
+        got
+    }
+
+    fn click_id(ctx: &egui::Context, name: &str, mut draw: impl FnMut(Vec<egui::Event>) -> Vec<ShellChange>) -> Vec<ShellChange> {
+        draw(vec![]);
+        draw(vec![]);
+        let at = ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT)
+            .into_iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("{name}"))
+            .rect
+            .center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        draw(vec![egui::Event::PointerMoved(at)]);
+        draw(vec![button(true)]);
+        let got = draw(vec![button(false)]);
+        draw(vec![]);
+        got
+    }
+
+    fn save_enabled(ctx: &egui::Context, out: &egui::FullOutput) -> bool {
+        let _ = ctx;
+        let update = out.platform_output.accesskit_update.as_ref().expect("accesskit");
+        update.nodes.iter().any(|(_, n)| n.author_id() == Some("settings.shell.env.save") && !n.is_disabled())
+    }
+
+    #[test]
+    fn save_is_off_for_a_bad_a_repeated_or_a_nameless_row() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let env = map(&[("A", "1")]);
+        let now = Shell { program: "", auto: "Automatic", shells: &[], args: &[], env: &env };
+        let (mut drafts, mut edit) = (Drafts::new(), ShellEdit::default());
+        let run = |ctx: &egui::Context, drafts: &mut Drafts, edit: &mut ShellEdit| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    shell_card(ui, Look { c: ito_theme::colors(), q: "" }, &SHELL_EN, drafts, edit, &now);
+                });
+            });
+            out.textures_delta.clear();
+            ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT);
+            save_enabled(ctx, &out)
+        };
+        edit.open(&env);
+        assert!(run(&ctx, &mut drafts, &mut edit), "the saved rows are fine");
+        let vars = edit.vars.as_mut().unwrap();
+        let bad = vars.push("A B", "x");
+        assert!(!run(&ctx, &mut drafts, &mut edit), "a name with a space");
+        edit.vars.as_mut().unwrap().remove(bad);
+        edit.vars.as_mut().unwrap().push("", "orphan");
+        assert!(!run(&ctx, &mut drafts, &mut edit), "a value with no name");
+        edit.open(&env);
+        edit.vars.as_mut().unwrap().push("A", "2");
+        assert!(!run(&ctx, &mut drafts, &mut edit), "a repeated name");
+    }
+
+    #[test]
+    fn the_cancel_button_closes_the_editor_and_a_reopen_shows_the_saved_rows() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let env = map(&[("A", "1")]);
+        let now = Shell { program: "", auto: "Automatic", shells: &[], args: &[], env: &env };
+        let (mut drafts, mut edit) = (Drafts::new(), ShellEdit::default());
+        edit.open(&env);
+        edit.vars.as_mut().unwrap().add();
+        let got = click_id(&ctx, "settings.shell.env.cancel", |ev| step(&ctx, &mut drafts, &mut edit, &now, ev));
+        assert!(got.is_empty() && edit.vars.is_none());
+        let got = click_id(&ctx, "settings.shell.env.edit", |ev| step(&ctx, &mut drafts, &mut edit, &now, ev));
+        assert!(got.is_empty());
+        assert_eq!(keys(&edit), [0], "the saved rows, not the cancelled ones");
+    }
+
+    #[test]
+    fn the_save_button_returns_the_changes() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let env = map(&[("A", "1")]);
+        let now = Shell { program: "", auto: "Automatic", shells: &[], args: &[], env: &env };
+        let (mut drafts, mut edit) = (Drafts::new(), ShellEdit::default());
+        edit.open(&env);
+        edit.vars.as_mut().unwrap().push(" B ", "2");
+        let got = click_id(&ctx, "settings.shell.env.save", |ev| step(&ctx, &mut drafts, &mut edit, &now, ev));
+        assert_eq!(got, vec![ShellChange::SetVar { name: "B".into(), value: "2".into() }]);
+        assert!(edit.vars.is_none());
+    }
+
+    #[test]
+    fn the_words_cover_both_languages() {
+        for w in [&SHELL_EN, &SHELL_JA] {
+            assert!(![w.name, w.empty, w.missing, w.twice, w.value].iter().any(|t| t.is_empty()));
+        }
     }
 
     #[test]

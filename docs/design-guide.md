@@ -40,6 +40,8 @@
 | 整数を打つか増減する（`−` `+`、↑↓） | `NumberField`（`.range(..)`・`.step(n)`・`.unit(..)`） |
 | 文字を打つか、よく使う値から選ぶ | `ComboField`（`.suggestions(..)`・`.mono()`・`.error(bool)`）。文言は `FieldWords::for_lang(&lang)` |
 | 編集フォーム（必須/任意の見出し、入力欄、行番号つきの欄、囲み） | `form_label`・`InputField`・`CodeBox`（`.hint(..)` で空のときの例）・`fieldset` |
+| 名前と値の組を足す・消す・直す（HTTP のヘッダー、環境変数） | `PairsEditor`（`.unique(..)`・`.check(..)`・`.hints(..)`） |
+| パスワード・トークンを打つ（伏せ字、目のボタン） | `SecretField`（`show` で値を `Hidden` に持つ、`take` で 1 回渡す。`.name(..)`・`.error(bool)`） |
 | 一覧から選ぶ（必須が空ならエラー、選択肢ごとの注） | `select`、エラーと注は `SelectField::new(id).error(bool).notes(&[..])` |
 | 宛先のチップ入力、二つ割りボタン、隅に浮くカード | `chips`・`SplitButton`・`FloatCard` |
 

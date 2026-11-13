@@ -3,6 +3,48 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.300.0] - 2026-11-13
+
+### 追加
+
+- `ito-prefs`: 名前 | 値 の行を編集する部品 `PairsEditor`（#230）。HTTP のヘッダー・環境変数のように、名前と値の組を足す・消す・直す。
+  - 中身は `Pairs`（`new`・`push`・`add`・`remove`・`rows`・`pairs`。行ごとに消えない番号 `u32` を持つ）。
+    `PairsEditor::new(id, PairWords::of(lang)).show(ui, &mut pairs)` → `PairsResponse { changed, valid, added, focused }`。
+  - 名前の検査: 空の名前に値があれば「名前を入れてください」、`.unique(fold_case)` で上と同じ名前は「同じ名前が上にあります」、
+    `.check(f)`・`.check_value(f)` でアプリの規則。理由は行の下に出し、`valid` はその場の打鍵・消したあとの値で返す。
+  - `.hints(名前, 値)`・`.mono_names()`・`.mono_values()`・`.name_width(w)`。見出し（名前・値）の行、空のときは「まだありません」と追加のボタン。
+  - 値の欄が 120 pt より狭いときは、値を名前の下に重ねる（1 つの組の 2 つの欄は近く、組と組の間は広く）。
+  - 追加すると新しい行の名前の欄にキーが行く。キーのある行を消すと、次の行（無ければ前の行、無ければ追加）の消すボタンへ。
+    キーが別の場所にあるときは動かさない。
+  - テストの ID: `{id}.row.{番号}.name`・`.value`・`.remove`、`{id}.add`。消すボタンの読み上げは「削除 <名前>」。
+- `ito-prefs`: 秘密を打つ欄 `SecretField` と、`Debug` に中身を出さない入れ物 `Hidden`（#231）。
+  - 2 つの使い方: `show(ui, look, &mut Hidden)` は値をアプリが持つ（打つたびに `changed`）。`take(ui, look, &mut drafts)` は
+    これまでの `secret_field` と同じく、Enter か欄を離れたときに `taken` で 1 回渡して欄を空にする（Esc で捨てる）。
+  - `.name(読み上げの名前)`・`.hint(..)`・`.width(..)`・`.error(bool)`（赤い枠）。目のボタンで見せる・隠す。前のフレームに描かれなかった欄は隠すに戻る。
+  - 欄は AccessKit で `PasswordInput`、値は伏せ字で読む。テストの ID は `secret.{id}`（欄）と `secret.{id}.eye`。
+  - `Hidden`: `new`・`expose`・`take`・`clear`・`is_empty`。`Debug` は `Hidden(..)`。
+
+### 変更
+
+- `ito-prefs`: 設定の Shell のカードの環境変数を `PairsEditor` にした（#230）。
+  - 名前の欄 38%・値の欄は残り、見出しの行、`=` をなくした、追加・削除は印のボタン、保存・キャンセルは下の行に。
+  - Windows では大文字・小文字を同じ名前として扱う（`unique(true)`）。名前の無い値・同じ名前があれば保存できない。
+  - 英語の `value` の文言を `Value` にした。
+- `ito-prefs`: `secret_field` は `SecretField::take` を呼ぶ形になった（呼び方は同じ）。
+  - 欄の高さが目のボタンと同じになった。欄に読み上げの名前（`hint`）と `PasswordInput` の役が付いた。
+  - 前のフレームに描かれなかった欄（ページを移って戻ったときなど）は、見せていても隠すに戻る。
+
+### 変更（壊れる）
+
+- `ito-prefs`: `ShellWords` に欄が 4 つ増えた（`name`・`empty`・`missing`・`twice`）。
+
+### 使う側がやること
+
+- kura: `ShellWords { .. }` を欄ごとに組んでいるところ（`src/ui/settings.rs`）に `name: base.name, empty: base.empty, missing: base.missing, twice: base.twice`
+  を足す（または `..*base`）。
+- koyomi: HTTP のヘッダーは `PairsEditor`（値の `secret:<名前>` はそのまま文字で持つ）、パスワード・トークンの欄は `SecretField::show` と `Hidden` を使える。
+- fumi: 何もしなくてよい（`secret_field` の呼び方は同じ）。
+
 ## [0.299.0] - 2026-11-13
 
 ### 追加

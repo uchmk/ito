@@ -28,12 +28,16 @@ mod compose;
 mod date;
 mod emoji;
 mod form;
+mod pairs;
 mod pick;
+#[cfg(test)]
+mod shots;
 pub use chrono::{NaiveDate, NaiveTime};
 pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 pub use date::{format_date, month_grid, month_picker, parse_date, shift_months, DateField, DateResponse, DateWords, DayLook, RangeField};
 pub use emoji::{emoji_picker, emoji_picker_open, EmojiWords, CATEGORIES as EMOJI_CATEGORIES};
 pub use form::{fieldset, form_label, CodeBox, FormWords, InputField, Need};
+pub use pairs::{PairWords, Pairs, PairsEditor, PairsResponse};
 pub use pick::{format_time, parse_time, ComboField, DurationField, FieldResponse, FieldWords, NumberField, TimeField, Unit};
 mod parts;
 pub use parts::{attachment, avatar, empty_state, notice, pill, AttachmentResponse};
@@ -60,7 +64,7 @@ pub use notify::{
 };
 pub use notify_cfg::{notify_window, take_clicks, test as test_notify, test_mail, Event, HookCfg, MailCfg, NotifyCfg, DONE_FAILED};
 pub use openin::{found_line, line_arg_edit, open_card, tool_choices, user_tool_edit, write_edits, OpenForm, OpenWords};
-pub use secret::{secret_field, taken as secret_taken, SecretWords};
+pub use secret::{secret_field, taken as secret_taken, Hidden, SecretField, SecretResponse, SecretWords};
 pub use shell::{env_changes, shell_card, shell_index, Shell, ShellChange, ShellEdit, ShellWords, SHELL_EN, SHELL_JA, SHELL_KEYS};
 #[cfg(feature = "tabs")]
 pub use tabs::{tabs_index, tabs_rows, tabs_rows_in, TabsWords, TABS_EN, TABS_JA, TABS_KEYS};
