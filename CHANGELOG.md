@@ -3,6 +3,37 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.294.0] - 2026-11-13
+
+### 追加
+
+- `ito-prefs`: 打つか選ぶ欄 4 つ（ito#224）。どれも `&mut String` をその場で直し、`DateField` と同じ枠（印のボタン・消す ×・エラーの縁）、テーマ・読み上げ（`ito-a11y`）・`--keys` に従う。一覧が開いている間のキーは、文字欄か印のボタンにフォーカスのある欄だけが受ける（Alt+↓ で開く、↑↓・Home・End で動く、Enter で選ぶ、Esc で閉じる、Tab で閉じて先へ）。
+  - `TimeField::new(id, words).empty_ok().step(分).multi().width(w).name(..).hint(..).show(ui, look, &mut String) -> FieldResponse { response, changed, valid, open }`: `HH:MM`（`9:30` も読む）。時と分の 2 列が開き、←→ で列を替える。時を選ぶと分の列へ移り、分を選ぶと書いて閉じる。`.multi()` はコンマ区切りの一覧（並べ替え・重複なし・読めない語は末尾に残す）で、分を選ぶとその時刻を足し、もうあれば外す。一覧は開いたまま。`parse_time`・`format_time`、`NaiveTime` の再エクスポート。
+  - `DurationField::new(id, words).units(&[Unit::Seconds, ..]).range(最小秒, 最大秒).show(..)`: 数の箱と単位のボタン。数字だけなら「その数の単位」（`2` と時間で `2h`）、ほかは打ったまま（`1h30m`）。単位を替えても数は変わらない。アプリが文字を替えたときは、割り切れる最大の単位で箱に出す。↑↓ で 1 ずつ。
+  - `NumberField::new(id, words).range(min, max).step(n).unit("回").show(..)`: `−` `+` のボタンと ↑↓（PageUp/PageDown は 10 倍）。範囲の中に収め、端ではボタンが押せなくなる。空や数でない文字からは、どちらに動かしても最小値（無ければ 0）。
+  - `ComboField::new(id, words).suggestions(&[(値, 注)]).mono().error(bool).show(..)`: 自由に打てる文字欄と、よく使う値の一覧。選ぶと値だけを書いて閉じる。文字と同じ行が光る。絞り込みはしない。
+  - `FieldWords::en()`・`ja()`・`for_lang(&lang)`、`FieldResponse`（`DateResponse` はこの別名）。
+  - テストの ID: `pick.{id}`（文字欄）・`.open`・`.clear`・`.less`・`.more`・`.unit`・`.hour.09`・`.minute.30`・`.unit.m`・`.item.0`。
+- `ito-prefs`: `SelectField::new(id).error(bool).notes(&[..]).show(ui, now, options)`: `select` にエラーの見た目（`InputField` の `.error(true)` と同じ赤い縁と光、読み上げは AccessKit の invalid）と、選択肢ごとの短い注（開いた一覧の行はホバーと読み上げ、閉じたボタンは選んでいるものの注）。`select` はそのまま。koyomi の #224 のコメント。
+- `ito-prefs`: `CodeBox::hint`: 空のときに薄い字で例を出す（`InputField` の hint と同じ見た目）。
+- `ito-prefs`: エラーを出す欄（`InputField`・`CodeBox` の `error`、日付と打つか選ぶ欄の読めない値）を、スクリーンリーダーにも無効な値として伝える。
+- `ito-prefs`: `Mark::Minus`（横の棒）。`Mark::ALL` は 80 個になった。
+
+### 修正
+
+- `ito-prefs`: `DateField`・`RangeField` の値と hint が左の縁にくっついていた。egui 0.36 は自前の枠があると `.margin(..)` を無視するので、余白を枠に入れた（打つか選ぶ欄の 4 つと、`compose` のチップの入力も同じ）。
+- `ito-prefs`: 打つか選ぶ欄の細かい直し。単位の字と、`DurationField` の単位のボタンの字を、値の基準線にそろえた（日本語の「時間」「秒」が上にずれていた）。開いた一覧の注が、点いた行の上で読めなかったのを直した。印のボタンをクリックして開いたとき、一覧の余白やスクロールバーを押したときに、一覧のキー（↑↓・Esc）が届かなくなっていたのを直した。キーのカーソルの行を一覧の真ん中に置き（下の縁のぼかしに隠れていた）、`NumberField` の単位と `−` の間を 6 pt にした。狭い幅で文字欄の幅が負になることもなくした。
+- `ito-winrm`: つなぐときの時間の上限が、名前の解決・TCP・TLS の握手のそれぞれに別々にかかり、合わせると上限を大きく超えることがあった。1 本の接続につき、3 つを合わせて `connect_timeout` 1 つに収めた（つなぎ直しは新しく数える）。`peek_fingerprint` も、`timeout` が呼び出し全体にかかり、`stop` で 250 ms ほどで戻る（終わっていない名前の解決は、OS の解決が終わるまで裏に残り、答えは捨てる）（ito#226）。
+- `ito-winrm`: Kerberos／Negotiate は作らないことにした（試すドメインが無い。ito#134 は not planned で閉じた）。今のサインインは Basic と NTLMv2。
+
+### 使う側がやること
+
+- `rev` を上げる。
+- 必須の `select` が空なら、`SelectField::new(id).error(true)` に替えられる。
+- `Mark` の全部を並べる `match` には、`Mark::Minus` の腕を 1 つ足す。
+- 手で書いた時刻・長さ・整数・よく使う値の欄は、`TimeField`・`DurationField`・`NumberField`・`ComboField` に置き換える。
+- 文言は `FieldWords::for_lang(&lang)` で作る。
+
 ## [0.293.2] - 2026-11-13
 
 ### 修正

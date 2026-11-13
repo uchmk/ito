@@ -82,7 +82,8 @@ pub struct Target {
     pub pin: Option<[u8; 32]>,
     /// The URL path, `/wsman` unless changed.
     pub path: String,
-    /// Time allowed to connect and to send a request.
+    /// Time allowed to connect (name lookup, TCP and the TLS handshake together, for each connection; a reconnect
+    /// starts a fresh budget) and, separately, to send each request.
     pub connect_timeout: Duration,
 }
 
@@ -188,7 +189,9 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// The SHA-256 fingerprint of the certificate the host shows on `port`, to show the user once so they can pin it.
-/// Nothing is sent to the server beyond the TLS handshake.
+/// Nothing is sent to the server beyond the TLS handshake. `timeout` bounds the whole call (name lookup, connect and
+/// handshake) and `stop` ends it within about 250 ms. A name lookup still running then is left to end by itself when
+/// the system's lookup ends; its answer goes nowhere.
 pub fn peek_fingerprint(host: &str, port: u16, timeout: Duration, stop: &AtomicBool) -> Result<[u8; 32], Error> {
     http::peek(host, port, timeout, stop)
 }

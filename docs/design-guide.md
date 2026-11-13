@@ -25,7 +25,7 @@
 | 主な操作・取り返しのつかない操作 | `button_with(…, Tone::Primary / Tone::Danger)` |
 | **アイコン＋文字のボタン** | `icon_button(ui, Mark, "文言", "読み上げ")`（`IconButton` で Tone・キーの札・`wide`） |
 | アイコンだけのボタン（ツールバー） | `mark_button(ui, Mark, "読み上げ", 大きさ)` |
-| 印そのもの（79 個。`Mark::…`） | `mark(painter, rect, Mark, 色)`。**アイコンが足りなければ描かずに ito に頼む** |
+| 印そのもの（80 個。`Mark::…`） | `mark(painter, rect, Mark, 色)`。**アイコンが足りなければ描かずに ito に頼む** |
 | 区切りのボタン（タブ風） | `seg` |
 | 小さな札・タグ | `pill`（右に印も付けられる） |
 | 空の一覧・0 件 | `empty_state`（薄い絵＋文言＋ボタン）。「ありません」だけ書かない |
@@ -35,7 +35,12 @@
 | 左の一覧の行（印・件数のピル） | `nav_row` |
 | 絵文字を選ぶ | `emoji_picker` |
 | 日付を選ぶ（月のグリッド、期間） | `DateField`・`RangeField`・`month_picker` |
-| 編集フォーム（必須/任意の見出し、入力欄、行番号つきの欄、囲み） | `form_label`・`InputField`・`CodeBox`・`fieldset` |
+| 時刻を打つか選ぶ（`09:30`、時と分の 2 列） | `TimeField`（`.step(分)`・`.multi()`） |
+| 時間の長さを打つか選ぶ（`30m`・`2h`、数と単位） | `DurationField`（`.units(..)`・`.range(..)`） |
+| 整数を打つか増減する（`−` `+`、↑↓） | `NumberField`（`.range(..)`・`.step(n)`・`.unit(..)`） |
+| 文字を打つか、よく使う値から選ぶ | `ComboField`（`.suggestions(..)`・`.mono()`・`.error(bool)`）。文言は `FieldWords::for_lang(&lang)` |
+| 編集フォーム（必須/任意の見出し、入力欄、行番号つきの欄、囲み） | `form_label`・`InputField`・`CodeBox`（`.hint(..)` で空のときの例）・`fieldset` |
+| 一覧から選ぶ（必須が空ならエラー、選択肢ごとの注） | `select`、エラーと注は `SelectField::new(id).error(bool).notes(&[..])` |
 | 宛先のチップ入力、二つ割りボタン、隅に浮くカード | `chips`・`SplitButton`・`FloatCard` |
 
 ## 確認・案内・知らせる

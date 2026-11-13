@@ -27,6 +27,8 @@ pub enum Mark {
     /// A chevron pointing right (fold a pane / on).
     ChevronRight,
     Plus,
+    /// A horizontal bar: less.
+    Minus,
     /// A cross.
     Close,
     /// A circling arrow.
@@ -169,7 +171,7 @@ pub enum Mark {
 
 impl Mark {
     /// Every mark, for a gallery or a test.
-    pub const ALL: [Mark; 79] = [
+    pub const ALL: [Mark; 80] = [
         Mark::Search,
         Mark::Download,
         Mark::Upload,
@@ -178,6 +180,7 @@ impl Mark {
         Mark::ChevronLeft,
         Mark::ChevronRight,
         Mark::Plus,
+        Mark::Minus,
         Mark::Close,
         Mark::Refresh,
         Mark::Copy,
@@ -298,6 +301,9 @@ pub fn mark(p: &Painter, rect: Rect, mark: Mark, colour: Color32) {
         Mark::Plus => {
             p.line_segment([at(-5.0, 0.0), at(5.0, 0.0)], line);
             p.line_segment([at(0.0, -5.0), at(0.0, 5.0)], line);
+        }
+        Mark::Minus => {
+            p.line_segment([at(-5.0, 0.0), at(5.0, 0.0)], line);
         }
         Mark::Close => {
             p.line_segment([at(-4.5, -4.5), at(4.5, 4.5)], line);

@@ -7,6 +7,7 @@
 //! Keys in an open grid: arrows move a day or a week, PageUp/PageDown a month, Home goes to today, Enter picks, Esc closes.
 //! Alt+Down in the field opens it.
 
+use crate::pick::FieldResponse;
 use crate::{focus_ring, mark, z, Look, Mark};
 use chrono::{Datelike, Days, Months, NaiveDate};
 use egui::{Align, Align2, Color32, Context, FontId, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -488,39 +489,58 @@ fn popup(ctx: &Context, l: Look, id: Id, anchor: Rect, g: &Grid, sel: &Sel, st: 
     picked
 }
 
-/// The result of a date field.
-#[derive(Debug)]
-pub struct DateResponse {
-    /// The text field.
-    pub response: Response,
-    /// The text changed, typed or picked.
-    pub changed: bool,
-    /// The text is fine (a date in range, or empty where that is allowed).
+/// The result of a date field (the other typed-or-picked fields answer the same way).
+pub type DateResponse = FieldResponse;
+
+/// A button inside the frame of an [`input`], at its right.
+pub(crate) struct Accessory<'a> {
+    pub mark: Mark,
+    /// The hover tip.
+    pub tip: &'a str,
+    /// What a screen reader says.
+    pub said: &'a str,
+    /// Tells it from the others: part of its id and of its test ID.
+    pub key: &'a str,
+    pub enabled: bool,
+    /// A word before the mark (a unit button); empty for the mark alone.
+    pub text: &'a str,
+}
+
+/// One text field with its buttons.
+pub(crate) struct Input<'a> {
+    pub id: Id,
+    pub hint: &'a str,
+    /// The word of the clear button (tip and spoken).
+    pub clear: &'a str,
+    pub width: f32,
     pub valid: bool,
-    /// The grid is open.
-    pub open: bool,
-}
-
-/// One text field with its calendar button: the text, whether the button was clicked, whether the text was cleared.
-struct Input<'a> {
-    id: Id,
-    words: &'a DateWords<'a>,
-    width: f32,
-    valid: bool,
-    clearable: bool,
+    pub clearable: bool,
     /// The spoken name of the text field; empty says the hint.
-    name: &'a str,
+    pub name: &'a str,
+    /// Left to right; the last one is at the right edge.
+    pub buttons: &'a [Accessory<'a>],
+    /// A dim word before the buttons (a unit); empty for none.
+    pub unit: &'a str,
+    pub mono: bool,
+    /// Name the text field as a text edit; else as a label (the date fields).
+    pub edit_role: bool,
+    /// Take Alt+Down as "open" (the first button).
+    pub alt_open: bool,
+    /// Test IDs `{test}`, `{test}.clear` and `{test}.{key}`; empty for none.
+    pub test: &'a str,
 }
 
-struct Shown {
-    text: Response,
-    outer: Rect,
-    button: bool,
-    changed: bool,
-    cleared: bool,
+pub(crate) struct Shown {
+    pub text: Response,
+    pub outer: Rect,
+    /// The button pressed (an index into `buttons`).
+    pub pressed: Option<usize>,
+    pub alt_down: bool,
+    pub changed: bool,
+    pub cleared: bool,
 }
 
-fn input(ui: &mut Ui, l: Look, i: &Input, text: &mut String) -> Shown {
+pub(crate) fn input(ui: &mut Ui, l: Look, i: &Input, text: &mut String) -> Shown {
     let c = l.c;
     let h = z(ui, 28.0);
     let (outer, _) = ui.allocate_exact_size(Vec2::new(i.width, h), Sense::hover());
@@ -535,40 +555,151 @@ fn input(ui: &mut Ui, l: Look, i: &Input, text: &mut String) -> Shown {
     };
     ui.painter().rect(outer, 6.0, c.panel, Stroke::new(1.0, edge), StrokeKind::Inside);
     let side = h - 4.0;
-    let button_rect = Rect::from_min_size(Pos2::new(outer.right() - side - 2.0, outer.top() + 2.0), Vec2::splat(side));
-    let clear_rect = Rect::from_min_size(Pos2::new(button_rect.left() - side, outer.top() + 2.0), Vec2::splat(side));
+    let font = FontId::proportional(z(ui, 12.0));
+    // The buttons from the right edge inwards.
+    let mut right = outer.right() - 2.0;
+    let mut rects = vec![Rect::NOTHING; i.buttons.len()];
+    for (k, b) in i.buttons.iter().enumerate().rev() {
+        let w = if b.text.is_empty() {
+            side
+        } else {
+            ui.painter().layout_no_wrap(b.text.to_owned(), font.clone(), c.dim).size().x + 6.0 + side
+        };
+        rects[k] = Rect::from_min_size(Pos2::new(right - w, outer.top() + 2.0), Vec2::new(w, side));
+        right -= w;
+    }
+    let clear_rect = Rect::from_min_size(Pos2::new(right - side, outer.top() + 2.0), Vec2::splat(side));
     let has_clear = i.clearable && !text.is_empty();
-    let text_rect = Rect::from_min_max(outer.min, Pos2::new(if has_clear { clear_rect.left() } else { button_rect.left() }, outer.max.y));
+    if has_clear {
+        right = clear_rect.left();
+    }
+    let unit_galley = (!i.unit.is_empty()).then(|| ui.painter().layout_no_wrap(i.unit.to_owned(), font.clone(), c.dim));
+    // The unit is drawn 2 points in from here and ends 6 points before the buttons.
+    let unit_left = unit_galley.as_ref().map(|g| right - g.size().x - 8.0);
+    let text_right = unit_left.unwrap_or(right).max(outer.left());
+    let text_rect = Rect::from_min_max(outer.min, Pos2::new(text_right, outer.max.y));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
-    let r = child.add(
-        egui::TextEdit::singleline(text)
-            .id(text_id)
-            .frame(egui::Frame::NONE)
-            .hint_text(i.words.hint)
-            .desired_width(text_rect.width())
-            .margin(Vec2::new(8.0, 4.0))
-            .vertical_align(Align::Center),
-    );
-    ito_a11y::say(&r, Said::Label, if i.name.is_empty() { i.words.hint } else { i.name });
+    let mut edit = egui::TextEdit::singleline(text)
+        .id(text_id)
+        // A custom frame wins over `.margin(..)` in egui 0.36, so the padding goes into the frame.
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 4)))
+        .hint_text(i.hint)
+        .desired_width(text_rect.width())
+        .vertical_align(Align::Center);
+    let value_font = if i.mono { egui::TextStyle::Monospace } else { egui::TextStyle::Body };
+    if i.mono {
+        edit = edit.font(value_font.clone());
+    }
+    let out = edit.show(&mut child);
+    let r = out.response.response;
+    if !i.valid {
+        ui.ctx().accesskit_node_builder(r.id, |n| n.set_invalid(egui::accesskit::Invalid::True));
+    }
+    let spoken = if i.name.is_empty() { i.hint } else { i.name };
+    if i.edit_role {
+        let enabled = r.enabled();
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, spoken));
+    } else {
+        ito_a11y::say(&r, Said::Label, spoken);
+    }
+    let test_id = |r: &Response, suffix: &str| {
+        let name = if suffix.is_empty() { i.test.to_owned() } else { format!("{}.{suffix}", i.test) };
+        if !i.test.is_empty() && ito_a11y::is_test_id(&name) {
+            ito_a11y::test_id(r, &name);
+        }
+    };
+    test_id(&r, "");
+    // The unit and a button's word sit on the value's baseline: the value has another size, and a fallback font (a Japanese
+    // unit) puts its glyphs at another height inside the same box.
+    let baseline =
+        |gal: &egui::Galley| gal.rows.first().map_or(0.0, |row| row.pos.y + row.row.glyphs.first().map_or(row.row.size.y, |gl| gl.pos.y));
+    let value_base = if out.galley.rows.first().is_some_and(|row| !row.row.glyphs.is_empty()) {
+        out.galley_pos.y + baseline(&out.galley)
+    } else {
+        let sample = ui.painter().layout_no_wrap("0".to_owned(), value_font.resolve(ui.style()), c.fg);
+        out.galley_pos.y + baseline(&sample)
+    };
+    if let (Some(g), Some(x)) = (unit_galley, unit_left) {
+        let at = Pos2::new(x + 2.0, value_base - baseline(&g));
+        ui.painter().galley(at, g, c.dim);
+    }
     let mut cleared = false;
     if has_clear {
         let x = ui.interact(clear_rect, i.id.with("clear"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        ito_a11y::say(&x, Said::Button, i.words.clear);
+        ito_a11y::say(&x, Said::Button, i.clear);
+        test_id(&x, "clear");
         mark(ui.painter(), clear_rect.shrink(side * 0.3), Mark::Close, if x.hovered() { c.err } else { c.dim });
         cleared = x.clicked();
     }
-    let b = ui
-        .interact(button_rect, i.id.with("open"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(i.words.open);
-    ito_a11y::say(&b, Said::Button, i.words.open);
-    if b.hovered() {
-        ui.painter().rect_filled(button_rect, 5.0, c.raised());
+    let mut pressed = None;
+    for (k, b) in i.buttons.iter().enumerate() {
+        let rect = rects[k];
+        let r = ui
+            .interact(rect, i.id.with(b.key), if b.enabled { Sense::click() } else { Sense::hover() })
+            .on_hover_cursor(if b.enabled { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default });
+        if !b.tip.is_empty() {
+            r.clone().on_hover_text(b.tip);
+        }
+        let enabled = b.enabled && r.enabled();
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, b.said));
+        test_id(&r, b.key);
+        let lit = r.hovered() && b.enabled;
+        if lit {
+            ui.painter().rect_filled(rect, 5.0, c.raised());
+        }
+        let ink = if !b.enabled {
+            mix(c.panel, c.dim, 0.4)
+        } else if lit {
+            c.strong()
+        } else {
+            c.dim
+        };
+        if !b.text.is_empty() {
+            let g = ui.painter().layout_no_wrap(b.text.to_owned(), font.clone(), ink);
+            let at = Pos2::new(rect.left() + 6.0, value_base - baseline(&g));
+            ui.painter().galley(at, g, ink);
+        }
+        let box_ = Rect::from_min_size(Pos2::new(rect.right() - side, rect.top()), Vec2::splat(side));
+        mark(ui.painter(), box_.shrink(side * 0.22), b.mark, ink);
+        focus_ring(ui, &r);
+        if r.clicked() {
+            pressed = Some(k);
+        }
     }
-    mark(ui.painter(), button_rect.shrink(side * 0.22), Mark::Calendar, if b.hovered() { c.strong() } else { c.dim });
-    focus_ring(ui, &b);
-    let alt_down = focused && ui.input_mut(|inp| inp.consume_key(Modifiers::ALT, Key::ArrowDown));
-    Shown { changed: r.changed(), text: r, outer, button: b.clicked() || alt_down, cleared }
+    let alt_down = i.alt_open && focused && ui.input_mut(|inp| inp.consume_key(Modifiers::ALT, Key::ArrowDown));
+    Shown { changed: r.changed(), text: r, outer, pressed, alt_down, cleared }
+}
+
+/// The text field of a date with its calendar button.
+#[allow(clippy::too_many_arguments)]
+fn date_input(
+    ui: &mut Ui,
+    l: Look,
+    id: Id,
+    words: &DateWords,
+    width: f32,
+    valid: bool,
+    clearable: bool,
+    name: &str,
+    text: &mut String,
+) -> Shown {
+    let open = Accessory { mark: Mark::Calendar, tip: words.open, said: words.open, key: "open", enabled: true, text: "" };
+    let i = Input {
+        id,
+        hint: words.hint,
+        clear: words.clear,
+        width,
+        valid,
+        clearable,
+        name,
+        buttons: &[open],
+        unit: "",
+        mono: false,
+        edit_role: false,
+        alt_open: true,
+        test: "",
+    };
+    input(ui, l, &i, text)
 }
 
 /// A date field: build it, then [`DateField::show`].
@@ -665,14 +796,13 @@ impl<'a> DateField<'a> {
         let mut st = Pop::load(&ctx, self.id, today);
         let valid = text_ok(text, self.empty_ok, (self.min, self.max), self.multi);
         let width = self.width.unwrap_or_else(|| ui.available_width().min(z(ui, 190.0)));
-        let shown =
-            input(ui, l, &Input { id: self.id, words: &self.words, width, valid, clearable: self.empty_ok, name: self.names.0 }, text);
+        let shown = date_input(ui, l, self.id, &self.words, width, valid, self.empty_ok, self.names.0, text);
         let mut changed = shown.changed;
         if shown.cleared {
             text.clear();
             changed = true;
         }
-        if shown.button {
+        if shown.pressed.is_some() || shown.alt_down {
             if st.open {
                 st.open = false;
             } else {
@@ -781,37 +911,20 @@ impl<'a> RangeField<'a> {
         let mut first = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = z(ui, 6.0);
-            let a = input(
-                ui,
-                l,
-                &Input {
-                    id: d.id.with("from"),
-                    words: &d.words,
-                    width,
-                    valid: ok(from) && ordered,
-                    clearable: d.empty_ok,
-                    name: d.names.0,
-                },
-                from,
-            );
+            let a = date_input(ui, l, d.id.with("from"), &d.words, width, ok(from) && ordered, d.empty_ok, d.names.0, from);
             first = Some(a.text.clone());
             outer = a.outer;
             changed |= a.changed;
-            button |= a.button;
+            button |= a.pressed.is_some() || a.alt_down;
             if a.cleared {
                 from.clear();
                 changed = true;
             }
             ui.label(egui::RichText::new("〜").color(l.c.dim));
-            let b = input(
-                ui,
-                l,
-                &Input { id: d.id.with("to"), words: &d.words, width, valid: ok(to) && ordered, clearable: d.empty_ok, name: d.names.1 },
-                to,
-            );
+            let b = date_input(ui, l, d.id.with("to"), &d.words, width, ok(to) && ordered, d.empty_ok, d.names.1, to);
             outer = outer.union(b.outer);
             changed |= b.changed;
-            button |= b.button;
+            button |= b.pressed.is_some() || b.alt_down;
             if b.cleared {
                 to.clear();
                 changed = true;
@@ -962,6 +1075,49 @@ mod tests {
 
     fn press(key: Key) -> egui::Event {
         egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }
+    }
+
+    #[test]
+    fn a_buttons_word_and_the_unit_sit_on_the_values_baseline() {
+        let ctx = Context::default();
+        let mut text = "2".to_owned();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 500.0))), ..Default::default() };
+        let mut o = ctx.run_ui(raw, |ui| {
+            let l = Look { c: ito_theme::colors(), q: "" };
+            let unit = Accessory { mark: Mark::ChevronDown, tip: "", said: "Unit", key: "unit", enabled: true, text: "hours" };
+            let i = Input {
+                id: Id::new("b"),
+                hint: "",
+                clear: "",
+                width: 260.0,
+                valid: true,
+                clearable: false,
+                name: "Length",
+                buttons: &[unit],
+                unit: "days",
+                mono: false,
+                edit_role: true,
+                alt_open: false,
+                test: "",
+            };
+            input(ui, l, &i, &mut text);
+        });
+        o.textures_delta.clear();
+        let base = |word: &str| {
+            o.shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Text(t) if t.galley.text() == word => {
+                        let row = &t.galley.rows[0];
+                        Some(t.pos.y + row.pos.y + row.row.glyphs[0].pos.y)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{word:?} was not painted"))
+        };
+        let value = base("2");
+        assert!((base("hours") - value).abs() < 0.25, "the button's word is off the baseline: {} vs {value}", base("hours"));
+        assert!((base("days") - value).abs() < 0.25, "the unit is off the baseline: {} vs {value}", base("days"));
     }
 
     #[test]

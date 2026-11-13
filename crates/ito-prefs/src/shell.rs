@@ -164,7 +164,7 @@ pub fn shell_card(ui: &mut egui::Ui, l: Look, w: &ShellWords, drafts: &mut Draft
             shells.push((now.program, now.program));
         }
         let program = keyed_row(ui, l, SHELL_KEYS[0], w.shell, w.shell_note, |ui| {
-            let (picked, resp) = crate::select_with_response(ui, "shell", now.program, &shells);
+            let (picked, resp) = crate::select_with_response(ui, "shell", now.program, &shells, false, &[]);
             ito_a11y::test_id(&resp, "settings.shell.program");
             picked
         });

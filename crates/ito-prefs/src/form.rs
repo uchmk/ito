@@ -223,6 +223,9 @@ impl<'a> InputField<'a> {
         let name = self.name;
         let enabled = edit.enabled();
         edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, name));
+        if self.error {
+            ui.ctx().accesskit_node_builder(edit.id, |n| n.set_invalid(egui::accesskit::Invalid::True));
+        }
         edit
     }
 }
@@ -236,11 +239,12 @@ pub struct CodeBox<'a> {
     aside: &'a str,
     rows: usize,
     error: bool,
+    hint: &'a str,
 }
 
 impl<'a> CodeBox<'a> {
     pub fn new(id: &'a str) -> Self {
-        CodeBox { id, name: id, title: "", aside: "", rows: 4, error: false }
+        CodeBox { id, name: id, title: "", aside: "", rows: 4, error: false, hint: "" }
     }
 
     /// The name a screen reader hears (and a `--keys` script clicks by).
@@ -267,6 +271,12 @@ impl<'a> CodeBox<'a> {
 
     pub fn error(mut self, on: bool) -> Self {
         self.error = on;
+        self
+    }
+
+    /// An example shown, faint, while the box is empty (for instance in the language of the picked shell). May span lines.
+    pub fn hint(mut self, hint: &'a str) -> Self {
+        self.hint = hint;
         self
     }
 
@@ -303,6 +313,7 @@ impl<'a> CodeBox<'a> {
                         let o = egui::TextEdit::multiline(text)
                             .id(id)
                             .frame(egui::Frame::NONE)
+                            .hint_text(RichText::new(self.hint).font(font.clone()).color(mix(c.bg, c.dim, 0.6)))
                             .font(font.clone())
                             .text_color(c.fg)
                             .code_editor()
@@ -333,6 +344,9 @@ impl<'a> CodeBox<'a> {
         let name = self.name;
         let enabled = edit.enabled();
         edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, name));
+        if self.error {
+            ui.ctx().accesskit_node_builder(edit.id, |n| n.set_invalid(egui::accesskit::Invalid::True));
+        }
         edit
     }
 }

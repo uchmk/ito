@@ -233,9 +233,9 @@ pub fn chips_with(ui: &mut Ui, l: Look, list: &mut Vec<String>, input: &mut Stri
             egui::TextEdit::singleline(input)
                 .hint_text(hint)
                 .id(field_id)
-                .frame(egui::Frame::NONE)
-                .desired_width(room)
-                .margin(Vec2::new(2.0, 2.0)),
+                // A custom frame wins over `.margin(..)` in egui 0.36, so the padding goes into the frame.
+                .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(2)))
+                .desired_width(room),
         );
         ito_a11y::say(&r, Said::Label, hint);
         field = Some(r);

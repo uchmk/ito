@@ -8,8 +8,9 @@ use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -179,45 +180,172 @@ fn lost(e: io::Error) -> Error {
 }
 
 fn connect(ep: &Endpoint, stop: &AtomicBool) -> Result<Conn, Error> {
-    let tcp = tcp_connect(&ep.host, ep.port, ep.connect_timeout, stop)?;
+    // One budget for the lookup, every TCP try and the TLS handshake.
+    let due = deadline(ep.connect_timeout);
+    let tcp = tcp_connect(&ep.host, ep.port, due, stop)?;
     let _ = tcp.set_nodelay(true);
     if !ep.https {
         return Ok(Conn::Plain(tcp));
     }
-    tls(tcp, &ep.host, ep.pin, ep.connect_timeout, stop).map(|(c, _)| Conn::Tls(Box::new(c)))
+    tls(tcp, &ep.host, ep.pin, ep.connect_timeout, due, stop).map(|(c, _)| Conn::Tls(Box::new(c)))
 }
 
-fn tcp_connect(host: &str, port: u16, timeout: Duration, stop: &AtomicBool) -> Result<TcpStream, Error> {
-    let addrs: Vec<_> = (host, port).to_socket_addrs().map_err(|e| Error::Connect(e.to_string()))?.collect();
-    let deadline = Instant::now() + timeout;
-    let mut last = None;
+/// `timeout` from now; a budget too large to add (`Duration::MAX`) becomes a year.
+fn deadline(timeout: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_add(timeout).or_else(|| now.checked_add(Duration::from_secs(365 * 24 * 3600))).unwrap_or(now)
+}
+
+/// The addresses of `host`. An IP literal answers at once; a name is looked up on a thread, waited for in slices of
+/// at most 100 ms that see `stop` and `due`.
+fn lookup(host: &str, port: u16, due: Instant, stop: &AtomicBool) -> Result<Vec<SocketAddr>, Error> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(vec![SocketAddr::new(ip, port)]);
+    }
+    let host = host.to_owned();
+    lookup_with(due, stop, move || (host.as_str(), port).to_socket_addrs().map(|a| a.collect()))
+}
+
+/// Run `work` (the system's name lookup, which cannot be cancelled) on a thread and wait for it until `due`.
+/// A lookup still running at the deadline, or when `stop` is set, is left to end by itself when the system's lookup
+/// ends: its answer goes nowhere.
+fn lookup_with<F>(due: Instant, stop: &AtomicBool, work: F) -> Result<Vec<SocketAddr>, Error>
+where
+    F: FnOnce() -> io::Result<Vec<SocketAddr>> + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("ito-winrm-lookup".to_owned())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .map_err(|e| Error::Connect(e.to_string()))?;
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return Err(Error::Stopped);
+        }
+        let left = due.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(Error::Timeout);
+        }
+        match rx.recv_timeout(left.min(Duration::from_millis(100))) {
+            Ok(Ok(addrs)) => return Ok(addrs),
+            Ok(Err(e)) => return Err(Error::Connect(e.to_string())),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(Error::Connect("the name lookup ended without an answer".to_owned())),
+        }
+    }
+}
+
+fn tcp_connect(host: &str, port: u16, due: Instant, stop: &AtomicBool) -> Result<TcpStream, Error> {
+    let addrs = lookup(host, port, due, stop)?;
+    if addrs.is_empty() {
+        return Err(Error::Connect(format!("{host} has no address")));
+    }
     // Short tries, so a stop request is noticed while the SYN goes unanswered.
-    while Instant::now() < deadline {
+    loop {
         for a in &addrs {
             if stop.load(Ordering::Relaxed) {
                 return Err(Error::Stopped);
             }
-            let slice = deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(250));
-            match TcpStream::connect_timeout(a, slice.max(Duration::from_millis(1))) {
+            let left = due.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(Error::Timeout);
+            }
+            match TcpStream::connect_timeout(a, left.min(Duration::from_millis(250))) {
                 Ok(s) => return Ok(s),
                 Err(e) if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock => {}
                 Err(e) => return Err(Error::Connect(e.to_string())),
             }
-            last = Some(io::Error::new(io::ErrorKind::TimedOut, "timed out"));
         }
     }
-    Err(last.map_or_else(|| Error::Connect(format!("{host} has no address")), |_| Error::Timeout))
 }
 
+/// The socket as the TLS handshake sees it: every read and write waits at most 250 ms at a time and then looks at
+/// `stop` and `due` again, so a server that trickles bytes (or says nothing) cannot hold the handshake past `due`.
+struct Bounded<'a> {
+    tcp: &'a mut TcpStream,
+    due: Instant,
+    stop: &'a AtomicBool,
+}
+
+impl Bounded<'_> {
+    /// Check `stop` and `due`, then set the socket's timeouts to the time left, at most 250 ms.
+    fn slice(&mut self) -> io::Result<()> {
+        if self.stop.load(Ordering::Relaxed) {
+            // Not `Interrupted` (rustls retries that). The caller reads the flag to tell this from a real failure.
+            return Err(io::Error::other("stopped"));
+        }
+        let left = self.due.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        let slice = Some(left.min(Duration::from_millis(250)));
+        self.tcp.set_read_timeout(slice)?;
+        self.tcp.set_write_timeout(slice)
+    }
+}
+
+impl Read for Bounded<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            self.slice()?;
+            match self.tcp.read(buf) {
+                Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => {}
+                r => return r,
+            }
+        }
+    }
+}
+
+impl Write for Bounded<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            self.slice()?;
+            match self.tcp.write(buf) {
+                Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => {}
+                r => return r,
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.tcp.flush()
+    }
+}
+
+/// Drive the handshake to its end by `due`. `stop` wins over every other outcome.
+fn handshake(conn: &mut rustls::ClientConnection, tcp: &mut TcpStream, due: Instant, stop: &AtomicBool, seen: &Seen) -> Result<(), Error> {
+    let mut io = Bounded { tcp, due, stop };
+    while conn.is_handshaking() {
+        if stop.load(Ordering::Relaxed) {
+            return Err(Error::Stopped);
+        }
+        if let Err(e) = conn.complete_io(&mut io) {
+            if stop.load(Ordering::Relaxed) {
+                return Err(Error::Stopped);
+            }
+            return Err(handshake_error(&e, seen));
+        }
+    }
+    Ok(())
+}
+
+/// The handshake takes until `due` at most (the lookup and connect before it spent part of the same budget);
+/// afterwards the socket's timeouts are `timeout`, for the requests.
 pub(crate) fn tls(
     mut tcp: TcpStream,
     host: &str,
     pin: Option<[u8; 32]>,
     timeout: Duration,
+    due: Instant,
     stop: &AtomicBool,
 ) -> Result<(rustls::StreamOwned<rustls::ClientConnection, TcpStream>, Seen), Error> {
-    tcp.set_read_timeout(Some(timeout)).map_err(lost)?;
-    tcp.set_write_timeout(Some(timeout)).map_err(lost)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let seen: Seen = Arc::new(Mutex::new(None));
     let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
@@ -240,20 +368,17 @@ pub(crate) fn tls(
     };
     let name = ServerName::try_from(host.to_owned()).map_err(|e| Error::Tls(e.to_string()))?;
     let mut conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| Error::Tls(e.to_string()))?;
-    while conn.is_handshaking() {
-        if stop.load(Ordering::Relaxed) {
-            return Err(Error::Stopped);
-        }
-        if let Err(e) = conn.complete_io(&mut tcp) {
-            return Err(handshake_error(&e, &seen));
-        }
-    }
+    handshake(&mut conn, &mut tcp, due, stop, &seen)?;
+    tcp.set_read_timeout(Some(timeout)).map_err(lost)?;
+    tcp.set_write_timeout(Some(timeout)).map_err(lost)?;
     Ok((rustls::StreamOwned::new(conn, tcp), seen))
 }
 
 /// Connect with any certificate accepted and say what its fingerprint is (nothing is sent to the server).
+/// `timeout` bounds the whole call (lookup, connect and handshake).
 pub(crate) fn peek(host: &str, port: u16, timeout: Duration, stop: &AtomicBool) -> Result<[u8; 32], Error> {
-    let tcp = tcp_connect(host, port, timeout, stop)?;
+    let due = deadline(timeout);
+    let mut tcp = tcp_connect(host, port, due, stop)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let seen: Seen = Arc::new(Mutex::new(None));
     let config = rustls::ClientConfig::builder_with_provider(provider.clone())
@@ -268,18 +393,11 @@ pub(crate) fn peek(host: &str, port: u16, timeout: Duration, stop: &AtomicBool) 
         .with_no_client_auth();
     let name = ServerName::try_from(host.to_owned()).map_err(|e| Error::Tls(e.to_string()))?;
     let mut conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| Error::Tls(e.to_string()))?;
-    let mut tcp = tcp;
-    tcp.set_read_timeout(Some(timeout)).map_err(lost)?;
-    while conn.is_handshaking() {
-        if stop.load(Ordering::Relaxed) {
-            return Err(Error::Stopped);
-        }
-        if let Err(e) = conn.complete_io(&mut tcp) {
-            if let Some(got) = seen.lock().ok().and_then(|g| *g) {
-                return Ok(got);
-            }
-            return Err(handshake_error(&e, &seen));
-        }
+    match handshake(&mut conn, &mut tcp, due, stop, &seen) {
+        Ok(()) => {}
+        Err(Error::Stopped) => return Err(Error::Stopped),
+        // A handshake that fails after the certificate was seen still has what the caller asked for.
+        Err(e) => return seen.lock().ok().and_then(|g| *g).ok_or(e),
     }
     let got = seen.lock().ok().and_then(|g| *g);
     got.ok_or_else(|| Error::Tls("the server showed no certificate".to_owned()))
@@ -452,4 +570,161 @@ fn read_reply(conn: &mut Conn, wait: Duration, stop: &AtomicBool) -> Result<Repl
         r.take(n)?
     };
     Ok(Reply { status, www_authenticate, body: String::from_utf8_lossy(&body).into_owned() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::thread;
+
+    /// Accepts one connection, then runs `serve` on it; the thread ends by itself.
+    fn peer(serve: impl FnOnce(TcpStream) + Send + 'static) -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        thread::spawn(move || {
+            if let Ok((s, _)) = l.accept() {
+                serve(s);
+            }
+        });
+        port
+    }
+
+    /// A TLS record header that promises a long record, then one byte every 150 ms (at most ~10 s, or until a write fails).
+    fn trickle(mut s: TcpStream) {
+        if s.write_all(&[0x16, 0x03, 0x03, 0x40, 0x00]).is_err() {
+            return;
+        }
+        for _ in 0..66 {
+            thread::sleep(Duration::from_millis(150));
+            if s.write_all(&[0]).is_err() {
+                return;
+            }
+        }
+    }
+
+    fn silent(s: TcpStream) {
+        thread::sleep(Duration::from_secs(5));
+        drop(s);
+    }
+
+    #[test]
+    fn a_trickling_server_cannot_hold_peek_past_the_deadline() {
+        let port = peer(trickle);
+        let t = Instant::now();
+        let r = peek("127.0.0.1", port, Duration::from_secs(1), &AtomicBool::new(false));
+        assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn stop_ends_a_trickling_peek() {
+        let port = peer(trickle);
+        let stop = Arc::new(AtomicBool::new(false));
+        let s2 = stop.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            s2.store(true, Ordering::Relaxed);
+        });
+        let t = Instant::now();
+        let r = peek("127.0.0.1", port, Duration::from_secs(10), &stop);
+        assert!(matches!(r, Err(Error::Stopped)), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_trickling_server_cannot_hold_the_login_handshake_past_the_deadline() {
+        let port = peer(trickle);
+        let stop = AtomicBool::new(false);
+        let timeout = Duration::from_secs(1);
+        let t = Instant::now();
+        let due = deadline(timeout);
+        let tcp = tcp_connect("127.0.0.1", port, due, &stop).unwrap();
+        let r = tls(tcp, "127.0.0.1", None, timeout, due, &stop);
+        assert!(matches!(r.err(), Some(Error::Timeout)));
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_silent_peer_times_out() {
+        let port = peer(silent);
+        let t = Instant::now();
+        let r = peek("127.0.0.1", port, Duration::from_secs(1), &AtomicBool::new(false));
+        assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_peer_that_closes_at_once_is_not_a_timeout() {
+        let port = peer(drop);
+        let t = Instant::now();
+        let r = peek("127.0.0.1", port, Duration::from_secs(5), &AtomicBool::new(false));
+        assert!(matches!(r, Err(Error::Connect(_))), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn extreme_budgets_do_not_panic() {
+        let r = peek("127.0.0.1", 9, Duration::ZERO, &AtomicBool::new(false));
+        assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+        let port = peer(drop);
+        let r = peek("127.0.0.1", port, Duration::MAX, &AtomicBool::new(false));
+        assert!(matches!(r, Err(Error::Connect(_))), "{r:?}");
+    }
+
+    #[test]
+    fn a_slow_lookup_ends_at_the_deadline() {
+        let t = Instant::now();
+        let due = deadline(Duration::from_millis(100));
+        let r = lookup_with(due, &AtomicBool::new(false), || {
+            thread::sleep(Duration::from_secs(3));
+            Ok(vec![])
+        });
+        assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn stop_ends_a_slow_lookup() {
+        let t = Instant::now();
+        let due = deadline(Duration::from_secs(10));
+        let r = lookup_with(due, &AtomicBool::new(true), || {
+            thread::sleep(Duration::from_secs(3));
+            Ok(vec![])
+        });
+        assert!(matches!(r, Err(Error::Stopped)), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_lookup_error_is_a_connect_error() {
+        let due = deadline(Duration::from_secs(5));
+        let r = lookup_with(due, &AtomicBool::new(false), || Err(io::Error::other("no such host")));
+        assert!(matches!(r, Err(Error::Connect(_))), "{r:?}");
+    }
+
+    #[test]
+    fn an_ip_literal_is_answered_without_a_lookup() {
+        let due = deadline(Duration::from_secs(5));
+        let r = lookup("127.0.0.1", 80, due, &AtomicBool::new(false)).unwrap();
+        assert_eq!(r, vec!["127.0.0.1:80".parse::<SocketAddr>().unwrap()]);
+    }
+
+    #[test]
+    fn an_abandoned_lookup_ends_by_itself() {
+        let done = Arc::new(AtomicBool::new(false));
+        let d2 = done.clone();
+        let due = deadline(Duration::from_millis(100));
+        let r = lookup_with(due, &AtomicBool::new(false), move || {
+            thread::sleep(Duration::from_millis(300));
+            d2.store(true, Ordering::Relaxed);
+            Ok(vec![])
+        });
+        assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+        let end = Instant::now() + Duration::from_secs(3);
+        while !done.load(Ordering::Relaxed) && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(done.load(Ordering::Relaxed));
+    }
 }

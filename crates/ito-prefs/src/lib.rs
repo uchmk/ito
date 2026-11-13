@@ -28,11 +28,13 @@ mod compose;
 mod date;
 mod emoji;
 mod form;
-pub use chrono::NaiveDate;
+mod pick;
+pub use chrono::{NaiveDate, NaiveTime};
 pub use compose::{chips, chips_with, ChipsResponse, FloatCard, FloatResponse, FloatWords, SplitButton, SplitResponse};
 pub use date::{format_date, month_grid, month_picker, parse_date, shift_months, DateField, DateResponse, DateWords, DayLook, RangeField};
 pub use emoji::{emoji_picker, emoji_picker_open, EmojiWords, CATEGORIES as EMOJI_CATEGORIES};
 pub use form::{fieldset, form_label, CodeBox, FormWords, InputField, Need};
+pub use pick::{format_time, parse_time, ComboField, DurationField, FieldResponse, FieldWords, NumberField, TimeField, Unit};
 mod parts;
 pub use parts::{attachment, avatar, empty_state, notice, pill, AttachmentResponse};
 mod notify;
@@ -920,13 +922,44 @@ fn ring_in_clip(widget: egui::Rect, clip: egui::Rect, pixels_per_point: f32) -> 
 /// Down (Home and End) move the light, Enter or Space picks and shuts it, Esc
 /// shuts it as it was, and Tab shuts it and goes on to the next control.
 pub fn select<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, now: T, options: &[(T, &str)]) -> Option<T> {
-    let (pick, resp) = select_with_response(ui, id, now, options);
-    // Only a name `is_test_id` accepts: app ids may hold other characters, and those get no ID.
-    let name = format!("settings.select.{id}");
-    if ito_a11y::is_test_id(&name) {
-        ito_a11y::test_id(&resp, &name);
+    SelectField::new(id).show(ui, now, options)
+}
+
+/// [`select`] with more: an error state and a short note per option.
+pub struct SelectField<'a> {
+    id: &'a str,
+    error: bool,
+    notes: &'a [&'a str],
+}
+
+impl<'a> SelectField<'a> {
+    pub fn new(id: &'a str) -> Self {
+        SelectField { id, error: false, notes: &[] }
     }
-    pick
+
+    /// Show the value as wrong (red border and glow, like `InputField::error`), and say it to a screen reader.
+    pub fn error(mut self, on: bool) -> Self {
+        self.error = on;
+        self
+    }
+
+    /// One note per option, in the order of the options (a missing or empty one is no note). A row of the open list shows its
+    /// note on hover, the closed button the note of the option it shows; a screen reader hears them as the description.
+    pub fn notes(mut self, notes: &'a [&'a str]) -> Self {
+        self.notes = notes;
+        self
+    }
+
+    /// The list; the value picked, when it changed. Test IDs as for [`select`].
+    pub fn show<T: PartialEq + Copy>(self, ui: &mut egui::Ui, now: T, options: &[(T, &str)]) -> Option<T> {
+        let (pick, resp) = select_with_response(ui, self.id, now, options, self.error, self.notes);
+        // Only a name `is_test_id` accepts: app ids may hold other characters, and those get no ID.
+        let name = format!("settings.select.{}", self.id);
+        if ito_a11y::is_test_id(&name) {
+            ito_a11y::test_id(&resp, &name);
+        }
+        pick
+    }
 }
 
 /// [`select`] and the list button's response, for a caller that gives the button a test ID.
@@ -935,6 +968,8 @@ pub(crate) fn select_with_response<T: PartialEq + Copy>(
     id: &str,
     now: T,
     options: &[(T, &str)],
+    error: bool,
+    notes: &[&str],
 ) -> (Option<T>, egui::Response) {
     let mut pick = now;
     let shown = options.iter().find(|(v, _)| *v == now).map_or("", |(_, t)| *t).to_owned();
@@ -988,7 +1023,11 @@ pub(crate) fn select_with_response<T: PartialEq + Copy>(
     let combo = egui::ComboBox::from_id_salt(salt).selected_text(shown).width(190.0).show_ui(ui, |ui| {
         for (k, (v, t)) in options.iter().enumerate() {
             let behind = ui.painter().add(egui::Shape::Noop);
-            let r = ui.selectable_value(&mut pick, *v, *t);
+            let mut r = ui.selectable_value(&mut pick, *v, *t);
+            if let Some(note) = notes.get(k).filter(|n| !n.is_empty()) {
+                r = r.on_hover_text(*note);
+                ui.ctx().accesskit_node_builder(r.id, |n| n.set_description(*note));
+            }
             let name = format!("settings.select.{id}.{k}");
             if ito_a11y::is_test_id(&name) {
                 ito_a11y::test_id(&r, &name);
@@ -1022,8 +1061,28 @@ pub(crate) fn select_with_response<T: PartialEq + Copy>(
         ui.memory_mut(|m| m.request_focus(button));
     }
     take_keys(ui, &combo.response);
-    focus_ring(ui, &combo.response);
-    ((pick != now).then_some(pick), combo.response)
+    let button_rect = combo.response.rect;
+    if error {
+        // Over the button's own border, then the glow outside it; both under the focus ring.
+        let c = ito_theme::colors();
+        let radius = ito_theme::scale::radius::CONTROL;
+        ui.painter().rect_stroke(button_rect, radius, egui::Stroke::new(1.0, c.err), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            button_rect.expand(1.5),
+            7.5,
+            egui::Stroke::new(2.0, ito_theme::mix(c.bg, c.err, 0.3)),
+            egui::StrokeKind::Outside,
+        );
+        ui.ctx().accesskit_node_builder(combo.response.id, |n| n.set_invalid(egui::accesskit::Invalid::True));
+    }
+    let on = options.iter().position(|(v, _)| *v == now).and_then(|k| notes.get(k)).filter(|n| !n.is_empty());
+    let mut response = combo.response;
+    if let Some(note) = on {
+        response = response.on_hover_text(*note);
+        ui.ctx().accesskit_node_builder(response.id, |n| n.set_description(*note));
+    }
+    focus_ring(ui, &response);
+    ((pick != now).then_some(pick), response)
 }
 
 /// A segmented control: one outlined group of parts, the chosen one filled.
@@ -1656,6 +1715,87 @@ mod tests {
         select_frame(ctx, id, vec![egui::Event::PointerMoved(at)]);
         select_frame(ctx, id, vec![button(true)]);
         select_frame(ctx, id, vec![button(false)]);
+    }
+
+    /// One frame with AccessKit on: the AccessKit nodes of whatever `show` draws.
+    fn field_nodes(ctx: &egui::Context, show: impl Fn(&mut egui::Ui)) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| show(ui));
+        });
+        out.textures_delta.clear();
+        out.platform_output.accesskit_update.expect("an AccessKit update").nodes
+    }
+
+    fn count_invalid(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> usize {
+        nodes.iter().filter(|(_, n)| n.invalid() == Some(egui::accesskit::Invalid::True)).count()
+    }
+
+    #[test]
+    fn a_select_in_error_is_invalid_to_a_screen_reader_and_one_that_is_not_is_not() {
+        let options = [(0u8, "zero"), (1, "one")];
+        for (error, want) in [(true, 1), (false, 0)] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let nodes = field_nodes(&ctx, |ui| {
+                SelectField::new("mode").error(error).show(ui, 1u8, &options);
+            });
+            assert_eq!(count_invalid(&nodes), want, "error {error}");
+        }
+    }
+
+    #[test]
+    fn a_text_field_in_error_is_invalid_to_a_screen_reader() {
+        for (error, want) in [(true, 1), (false, 0)] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let nodes = field_nodes(&ctx, |ui| {
+                InputField::new("a").error(error).show(ui, &mut String::new());
+            });
+            assert_eq!(count_invalid(&nodes), want, "InputField error {error}");
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let nodes = field_nodes(&ctx, |ui| {
+                CodeBox::new("b").error(error).show(ui, &mut String::new());
+            });
+            assert_eq!(count_invalid(&nodes), want, "CodeBox error {error}");
+        }
+    }
+
+    #[test]
+    fn the_closed_select_button_is_described_by_the_note_of_the_option_it_shows() {
+        let options = [(0u8, "zero"), (1, "one")];
+        let notes = ["", "from PATH"];
+        let described = |now: u8| {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let nodes = field_nodes(&ctx, |ui| {
+                SelectField::new("mode").notes(&notes).show(ui, now, &options);
+            });
+            nodes.iter().filter(|(_, n)| n.description() == Some("from PATH")).count()
+        };
+        assert_eq!(described(1), 1);
+        assert_eq!(described(0), 0);
+    }
+
+    #[test]
+    fn a_codebox_paints_its_hint_while_empty() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                CodeBox::new("b").hint("echo hi").show(ui, &mut String::new());
+            });
+        });
+        out.textures_delta.clear();
+        let painted = |s: &egui::Shape| matches!(s, egui::Shape::Text(t) if t.galley.text() == "echo hi");
+        assert!(out.shapes.iter().any(|c| painted(&c.shape)), "the hint was painted");
     }
 
     #[test]
