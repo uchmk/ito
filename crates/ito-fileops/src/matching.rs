@@ -66,8 +66,9 @@ fn snapshot(from: &Path, on: &mut dyn FnMut(Event)) -> Result<Vec<(OsString, Pat
         return match fs::metadata(from) {
             Ok(m) if m.is_file() => Ok(vec![(last.to_owned(), from.to_path_buf())]),
             Ok(_) => Ok(Vec::new()),
-            // The file is not there: that is "no match" only when its folder is.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => match fs::metadata(dir) {
+            // The file is not there: that is "no match" only when its folder is. Unix says ENOTDIR (not
+            // ENOENT) when the folder is a file; Windows says "path not found" for both.
+            Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => match fs::metadata(dir) {
                 Ok(d) if d.is_dir() => Ok(Vec::new()),
                 Ok(_) => Err(io_err(dir, Doing::List, io::Error::new(io::ErrorKind::NotADirectory, "not a folder"))),
                 Err(de) => Err(io_err(dir, Doing::List, de)),

@@ -284,6 +284,8 @@ fn a_destination_replaced_by_a_link_after_the_listing_is_not_written_through() {
     let (t, from, into) = dirs();
     write(&from.join("a.txt"), "new");
     write(&into.join("a.txt"), "old");
+    // Same size: without a different time the two would be "the same" where file times are coarse (Linux).
+    set_mtime(&from.join("a.txt"), SystemTime::now() - days(2));
     let outside = t.path().join("outside");
     fs::create_dir(&outside).unwrap();
     let out2 = outside.clone();

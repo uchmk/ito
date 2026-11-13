@@ -3,6 +3,17 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.298.1] - 2026-11-13
+
+### 修正
+
+- `Cargo.lock`: `webpki-root-certs` を 1.0.9 から 1.0.12 に上げた（RUSTSEC-2026-0383: 同梱のルート証明書が、信頼を取り消された emSign の中間証明書を信じてしまう）。ureq → rustls-platform-verifier の経路で `ito-fetch`・`ito-cloud` に入っていた。0.297.0 から CI の Audit が落ちていた。
+- `ito-fileops` の `copy_matching`: Linux・macOS で、ワイルドカードのない元のフォルダーがファイルだったとき（`f/a.txt` の `f` がファイル）、`Doing::List` でなく `Doing::Read` の失敗になっていた（Unix は「無い」でなく ENOTDIR を返す）。Windows と同じ `Doing::List` にした。Linux の CI で落ちていた試験をもう 1 つ直した（大きさが同じ 2 つのファイルが、時刻の粗いファイルシステムで「同じ」と見なされ、試したいところまで進まなかった）。
+
+### 使う側がやること
+
+- `ito-fetch`・`ito-cloud` を使うアプリ（koyomi）: `rev` を上げたあと、アプリの `Cargo.lock` の `webpki-root-certs` が 1.0.10 より前なら `cargo update -p webpki-root-certs`。
+
 ## [0.298.0] - 2026-11-13
 
 ### 追加
