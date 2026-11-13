@@ -3,6 +3,9 @@
 //!
 //! No window is opened (the workspace has no `eframe`): frames run on a bare `egui::Context` with scripted keys, and the log
 //! says what the dialog asked for and how it ended. Run: `cargo run -p ito-filepick --example filepick --features egui`.
+//!
+//! With feature `local` and `--local`, the engine lists this machine's real disk with `list_local` instead (it starts at
+//! home, with `local_places()`), and the run only opens the dialog and prints what it shows.
 
 use std::sync::mpsc;
 use std::thread;
@@ -42,15 +45,49 @@ fn engine(wants: mpsc::Receiver<(Ticket, String)>, replies: mpsc::Sender<Reply>)
     }
 }
 
+/// The real engine: lists this machine's disk, one request at a time.
+#[cfg(feature = "local")]
+fn local_engine(wants: mpsc::Receiver<(Ticket, String)>, replies: mpsc::Sender<Reply>) {
+    for (ticket, path) in wants {
+        let answer = ito_filepick::list_local(&path, 5000).map_err(|e| e.words("en"));
+        if replies.send((ticket, answer)).is_err() {
+            return;
+        }
+    }
+}
+
 fn main() {
     let (want_tx, want_rx) = mpsc::channel();
     let (reply_tx, reply_rx) = mpsc::channel();
+    #[cfg(feature = "local")]
+    let local = std::env::args().any(|a| a == "--local");
+    #[cfg(not(feature = "local"))]
+    let local = {
+        if std::env::args().any(|a| a == "--local") {
+            eprintln!("--local needs feature `local`; running the scripted fake engine");
+        }
+        false
+    };
+    #[cfg(feature = "local")]
+    if local {
+        thread::spawn(move || local_engine(want_rx, reply_tx));
+    } else {
+        thread::spawn(move || engine(want_rx, reply_tx));
+    }
+    #[cfg(not(feature = "local"))]
     thread::spawn(move || engine(want_rx, reply_tx));
 
     let mut picker = Picker::new("demo", Mode::OpenFile, Style::Posix)
         .start("/")
         .places(vec![Place::new("Root", "/", PlaceKind::Root), Place::new("Big", "/big", PlaceKind::Folder)])
         .filters(vec![Filter::new("Text", &["txt", "md"])]);
+    #[cfg(feature = "local")]
+    if local {
+        let places = ito_filepick::local_places();
+        let home = places.iter().find(|p| p.kind == PlaceKind::Home).or(places.first()).map(|p| p.path.clone());
+        let style = ito_filepick::local_style();
+        picker = Picker::new("demo", Mode::OpenFile, style).start(&home.unwrap_or_else(|| style.default_root().to_owned())).places(places);
+    }
     let (words, clock) = (Words::en(), ito_common::Clock::default());
     let look = Look { words: &words, clock: &clock, lang: "en" };
     let ctx = Context::default();
@@ -118,12 +155,13 @@ fn main() {
         ),
     ];
 
-    for frame in 0..400usize {
+    let frames = if local { 60 } else { 400 };
+    for frame in 0..frames {
         while let Ok((ticket, answer)) = reply_rx.try_recv() {
             println!("frame {frame}: engine answered {ticket} ({})", if answer.is_ok() { "listing" } else { "error" });
             picker.set_listing(ticket, answer);
         }
-        let events = script.iter().filter(|(at, _)| *at == frame).flat_map(|(_, f)| f(&mut picker)).collect();
+        let events = script.iter().filter(|(at, _)| !local && *at == frame).flat_map(|(_, f)| f(&mut picker)).collect();
         let input = RawInput { time: Some(frame as f64 * 0.016), events, ..Default::default() };
         let mut shown = Default::default();
         let mut out = ctx.run_ui(input, |ui| shown = picker.show(ui.ctx(), &look));
@@ -139,6 +177,9 @@ fn main() {
             None => {}
         }
         thread::sleep(Duration::from_millis(16));
+    }
+    if local {
+        return println!("local: at {:?}, {} entries, status {:?}", picker.current(), picker.entry_count(), picker.status());
     }
     println!(
         "the script ended without a result: name {:?} error {:?} can_accept {} target {}",

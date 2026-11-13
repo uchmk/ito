@@ -33,25 +33,35 @@ pub(crate) fn check_empty_target(path: &Path) -> Result<(), Unsafe> {
     }
 }
 
+/// The path as `Path::components` reads it: repeated separators, a trailing separator and `.` after the first
+/// name are gone (`a/b/`, `a/b/.` and `a//b` are `a/b`; a verbatim `\\?\` path is read by std's own rules);
+/// `..` stays. On Unix `lstat` follows a final link when the path ends in `/` or `/.`, so a link check must look
+/// at this form.
+pub(crate) fn plain(path: &Path) -> PathBuf {
+    path.components().collect()
+}
+
 /// The folder named by the caller must be a real folder, not a link that `read_dir` would follow.
-/// With `refuse_root` it is also not a root (also after resolving the real path).
-pub(crate) fn check_real_folder(folder: &Path, refuse_root: bool) -> Result<(), Error> {
+/// With `refuse_root` it is also not a root (also after resolving the real path). Returns the folder in its
+/// `plain` form, which is what was checked and what the caller lists.
+pub(crate) fn check_real_folder(folder: &Path, refuse_root: bool) -> Result<PathBuf, Error> {
     if refuse_root {
         check_empty_target(folder).map_err(|why| unsafe_err(folder, why))?;
     } else if folder.as_os_str().is_empty() {
         return Err(unsafe_err(folder, Unsafe::Empty));
     }
-    let meta = fs::symlink_metadata(folder).map_err(|e| io_err(folder, Doing::List, e))?;
+    let folder = plain(folder);
+    let meta = fs::symlink_metadata(&folder).map_err(|e| io_err(&folder, Doing::List, e))?;
     if meta.file_type().is_symlink() {
-        return Err(unsafe_err(folder, Unsafe::Link));
+        return Err(unsafe_err(&folder, Unsafe::Link));
     }
     if refuse_root {
-        let real = folder.canonicalize().map_err(|e| io_err(folder, Doing::List, e))?;
+        let real = folder.canonicalize().map_err(|e| io_err(&folder, Doing::List, e))?;
         if is_root(&real) {
-            return Err(unsafe_err(folder, Unsafe::Root));
+            return Err(unsafe_err(&folder, Unsafe::Root));
         }
     }
-    Ok(())
+    Ok(folder)
 }
 
 /// Lower-cased on Windows, where paths are not case-sensitive.

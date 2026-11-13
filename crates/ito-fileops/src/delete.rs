@@ -33,12 +33,13 @@ fn delete_old_in(
     on: &mut dyn FnMut(Event),
     paths: &mut Vec<PathBuf>,
 ) -> End {
-    if let Err(e) = safe::check_real_folder(folder, false) {
-        return End::Failed(e);
-    }
-    let entries = match list_sorted(folder) {
+    let folder = match safe::check_real_folder(folder, false) {
+        Ok(f) => f,
+        Err(e) => return End::Failed(e),
+    };
+    let entries = match list_sorted(&folder) {
         Ok(v) => v,
-        Err(e) => return End::Failed(io_err(folder, Doing::List, e)),
+        Err(e) => return End::Failed(io_err(&folder, Doing::List, e)),
     };
     // Nothing is old enough when the cut-off is before the beginning of time.
     let Some(cutoff) = now.checked_sub(older_than) else { return End::Done };
@@ -122,12 +123,13 @@ pub fn empty(folder: &Path, stop: &AtomicBool, on: &mut dyn FnMut(Event)) -> Emp
 }
 
 fn empty_in(folder: &Path, stop: &AtomicBool, on: &mut dyn FnMut(Event), removed: &mut usize) -> End {
-    if let Err(e) = safe::check_real_folder(folder, true) {
-        return End::Failed(e);
-    }
-    let entries = match list_sorted(folder) {
+    let folder = match safe::check_real_folder(folder, true) {
+        Ok(f) => f,
+        Err(e) => return End::Failed(e),
+    };
+    let entries = match list_sorted(&folder) {
         Ok(v) => v,
-        Err(e) => return End::Failed(io_err(folder, Doing::List, e)),
+        Err(e) => return End::Failed(io_err(&folder, Doing::List, e)),
     };
     for entry in entries {
         if stopped(stop) {

@@ -14,6 +14,11 @@
 //!   removed as a link; what it points to is untouched. The folder named by the caller must itself be a real
 //!   folder, not a link (`Unsafe::Link`). [`empty`] also refuses the top of a drive or share (`Unsafe::Root`);
 //!   [`delete_old`] allows it (files only, old ones only).
+//! * The folder is read as `Path::components` reads it: a trailing separator, `.` and repeated separators are
+//!   dropped before the link check (on Unix `link/` and `link/.` would make the check see the target), and the
+//!   paths in the summary and the events use that form (`dir/./x` is `dir/x`). Only the last name is checked:
+//!   links earlier in the path are resolved as the OS does, so on Unix `link/..` is the parent of the link's
+//!   target.
 //! * [`copy_tree`] follows the two roots the caller names, and refuses roots that are the same folder or one
 //!   inside the other (`Unsafe::Overlap`). Inside the tree a file symlink is copied as its content (as
 //!   robocopy does), a folder symlink or junction is not followed (`Skip::Link`; robocopy would follow it by

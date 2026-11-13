@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime};
 
@@ -101,6 +102,74 @@ fn delete_old_refuses_a_link_as_the_folder_and_an_empty_path() {
     assert!(matches!(r.end, End::Failed(Error::Unsafe { why: Unsafe::Empty, .. })));
     let r = delete_old(&t.path().join("missing"), "*", days(30), now, &no_stop(), &mut |_| {});
     assert!(matches!(r.end, End::Failed(Error::Io { doing: Doing::List, .. })));
+}
+
+/// `link` with a trailing separator, `.` or both: on Unix `lstat` of these follows the link (#236).
+fn with_tails(link: &Path) -> Vec<PathBuf> {
+    let sep = std::path::MAIN_SEPARATOR_STR;
+    [sep.to_string(), format!("{sep}."), format!("{sep}.{sep}"), format!("{sep}{sep}")]
+        .iter()
+        .map(|tail| {
+            let mut s = link.as_os_str().to_owned();
+            s.push(tail);
+            PathBuf::from(s)
+        })
+        .collect()
+}
+
+#[test]
+fn a_trailing_separator_does_not_get_past_the_link_check() {
+    let t = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let real = t.path().join("real");
+    old_file(&real, "a.log", 40, now);
+    let link = t.path().join("link");
+    link_dir(&real, &link);
+    for p in with_tails(&link) {
+        let r = delete_old(&p, "*", days(30), now, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Failed(Error::Unsafe { why: Unsafe::Link, .. })), "{p:?}: {:?}", r.end);
+        let r = empty(&p, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Failed(Error::Unsafe { why: Unsafe::Link, .. })), "{p:?}: {:?}", r.end);
+        assert!(real.join("a.log").exists(), "{p:?}");
+    }
+}
+
+/// Windows does not normalize a verbatim `\\?\` path, so whatever `Path::components` leaves of the tail must still
+/// not let the junction be listed through: refused as a link (measured on Windows 11) or failing the lookup.
+#[cfg(windows)]
+#[test]
+fn a_verbatim_link_with_a_tail_is_not_listed_through() {
+    let t = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let real = t.path().join("real");
+    old_file(&real, "a.log", 40, now);
+    let link = t.path().join("link");
+    link_dir(&real, &link);
+    for tail in ["\\", "\\.", "\\.\\"] {
+        let p = PathBuf::from(format!("\\\\?\\{}{tail}", link.display()));
+        let r = delete_old(&p, "*", days(30), now, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Failed(Error::Unsafe { why: Unsafe::Link, .. } | Error::Io { .. })), "{p:?}: {:?}", r.end);
+        let r = empty(&p, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Failed(Error::Unsafe { why: Unsafe::Link, .. } | Error::Io { .. })), "{p:?}: {:?}", r.end);
+        assert!(real.join("a.log").exists(), "{p:?}");
+    }
+}
+
+#[test]
+fn a_real_folder_with_a_trailing_separator_still_works() {
+    let t = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let real = t.path().join("real");
+    for p in with_tails(&real) {
+        old_file(&real, "a.log", 40, now);
+        let r = delete_old(&p, "*", days(30), now, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Done), "{p:?}: {:?}", r.end);
+        assert_eq!(r.paths, vec![real.join("a.log")], "{p:?}");
+        write(&real.join("sub/b.txt"), "b");
+        let r = empty(&p, &no_stop(), &mut |_| {});
+        assert!(matches!(r.end, End::Done) && r.removed == 1, "{p:?}: {:?}", r.end);
+        assert!(real.is_dir() && fs::read_dir(&real).unwrap().next().is_none(), "{p:?}");
+    }
 }
 
 #[test]

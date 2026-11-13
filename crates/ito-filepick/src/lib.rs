@@ -7,12 +7,16 @@
 //!
 //! Paths are text, read by [`Style`] (Windows or Posix) whatever machine runs the dialog.
 
+#[cfg(feature = "local")]
+mod local;
 mod model;
 mod path;
 #[cfg(feature = "egui")]
 mod window;
 mod words;
 
+#[cfg(feature = "local")]
+pub use local::{list_local, local_places, local_style, ListError};
 pub use model::{
     extension, format_size, natural_cmp, Done, Entry, Filter, InputError, Kind, Listing, Mode, Picker, Place, PlaceKind, Shown, Sort,
     Status, Ticket, Want,
@@ -22,6 +26,10 @@ pub use path::{display_name, is_component, PathError, Style};
 pub use window::Look;
 pub use words::Words;
 
+#[cfg(test)]
+mod gate_tests;
+#[cfg(all(test, feature = "local"))]
+mod local_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, feature = "egui"))]

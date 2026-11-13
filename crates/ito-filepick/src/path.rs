@@ -9,6 +9,7 @@ use std::borrow::Cow;
 
 /// How paths are written. This is data about the machine that lists, never the OS this program runs on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "lowercase"))]
 pub enum Style {
     /// `C:\dir\file`, `\\server\share\dir`. Both `\` and `/` are read, `\` is written. Names compare without case.
     Windows,
@@ -35,6 +36,15 @@ pub enum PathError {
 struct Abs {
     root: String,
     parts: Vec<String>,
+}
+
+/// Why `Style::gate_local` refused a path.
+#[cfg(any(feature = "local", test))]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) enum Gate {
+    /// Relative, or rooted without a drive: it would depend on a current folder.
+    NotAbsolute,
+    Path(PathError),
 }
 
 /// How a typed path starts.
@@ -109,6 +119,18 @@ impl Style {
                 }
                 Ok(Start::Relative(s))
             }
+        }
+    }
+
+    /// The gate of a local listing: only a complete path passes (`Start::Abs`), and what comes back is what to hand the OS.
+    /// Lexical only: `..` is not folded, and reserved device names or trailing dots are left to the OS. `C:` alone is
+    /// read as `C:\`; everything else passes as written.
+    #[cfg(any(feature = "local", test))]
+    pub(crate) fn gate_local(self, s: &str) -> Result<String, Gate> {
+        match self.split_start(s).map_err(Gate::Path)? {
+            Start::Abs { .. } if self == Style::Windows && s.len() == 2 => Ok(format!("{s}\\")),
+            Start::Abs { .. } => Ok(s.to_owned()),
+            Start::Rooted(_) | Start::Relative(_) => Err(Gate::NotAbsolute),
         }
     }
 

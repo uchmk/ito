@@ -3,6 +3,36 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.302.0] - 2026-11-13
+
+### 追加
+
+- `ito-filepick`: 機能 `local`（#235）。別の PC の窓の `Picker` のために、この PC のフォルダーを一覧にするエンジン側の部品。
+  - `list_local(path, max) -> Result<Listing, ListError>`: 1 つのフォルダーを読む（止まるのでワーカースレッドから）。
+    パスはこの PC の形の絶対パスだけ。ディスクに触る前に文字だけで、NUL・相対・`\dir`・`C:foo`・`\\?\` などの形・共有のない UNC を断る（`C:` は `C:\`）。
+    入れ物の制限も権限の確認もしない（誰に許すかはアプリが決める）。
+  - 返すのは `max` 件まで。まだあれば `truncated`、Unicode でない名前・読めなかった項目は `left_out` に数える（`max` は使わない）。
+    `max + 1024` 個読んだら止める。リンク（シンボリックリンク・ジャンクション）は `link` で、種類・大きさ・時刻はリンク先のもの。`hidden` は Windows の隠し属性。
+  - `ListError`（`NotAbsolute`・`Path(PathError)`・`Io`）と `words(lang)`（`ja` で始まれば日本語。OS の文は入れない）。`Display` は英語の言葉。
+  - `local_places()`: 場所の列。Windows は割り当てのあるドライブ（ドライブには触らないので、空のカードリーダーや切れたネットワークドライブでも止まらない）とホーム、ほかは `/` とホーム。
+  - `local_style()`: この PC のパスの形（Windows なら `Style::Windows`、ほかは `Posix`）。窓の `Picker` に渡す。
+  - 例 `filepick` に `--local`（この PC の一覧で窓を開く。機能 `local` が無ければ偽のエンジンのまま動き、そう知らせる）。
+- `ito-filepick`: 機能 `serde` で `Place`・`PlaceKind`・`Style` も JSON にできる（`PlaceKind` と `Style` は小文字）。
+
+### 修正
+
+- `ito-fileops`: `delete_old`・`empty` に渡したフォルダーが末尾に `/`・`/.`・`//` の付いたリンクのとき、Unix ではリンクの確かめをすり抜けて、
+  リンク先の中を消せた（#236）。`lstat` が末尾の区切りでリンクをたどるため。確かめる前に `Path::components` の形
+  （末尾の区切り・途中の `.`・重なった区切りを落とした形）にして、`link/` も `link` と同じく `Unsafe::Link` で断る。
+  Windows の `\\?\` の形でも、末尾が何であってもリンクの中は一覧にしない（Windows 11 で確かめた）。
+  - 戻り値（`Deleted::paths`）と `Event` のパスはその形になる（`dir/./x` は `dir/x`）。
+  - 確かめるのは最後の名前だけ。途中のリンクと最後の `..` は OS のとおりにたどる（Unix の `link/..` はリンク先の親）。
+
+### 使う側がやること
+
+- koyomi: `delete_old`・`empty` の前に自分で `components()` に直している回避は外せる。
+  別の PC のファイルを選ぶ窓のエンジンは `ito-filepick` の機能 `local`（`list_local`・`local_places`・`local_style`）に載せ替えられる。
+
 ## [0.301.0] - 2026-11-13
 
 ### 追加

@@ -2,8 +2,22 @@
 
 use std::path::Path;
 
-use crate::safe::{check_empty_target, check_real_folder, is_root, overlap};
+use crate::safe::{check_empty_target, check_real_folder, is_root, overlap, plain};
 use crate::{Error, Unsafe};
+
+#[test]
+fn plain_drops_trailing_separators_and_dots_but_keeps_parents() {
+    for (p, want) in [("a/b/", "a/b"), ("a/b/.", "a/b"), ("a/b/./", "a/b"), ("a//b", "a/b"), ("/a/b/", "/a/b"), ("/", "/")] {
+        assert_eq!(plain(Path::new(p)), Path::new(want), "{p}");
+    }
+    assert_eq!(plain(Path::new("a/b/..")), Path::new("a/b/.."));
+    assert_eq!(plain(Path::new("./a")), Path::new("./a"));
+    assert_eq!(plain(Path::new("")), Path::new(""));
+    #[cfg(windows)]
+    for (p, want) in [("C:\\a\\", "C:\\a"), ("C:\\a\\.", "C:\\a"), ("C:/a/./", "C:\\a"), ("C:\\", "C:\\")] {
+        assert_eq!(plain(Path::new(p)), Path::new(want), "{p}");
+    }
+}
 
 #[test]
 fn roots_are_found_from_the_text() {

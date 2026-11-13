@@ -20,6 +20,7 @@ pub enum Mode {
 
 /// What a place in the places column is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "lowercase"))]
 pub enum PlaceKind {
     Root,
     Drive,
@@ -29,6 +30,7 @@ pub enum PlaceKind {
 
 /// A shortcut in the places column. The app gives these (the engine knows its home and its drives).
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Place {
     pub label: String,
     pub path: String,
