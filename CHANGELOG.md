@@ -3,6 +3,37 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.295.0] - 2026-11-13
+
+### 追加
+
+- `ito-sql`: つなげなかった理由を分けた（ito#227）。`Error::Connect { kind: ConnectKind, text }` の `ConnectKind` は `Unreachable`（名前が引けない・断られた・切れた）・`Tls`（暗号にしない・証明書を断った・握手が壊れた）・`SignIn`（ユーザーかパスワードが違う・ロック・期限切れ）・`Missing`（SQLite のファイルやフォルダー、サーバーのデータベースが無い）・`NotDatabase`（SQLite のファイルがデータベースでない）・`Other`。`text` はドライバーかサーバーの言葉のまま。表示は種類ごとに「cannot reach the server: …」「TLS failed: …」「sign-in refused: …」「not found: …」「not a database: …」「cannot connect: …」。
+  - PostgreSQL: サーバーの SQLSTATE の `28` で始まるもの（`28P01` など）は `SignIn`、`3D000` は `Missing`。TLS の握手が途中で切られたのは `Unreachable`、rustls の誤りは `Tls`、話せないサインインの方式（Kerberos・GSS・SSPI）と SCRAM の失敗は `SignIn`。
+  - SQL Server: 18456・18452・18470・18486・18487・18488 は `SignIn`、4060 は `Missing`（そのデータベースを開く権限が無いときも 4060）。SQL ログインの TLS の失敗は `Tls`。
+- `ito-sql`: SQLite の開き方 `SqliteOpen`（ito#229）。`Target::Sqlite { path, open }` の `open` が `Create`（既定。今までどおり、無ければ作る）・`Existing`（あるファイルだけを読み書き。無ければ `Missing` で、作らない）・`ReadOnly`（読むだけ。作らず、データベースのファイルそのものは変えない。WAL のデータベースは横の `-wal`・`-shm` を作ったり触ったりすることがある。書き手が落ちて残った rollback journal があると読めない）。
+- `ito-sql`: `check(&Target, &cancel, timeout)`: 設定の画面の「接続を試す」。PostgreSQL と SQL Server はサインインして `SELECT 1`、SQLite は `open` に関わらず読むだけで開いてヘッダーを読む（無いファイルは `Missing`。作らない）。届いて読めることを確かめるだけで、書けるか・ファイルを作れるかは見ない。
+- `ito-sql`: SQL Server が Azure SQL の振り向け（`Routing`）を返したら、1 回だけ振り向け先につなぎ直す。
+
+### 修正
+
+- `ito-sql`: **PostgreSQL の `Tls::Require`・`Tls::Verify` が、サーバーが暗号にしないと平文に落ちていた**（tokio-postgres の既定の `SslMode::Prefer` のまま）。今は `Require` にして、暗号にしないサーバーは `ConnectKind::Tls` で断る。`Tls::Disable` だけが平文。
+- `ito-sql`: SQLite の待ち（busy timeout）を、残りの時間と 5 秒の短い方にした（時間切れの上限を超えて待たない）。待ちが残りの時間で、終わってもファイルが使われていれば `Timeout`（SQLite の待ちはミリ秒で数えるので、期限のわずかに前に終わることがある）。
+
+### 変更（壊れる）
+
+- `Error::Connect(String)` は `Error::Connect { kind, text }` になった。`ConnectKind` は `#[non_exhaustive]` なので、`match` には `_` の腕を置く。
+- `Error::Connect` の表示の文字が種類ごとになった（前はどれも「cannot connect: …」）。表示の文字で見分けていた所は `kind` で見分ける。
+- `Error::retryable()` が狭くなった: `true` は `Connect { Unreachable | Other }` と `Timeout` だけ。`Tls`・`SignIn`・`Missing`・`NotDatabase` はやり直さない（間違ったパスワードのやり直しはログインをロックしうる）。`Other` には直らない失敗も入るので、やり直しの回数の上限は使う側が持つ。
+- データベースでないファイルを SQLite で開くと、どの `open` でも `Connect { kind: NotDatabase, .. }` になった（前は `Sql`）。開けないときの誤りも `Missing`・`Other` の種類つきになった。
+
+### 使う側がやること
+
+- `rev` を上げる。
+- `Target::Sqlite { path }` を `Target::Sqlite { path, open: SqliteOpen::Create }` にする（今までどおり）。読むだけの欄・あるはずのファイルなら `ReadOnly`・`Existing`。
+- `Error::Connect(s)` の `match` を `Error::Connect { kind, text }` にし、`kind` で文言を分ける（`_` の腕を忘れずに）。
+- 「接続を試す」のボタンは `check` を使う（ワーカースレッドから）。
+- PostgreSQL を `Tls::Require` で使っていて、サーバーが TLS を持っていなかった所は、今度は `Tls` でつながらない。サーバーに TLS を入れるか、分かっていて平文にするなら `Tls::Disable` にする。
+
 ## [0.294.0] - 2026-11-13
 
 ### 追加

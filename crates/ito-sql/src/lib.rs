@@ -6,7 +6,12 @@
 //! - [`split_batches`]: how a script is cut. SQL Server: at a line that is only `GO`. PostgreSQL and SQLite: at `;`
 //!   outside quotes, comments, `$tag$ … $tag$` (PostgreSQL) and `CREATE TRIGGER … END` (SQLite). Each batch commits by
 //!   itself unless the script has its own `BEGIN` … `COMMIT`.
+//! - [`check`]: "test the connection": connect and read one thing, for a settings page's button.
 //! - Features `sqlserver`, `postgres`, `sqlite` (all on by default) keep a program that needs one from carrying the others.
+//!
+//! A connection that fails is [`Error::Connect`] with a [`ConnectKind`] (unreachable, TLS, sign-in refused, not found,
+//! not a database, other), so a caller can say why and [`Error::retryable`] can tell what is worth another try.
+//! PostgreSQL with [`Tls::Require`] or [`Tls::Verify`] never falls back to plain text.
 //!
 //! The password is given as text in [`Target`]; the caller reads it from `ito-secret` first. `Debug` hides it.
 //! The drivers are `tiberius` (TDS, rustls), `tokio-postgres` (rustls) and `rusqlite` (SQLite built in). The two network
@@ -58,6 +63,9 @@ impl fmt::Debug for SqlAuth {
 }
 
 /// The encryption of a PostgreSQL connection.
+///
+/// [`Tls::Require`] and [`Tls::Verify`] fail ([`ConnectKind::Tls`]) when the server does not encrypt; they never fall
+/// back to plain text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tls {
     /// Plain text on the wire.
@@ -66,6 +74,21 @@ pub enum Tls {
     Require,
     /// Encrypted, and the certificate must chain to a public root and match the host (`verify-full`).
     Verify,
+}
+
+/// How a SQLite target is opened. A path that starts with `file:` is a SQLite URI (the bundled SQLite reads it so), but
+/// its `mode=` cannot ask for more than the mode here gives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum SqliteOpen {
+    /// Read and write; the file is made when it is not there (as before 0.295.0).
+    #[default]
+    Create,
+    /// Read and write an existing file; a missing one is `Error::Connect { kind: Missing, .. }` and is not made.
+    Existing,
+    /// Read only: never made, and the database file itself is not changed. Reading still opens a read transaction, so a
+    /// WAL-mode database may get its `-wal` / `-shm` side files made or touched next to it; a database left with a hot
+    /// rollback journal (a crashed writer) cannot be read this way and fails (SQLite's `SQLITE_READONLY_ROLLBACK`).
+    ReadOnly,
 }
 
 /// Where the script runs.
@@ -87,9 +110,10 @@ pub enum Target {
         password: String,
         tls: Tls,
     },
-    /// A file on this PC (made when it is not there).
+    /// A file on this PC; `open` says whether it is made when it is not there.
     Sqlite {
         path: PathBuf,
+        open: SqliteOpen,
     },
 }
 
@@ -123,7 +147,7 @@ impl fmt::Debug for Target {
                 .field("password", &"***")
                 .field("tls", tls)
                 .finish(),
-            Target::Sqlite { path } => f.debug_struct("Sqlite").field("path", path).finish(),
+            Target::Sqlite { path, open } => f.debug_struct("Sqlite").field("path", path).field("open", open).finish(),
         }
     }
 }
@@ -141,10 +165,30 @@ pub struct Outcome {
     pub result_rows: Option<u64>,
 }
 
+/// Why a connection could not be made. More kinds may come; match with a `_` arm.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConnectKind {
+    /// The server could not be reached: the name did not resolve, the connection was refused or reset, or it closed early.
+    Unreachable,
+    /// The TLS check failed: the server would not encrypt, its certificate was refused, or the handshake broke.
+    Tls,
+    /// The server refused the sign-in: a wrong user or password, a locked or expired login.
+    SignIn,
+    /// What was named is not there: the SQLite file (or its folder), or the database on the server
+    /// (PostgreSQL `3D000`; SQL Server `4060`, which SQL Server also gives when the login may not open that database).
+    Missing,
+    /// The SQLite file is there but is not a database (or is encrypted or damaged at its header).
+    NotDatabase,
+    /// Anything else (e.g. too many connections, the server starting up).
+    Other,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// The server is not reachable, refused the sign-in, or the TLS failed.
-    Connect(String),
+    /// A connection could not be made: `kind` says why (unreachable, TLS, sign-in refused, not found, not a database,
+    /// other) and `text` is the driver's or the server's own words.
+    Connect { kind: ConnectKind, text: String },
     /// The database refused a statement. The text is the database's own.
     Sql(String),
     /// The stop flag was raised.
@@ -158,16 +202,31 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether the same run may work later: a server that could not be reached, or the time running out.
+    pub(crate) fn connect(kind: ConnectKind, text: impl Into<String>) -> Error {
+        Error::Connect { kind, text: text.into() }
+    }
+
+    /// Whether the same run is worth another try later: a server that could not be reached (or another connect failure
+    /// of no known kind), or the time running out. It does not mean it will succeed: `Other` also holds lasting
+    /// failures (a protocol or configuration error), so a caller keeps its own cap on the tries. A refused TLS or
+    /// sign-in, a missing target and a file that is not a database are never retryable (none fixes itself, and a retried
+    /// wrong password can lock a login).
     pub fn retryable(&self) -> bool {
-        matches!(self, Error::Connect(_) | Error::Timeout)
+        matches!(self, Error::Connect { kind: ConnectKind::Unreachable | ConnectKind::Other, .. } | Error::Timeout)
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Connect(s) => write!(f, "cannot connect: {s}"),
+            Error::Connect { kind, text } => match kind {
+                ConnectKind::Unreachable => write!(f, "cannot reach the server: {text}"),
+                ConnectKind::Tls => write!(f, "TLS failed: {text}"),
+                ConnectKind::SignIn => write!(f, "sign-in refused: {text}"),
+                ConnectKind::Missing => write!(f, "not found: {text}"),
+                ConnectKind::NotDatabase => write!(f, "not a database: {text}"),
+                ConnectKind::Other => write!(f, "cannot connect: {text}"),
+            },
             Error::Sql(s) => f.write_str(s),
             Error::Cancelled => f.write_str("cancelled"),
             Error::Timeout => f.write_str("timed out"),
@@ -178,6 +237,18 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Connect and read one thing: a settings page's "test the connection". Blocks; call it from a worker thread.
+/// PostgreSQL and SQL Server: sign in and run `SELECT 1`. SQLite: open the file read-only whatever the target's `open` says
+/// (a missing file is `Missing`, never made) and read its header. It shows the target can be reached and read, not that the
+/// target's own `open` mode (writing, making the file) will work; for a WAL database it may touch the `-wal` / `-shm` files.
+pub fn check(target: &Target, cancel: &AtomicBool, timeout: Duration) -> Result<(), Error> {
+    let target = match target {
+        Target::Sqlite { path, .. } => Target::Sqlite { path: path.clone(), open: SqliteOpen::ReadOnly },
+        other => other.clone(),
+    };
+    run(&target, "SELECT 1", None, cancel, timeout).map(|_| ())
+}
 
 /// Run `script` on `target`. Blocks until it ends, so call it from a worker thread.
 ///
@@ -247,8 +318,10 @@ impl Clock<'_> {
     /// which closes its connection).
     #[cfg(any(feature = "sqlserver", feature = "postgres"))]
     pub fn block_on<T>(&self, work: impl std::future::Future<Output = Result<T, Error>>) -> Result<T, Error> {
-        let rt =
-            tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| Error::Connect(format!("no runtime: {e}")))?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| Error::connect(ConnectKind::Other, format!("no runtime: {e}")))?;
         rt.block_on(async {
             tokio::select! {
                 r = work => r,
@@ -304,6 +377,38 @@ mod tests {
         assert!(!format!("{t:?}").contains("hunter2"));
         let a = SqlAuth::Login { user: "sa".into(), password: "hunter2".into() };
         assert!(!format!("{a:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn retryable_by_kind() {
+        let c = |kind| Error::connect(kind, "x");
+        assert!(c(ConnectKind::Unreachable).retryable());
+        assert!(c(ConnectKind::Other).retryable());
+        assert!(!c(ConnectKind::Tls).retryable());
+        assert!(!c(ConnectKind::SignIn).retryable());
+        assert!(!c(ConnectKind::Missing).retryable());
+        assert!(!c(ConnectKind::NotDatabase).retryable());
+        assert!(Error::Timeout.retryable());
+        assert!(!Error::Cancelled.retryable());
+        assert!(!Error::Sql("x".into()).retryable());
+    }
+
+    #[test]
+    fn display_by_kind() {
+        let show = |kind| Error::connect(kind, "why").to_string();
+        assert_eq!(show(ConnectKind::Unreachable), "cannot reach the server: why");
+        assert_eq!(show(ConnectKind::Tls), "TLS failed: why");
+        assert_eq!(show(ConnectKind::SignIn), "sign-in refused: why");
+        assert_eq!(show(ConnectKind::Missing), "not found: why");
+        assert_eq!(show(ConnectKind::NotDatabase), "not a database: why");
+        assert_eq!(show(ConnectKind::Other), "cannot connect: why");
+    }
+
+    #[test]
+    fn debug_of_a_sqlite_target_shows_open() {
+        let t = Target::Sqlite { path: "a.db".into(), open: SqliteOpen::ReadOnly };
+        assert!(format!("{t:?}").contains("open: ReadOnly"), "{t:?}");
+        assert_eq!(SqliteOpen::default(), SqliteOpen::Create);
     }
 
     #[test]
