@@ -1,0 +1,19 @@
+[package]
+name = "ito-fetch"
+description = "One plain HTTP or HTTPS request to an ordinary server with a blocking API: any method, secret headers, redirects that never leave https, a body limit, a deadline, a stop flag and proxy variables"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# `ring` (not aws-lc-rs) like ito-cloud, so a C compiler is needed on Linux and macOS targets. No gzip and no
+# `win-system-proxy`: bodies come back as sent, and proxies come from the environment variables only.
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+url = "2"
+
+[dev-dependencies]
+ito-testserver = { path = "../ito-testserver" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

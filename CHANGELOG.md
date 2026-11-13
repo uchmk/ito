@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.297.0] - 2026-11-13
+
+### 追加
+
+- `ito-fetch`（新しいクレート）: ふつうのサーバーへの HTTP / HTTPS の要求を 1 回（ito#222）。更新の確認・公開された表の取得・Web のアドレスを呼ぶ仕事に。`request(&Request, &Options, &stop) -> Result<Reply, Error>` と `get(url, ..)`。止まるのでワーカースレッドから。
+  - どの状態コードも `Reply`（`status`・最後の `url`・`content_type`・`headers`・`body`・`cut`、`success`・`text`（BOM を飛ばす UTF-8）・`text_lossy`）。答えが無いときだけ `Error`。
+  - `Request { method, url, headers, body }`。`Method` は GET・HEAD・POST・PUT・PATCH・DELETE、本文は GET と HEAD に付けられない。`Header::secret` の値は `Debug` に出ない。
+  - `Options`: 全体の期限 `deadline`（既定 30 秒。名前の解決・接続・TLS・リダイレクトのすべて・本文を合わせて）・本文の上限 `max_reply`（既定 8 MiB）と超えたとき `Over::{Fail, Cut}`・`https_only`・`max_redirects`（既定 5、0 で 3xx をそのまま返す）・`Roots::{Os, Bundled}`・`Proxy::{Env, None}`・`user_agent`（既定 `ito-fetch/<版>`）。
+  - 止める旗と期限は 50 ms ごとに見て、立てばすぐ `Stopped`・`Timeout` を返す（つないでいるものは閉じる）。もう送った要求はサーバーで動いたかもしれない。
+  - リダイレクトはここでたどる。301・302・303 は本文なしの GET（HEAD は HEAD のまま）、307・308 は方式と本文を保つが、別のオリジンには本文を送らない。https から http へは必ず断る。オリジンが変われば、秘密のヘッダーと `Authorization`・`Cookie` はそれから先送らない。本文を落としたリダイレクトでは `Content-Type` などの本文のヘッダーも落とす。
+  - `Proxy::Env` は `HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`（小文字も）と `NO_PROXY`（`[::1]:8000` のような IPv6 も）を 1 段ごとに読む。PAC と Windows のプロキシの設定は読まない。
+  - `Error`（`#[non_exhaustive]`）: `BadUrl`・`InvalidRequest`・`Name`・`Connect`・`Tls`・`Proxy`・`Timeout`・`Stopped`・`TooLarge`・`Redirect(Redirect::{TooMany, ToHttp, BadLocation, BodyElsewhere})`・`Broken { status }`（本文が途中で切れた。Content-Length に足りない・チャンクの途中）・`Other`。文はホストまでしか書かない（URL のパス・クエリ・ヘッダーの値・本文は出さない）。`retryable()` は `Name`・`Connect`・`Proxy`・`Timeout`。
+  - HTTP/1.1 だけ。Cookie・圧縮・やり直しは無い。TLS は rustls + ring なので、Linux・macOS 向けは C が要る（`ito-cloud` と同じ）。
+
+### 使う側がやること
+
+- `log` のロガーを入れているアプリで `ito-fetch` を使うときは、ターゲット `ureq` と `ureq_proto` を `info` 以上にする（`debug`・`trace` では URL のパスやヘッダーの値が出ることがある）。
+
 ## [0.296.0] - 2026-11-13
 
 ### 追加
