@@ -3,6 +3,32 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.306.0] - 2026-11-13
+
+### 削除
+
+- koyomi だけが使うクレート `ito-sql`・`ito-winrm`・`ito-sftp`・`ito-zip`・`ito-cloud`・`ito-http`・`ito-service`・`ito-table`・`ito-mail` を ito から消した（持ち主の決定）。
+  koyomi が 0.305.0（d2e252b）の中身を `crates/koyomi-*` に写して使っている（koyomi の main の 74b6dc8）。ito では直さない。
+- `ito-testserver`: SMTP・IMAP・WinRM・SSH／SFTP の偽サーバー（`smtp`・`imap`・`winrm`・`ssh`・`tls` のモジュールとそのテスト）を消した。
+  試していたクレートと一緒に koyomi の `koyomi-testserver` に移った。
+
+### 変更
+
+- `ito-testserver`: 偽の HTTP サーバー `http::HttpServer` だけになった（`http` の API は前と同じ）。依存は 1 つも無い（前は rustls・rcgen・russh・tokio など）。
+- `ito-power`・`ito-notify`・`ito-fetch`・`ito-oauth`: 説明の中の消したクレートの名前を直した（動きは同じ）。
+  `ito-power` の `set_service_mode`・`service_session_change` は、koyomi の `koyomi-service` が呼ぶので、名前と形を変えずに残す。
+- `CLAUDE.md` の表から 9 つのクレートの行を消し、表の下に移したことと ito-first の注意を書いた。アプリの雛形の `CLAUDE.md` にも、ほかのアプリの中のクレートを使わない・写さない行を足した。
+- `docs/proposals/file-transfer-app.md`: 案に出てくるクレートが koyomi に移った注を足した（中身は書いたときのまま）。
+
+### 使う側がやること
+
+- koyomi: 何もしない（移し終えている）。次に `rev` を上げるときも、`koyomi-*` が使う `ito-match`・`ito-secret`・`ito-power` を koyomi のほかの ito のクレートと同じ `rev` にそろえる。
+  `ito-power` の 2 つの関数は前と同じ形。
+- fumi: `ito-mail` を使っているので、`rev` を上げるとビルドできない（メンテナンスの対象の外として持ち主が受け入れた）。
+- ほかのアプリ: koyomi の `koyomi-*` を依存にせず、写しもしない。同じ役目（SQL・SFTP・zip・S3・WinRM・HTTP の待ち受け・サービス・表・メール）が要るときは、
+  アプリに先に書かず、`crate-request` で ito に戻すよう頼む。戻すときは koyomi の今の `koyomi-*` を元にし、koyomi も ito のクレートに載せ替える（二重に持たない）。
+- `ito-testserver` を dev-dependency にしているアプリ: HTTP 以外の偽サーバーは無くなった（ito の外では使われていない）。
+
 ## [0.305.0] - 2026-11-13
 
 ### 修正

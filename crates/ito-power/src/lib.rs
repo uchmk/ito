@@ -5,7 +5,7 @@
 //! - [`sleep_after`]: how long the PC idles before it sleeps, on the current power source.
 //! - [`on_ac`], [`network_up`], [`idle_for`]: probes for "run only when ..." conditions; `None` when the system cannot say.
 //! - [`on_session`] / [`on_session_with`] (with whose session: [`SessionInfo`]): sign-in, sign-out, lock and unlock ([`SessionEvent`]), from a process in the person's session or from a
-//!   Windows service run by `ito-service`. [`user_idle_for`]: the idle time of the person at the screen, readable from a service.
+//!   Windows service run by a service host such as koyomi's `koyomi-service`. [`user_idle_for`]: the idle time of the person at the screen, readable from a service.
 //!
 //! Windows uses power requests, a resume timer and the active power plan. macOS holds with `caffeinate`
 //! and Linux with `systemd-inhibit` (both a child process killed on drop); neither can wake the PC, so

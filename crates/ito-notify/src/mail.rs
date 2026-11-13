@@ -214,7 +214,7 @@ fn post(mail: &Mail, level: Level, title: &str, message: &str) -> Result<(), Str
     upload(mail, &mail.to, body(mail, level, title, message, now()).as_bytes(), 60)
 }
 
-/// Send one message that is already composed (RFC 5322 bytes with CRLF lines, such as `ito_mail::compose` makes,
+/// Send one message that is already composed (RFC 5322 bytes with CRLF lines, such as koyomi's `koyomi_mail::compose` makes,
 /// attachments and all) through `mail`'s server and login, to `to` (not `mail.to`); the sender is `mail.from`.
 /// Waits on the calling thread until `curl` ends, at most `timeout` (a second at least), and tries once: whether to
 /// try again is for the caller. The error is a line for a log: `curl`'s own words or its exit code, never the password.

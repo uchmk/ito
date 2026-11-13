@@ -1,5 +1,7 @@
 # 届いた証明つきのファイル転送（koyomi の send / fetch を広げる案）
 
+> 2026-11-13: ito-sftp, ito-cloud, ito-winrm and the other crates this proposal names moved to koyomi (`koyomi-*`); ito no longer has them.
+
 HULFT のような「確実に届いたことを残す」ファイル転送を、新しいアプリでなく koyomi の send / fetch の部品に「届いたかの確認」を足して作る案。
 2026-11-01 の ito セッションでの会話と実機の確認から始め、同じ日に koyomi の今の部品と ito-sftp の中身に合わせて書き直した。まだ作っていない。
 

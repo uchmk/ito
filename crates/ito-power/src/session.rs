@@ -2,7 +2,7 @@
 //!
 //! A process that runs in the person's own session gets the events from a hidden message-only window
 //! (`WTSRegisterSessionNotification`). A Windows service (session 0) has no such window that works: the SCM
-//! hands it `SERVICE_CONTROL_SESSIONCHANGE` instead, which `ito-service` passes on to [`service_session_change`]
+//! hands it `SERVICE_CONTROL_SESSIONCHANGE` instead, which a service host such as koyomi's `koyomi-service` passes on to [`service_session_change`]
 //! once [`set_service_mode`] has been called. [`on_session`] picks the right way by itself.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -107,14 +107,14 @@ fn listeners() -> std::sync::MutexGuard<'static, Vec<(u64, Callback)>> {
     LISTENERS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Called by `ito-service` before it runs the service's main: from here on [`on_session`] is fed by
-/// [`service_session_change`] and opens no window. Not for apps.
+/// Called by an app's service host (koyomi's `koyomi-service`) before it runs the service's main: from here on
+/// [`on_session`] is fed by [`service_session_change`] and opens no window. Not for apps.
 #[doc(hidden)]
 pub fn set_service_mode() {
     SERVICE.store(true, Ordering::SeqCst);
 }
 
-/// Called by `ito-service` for `SERVICE_CONTROL_SESSIONCHANGE`: `code` is its event type, `session` the session id
+/// Called by an app's service host (koyomi's `koyomi-service`) for `SERVICE_CONTROL_SESSIONCHANGE`: `code` is its event type, `session` the session id
 /// (session 0 is the services' own and is ignored). Not for apps.
 #[doc(hidden)]
 pub fn service_session_change(code: u32, session: u32) {
@@ -156,7 +156,7 @@ impl Drop for SessionWatch {
 ///
 /// - In a process in the person's session: events of that session (sign-in does not happen there, a process
 ///   that lives through a sign-out is rare, so mostly [`SessionEvent::Lock`] and [`SessionEvent::Unlock`]).
-/// - In a Windows service run by `ito-service`: events of every session but the services' own.
+/// - In a Windows service run by a service host such as koyomi's `koyomi-service`: events of every session but the services' own.
 ///
 /// `Err(WhyNot::Unsupported)` on macOS and Linux; `Err(WhyNot::Failed(_))` when the window cannot be made.
 pub fn on_session(f: impl Fn(SessionEvent) + Send + Sync + 'static) -> Result<SessionWatch, WhyNot> {

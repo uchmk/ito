@@ -9,6 +9,8 @@
 - 新しい機能を足す前に、ito の `CLAUDE.md` の表（`C:\dev\ito\CLAUDE.md`）で、同じ役目のクレートがないか見る。
 - ないときは、uchmk/ito に Issue を立てる（雛形 `crate-request`）か、ito のセッションに頼む。
   このアプリに先に書いて、あとで ito に移すことはしない（移す手間が残り、二重になる）。
+- ほかのアプリの中のクレート（koyomi の `koyomi-*` など。2026-11-13 に ito から koyomi に移したもの）を依存にせず、写しもしない。
+  同じ役目が要るなら、ito に戻すよう `crate-request` で頼む（ito の `CLAUDE.md` の表の下の注）。
 - `scripts/ito-first.py` が機械で見る。ito が受け持つ依存（`toml_edit`・`dirs`・`notify` …）を直接足すと落ちる。
   持つべき ito のクレート（keyscript・help・notify・bugreport …）が抜けていても落ちる。
   理由があって外すときだけ `scripts/ito-first.allow` に `<crate> <理由>` を書く（理由のない行は効かない）。

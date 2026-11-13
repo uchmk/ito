@@ -27,7 +27,7 @@
 //!   values. An app that installs a `log` logger should keep the targets `ureq` and `ureq_proto` at `info` or above.
 //! - HTTP/1.1 only. No cookies, no compression (no `Accept-Encoding` is sent), no retries (the caller retries when
 //!   [`Error::retryable`]).
-//! - Not pure Rust: TLS is rustls with `ring`, which needs a C compiler on Linux and macOS targets (like `ito-cloud`).
+//! - Not pure Rust: TLS is rustls with `ring`, which needs a C compiler on Linux and macOS targets.
 
 mod error;
 mod proxy;

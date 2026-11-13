@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# `ring` (not aws-lc-rs) like ito-cloud, so a C compiler is needed on Linux and macOS targets. No gzip and no
+# `ring` (not aws-lc-rs), so a C compiler is needed on Linux and macOS targets. No gzip and no
 # `win-system-proxy`: bodies come back as sent, and proxies come from the environment variables only.
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 url = "2"
