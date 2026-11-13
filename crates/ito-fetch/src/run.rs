@@ -12,6 +12,7 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::{Agent, AsSendBody};
 use url::Url;
 
+use crate::error::{BAD_ADDRESS, BAD_SCHEME, HTTPS_REQUIRED, NO_HOST, PROXY_CONNECT, PROXY_REFUSED, PROXY_UNUSABLE};
 use crate::redirect::{self, Hop};
 use crate::{proxy, Error, Method, Options, Over, Proxy, Reply, Request, Roots};
 
@@ -31,18 +32,18 @@ pub(crate) fn root_certs(roots: Roots) -> RootCerts {
 
 /// Check the request and return the start URL (no fragment).
 fn validate(req: &Request, opts: &Options) -> Result<Url, Error> {
-    let url = Url::parse(&req.url).map_err(|_| Error::BadUrl("not a valid address".into()))?;
+    let url = Url::parse(&req.url).map_err(|_| Error::BadUrl(BAD_ADDRESS.into()))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(Error::BadUrl("only http and https addresses are supported".into()));
+        return Err(Error::BadUrl(BAD_SCHEME.into()));
     }
     if url.host_str().is_none_or(str::is_empty) {
-        return Err(Error::BadUrl("the address has no host".into()));
+        return Err(Error::BadUrl(NO_HOST.into()));
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err(Error::InvalidRequest("the URL has user information; use a header".into()));
     }
     if opts.https_only && url.scheme() != "https" {
-        return Err(Error::BadUrl("https is required".into()));
+        return Err(Error::BadUrl(HTTPS_REQUIRED.into()));
     }
     if req.body.is_some() && matches!(req.method, Method::Get | Method::Head) {
         return Err(Error::InvalidRequest(format!("a body is not allowed on {}", req.method.name())));
@@ -64,7 +65,7 @@ fn validate(req: &Request, opts: &Options) -> Result<Url, Error> {
             return Err(Error::InvalidRequest("bad value for the header Content-Type".into()));
         }
     }
-    redirect::clean(url).ok_or_else(|| Error::BadUrl("not a valid address".into()))
+    redirect::clean(url).ok_or_else(|| Error::BadUrl(BAD_ADDRESS.into()))
 }
 
 fn build_agent(opts: &Options) -> Agent {
@@ -160,7 +161,7 @@ impl Job {
             let left = self.check()?;
             let host = url.host_str().unwrap_or("?").to_owned();
             let proxy = match self.env.as_ref().and_then(|env| proxy::choose(env, &url)) {
-                Some(p) => Some(ureq::Proxy::new(&p).map_err(|_| Error::Proxy("the proxy setting is not usable".into()))?),
+                Some(p) => Some(ureq::Proxy::new(&p).map_err(|_| Error::Proxy(PROXY_UNUSABLE.into()))?),
                 None => None,
             };
             let proxied = proxy.is_some();
@@ -305,18 +306,18 @@ fn map_err(e: ureq::Error, host: &str, proxied: bool) -> Error {
             _ => false,
         };
         if to_proxy {
-            return Error::Proxy("could not connect to the proxy".into());
+            return Error::Proxy(PROXY_CONNECT.into());
         }
     }
     match e {
         U::Timeout(_) => Error::Timeout,
         U::HostNotFound => Error::Name(host),
-        U::ConnectionFailed if proxied => Error::Proxy("could not connect to the proxy".into()),
+        U::ConnectionFailed if proxied => Error::Proxy(PROXY_CONNECT.into()),
         U::ConnectionFailed => Error::Connect(host),
-        U::InvalidProxyUrl => Error::Proxy("the proxy setting is not usable".into()),
-        U::ConnectProxyFailed(_) => Error::Proxy("the proxy refused the connection".into()),
+        U::InvalidProxyUrl => Error::Proxy(PROXY_UNUSABLE.into()),
+        U::ConnectProxyFailed(_) => Error::Proxy(PROXY_REFUSED.into()),
         U::Tls(_) | U::Pem(_) | U::Rustls(_) | U::TlsRequired => Error::Tls(host),
-        U::BadUri(_) | U::Http(_) => Error::BadUrl("not a valid address".into()),
+        U::BadUri(_) | U::Http(_) => Error::BadUrl(BAD_ADDRESS.into()),
         U::Io(e) => match e.kind() {
             K::TimedOut | K::WouldBlock => Error::Timeout,
             K::InvalidData => {

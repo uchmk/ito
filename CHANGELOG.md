@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.301.0] - 2026-11-13
+
+### 追加
+
+- `ito-fetch`: `Error::words(lang)`（#234）。失敗の理由を窓の言語の短い言葉にする（`ja` で始まれば日本語、ほかは英語）。
+  アプリの行のコロンの後ろに置ける長さで、名前を出すのはホストだけ（パス・クエリ・ヘッダーの値・本文は出さない）。
+  - 例: `Name` は「{host} が見つかりません」、`Connect` は「{host} につながりません」、`Tls` は「{host} と安全につなげません」、
+    `Timeout` は「時間内に終わりませんでした」、`TooLarge` は「大きすぎます（10 MiB まで）」（上限は B・KiB・MiB・GiB で切り捨て）。
+  - `BadUrl`・`Proxy` は理由ごとに言葉を分ける（http/https だけ・ホストがない・https が要る、プロキシの設定・つながらない・断られた）。
+  - `Display`（英語、ログ向け）は変わらない。
+
+### 使う側がやること
+
+- koyomi: 祝日の表を取り込めなかったときの行に、`Display` の代わりに `e.words(lang)` を使える。
+
 ## [0.300.0] - 2026-11-13
 
 ### 追加
