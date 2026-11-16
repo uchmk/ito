@@ -17,6 +17,7 @@ egui = { version = "0.36", default-features = false }
 ito-a11y = { path = "../ito-a11y", features = ["egui"] }
 ito-common = { path = "../ito-common" }
 ito-i18n = { path = "../ito-i18n" }
+ito-keyboard = { path = "../ito-keyboard" }
 ito-keymap = { path = "../ito-keymap" }
 ito-keys = { path = "../ito-keys", features = ["egui"] }
 ito-notify = { path = "../ito-notify" }

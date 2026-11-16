@@ -82,6 +82,7 @@ dark_theme = "tsumugi Dark"   # system で OS が暗いとき
 light_theme = "tsumugi Light" # system で OS が明るいとき
 scale = 1.0                # 画面の倍率。0.2 から 5.0、0.1 刻み
 mono_font = "bundled"      # 等幅の字体。bundled（内蔵の JetBrains Mono）/ system（システムのもの）
+keyboard = "auto"          # キーの設定のページに描くキーボード。auto は OS から物理配列（JIS か US）を推す / us / jis で決める。読むのはその絵だけ
 easy = false               # やさしい表示。専門語を言い換え、ホバーで説明（ito-glossary）
 high_contrast = false      # 高コントラスト。色を `Colors::high_contrast()` に通し、状態に印（ito-a11y）を付ける
 
@@ -197,6 +198,12 @@ prepend_keymap = [
 - 入れている間（`KeysEdit::busy`）は、`show` に `Keys::default()` を渡す（Esc・Ctrl+Tab をページに渡す）。
   ほかのページへ移ったとき、設定の画面を閉じたとき・開き直したときは、入れかけのキー（`KeysEdit::capture`・`listening`）を捨てる
   （残すと、次に開いたときもまだ受け取っていて、最初の Esc がページに取られる。`KeysEdit` を画面と一緒に作り直すのでもよい）。
+- キーボードの絵（`ito_prefs::keys_page_kb`、`ito-keyboard`）: 表の上に物理配列（PC の US・JIS、Mac の US・JIS）を描き、
+  選んだ層のキーがどのキーにあるかを見せる。**見て選ぶだけ**で、キーを変えるのは今までどおり下の表。キーを押す（または「⌨ キーで探す」）と、
+  その修飾キーの層に切り替わり、押したキーで下の表が絞られる。どの配列かは common.toml の `keyboard`（`auto` は OS から推す。
+  アプリは `keys_page_kb` に `common.keyboard_or_auto()` を渡し、返る `KeysOut.common` を common.toml の書き手で書く）。
+  設定の画面の本文は 820pt（`ito_prefs::PAGE`）までなので、キーのページを `show_with` の `Extras::wide` に入れて 1280pt（`WIDE_PAGE`）まで広げる。
+  広げないと絵は右のかたまり（Ins〜PgDn・矢印）を本体の下に畳んだ形にしかならない。
 - Ctrl+C・X・V は egui が `Copy`・`Cut`・`Paste` に変えるので、ページは `ito_keys::from_clipboard` でもとのキーに戻して受け取る。
   ページで `<C-S-v>` などに割り当てたキーが一覧でも効くよう、アプリのキーの入口も同じものを通す（kura 0.111 から）。
 - ページは `Edit` を返す。アプリは UI ではないスレッドで `ito_keymap::edit` を自分の keymap.toml に当てて `write_atomic` で書き、

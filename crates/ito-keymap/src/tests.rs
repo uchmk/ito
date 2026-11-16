@@ -581,3 +581,20 @@ fn the_help_keeps_the_live_keys_and_joins_those_that_do_the_same() {
     // `m` buries `m s` and `m t`; `gG` is taken away; `Q` and `q` read as one line.
     assert_eq!(shown, [("m", "bookmark"), ("Q / q", "quit"), ("gg", "top"), ("<C-,>", "settings")]);
 }
+
+#[test]
+fn the_common_keys_are_ctrls_and_on_a_mac_with_sup_cmds() {
+    let comma = Key::parse("<C-,>").unwrap();
+    assert!(common_for(&[comma], false).is_some());
+    assert_eq!(common_for(&[comma], false), common(&[comma]));
+    assert_eq!(common_for(&[Key::parse("x").unwrap()], false), None);
+    if cfg!(target_os = "macos") {
+        // Apart, Ctrl is not the common key; Cmd is.
+        assert_eq!(common_for(&[comma], true), None);
+        let mut cmd = comma;
+        (cmd.ctrl, cmd.sup) = (false, true);
+        assert_eq!(common_for(&[cmd], true), common(&[comma]));
+    } else {
+        assert!(common_for(&[comma], true).is_some());
+    }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "ito-keyboard"
+description = "What a keymap looks like on a keyboard: the physical boards (PC and Mac, US and JIS), where a key press lands, which keys a layer binds, and which kind of keyboard this machine has (no drawing)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ito-keymap = { path = "../ito-keymap" }
+ito-keys = { path = "../ito-keys", features = ["egui"] }
+egui = { version = "0.36", default-features = false }

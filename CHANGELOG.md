@@ -3,6 +3,48 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.307.0] - 2026-11-16
+
+### 追加
+
+- 新しいクレート `ito-keyboard`（描かない。依存は `ito-keys`・`ito-keymap`・egui の型だけ）: キーボードの絵のための部品（#240）。
+  - 盤 `Board`（PC・Mac × US・JIS）、キーの位置 `Phys`（W3C の `KeyboardEvent.code` の名前。`id()` の小文字はテスト ID に使う）、
+    キーの形と場所 `caps(board)`（本体は 1 行 15u、右に Ins〜PgDn と矢印。テンキー・PrtSc・F13 以上は描かない）、印字 `legend`、打つ文字 `types`、修飾キー `modifier`。
+  - `produce(board, phys, mods, apart)`: そのキーを押したときにアプリが受け取る `Key`（egui-winit と `ito_keys::from_egui` と同じ手順。JIS の Ctrl+@ が `<C-[>` になるなども同じ）。
+    `place(board, &key, apart)`: そのキーを出す位置と修飾キーの全部（Windows の JIS の `\` は ¥ と ろ の 2 か所）。
+    `apart` は macOS で Ctrl と Cmd を分けるアプリ（`KeyTable::sup`）で、`<D-…>` を Cmd、`<C-…>` を Control に置く。
+  - `view(bindings, noop, rows, layer, prefix, board, sup)` → `View`: 層の割り当てがどのキーにあるか（`prefix` の続き。続きの数・全アプリ共通か・変えたキーか・届かない割り当て・
+    このキーボードに無いキー）。`split(bindings, noop, by_key)`: 「キーで探す」の打鍵を、続きを見せる手前の打鍵と選んだキーに分ける。
+  - `detect()`・`detected(wake)`: この機械のキーボードが JIS か US かを推す（Windows は `GetKeyboardType`、macOS は Carbon の `KBGetLayoutType`、
+    Linux は `XKB_DEFAULT_LAYOUT` と `/etc/default/keyboard`・`/etc/vconsole.conf`・`/etc/X11/xorg.conf.d/00-keyboard.conf`）。
+    `detected` は UI のスレッドを止めない（最初の呼び出しでスレッドを 1 つ起こし、終われば `wake` を呼ぶ。結果はプロセスの間覚える）。推測なので、違えば common.toml の `keyboard` で決める。
+- `ito-prefs`: `keys_page_kb(ui, l, w, t, st, layout) -> KeysOut`。「キー」ページの表の上にキーボードの絵を描く。
+  - 選んだ層（「すべて」なら最初の層）の割り当てを、キーの上に説明（長ければ `…`、全文はホバーと詳細の一覧）・印（◆ 全アプリ共通、● その層だけ、▸N 続きあり、• 変えたキー、⚠ 届かない）で見せる。色だけで区別しない。
+  - キーをクリックすると、下の表がそのキーに絞られ（`KeysEdit::by_key`）、続きのあるキー（`g` など）は続きの絵に変わる。「‹ g」で 1 打戻る。
+  - Shift・Ctrl・Alt（Mac は ⌘）は、押している間とクリックで固定した間、その層の割り当てを見せる。「⌨ キーで探す」で押したキーにも絵が付いてくる。
+  - 幅に合わせて 3 段階（広い: 本体と右のかたまり／中くらい: 右のかたまりを本体の下の帯に／狭い: 文字と印だけ、足りなければ横にスクロール）。
+  - 見出しに配列の選択（自動（検出した配列）・US・JIS）と、絵を畳むボタン（`KeysEdit::kb_hidden`）。
+  - テスト ID: `settings.keys.kb`、`.key.<code>`（`keyg`・`intlyen` など）、`.mod.{shift,ctrl,alt,cmd}`、`.prefix`、`.detail`・`.detail.<n>`、`.unplaced`、`.toggle`、配列の選択 `settings.select.keys-keyboard`。
+- `ito-prefs`: `Extras::wide`（本文を `WIDE_PAGE`＝1280pt まで広げるページ）と、本文の幅の上限の定数 `PAGE`（820pt、今までの値）・`WIDE_PAGE`。
+  検索の結果のページは広げない。
+- `ito-common`: common.toml の `keyboard`（`auto`（既定）・`us`・`jis`）。`Keyboard`、`Common::keyboard`・`keyboard_or_auto()`、`keyboard_change(k)`。
+  読むのはキーボードの絵だけで、キーの割り当ては変わらない。知らない値は警告を出して `auto`。
+- `ito-keymap`: `common_for(on, sup)`。全アプリ共通のキーの判定を公開した（macOS で Ctrl と Cmd を分けるアプリでは `<D-,>` などが共通のキー）。
+
+### 変更
+
+- `ito-prefs`: `KeyWords` にキーボードの絵の言葉（`kb_*`）を、`KeysEdit` に `kb_hidden`・`kb_latch` を足した。`keys_page` は前と同じで、絵を描かない。
+- `docs/common-spec.md`: common.toml の `keyboard` と、「キー」ページのキーボードの絵を足した。
+
+### 使う側がやること
+
+- 絵を出すには、`keys_page` を `keys_page_kb(ui, l, w, t, st, common.keyboard_or_auto())` に替える。返る `KeysOut` の `edits` は今の `keys_page` の戻り値と同じに
+  （UI ではないスレッドで keymap.toml に当てる）、`common`（配列を選んだとき `Some`）は common.toml の書き手に渡す（UI ではないスレッドで書く）。
+  あわせて、`show` を `show_with` にして `Extras { wide: &[<キーのページの番号>], ..Default::default() }` を渡す（広げないと、絵は右のかたまりを下に畳んだ形にしかならない）。
+- `rev` を上げるだけなら何も壊れない。`KeyWords` は `KeyWords::of` で、`KeysEdit` は `Default` で作っていれば足す欄は無い（`KeysEdit { … }` を欄を並べて作っているなら `..Default::default()` を足す）。
+  `Extras { … }` を欄を並べて作っているなら `wide: &[]` を足す。
+- `--keys` の状態に絵の状態を出すなら、`KeysEdit::by_key`・`kb_latch` と、選んだ配列を足す。
+
 ## [0.306.0] - 2026-11-13
 
 ### 削除

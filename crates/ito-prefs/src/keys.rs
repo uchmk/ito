@@ -6,7 +6,7 @@
 //! the keymap again.
 
 use egui::{Color32, FontId, RichText};
-use ito_keymap::{clashes, common, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
+use ito_keymap::{clashes, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
 use ito_keys::{human_seq_for, render_seq, Code, Key, Named};
 
 use crate::{select, switch, z, Look};
@@ -57,6 +57,29 @@ pub struct KeyWords {
     /// What each of [`ito_keymap::COMMON`] is for, in its order.
     pub common_what: [&'static str; 9],
     pub nothing: &'static str,
+    /// The keyboard picture (`keys_page_kb`): the layout's label.
+    pub kb_keyboard: &'static str,
+    /// `{0}` is the guessed layout (`kb_us` or `kb_jis`).
+    pub kb_auto: &'static str,
+    /// The layout "auto" while the machine is still being asked.
+    pub kb_auto_wait: &'static str,
+    pub kb_us: &'static str,
+    pub kb_jis: &'static str,
+    pub kb_show: &'static str,
+    pub kb_hide: &'static str,
+    /// `{0}` is the layer shown, `{1}` the label of the layer filter.
+    pub kb_showing: &'static str,
+    pub kb_common: &'static str,
+    /// `{0}` is the layer.
+    pub kb_layer_only: &'static str,
+    /// `{0}` is how many keys follow.
+    pub kb_follows: &'static str,
+    pub kb_changed: &'static str,
+    pub kb_unreachable: &'static str,
+    /// `{0}` is how many keys.
+    pub kb_unplaced: &'static str,
+    pub kb_back: &'static str,
+    pub kb_detail: &'static str,
 }
 
 pub const KEYS_EN: KeyWords = KeyWords {
@@ -102,6 +125,22 @@ pub const KEYS_EN: KeyWords = KeyWords {
         "the zoom back to 100%",
     ],
     nothing: "No key matches",
+    kb_keyboard: "Keyboard",
+    kb_auto: "Auto ({0})",
+    kb_auto_wait: "Auto",
+    kb_us: "US",
+    kb_jis: "JIS",
+    kb_show: "Show keyboard",
+    kb_hide: "Hide keyboard",
+    kb_showing: "Showing {0} — pick another in {1}",
+    kb_common: "All apps",
+    kb_layer_only: "{0} only",
+    kb_follows: "{0} more — click to show",
+    kb_changed: "Changed",
+    kb_unreachable: "Never runs",
+    kb_unplaced: "Not on this keyboard ({0})",
+    kb_back: "Back",
+    kb_detail: "On this key",
 };
 
 pub const KEYS_JA: KeyWords = KeyWords {
@@ -137,6 +176,22 @@ pub const KEYS_JA: KeyWords = KeyWords {
     more: "ほか {0} 件も同じです",
     common_what: ["設定", "ヘルプ", "コマンドパレット", "終了", "拡大", "拡大", "拡大", "縮小", "倍率を 100% に戻す"],
     nothing: "当てはまるキーはありません",
+    kb_keyboard: "キーボード",
+    kb_auto: "自動（{0}）",
+    kb_auto_wait: "自動",
+    kb_us: "US",
+    kb_jis: "JIS",
+    kb_show: "キーボードを表示",
+    kb_hide: "キーボードを隠す",
+    kb_showing: "表示中: {0}（{1} で変える）",
+    kb_common: "全アプリ共通",
+    kb_layer_only: "{0}だけ",
+    kb_follows: "続き {0} 個（クリックで表示）",
+    kb_changed: "変えたキー",
+    kb_unreachable: "届かない",
+    kb_unplaced: "このキーボードに無いキー（{0}）",
+    kb_back: "戻る",
+    kb_detail: "このキー",
 };
 
 impl KeyWords {
@@ -151,7 +206,7 @@ impl KeyWords {
 
 /// The page's words, for the settings' search.
 pub fn keys_index(w: &KeyWords) -> Vec<&'static str> {
-    vec![w.by_key, w.changed_only, w.layer, w.add, w.remove, w.reset, w.special]
+    vec![w.by_key, w.changed_only, w.layer, w.add, w.remove, w.reset, w.special, w.kb_keyboard, w.kb_show, w.kb_hide]
 }
 
 /// How many keys a sequence being set starts (or is the start of) are named
@@ -199,6 +254,11 @@ pub struct KeysEdit {
     pub changed_only: bool,
     /// The keys being pressed for an operation.
     pub capture: Option<Capture>,
+    /// The keyboard picture of [`keys_page_kb`] is folded away.
+    pub kb_hidden: bool,
+    /// Modifiers the picture holds down for the person: clicked on its
+    /// modifier keys, or taken from the last key pressed while finding by key.
+    pub kb_latch: ito_keyboard::Mods,
 }
 
 /// Keys being pressed for an operation, not yet set.
@@ -243,20 +303,6 @@ fn special(sup: bool) -> [Key; 7] {
         k
     };
     [named(Named::Enter), named(Named::Esc), named(Named::Backspace), named(Named::Tab), clip('c'), clip('x'), clip('v')]
-}
-
-/// The key every app keeps that `keys` starts with: where Ctrl and Cmd are
-/// apart on macOS (`sup`), the common keys are Cmd's (`<D-,>`), not Ctrl's.
-fn common_of(keys: &[Key], sup: bool) -> Option<usize> {
-    if !(sup && cfg!(target_os = "macos")) {
-        return common(keys);
-    }
-    let mut first = *keys.first()?;
-    if first.ctrl {
-        return None;
-    }
-    (first.ctrl, first.sup) = (first.sup, false);
-    common(&[first])
 }
 
 /// The keys pressed this frame, taken out of egui's input so nothing else
@@ -317,7 +363,7 @@ fn presses(ui: &egui::Ui, sup: bool) -> Vec<Press> {
 }
 
 /// `s` with `{0}`, `{1}` … filled in.
-fn fill(s: &str, args: &[&str]) -> String {
+pub(crate) fn fill(s: &str, args: &[&str]) -> String {
     args.iter().enumerate().fold(s.to_owned(), |s, (k, a)| s.replace(&format!("{{{k}}}"), a))
 }
 
@@ -364,9 +410,48 @@ fn sign(ui: &mut egui::Ui, l: Look, s: &str, tip: &str, enabled: bool) -> bool {
     r.clicked()
 }
 
+/// What [`keys_page_kb`] hands back.
+#[derive(Debug, Default)]
+pub struct KeysOut {
+    /// The changes to the keymap, as [`keys_page`] gives them.
+    pub edits: Vec<Edit>,
+    /// A change to `common.toml` (the keyboard layout picked): the app
+    /// writes it with its common.toml writer off the UI thread, as it does
+    /// for other common changes.
+    pub common: Option<ito_common::CommonChange>,
+}
+
 /// The Keys page: the search and filters, then the table. What is set hands
 /// back the edits to write; `None` the rest of the time.
 pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, st: &mut KeysEdit) -> Option<Vec<Edit>> {
+    page(ui, l, w, t, st, None).0
+}
+
+/// [`keys_page`] with a picture of the keyboard between the filters and the
+/// table: each key shows what it does in the layer chosen, and a click
+/// narrows the table to the keys that start so. `layout` is `common.toml`'s
+/// `keyboard` ([`ito_common::Common::keyboard_or_auto`]); picking another in
+/// the picture is handed back in [`KeysOut::common`].
+pub fn keys_page_kb<A>(
+    ui: &mut egui::Ui,
+    l: Look,
+    w: &KeyWords,
+    t: &KeyTable<A>,
+    st: &mut KeysEdit,
+    layout: ito_common::Keyboard,
+) -> KeysOut {
+    let (edits, common) = page(ui, l, w, t, st, Some(layout));
+    KeysOut { edits: edits.unwrap_or_default(), common }
+}
+
+fn page<A>(
+    ui: &mut egui::Ui,
+    l: Look,
+    w: &KeyWords,
+    t: &KeyTable<A>,
+    st: &mut KeysEdit,
+    kb: Option<ito_common::Keyboard>,
+) -> (Option<Vec<Edit>>, Option<ito_common::CommonChange>) {
     let c = l.c;
     let mut all = rows(t.now, t.built_in, t.noop);
     for &(layer, run, desc) in t.unbound {
@@ -413,13 +498,26 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                 }
             } else if st.listening {
                 match p {
-                    Press::Key(k) => st.by_key.push(k),
+                    Press::Key(k) => {
+                        // The keyboard picture shows the layer this key is in.
+                        let own = ito_keyboard::Mods { ctrl: k.ctrl, alt: k.alt, shift: k.shift, sup: k.sup };
+                        st.kb_latch = match kb {
+                            // Where the key is, as the picture has it (`G` is Shift+g).
+                            Some(setting) => {
+                                let (board, _) = crate::keyboard::board_for(ui.ctx(), setting);
+                                ito_keyboard::place(board, &k, t.sup).first().map_or(own, |(_, m)| *m).folded(board, t.sup)
+                            }
+                            None => own,
+                        };
+                        st.by_key.push(k);
+                    }
                     Press::Back => {
                         st.by_key.pop();
                     }
                     Press::Esc => {
                         st.listening = false;
                         st.by_key.clear();
+                        st.kb_latch = Default::default();
                     }
                     Press::Enter => st.listening = false,
                 }
@@ -455,17 +553,20 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
             if crate::button(ui, l, w.clear) {
                 st.listening = false;
                 st.by_key.clear();
+                st.kb_latch = Default::default();
             }
         } else {
             if crate::button(ui, l, w.by_key) {
                 st.listening = true;
                 st.by_key.clear();
+                st.kb_latch = Default::default();
                 st.capture = None;
             }
             if !st.by_key.is_empty() {
                 chip(ui, l, &human_seq_for(&st.by_key, t.sup), false, false);
                 if crate::button(ui, l, w.clear) {
                     st.by_key.clear();
+                    st.kb_latch = Default::default();
                 }
             }
         }
@@ -487,6 +588,11 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
         ui.label(RichText::new(w.changed_only).size(z(ui, 12.5)).color(c.fg));
     });
     ui.add_space(ito_theme::scale::space::MD);
+    let mut common_out = None;
+    if let Some(setting) = kb {
+        common_out = crate::keyboard::picture(ui, l, w, t, st, &all, &layers, setting);
+        ui.add_space(ito_theme::scale::space::MD);
+    }
 
     // The rows shown, with the words each is found by.
     let q = st.query.trim().to_lowercase();
@@ -581,7 +687,7 @@ pub fn keys_page<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, s
                 }
             }
         });
-    (!out.is_empty()).then_some(out)
+    ((!out.is_empty()).then_some(out), common_out)
 }
 
 /// The keys of a row: a cap for each, ＋ to add one, ↺ when it was changed;
@@ -725,7 +831,7 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             if prefixes > PREFIXES_SHOWN {
                 said.push(fill(w.more, &[&(prefixes - PREFIXES_SHOWN).to_string()]));
             }
-            if let Some(k) = common_of(&cap.keys, t.sup) {
+            if let Some(k) = ito_keymap::common_for(&cap.keys, t.sup) {
                 let first = human_seq_for(&cap.keys[..1], t.sup);
                 said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
             }
@@ -1275,5 +1381,311 @@ desc = "Close the help"
         assert_eq!(KeyWords::of("fr").set, "Set");
         assert!(keys_index(&KEYS_JA).contains(&"変えたものだけ"));
         assert_eq!(fill("{0} and {1}", &["a", "b"]), "a and b");
+    }
+
+    // ---- the keyboard picture ----
+
+    type Ids = Vec<ito_a11y::TestIdEntry>;
+
+    /// One frame of `keys_page_kb` at this width with AccessKit on: the test IDs drawn, and what it hands back.
+    fn kb_frame(
+        ctx: &egui::Context,
+        files: &[(&str, &str)],
+        st: &mut KeysEdit,
+        events: Vec<egui::Event>,
+        width: f32,
+        layout: ito_common::Keyboard,
+    ) -> (Ids, KeysOut) {
+        ctx.enable_accesskit();
+        let (now, built_in) = keymap(files);
+        let layer_name = |n: &str| if n == "list" { "List".to_owned() } else { "Help".to_owned() };
+        let tr = |d: &str| d.to_owned();
+        let extra = |_: &str, _: &[Key]| Vec::new();
+        let t = KeyTable {
+            now: &now,
+            built_in: &built_in,
+            noop: "noop",
+            own: OWN,
+            layer_name: &layer_name,
+            tr: &tr,
+            extra: &extra,
+            unbound: &[],
+            sup: false,
+        };
+        let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 1600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut screen = Screen::default();
+        let mut got = None;
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                // As an app shows it: the Keys page is a wide one.
+                let extras = crate::Extras { wide: &[0], ..Default::default() };
+                crate::show_with(ui, ito_theme::colors(), &mut screen, &nav, Keys::default(), extras, |ui, _, l| {
+                    got = Some(keys_page_kb(ui, l, &KEYS_EN, &t, st, layout));
+                });
+            });
+        });
+        out.textures_delta.clear();
+        (ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT), got.unwrap())
+    }
+
+    const US: ito_common::Keyboard = ito_common::Keyboard::Us;
+
+    fn id_rect(ids: &[ito_a11y::TestIdEntry], name: &str) -> Option<egui::Rect> {
+        ids.iter().find(|e| e.name == name).map(|e| e.rect)
+    }
+
+    fn button(p: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    /// A real click on the thing with this test ID, over four frames; the IDs of a frame after it.
+    fn kb_click(ctx: &egui::Context, files: &[(&str, &str)], st: &mut KeysEdit, name: &str, width: f32) -> Ids {
+        let (ids, _) = kb_frame(ctx, files, st, Vec::new(), width, US);
+        let p = id_rect(&ids, name).unwrap_or_else(|| panic!("{name} is drawn")).center();
+        kb_frame(ctx, files, st, vec![egui::Event::PointerMoved(p)], width, US);
+        kb_frame(ctx, files, st, vec![button(p, true)], width, US);
+        kb_frame(ctx, files, st, vec![button(p, false)], width, US);
+        kb_frame(ctx, files, st, Vec::new(), width, US).0
+    }
+
+    #[test]
+    fn the_plain_page_draws_no_keyboard_and_the_other_does() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let (ids, _) = kb_frame(&ctx, &[(OWN, "")], &mut st, Vec::new(), 1400.0, US);
+        assert!(id_rect(&ids, "settings.keys.kb").is_some());
+        assert!(id_rect(&ids, "settings.keys.kb.key.keyg").is_some());
+
+        let ctx2 = egui::Context::default();
+        ctx2.enable_accesskit();
+        let mut st2 = KeysEdit::default();
+        let ids = {
+            let (now, built_in) = keymap(&[(OWN, "")]);
+            let layer_name = |n: &str| n.to_owned();
+            let tr = |d: &str| d.to_owned();
+            let extra = |_: &str, _: &[Key]| Vec::new();
+            let t = KeyTable {
+                now: &now,
+                built_in: &built_in,
+                noop: "noop",
+                own: OWN,
+                layer_name: &layer_name,
+                tr: &tr,
+                extra: &extra,
+                unbound: &[],
+                sup: false,
+            };
+            let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))),
+                ..Default::default()
+            };
+            let mut screen = Screen::default();
+            let mut out = ctx2.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    show(ui, ito_theme::colors(), &mut screen, &nav, Keys::default(), |ui, _, l| {
+                        keys_page(ui, l, &KEYS_EN, &t, &mut st2);
+                    });
+                });
+            });
+            out.textures_delta.clear();
+            ito_a11y::take_test_ids(&ctx2, egui::ViewportId::ROOT)
+        };
+        assert!(ids.iter().all(|e| !e.name.starts_with("settings.keys.kb")));
+    }
+
+    #[test]
+    fn a_click_on_a_key_follows_it_and_the_chip_goes_back() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let ids = kb_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.kb.key.keyg", 1400.0);
+        assert_eq!(st.by_key, keys("g"));
+        assert!(id_rect(&ids, "settings.keys.kb.prefix").is_some());
+        let ids = kb_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.kb.prefix", 1400.0);
+        assert!(st.by_key.is_empty());
+        assert!(id_rect(&ids, "settings.keys.kb.prefix").is_none());
+    }
+
+    #[test]
+    fn a_latched_shift_shows_the_shifted_bindings() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let own = "[[list.keymap]]\non = \"G\"\nrun = \"bottom\"\ndesc = \"Go to the bottom\"\n";
+        kb_click(&ctx, &[(OWN, own)], &mut st, "settings.keys.kb.mod.shift", 1400.0);
+        assert!(st.kb_latch.shift);
+        let ids = kb_click(&ctx, &[(OWN, own)], &mut st, "settings.keys.kb.key.keyg", 1400.0);
+        assert_eq!(st.by_key, keys("G"));
+        assert!(id_rect(&ids, "settings.keys.kb.detail.0").is_some(), "the G binding is on the key");
+    }
+
+    #[test]
+    fn listening_latches_the_modifiers_of_the_key_pressed() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { listening: true, ..Default::default() };
+        let ctrl = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let mut ev = vec![egui::Event::ModifiersChanged(ctrl)];
+        ev.extend(key(egui::Key::Comma, ctrl));
+        kb_frame(&ctx, &[(OWN, "")], &mut st, ev, 1400.0, US);
+        assert_eq!(st.by_key, keys("<C-,>"));
+        assert!(st.kb_latch.ctrl && !st.kb_latch.shift);
+    }
+
+    #[test]
+    fn a_capital_pressed_while_listening_latches_shift() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { listening: true, ..Default::default() };
+        kb_frame(&ctx, &[(OWN, "")], &mut st, vec![egui::Event::Text("G".into())], 1400.0, US);
+        assert_eq!(st.by_key, keys("G"));
+        assert!(st.kb_latch.shift);
+    }
+
+    #[test]
+    fn a_key_with_nothing_on_it_can_be_picked_too() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        kb_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.kb.key.keyq", 1400.0);
+        assert_eq!(st.by_key, keys("q"));
+    }
+
+    #[test]
+    fn the_board_changes_its_shape_with_the_width() {
+        let rects = |width: f32| {
+            let ctx = egui::Context::default();
+            let mut st = KeysEdit::default();
+            let (ids, _) = kb_frame(&ctx, &[(OWN, "")], &mut st, Vec::new(), width, US);
+            ids
+        };
+        // Wide: the nav keys sit at the right of the main block, on its rows.
+        let ids = rects(1600.0);
+        let (home, space, back) = (
+            id_rect(&ids, "settings.keys.kb.key.home").unwrap(),
+            id_rect(&ids, "settings.keys.kb.key.space").unwrap(),
+            id_rect(&ids, "settings.keys.kb.key.backspace").unwrap(),
+        );
+        assert!(home.top() < space.top() && home.left() > back.right() && home.right() <= 1600.0, "{home:?} {space:?} {back:?}");
+        // Middle: the nav keys are a strip under the main block.
+        let ids = rects(900.0);
+        let (home, space) = (id_rect(&ids, "settings.keys.kb.key.home").unwrap(), id_rect(&ids, "settings.keys.kb.key.space").unwrap());
+        assert!(home.top() > space.bottom() && home.right() <= 900.0, "{home:?} {space:?}");
+        // Narrow: the keys are small and the board scrolls.
+        let ids = rects(200.0);
+        assert!(id_rect(&ids, "settings.keys.kb.key.keyg").is_some());
+    }
+
+    #[test]
+    fn clearing_the_search_lets_go_of_the_latch() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { listening: true, ..Default::default() };
+        kb_frame(&ctx, &[(OWN, "")], &mut st, vec![egui::Event::Text("G".into())], 1400.0, US);
+        assert!(st.kb_latch.shift);
+        let (ids, _) = kb_frame(&ctx, &[(OWN, "")], &mut st, Vec::new(), 1400.0, US);
+        let _ = ids;
+        let texts = {
+            // The Clear button is a plain text button on the page: find it by its words.
+            let (now, built_in) = keymap(&[(OWN, "")]);
+            let layer_name = |n: &str| n.to_owned();
+            let tr = |d: &str| d.to_owned();
+            let extra = |_: &str, _: &[Key]| Vec::new();
+            let t = KeyTable {
+                now: &now,
+                built_in: &built_in,
+                noop: "noop",
+                own: OWN,
+                layer_name: &layer_name,
+                tr: &tr,
+                extra: &extra,
+                unbound: &[],
+                sup: false,
+            };
+            let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))),
+                ..Default::default()
+            };
+            let mut screen = Screen::default();
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    show(ui, ito_theme::colors(), &mut screen, &nav, Keys::default(), |ui, _, l| {
+                        keys_page_kb(ui, l, &KEYS_EN, &t, &mut st, US);
+                    });
+                });
+            });
+            out.textures_delta.clear();
+            fn walk(s: &egui::Shape, v: &mut Vec<(String, egui::Rect)>) {
+                match s {
+                    egui::Shape::Text(t) => v.push((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2()))),
+                    egui::Shape::Vec(list) => list.iter().for_each(|s| walk(s, v)),
+                    _ => {}
+                }
+            }
+            let mut texts = Vec::new();
+            for c in &out.shapes {
+                walk(&c.shape, &mut texts);
+            }
+            texts
+        };
+        let p = at(&texts, KEYS_EN.clear).expect("the Clear button").center();
+        for ev in [vec![egui::Event::PointerMoved(p)], vec![button(p, true)], vec![button(p, false)]] {
+            kb_frame(&ctx, &[(OWN, "")], &mut st, ev, 1400.0, US);
+        }
+        assert!(st.by_key.is_empty() && !st.listening);
+        assert_eq!(st.kb_latch, ito_keyboard::Mods::default());
+    }
+
+    #[test]
+    fn a_long_description_is_elided_on_its_key() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let own =
+            "[[list.keymap]]\non = \"q\"\nrun = \"quit\"\ndesc = \"とても長い日本語の説明がここに入ります。キーの中には収まりません。\"\n";
+        let (ids, _) = kb_frame(&ctx, &[(OWN, own)], &mut st, Vec::new(), 1400.0, US);
+        let e = ids.iter().find(|e| e.name == "settings.keys.kb.key.keyq").expect("keyq");
+        assert_eq!(e.elided, Some(true));
+    }
+
+    #[test]
+    fn the_layout_is_picked_in_the_header_and_jis_has_its_own_keys() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let files = [(OWN, "")];
+        let (ids, _) = kb_frame(&ctx, &files, &mut st, Vec::new(), 1400.0, ito_common::Keyboard::Jis);
+        assert!(id_rect(&ids, "settings.keys.kb.key.intlyen").is_some());
+        let (ids, _) = kb_frame(&ctx, &files, &mut st, Vec::new(), 1400.0, US);
+        assert!(id_rect(&ids, "settings.keys.kb.key.intlyen").is_none());
+
+        let p = id_rect(&ids, "settings.select.keys-keyboard").expect("select").center();
+        kb_frame(&ctx, &files, &mut st, vec![egui::Event::PointerMoved(p)], 1400.0, US);
+        kb_frame(&ctx, &files, &mut st, vec![button(p, true)], 1400.0, US);
+        let (ids, _) = kb_frame(&ctx, &files, &mut st, vec![button(p, false)], 1400.0, US);
+        let (ids2, _) = kb_frame(&ctx, &files, &mut st, Vec::new(), 1400.0, US);
+        let opt = id_rect(&ids2, "settings.select.keys-keyboard.2")
+            .or_else(|| id_rect(&ids, "settings.select.keys-keyboard.2"))
+            .expect("option 2")
+            .center();
+        kb_frame(&ctx, &files, &mut st, vec![egui::Event::PointerMoved(opt)], 1400.0, US);
+        kb_frame(&ctx, &files, &mut st, vec![button(opt, true)], 1400.0, US);
+        let mut got = None;
+        for ev in [vec![button(opt, false)], Vec::new()] {
+            let (_, o) = kb_frame(&ctx, &files, &mut st, ev, 1400.0, US);
+            if o.common.is_some() {
+                got = o.common;
+            }
+        }
+        assert_eq!(got, Some(ito_common::keyboard_change(ito_common::Keyboard::Jis)));
+    }
+
+    #[test]
+    fn a_folded_keyboard_leaves_only_the_header() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { kb_hidden: true, ..Default::default() };
+        let (ids, _) = kb_frame(&ctx, &[(OWN, "")], &mut st, Vec::new(), 1400.0, US);
+        assert!(id_rect(&ids, "settings.keys.kb.toggle").is_some());
+        assert!(id_rect(&ids, "settings.keys.kb").is_none());
+        assert!(id_rect(&ids, "settings.keys.kb.key.keyg").is_none());
     }
 }

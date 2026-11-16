@@ -5,7 +5,7 @@
 //! a person wrote around it kept.
 //!
 //! ```text
-//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, easy, high_contrast, [clock], [window], [apps]
+//! <config dir>/uchmk/common.toml        language, theme, dark_theme, light_theme, scale, mono_font, keyboard, easy, high_contrast, [clock], [window], [apps]
 //! <config dir>/uchmk/<app>/config.toml  each app's own (`<APP>_CONFIG_HOME` moves the folder)
 //! <config dir>/uchmk/themes/*.toml      themes of one's own
 //! ```
@@ -497,6 +497,43 @@ pub fn mono_font_change(m: MonoFont) -> CommonChange {
     CommonChange { table: None, key: "mono_font", value: quote(m.as_str()) }
 }
 
+/// Which physical keyboard the Keys page draws: JIS or US. Only the picture of
+/// the keyboard on that page reads it; no key binding depends on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Keyboard {
+    /// Guess it from the OS (JIS or US).
+    #[default]
+    Auto,
+    /// An ANSI keyboard with the US key set.
+    Us,
+    /// A Japanese keyboard (JIS).
+    Jis,
+}
+
+impl Keyboard {
+    /// All three, in the order a settings screen lists them.
+    pub const ALL: [Keyboard; 3] = [Keyboard::Auto, Keyboard::Us, Keyboard::Jis];
+
+    /// The word common.toml writes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Keyboard::Auto => "auto",
+            Keyboard::Us => "us",
+            Keyboard::Jis => "jis",
+        }
+    }
+
+    /// `auto`, `us` or `jis`, in any case; `None` for anything else.
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.as_str().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+/// The change that writes `k` as common.toml's `keyboard`.
+pub fn keyboard_change(k: Keyboard) -> CommonChange {
+    CommonChange { table: None, key: "keyboard", value: quote(k.as_str()) }
+}
+
 /// What `common.toml` holds; `None` for a key it does not have, so an app
 /// can fall back on its own older setting.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -513,6 +550,8 @@ pub struct Common {
     pub scale: Option<f32>,
     /// `bundled` (the default) or `system`: see [`MonoFont`].
     pub mono_font: Option<MonoFont>,
+    /// `auto` (the default), `us` or `jis`: see [`Keyboard`].
+    pub keyboard: Option<Keyboard>,
     pub clock: Option<Clock>,
     pub window: Option<WindowPrefs>,
     /// `[apps]`: where a person pinned an app's exe (see [`apps`]); empty for none.
@@ -524,8 +563,20 @@ pub struct Common {
 }
 
 /// The keys `common.toml` has.
-const KEYS: [&str; 11] =
-    ["language", "theme", "dark_theme", "light_theme", "scale", "mono_font", "easy", "high_contrast", "clock", "window", "apps"];
+const KEYS: [&str; 12] = [
+    "language",
+    "theme",
+    "dark_theme",
+    "light_theme",
+    "scale",
+    "mono_font",
+    "keyboard",
+    "easy",
+    "high_contrast",
+    "clock",
+    "window",
+    "apps",
+];
 
 impl Common {
     /// The settings in common.toml's `text`, and what in it is not known
@@ -629,6 +680,13 @@ impl Common {
             }
             m
         });
+        let keyboard = text_of("keyboard", &mut warnings).and_then(|s| {
+            let k = Keyboard::parse(&s);
+            if k.is_none() {
+                warnings.push(format!("common.toml: keyboard = \"{s}\" is not `auto`, `us` or `jis`, so `auto` is used"));
+            }
+            k
+        });
         let mut apps = std::collections::BTreeMap::new();
         match t.get("apps") {
             None => {}
@@ -657,7 +715,8 @@ impl Common {
         };
         let easy = flag("easy");
         let high_contrast = flag("high_contrast");
-        let common = Self { language, theme, dark_theme, light_theme, scale, mono_font, easy, high_contrast, clock, window, apps };
+        let common =
+            Self { language, theme, dark_theme, light_theme, scale, mono_font, keyboard, easy, high_contrast, clock, window, apps };
         Ok((common, warnings))
     }
 
@@ -693,6 +752,11 @@ impl Common {
     /// The monospace face: common.toml's, else the bundled one.
     pub fn mono_font_or_default(&self) -> MonoFont {
         self.mono_font.unwrap_or_default()
+    }
+
+    /// The keyboard the Keys page draws: common.toml's, else `auto`.
+    pub fn keyboard_or_auto(&self) -> Keyboard {
+        self.keyboard.unwrap_or_default()
     }
 
     /// The scale: common.toml's, else 1.0.
@@ -1492,6 +1556,21 @@ zzz = 1
             )
             .unwrap();
         assert_eq!(Common::parse(&text).unwrap().0.mono_font, Some(MonoFont::System));
+    }
+
+    #[test]
+    fn the_keyboard_is_auto_unless_the_file_says_us_or_jis() {
+        assert_eq!(Common::default().keyboard_or_auto(), Keyboard::Auto);
+        for (word, k) in [("auto", Keyboard::Auto), ("US", Keyboard::Us), ("jis", Keyboard::Jis)] {
+            let (c, w) = Common::parse(&format!("keyboard = \"{word}\"\n")).unwrap();
+            assert_eq!((c.keyboard_or_auto(), w.len()), (k, 0), "{word}");
+        }
+        let (c, w) = Common::parse("keyboard = \"dvorak\"\n").unwrap();
+        assert_eq!((c.keyboard, c.keyboard_or_auto(), w.len()), (None, Keyboard::Auto, 1));
+        assert_eq!(Common::parse("keyboard = 3\n").unwrap().0.keyboard, None);
+        let text = keyboard_change(Keyboard::Jis).apply("language = \"ja\"\n").unwrap();
+        assert!(text.contains("keyboard = \"jis\""), "{text}");
+        assert_eq!(Common::parse(&text).unwrap().0.keyboard, Some(Keyboard::Jis));
     }
 
     #[test]

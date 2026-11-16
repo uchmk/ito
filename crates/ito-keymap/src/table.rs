@@ -209,3 +209,17 @@ pub fn common(on: &[Key]) -> Option<usize> {
     let first = on.first()?;
     COMMON.iter().position(|(k, _)| Key::parse(k).as_ref() == Some(first))
 }
+
+/// The key every app keeps that `on` starts with: where Ctrl and Cmd are
+/// apart on macOS (`sup`), the common keys are Cmd's (`<D-,>`), not Ctrl's.
+pub fn common_for(on: &[Key], sup: bool) -> Option<usize> {
+    if !(sup && cfg!(target_os = "macos")) {
+        return common(on);
+    }
+    let mut first = *on.first()?;
+    if first.ctrl {
+        return None;
+    }
+    (first.ctrl, first.sup) = (first.sup, false);
+    common(&[first])
+}

@@ -18,11 +18,12 @@ use ito_common::{quote, scale_change, Clock, CommonChange, DATE_FORMATS};
 use ito_theme::{Colors, Theme};
 
 mod apps;
+mod keyboard;
 mod keys;
 mod mark;
 mod more;
 mod nav;
-pub use keys::{keys_index, keys_page, Capture, KeyTable, KeyWords, KeysEdit, KEYS_EN, KEYS_JA};
+pub use keys::{keys_index, keys_page, keys_page_kb, Capture, KeyTable, KeyWords, KeysEdit, KeysOut, KEYS_EN, KEYS_JA};
 pub use mark::{icon_button, mark, mark_button, IconButton, Mark};
 mod compose;
 mod date;
@@ -412,7 +413,16 @@ pub struct Extras<'a> {
     /// The app's own settings files (`["koyomi.toml"]`), as buttons stacked above the common file's, in this order.
     /// A click is [`Out::open_file`]` = Some(1 + i)`. Tab reaches them before the common file.
     pub files: &'a [&'a str],
+    /// The pages (indexes into [`Nav::pages`]) whose content may be [`WIDE_PAGE`] wide instead of
+    /// [`PAGE`]: a page with a figure, such as the keyboard of [`keys_page_kb`]. The search's results stay [`PAGE`] wide.
+    pub wide: &'a [usize],
 }
+
+/// How wide a page's content is at most: rows of words stay readable.
+pub const PAGE: f32 = 820.0;
+/// How wide the content of a page in [`Extras::wide`] is at most: room for the keyboard of [`keys_page_kb`]
+/// with the block of Ins..PgDn and the arrows at its side.
+pub const WIDE_PAGE: f32 = 1280.0;
 
 /// The words of the search's results page ([`Extras::results`]).
 #[derive(Clone, Copy, Debug)]
@@ -623,7 +633,8 @@ pub fn show_with(
     let side_margin = (area.width() * 0.1).clamp(16.0, 48.0) as i8;
     egui::ScrollArea::vertical().id_salt(("prefs-page", title)).auto_shrink([false, false]).show(&mut body_ui, |ui| {
         egui::Frame::NONE.inner_margin(egui::Margin { left: side_margin, right: side_margin, top: 28, bottom: 40 }).show(ui, |ui| {
-            ui.set_max_width(ui.available_width().min(820.0));
+            let cap = if results.is_none() && extras.wide.contains(&page) { WIDE_PAGE } else { PAGE };
+            ui.set_max_width(ui.available_width().min(cap));
             if !extras.back.is_empty() && results.is_none() {
                 ui.horizontal(|ui| {
                     let back = egui::Button::new(RichText::new(format!("\u{2190} {}", extras.back)).size(z(ui, 12.5)).color(c.dim))
@@ -2011,6 +2022,7 @@ mod tests {
             back: "Back",
             results: Some(Results { head: "Settings with \"{q}\"", lead: "All pages.", none: "None." }),
             files: &[],
+            wide: &[],
         };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1600.0))),
@@ -2056,7 +2068,7 @@ mod tests {
     fn the_files_stack_above_the_common_one_and_a_click_names_it() {
         let nav = Nav { pages: &[("General", "One")], index: &[(0, "Language")], words: &EN, file: "common.toml" };
         let files = ["app.toml", "other.toml"];
-        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "", results: None, files: &files };
+        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "", results: None, files: &files, wide: &[] };
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
         let ctx = egui::Context::default();
         let mut state = State::default();
@@ -2085,13 +2097,37 @@ mod tests {
         assert_eq!(got, vec![Some(1), Some(2), Some(0)], "buttons by height");
     }
 
+    /// A page in `Extras::wide` takes up to `WIDE_PAGE`; the others, and the search's results, stay `PAGE` wide.
+    #[test]
+    fn a_wide_page_is_wider_than_the_others() {
+        let nav = Nav { pages: &[("General", "One"), ("Keys", "Two")], index: &[(1, "Keymap")], words: &EN, file: "common.toml" };
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1900.0, 800.0));
+        let ctx = egui::Context::default();
+        let width = |page: usize, query: &str| {
+            let results = Results { head: "Settings with \"{q}\"", lead: "All pages.", none: "None." };
+            let extras = Extras { wide: &[1], results: (!query.is_empty()).then_some(results), ..Default::default() };
+            let mut state = State { page, query: query.to_owned(), ..Default::default() };
+            let mut got = 0.0_f32;
+            let mut run = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                show_with(ui, ito_theme::colors(), &mut state, &nav, Keys::default(), extras, |ui, _, _| {
+                    got = got.max(ui.available_width());
+                });
+            });
+            run.textures_delta.clear();
+            got
+        };
+        assert!(width(0, "") <= PAGE, "a plain page: {}", width(0, ""));
+        assert!(width(1, "") > PAGE + 300.0 && width(1, "") <= WIDE_PAGE, "the wide page: {}", width(1, ""));
+        assert!(width(1, "key") > 0.0 && width(1, "key") <= PAGE, "the results: {}", width(1, "key"));
+    }
+
     /// On the root ui under a top panel (a title bar), the screen leaves the bar alone (uchmk/ito#63).
     #[test]
     fn the_screen_stays_below_a_top_panel() {
         let ctx = egui::Context::default();
         let mut state = State::default();
         let nav = Nav { pages: &[("General", "One")], index: &[(0, "Language")], words: &EN, file: "config.toml" };
-        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "Back", results: None, files: &[] };
+        let extras = Extras { groups: &[], shared: &[], shared_tag: "", back: "Back", results: None, files: &[], wide: &[] };
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
             ..Default::default()
