@@ -74,6 +74,12 @@ pub struct KeyWords {
     pub kb_layer_only: &'static str,
     /// `{0}` is how many keys follow.
     pub kb_follows: &'static str,
+    /// The legend line under the picture: no number, as the mark is `▸N`.
+    pub kb_follows_legend: &'static str,
+    /// Hover on a modifier key: `{0}` is how many keys, `{1}` the modifier's name.
+    pub kb_mod_count: &'static str,
+    /// Hover on a modifier key that is held by a click.
+    pub kb_unlock: &'static str,
     pub kb_changed: &'static str,
     pub kb_unreachable: &'static str,
     /// `{0}` is how many keys.
@@ -136,6 +142,9 @@ pub const KEYS_EN: KeyWords = KeyWords {
     kb_common: "All apps",
     kb_layer_only: "{0} only",
     kb_follows: "{0} more — click to show",
+    kb_follows_legend: "more keys follow — click to show",
+    kb_mod_count: "{0} keys with {1} — click to lock it",
+    kb_unlock: "click to unlock",
     kb_changed: "Changed",
     kb_unreachable: "Never runs",
     kb_unplaced: "Not on this keyboard ({0})",
@@ -183,10 +192,13 @@ pub const KEYS_JA: KeyWords = KeyWords {
     kb_jis: "JIS",
     kb_show: "キーボードを表示",
     kb_hide: "キーボードを隠す",
-    kb_showing: "表示中: {0}（{1} で変える）",
+    kb_showing: "表示中: {0}（「{1}」で変える）",
     kb_common: "全アプリ共通",
     kb_layer_only: "{0}だけ",
     kb_follows: "続き {0} 個（クリックで表示）",
+    kb_follows_legend: "続きのキーあり（クリックで表示）",
+    kb_mod_count: "{1} との組み合わせ {0} 個（クリックで固定）",
+    kb_unlock: "クリックで解除",
     kb_changed: "変えたキー",
     kb_unreachable: "届かない",
     kb_unplaced: "このキーボードに無いキー（{0}）",
@@ -1366,6 +1378,10 @@ desc = "Close the help"
                 w.clash_common,
                 w.more,
                 w.nothing,
+                w.kb_follows,
+                w.kb_follows_legend,
+                w.kb_mod_count,
+                w.kb_unlock,
             ];
             v.extend(w.common_what);
             v
@@ -1396,6 +1412,19 @@ desc = "Close the help"
         width: f32,
         layout: ito_common::Keyboard,
     ) -> (Ids, KeysOut) {
+        let (ids, got, _) = kb_run(ctx, files, st, events, width, layout);
+        (ids, got)
+    }
+
+    /// [`kb_frame`] and the text of each galley painted, as shown (an elided one ends in `…`), with its place.
+    fn kb_run(
+        ctx: &egui::Context,
+        files: &[(&str, &str)],
+        st: &mut KeysEdit,
+        events: Vec<egui::Event>,
+        width: f32,
+        layout: ito_common::Keyboard,
+    ) -> (Ids, KeysOut, Vec<(String, egui::Rect)>) {
         ctx.enable_accesskit();
         let (now, built_in) = keymap(files);
         let layer_name = |n: &str| if n == "list" { "List".to_owned() } else { "Help".to_owned() };
@@ -1430,7 +1459,21 @@ desc = "Close the help"
             });
         });
         out.textures_delta.clear();
-        (ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT), got.unwrap())
+        fn walk(s: &egui::Shape, v: &mut Vec<(String, egui::Rect)>) {
+            match s {
+                egui::Shape::Text(t) => {
+                    let shown: String = t.galley.rows.iter().map(|r| r.text()).collect();
+                    v.push((shown, t.galley.rect.translate(t.pos.to_vec2())));
+                }
+                egui::Shape::Vec(list) => list.iter().for_each(|s| walk(s, v)),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            walk(&c.shape, &mut texts);
+        }
+        (ito_a11y::take_test_ids(ctx, egui::ViewportId::ROOT), got.unwrap(), texts)
     }
 
     const US: ito_common::Keyboard = ito_common::Keyboard::Us;
@@ -1550,6 +1593,103 @@ desc = "Close the help"
         let mut st = KeysEdit::default();
         kb_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.kb.key.keyq", 1400.0);
         assert_eq!(st.by_key, keys("q"));
+    }
+
+    /// A keymap that binds the keys whose legends were cut to "…".
+    const KB_OWN: &str = "[[list.keymap]]\non = \"<Esc>\"\nrun = \"escape\"\ndesc = \"Leave\"\n\n\
+        [[list.keymap]]\non = \"<PageUp>\"\nrun = \"page_up\"\ndesc = \"Page up\"\n\n\
+        [[list.keymap]]\non = \"<PageDown>\"\nrun = \"page_down\"\ndesc = \"Page down\"\n\n\
+        [[list.keymap]]\non = \"<Home>\"\nrun = \"top\"\ndesc = \"Go to the top\"\n\n\
+        [[list.keymap]]\non = [\"g\", \"g\"]\nrun = \"top\"\ndesc = \"Go to the top\"\n\n\
+        [[list.keymap]]\non = [\"g\", \"h\"]\nrun = \"home\"\ndesc = \"Go home\"\n";
+
+    /// The screen width that gives the board keys of this size, found by probing how wide the page leaves it.
+    fn width_for_unit(u: f32) -> f32 {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let (ids, _) = kb_frame(&ctx, &[(OWN, KB_OWN)], &mut st, Vec::new(), 700.0, US);
+        let u0 = id_rect(&ids, "settings.keys.kb.key.keyg").unwrap().width();
+        700.0 - 15.0 * u0 + 15.0 * u
+    }
+
+    /// What is painted on one key: the texts that sit inside its rect.
+    fn on_key(ids: &[ito_a11y::TestIdEntry], texts: &[(String, egui::Rect)], code: &str) -> Vec<String> {
+        let r = id_rect(ids, &format!("settings.keys.kb.key.{code}")).unwrap_or_else(|| panic!("{code} is drawn"));
+        texts.iter().filter(|(_, t)| r.contains(t.center())).map(|(t, _)| t.clone()).collect()
+    }
+
+    #[test]
+    fn the_narrow_keys_keep_their_legends_whole() {
+        // u = 22 (the smallest; the board scrolls when the page is narrower), a page narrower than the board there, and u about 29.
+        for (u, page) in [(22.0, width_for_unit(22.0)), (22.0, width_for_unit(22.0) - 120.0), (29.0, width_for_unit(29.0))] {
+            let ctx = egui::Context::default();
+            let mut st = KeysEdit::default();
+            let (ids, _, texts) = kb_run(&ctx, &[(OWN, KB_OWN)], &mut st, Vec::new(), page, US);
+            let esc = id_rect(&ids, "settings.keys.kb.key.escape").unwrap();
+            assert!(esc.width() >= 21.0 && esc.width() < 40.0, "narrow keys at {page}: {esc:?}");
+            for e in ids.iter().filter(|e| e.name.starts_with("settings.keys.kb.key.")) {
+                for t in on_key(&ids, &texts, e.name.rsplit('.').next().unwrap()) {
+                    assert_ne!(t, "\u{2026}", "{} shows a lone ellipsis at page {page}", e.name);
+                }
+            }
+            // At u = 22 a four-letter legend does not fit even at the smallest size, so it may be cut there
+            // (never to a lone "…", checked above); from u about 29 it is whole.
+            if u > 25.0 {
+                for (code, legend) in [("escape", "Esc"), ("pageup", "PgUp"), ("pagedown", "PgDn"), ("home", "Home")] {
+                    let on = on_key(&ids, &texts, code);
+                    assert!(on.iter().any(|t| t == legend), "{code} shows {legend}: {on:?}");
+                    let e = ids.iter().find(|e| e.name == format!("settings.keys.kb.key.{code}")).unwrap();
+                    assert_eq!(e.elided, Some(false), "{code} is not elided");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_modifier_count_does_not_sit_on_the_legend() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        // One binding per modifier, so each modifier key draws a count beside its legend.
+        let own = format!(
+            "{KB_OWN}\n[[list.keymap]]\non = \"G\"\nrun = \"bottom\"\ndesc = \"Bottom\"\n\n\
+             [[list.keymap]]\non = \"<C-p>\"\nrun = \"palette\"\ndesc = \"Palette\"\n\n\
+             [[list.keymap]]\non = \"<A-x>\"\nrun = \"cut\"\ndesc = \"Cut\"\n"
+        );
+        let (ids, _, texts) = kb_run(&ctx, &[(OWN, own.as_str())], &mut st, Vec::new(), width_for_unit(29.0), US);
+        for name in ["shift", "ctrl", "alt"] {
+            let key = id_rect(&ids, &format!("settings.keys.kb.mod.{name}")).unwrap();
+            let inside: Vec<&(String, egui::Rect)> = texts.iter().filter(|(_, t)| key.contains(t.center())).collect();
+            assert!(inside.len() >= 2, "{name} draws its legend and its count: {inside:?}");
+            for (i, a) in inside.iter().enumerate() {
+                for b in &inside[i + 1..] {
+                    let both = a.1.intersect(b.1);
+                    assert!(both.width() <= 0.5 || both.height() <= 0.5, "{name}: {a:?} over {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pgup_and_pgdn_are_told_apart_in_the_middle_form() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let (ids, _, texts) = kb_run(&ctx, &[(OWN, KB_OWN)], &mut st, Vec::new(), width_for_unit(44.0), US);
+        let key = id_rect(&ids, "settings.keys.kb.key.pageup").unwrap();
+        assert!(key.width() > 40.0 && key.width() < 48.0, "{key:?}");
+        let (up, down) = (on_key(&ids, &texts, "pageup"), on_key(&ids, &texts, "pagedown"));
+        assert!(up.iter().any(|t| t == "PgUp"), "{up:?}");
+        assert!(down.iter().any(|t| t == "PgDn"), "{down:?}");
+    }
+
+    #[test]
+    fn the_legend_line_does_not_repeat_the_number() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit::default();
+        let (_, _, texts) = kb_run(&ctx, &[(OWN, KB_OWN)], &mut st, Vec::new(), 900.0, US);
+        let want = format!("\u{25b8} {}", KEYS_EN.kb_follows_legend);
+        assert!(texts.iter().any(|(t, _)| *t == want), "{:?}", texts.iter().map(|(t, _)| t).collect::<Vec<_>>());
+        assert!(texts.iter().all(|(t, _)| !t.contains("\u{25b8}N")));
+        assert!(!KEYS_EN.kb_follows_legend.contains("{0}") && !KEYS_JA.kb_follows_legend.contains("{0}"));
     }
 
     #[test]

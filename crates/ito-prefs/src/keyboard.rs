@@ -36,6 +36,15 @@ enum Mode {
 /// The largest key, so a very wide page does not get a huge keyboard.
 const MAX_UNIT: f32 = 80.0;
 
+/// The width of the colour bar at a bound key's left edge.
+const BAR_W: f32 = 3.0;
+/// The padding inside a key on the smallest keys.
+const NARROW_PAD: f32 = 2.0;
+/// The space between the legend and what sits beside it.
+const ITEM_GAP: f32 = 2.0;
+/// The smallest legend font on the smallest keys; below it the legend is cut with an ellipsis.
+const MIN_LEGEND: f32 = 7.0;
+
 fn sizing(width: f32) -> (Mode, f32) {
     if width / 18.5 >= 52.0 {
         (Mode::Wide, (width / 18.5).min(MAX_UNIT))
@@ -266,7 +275,14 @@ pub(crate) fn picture<A>(
             }
 
             let (mode, u) = sizing(ui.available_width());
-            let uy = if mode == Mode::Narrow { 0.9 * u } else { u };
+            let gap = (u * 0.08).clamp(2.0, space::XS);
+            // The smallest keys hold two rows (the legend, the marks) with their padding.
+            let uy = if mode == Mode::Narrow {
+                let row_h = text_galley(ui, "Mg", FontId::monospace(small * 0.9), c.dim, 1.0e6, 1, false).size().y;
+                u.max(2.0 * row_h + 2.0 * NARROW_PAD + gap)
+            } else {
+                u
+            };
             let d = Draw {
                 c,
                 w,
@@ -280,7 +296,7 @@ pub(crate) fn picture<A>(
                 mode,
                 u,
                 uy,
-                gap: (u * 0.08).clamp(2.0, space::XS),
+                gap,
                 small,
                 tr: t.tr,
                 layer_name: layer_name.clone(),
@@ -333,17 +349,24 @@ pub(crate) fn picture<A>(
                 ito_a11y::test_id(&r, "settings.keys.kb.unplaced");
             }
 
-            // What the marks mean.
+            // What the marks mean: a mark, a space, its words; one label each so they never part.
             ui.add_space(space::SM);
             ui.horizontal_wrapped(|ui| {
                 let note = |ui: &mut egui::Ui, mark: &str, color: Color32, words: &str| {
-                    ui.label(RichText::new(mark).size(small).color(color));
-                    ui.label(RichText::new(words).size(small).color(c.dim));
-                    ui.add_space(space::SM);
+                    let mut job = LayoutJob::default();
+                    job.append(mark, 0.0, TextFormat { font_id: FontId::proportional(small), color, ..Default::default() });
+                    job.append(
+                        &format!(" {words}"),
+                        0.0,
+                        TextFormat { font_id: FontId::proportional(small), color: c.dim, ..Default::default() },
+                    );
+                    // Extend, not wrap: an item that does not fit moves whole to the next row.
+                    ui.add(egui::Label::new(job).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add_space(space::MD);
                 };
                 note(ui, "\u{25c6}", c.magenta, w.kb_common);
                 note(ui, "\u{25cf}", c.done, &fill(w.kb_layer_only, &[&layer_name]));
-                note(ui, "\u{25b8}N", c.dim, &fill(w.kb_follows, &["N"]));
+                note(ui, "\u{25b8}", c.dim, w.kb_follows_legend);
                 note(ui, "\u{2022}", c.dim, w.kb_changed);
                 note(ui, "\u{26a0}", c.err, w.kb_unreachable);
             });
@@ -356,6 +379,73 @@ pub(crate) fn picture<A>(
     }
     st.kb_latch = asked.latch;
     common
+}
+
+/// Where what is on one key goes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct KeyLayout {
+    /// The legend: the full inner width unless the top-right item sits beside it.
+    legend: Rect,
+    /// The kind glyph or the modifier's count, at the top right beside the legend.
+    top_right: Option<Rect>,
+    /// The same item when it did not fit beside the legend: the glyph at the foot's left, the count at its right.
+    foot_item: Option<Rect>,
+    /// The marks at the foot's right.
+    marks: Option<Rect>,
+    /// The marks lost their numbers (`▸` for `▸N`) to fit.
+    short_marks: bool,
+}
+
+/// One rule for every mode. The top-right item (`top_right_w` wide, 0 when there is none) stays beside the legend
+/// only when both fit the inner width; else the legend gets all of it and the item goes to the foot row, a glyph
+/// (`item_left`) at its left, a count at its right. The foot row is the bottom `row_h` of `inner` and never meets
+/// the legend row (the top `row_h`) when `inner` is two rows high. When the foot is too wide the marks lose their
+/// numbers (`marks_short_w` wide), and a moved glyph is left out before a mark is.
+fn key_layout(inner: Rect, legend_w: f32, top_right_w: f32, item_left: bool, marks_w: f32, marks_short_w: f32, row_h: f32) -> KeyLayout {
+    let width = inner.width();
+    let at_top = |x0: f32, w: f32| Rect::from_min_size(Pos2::new(x0, inner.top()), egui::vec2(w, row_h));
+    let at_foot = |x0: f32, w: f32| Rect::from_min_size(Pos2::new(x0, (inner.bottom() - row_h).max(inner.top())), egui::vec2(w, row_h));
+    let right = |w: f32| inner.right() - w;
+    // The marks alone on the foot: whole if they fit, else without numbers.
+    let marks_alone = |out: &mut KeyLayout| {
+        if marks_w > 0.0 {
+            let (w, short) = if marks_w <= width || marks_short_w <= 0.0 { (marks_w, false) } else { (marks_short_w, true) };
+            let w = w.min(width);
+            out.marks = Some(at_foot(right(w), w));
+            out.short_marks = short;
+        }
+    };
+    let mut out = KeyLayout { legend: at_top(inner.left(), width), top_right: None, foot_item: None, marks: None, short_marks: false };
+    if top_right_w <= 0.0 || legend_w + ITEM_GAP + top_right_w <= width {
+        if top_right_w > 0.0 {
+            out.top_right = Some(at_top(right(top_right_w), top_right_w));
+            out.legend = at_top(inner.left(), (width - top_right_w - ITEM_GAP).max(1.0));
+        }
+        marks_alone(&mut out);
+        return out;
+    }
+    // The item goes down. A glyph shares the row with the marks; a count has the row to itself (only a modifier
+    // has a count, and a modifier has no marks).
+    let moved = top_right_w.min(width);
+    if !item_left || marks_w <= 0.0 {
+        marks_alone(&mut out);
+        out.foot_item = Some(if item_left { at_foot(inner.left(), moved) } else { at_foot(right(moved), moved) });
+        return out;
+    }
+    let fits = |m: f32| top_right_w + ITEM_GAP + m <= width;
+    let (marks, short, glyph) = if fits(marks_w) {
+        (marks_w, false, true)
+    } else if fits(marks_short_w) {
+        (marks_short_w, true, true)
+    } else {
+        (marks_short_w.min(width), true, false)
+    };
+    out.marks = Some(at_foot(right(marks), marks));
+    out.short_marks = short;
+    if glyph {
+        out.foot_item = Some(at_foot(inner.left(), moved));
+    }
+    out
 }
 
 /// Where each key goes, then the keys.
@@ -449,8 +539,13 @@ fn draw_key(ui: &mut egui::Ui, d: &Draw, cap: &Cap, rect: Rect, notch: Option<Re
     }
 
     // What is on it.
+    let narrow = d.mode == Mode::Narrow;
     let pad = (d.u * 0.08).max(3.0);
-    let inner = body.shrink(pad);
+    let inner = if narrow {
+        Rect::from_min_max(body.min + egui::vec2(BAR_W + 1.0, NARROW_PAD), body.max - egui::vec2(NARROW_PAD, NARROW_PAD))
+    } else {
+        body.shrink(pad)
+    };
     let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
     let (plain, shifted) = legend(d.board, cap.phys);
     let word = if d.active.shift { shifted.unwrap_or(plain) } else { plain };
@@ -461,70 +556,88 @@ fn draw_key(ui: &mut egui::Ui, d: &Draw, cap: &Cap, rect: Rect, notch: Option<Re
     } else {
         (c.dim, false)
     };
-    let small = if d.mode == Mode::Narrow { d.small * 0.9 } else { d.small };
-    let mark_w = if kv.is_some_and(|k| !k.on.is_empty()) { small * 1.3 } else { 0.0 };
-    let lg = text_galley(ui, word, FontId::monospace(small), legend_color, inner.width() - mark_w, 1, underline);
-    painter.galley(inner.min, lg.clone(), legend_color);
-
-    // How many keys the modifier would show.
-    if let Some(m) = md {
-        if !lit(d.active, m, d.sup) {
-            let mut next = d.active;
-            set_mod(&mut next, m, d.sup, true);
-            let n = d.v.per_mods.iter().find(|(x, _)| *x == next).map_or(0, |(_, n)| *n);
-            if n > 0 {
-                let g = text_galley(ui, &n.to_string(), FontId::monospace(small), c.dim, inner.width(), 1, false);
-                painter.galley(Pos2::new(inner.right() - g.size().x, inner.top()), g, c.dim);
-            }
-        }
+    let small = if narrow { d.small * 0.9 } else { d.small };
+    let row_h = text_galley(ui, "Mg", FontId::monospace(small), c.dim, 1.0e6, 1, false).size().y;
+    // On the smallest keys a legend too long for the key is set smaller before it is cut.
+    let mut legend_size = small;
+    let mut natural = text_galley(ui, word, FontId::monospace(legend_size), legend_color, 1.0e6, 1, underline).size().x;
+    if narrow && natural > inner.width() && natural > 0.0 {
+        legend_size = (small * inner.width() / natural).clamp(MIN_LEGEND.min(small), small);
+        natural = text_galley(ui, word, FontId::monospace(legend_size), legend_color, 1.0e6, 1, underline).size().x;
     }
 
-    let mut shown = lg.clone();
-    if let Some(kv) = kv {
-        if !kv.on.is_empty() {
-            let kind_color = if kv.kind == Kind::Common { c.magenta } else { c.done };
-            let glyph = if kv.kind == Kind::Common { "\u{25c6}" } else { "\u{25cf}" };
-            let g = text_galley(ui, glyph, FontId::monospace(small), kind_color, inner.width(), 1, false);
-            painter.galley(Pos2::new(inner.right() - g.size().x, inner.top()), g, kind_color);
-            let bar = Rect::from_min_size(body.min, egui::vec2(3.0, body.height()));
-            painter.rect_filled(bar, CornerRadius { nw: radius::CONTROL, sw: radius::CONTROL, ne: 0, se: 0 }, kind_color);
-        }
+    // The top-right item: the kind glyph of a bound key, or what a modifier would show.
+    let bound = kv.filter(|k| !k.on.is_empty());
+    let kind_color = bound.map(|k| if k.kind == Kind::Common { c.magenta } else { c.done });
+    let mod_count = md.filter(|m| !lit(d.active, *m, d.sup)).map_or(0, |m| {
+        let mut next = d.active;
+        set_mod(&mut next, m, d.sup, true);
+        d.v.per_mods.iter().find(|(x, _)| *x == next).map_or(0, |(_, n)| *n)
+    });
+    let item: Option<(Arc<Galley>, Color32)> = if let (Some(k), Some(color)) = (bound, kind_color) {
+        let glyph = if k.kind == Kind::Common { "\u{25c6}" } else { "\u{25cf}" };
+        Some((text_galley(ui, glyph, FontId::monospace(small), color, 1.0e6, 1, false), color))
+    } else if mod_count > 0 {
+        Some((text_galley(ui, &mod_count.to_string(), FontId::monospace(small), c.dim, 1.0e6, 1, false), c.dim))
+    } else {
+        None
+    };
 
-        // The marks at the foot: keys that follow, a changed key, one that never runs.
-        let mut marks = LayoutJob::default();
-        let mark = |job: &mut LayoutJob, text: String, color: Color32| {
+    // The marks at the foot: keys that follow, a changed key, one that never runs.
+    let marks_job = |numbers: bool| {
+        let mut job = LayoutJob::default();
+        let mut mark = |text: String, color: Color32| {
             job.append(&text, 0.0, TextFormat { font_id: FontId::monospace(small), color, ..Default::default() });
         };
-        if kv.follows > 0 {
-            mark(&mut marks, format!("\u{25b8}{} ", kv.follows), c.dim);
+        if let Some(kv) = kv {
+            if kv.follows > 0 {
+                mark(if numbers { format!("\u{25b8}{} ", kv.follows) } else { "\u{25b8} ".to_owned() }, c.dim);
+            }
+            if kv.changed {
+                mark("\u{2022} ".to_owned(), c.dim);
+            }
+            if kv.also.iter().any(|a| a.unreachable) {
+                mark("\u{26a0}".to_owned(), c.err);
+            }
         }
-        if kv.changed {
-            mark(&mut marks, "\u{2022} ".to_owned(), c.dim);
-        }
-        if kv.also.iter().any(|a| a.unreachable) {
-            mark(&mut marks, "\u{26a0}".to_owned(), c.err);
-        }
-        let marks_h = if marks.sections.is_empty() {
-            0.0
-        } else {
-            let g = ui.painter().layout_job(marks);
-            let at = Pos2::new(inner.right() - g.size().x, inner.bottom() - g.size().y);
-            let h = g.size().y;
-            painter.galley(at, g, c.dim);
-            h
-        };
+        job
+    };
+    let has_marks = !marks_job(true).sections.is_empty();
+    let marks_full = ui.painter().layout_job(marks_job(true));
+    let marks_short = ui.painter().layout_job(marks_job(false));
+    let (marks_w, marks_short_w) = if has_marks { (marks_full.size().x, marks_short.size().x) } else { (0.0, 0.0) };
+    let item_w = item.as_ref().map_or(0.0, |(g, _)| g.size().x);
+    let lay = key_layout(inner, natural, item_w, md.is_none(), marks_w, marks_short_w, row_h);
 
-        // The words: not on the smallest keys.
-        if d.mode != Mode::Narrow {
+    let lg = text_galley(ui, word, FontId::monospace(legend_size), legend_color, lay.legend.width(), 1, underline);
+    painter.galley(lay.legend.min, lg.clone(), legend_color);
+    if let Some((g, color)) = item {
+        if let Some(r) = lay.top_right.or(lay.foot_item) {
+            painter.galley(r.min, g, color);
+        }
+    }
+    if let Some(color) = kind_color {
+        let bar = Rect::from_min_size(body.min, egui::vec2(BAR_W, body.height()));
+        painter.rect_filled(bar, CornerRadius { nw: radius::CONTROL, sw: radius::CONTROL, ne: 0, se: 0 }, color);
+    }
+    if let Some(r) = lay.marks {
+        painter.galley(r.min, if lay.short_marks { marks_short } else { marks_full }, c.dim);
+    }
+    let foot_h = if lay.marks.is_some() || lay.foot_item.is_some() { row_h } else { 0.0 };
+
+    // The words: not on the smallest keys.
+    let mut shown = lg.clone();
+    if let Some(kv) = kv {
+        if !narrow {
             let text = kv_text(d, kv);
             if !text.is_empty() {
                 let top = inner.top() + lg.size().y + 1.0;
-                let room = inner.bottom() - marks_h - top;
+                let room = inner.bottom() - foot_h - top;
                 let rows = if d.u > 70.0 { 3 } else { 2 };
                 let font = FontId::proportional(small);
                 let mut g = text_galley(ui, &text, font.clone(), c.fg, inner.width(), rows, false);
-                let row_h = g.rows.first().map_or(small, |r| r.height());
-                let fit = (room / row_h).floor().max(0.0) as usize;
+                let words_h = g.rows.first().map_or(small, |r| r.height());
+                let fit = (room / words_h).floor().max(0.0) as usize;
                 if fit < g.rows.len() && fit >= 1 {
                     g = text_galley(ui, &text, font, c.fg, inner.width(), fit, false);
                 }
@@ -567,6 +680,18 @@ fn draw_key(ui: &mut egui::Ui, d: &Draw, cap: &Cap, rect: Rect, notch: Option<Re
     // What the person sees on hover.
     if let Some(kv) = kv {
         either.on_hover_ui(|ui| popup(ui, d, kv));
+    } else if let Some(m) = md.filter(|_| !cap.inert) {
+        // What the number on a modifier means (in the state a click would leave it).
+        let n = if lit(d.active, m, d.sup) { d.v.per_mods.iter().find(|(x, _)| *x == d.active).map_or(0, |(_, n)| *n) } else { mod_count };
+        if n > 0 {
+            let latched = lit(asked.latch, m, d.sup);
+            either.on_hover_ui(|ui| {
+                ui.label(RichText::new(fill(d.w.kb_mod_count, &[&n.to_string(), word])).size(d.small).color(d.c.fg));
+                if latched {
+                    ui.label(RichText::new(d.w.kb_unlock).size(d.small).color(d.c.dim));
+                }
+            });
+        }
     }
 }
 
@@ -604,6 +729,65 @@ fn popup(ui: &mut egui::Ui, d: &Draw, kv: &KeyView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Widths of the legends keys have, the glyph and the marks, taken as 6 pt a character and 12 pt a row.
+    const CH: f32 = 6.0;
+    const ROW: f32 = 12.0;
+
+    fn overlap(a: Rect, b: Rect) -> bool {
+        let i = a.intersect(b);
+        i.width() > 0.01 && i.height() > 0.01
+    }
+
+    #[test]
+    fn nothing_on_a_key_meets_anything_else() {
+        let legends = ["Esc", "PgUp", "Backspace", "1", "Ctrl", "Shift"];
+        for width in 14..=60 {
+            let inner = Rect::from_min_size(Pos2::new(5.0, 7.0), egui::vec2(width as f32, 2.0 * ROW + 1.0));
+            for l in legends {
+                let lw = l.chars().count() as f32 * CH;
+                // (the item's width, a glyph on the left?, the marks, the marks without numbers)
+                let cases = [
+                    (CH, true, 0.0, 0.0),
+                    (CH, true, 5.0 * CH, 2.0 * CH),
+                    (CH, true, 2.0 * CH, 2.0 * CH),
+                    (2.0 * CH, false, 0.0, 0.0),
+                    (0.0, true, 5.0 * CH, 2.0 * CH),
+                ];
+                for (item, left, marks, short) in cases {
+                    let k = key_layout(inner, lw, item, left, marks, short, ROW);
+                    let parts: Vec<Rect> = [Some(k.legend), k.top_right, k.foot_item, k.marks].into_iter().flatten().collect();
+                    for (i, a) in parts.iter().enumerate() {
+                        for b in &parts[i + 1..] {
+                            assert!(!overlap(*a, *b), "{l} at {width}: {a:?} over {b:?} ({k:?})");
+                        }
+                    }
+                    if item > 0.0 && k.top_right.is_none() {
+                        assert_eq!(k.legend.width(), inner.width(), "{l} at {width} gets the whole width when the item moved");
+                        assert!(k.foot_item.is_some() || (left && marks > 0.0), "{l} at {width}: only a glyph may go, for the marks");
+                    }
+                    if k.top_right.is_some() {
+                        assert!(lw + ITEM_GAP + item <= inner.width() + 0.01, "{l} at {width} sits beside the item without room");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_marks_lose_their_numbers_before_a_glyph_is_dropped() {
+        let inner = Rect::from_min_size(Pos2::ZERO, egui::vec2(30.0, 2.0 * ROW));
+        // "Backspace" cannot sit beside the glyph; glyph 6 + marks 30 do not fit 30 together, 6 + 2 + 18 does.
+        let k = key_layout(inner, 9.0 * CH, CH, true, 5.0 * CH, 3.0 * CH, ROW);
+        assert!(k.short_marks && k.foot_item.is_some() && k.marks.is_some());
+        // Not even that: the glyph goes, the marks stay (the bar and the hover still say what it is).
+        let k = key_layout(inner, 9.0 * CH, 2.0 * CH, true, 5.0 * CH, 4.0 * CH, ROW);
+        assert!(k.short_marks && k.foot_item.is_none() && k.marks.is_some());
+        // A count on a modifier goes to the foot's right.
+        let k = key_layout(inner, 4.0 * CH, 2.0 * CH, false, 0.0, 0.0, ROW);
+        assert_eq!(k.foot_item.unwrap().right(), inner.right());
+        assert!(k.top_right.is_none());
+    }
 
     #[test]
     fn the_width_picks_the_mode() {
