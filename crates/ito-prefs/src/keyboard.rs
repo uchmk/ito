@@ -19,7 +19,7 @@ use ito_keymap::Row;
 use ito_keys::{human_seq_for, render_seq, Key};
 use ito_theme::scale::{radius, space, Text};
 
-use crate::keys::{fill, KeyTable, KeyWords, KeysEdit};
+use crate::keys::{fill, keys_are_free, layer_bindings, KeyTable, KeyWords, KeysEdit};
 use crate::{select, z, Look, Tone};
 
 /// How the keyboard is laid out for the width there is.
@@ -140,6 +140,8 @@ struct Draw<'a> {
     small: f32,
     tr: &'a dyn Fn(&str) -> String,
     layer_name: String,
+    /// Whether these keys are free in the layer shown.
+    free: &'a dyn Fn(&[Key]) -> bool,
 }
 
 /// What a frame of drawing asks for.
@@ -159,6 +161,14 @@ fn kv_text(d: &Draw, kv: &KeyView) -> String {
     } else {
         (d.tr)(&kv.desc)
     }
+}
+
+/// Which layer the picture shows: the one chosen (`true`) when it is one of
+/// `layers`, else the first. `layers` is not empty. The table offering a free
+/// key an operation asks the same, so the two never differ.
+pub(crate) fn shown_layer(layers: &[&str], chosen: &str) -> (bool, String) {
+    let is = layers.contains(&chosen);
+    (is, if is { chosen.to_owned() } else { layers[0].to_owned() })
 }
 
 /// The picture, its header and the lists under it. Hands back the layout
@@ -202,11 +212,9 @@ pub(crate) fn picture<A>(
     }
     ui.add_space(space::SM);
 
-    // Which layer: the one chosen, else the first.
-    let chosen = layers.contains(&st.layer.as_str());
-    let layer = if chosen { st.layer.clone() } else { layers[0].to_owned() };
+    let (chosen, layer) = shown_layer(layers, &st.layer);
     let layer_name = (t.layer_name)(&layer);
-    let bindings = t.now.iter().find(|(n, _)| *n == layer).map_or(&[][..], |(_, b)| b.as_slice());
+    let bindings = layer_bindings(t, &layer);
     let (n, sel) = split(bindings, t.noop, &st.by_key);
     let prefix: Vec<Key> = st.by_key[..n].to_vec();
     let v = view(bindings, t.noop, all, &layer, &prefix, board, t.sup);
@@ -237,6 +245,7 @@ pub(crate) fn picture<A>(
 
     let sel_phys: Vec<Phys> = sel.map(|k| place(board, &k, t.sup).into_iter().map(|(p, _)| p).collect()).unwrap_or_default();
     let mut asked = Asked { by_key: None, latch };
+    let free = |keys: &[Key]| keys_are_free(t, &layer, keys);
 
     let fr = egui::Frame::NONE
         .fill(c.panel)
@@ -300,6 +309,7 @@ pub(crate) fn picture<A>(
                 small,
                 tr: t.tr,
                 layer_name: layer_name.clone(),
+                free: &free,
             };
             if mode == Mode::Narrow && 15.0 * u > ui.available_width() {
                 egui::ScrollArea::horizontal().id_salt("settings.keys.kb.scroll").show(ui, |ui| draw_board(ui, &d, &mut asked));
@@ -680,6 +690,15 @@ fn draw_key(ui: &mut egui::Ui, d: &Draw, cap: &Cap, rect: Rect, notch: Option<Re
     // What the person sees on hover.
     if let Some(kv) = kv {
         either.on_hover_ui(|ui| popup(ui, d, kv));
+    } else if either.hovered() && !cap.inert && md.is_none() {
+        // A key with nothing on it, when pressing it would not meet anything.
+        if let Some(k) = produce(d.board, cap.phys, d.active, d.sup).filter(|k| d.sel != Some(*k)) {
+            let mut on = d.prefix.to_vec();
+            on.push(k);
+            if (d.free)(&on) {
+                either.on_hover_text(fill(d.w.kb_free, &[&human_seq_for(&on, d.sup)]));
+            }
+        }
     } else if let Some(m) = md.filter(|_| !cap.inert) {
         // What the number on a modifier means (in the state a click would leave it).
         let n = if lit(d.active, m, d.sup) { d.v.per_mods.iter().find(|(x, _)| *x == d.active).map_or(0, |(_, n)| *n) } else { mod_count };

@@ -204,6 +204,7 @@ prepend_keymap = [
   アプリは `keys_page_kb` に `common.keyboard_or_auto()` を渡し、返る `KeysOut.common` を common.toml の書き手で書く）。
   設定の画面の本文は 820pt（`ito_prefs::PAGE`）までなので、キーのページを `show_with` の `Extras::wide` に入れて 1280pt（`WIDE_PAGE`）まで広げる。
   広げないと絵は右のかたまり（Ins〜PgDn・矢印）を本体の下に畳んだ形にしかならない。
+  選んだキーが絵の層で空いている（同じ・頭が同じ・頭になるキーが無い）と、下の表は「その層の操作から選ぶ」表になり、各操作に「{キー} にする」ボタンが出る（押すと「＋ → キーを押す → 決める」と同じ `Edit::Add`）。
 - Ctrl+C・X・V は egui が `Copy`・`Cut`・`Paste` に変えるので、ページは `ito_keys::from_clipboard` でもとのキーに戻して受け取る。
   ページで `<C-S-v>` などに割り当てたキーが一覧でも効くよう、アプリのキーの入口も同じものを通す（kura 0.111 から）。
 - ページは `Edit` を返す。アプリは UI ではないスレッドで `ito_keymap::edit` を自分の keymap.toml に当てて `write_atomic` で書き、

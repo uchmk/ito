@@ -9,7 +9,7 @@ use egui::{Color32, FontId, RichText};
 use ito_keymap::{clashes, rows, Binding, Clash, Edit, Row, State, BUILT_IN};
 use ito_keys::{human_seq_for, render_seq, Code, Key, Named};
 
-use crate::{select, switch, z, Look};
+use crate::{select, switch, z, Look, Tone};
 
 /// The words of the Keys page, in one language.
 pub struct KeyWords {
@@ -86,6 +86,14 @@ pub struct KeyWords {
     pub kb_unplaced: &'static str,
     pub kb_back: &'static str,
     pub kb_detail: &'static str,
+    /// Above the operations offered for a free key: `{0}` the keys, `{1}` the layer.
+    pub kb_assign_head: &'static str,
+    /// The button on an operation offered for a free key: `{0}` the keys.
+    pub kb_assign: &'static str,
+    /// Hover on that button: `{0}` the keys.
+    pub kb_assign_tip: &'static str,
+    /// Hover on a free key of the picture: `{0}` the keys.
+    pub kb_free: &'static str,
 }
 
 pub const KEYS_EN: KeyWords = KeyWords {
@@ -150,6 +158,10 @@ pub const KEYS_EN: KeyWords = KeyWords {
     kb_unplaced: "Not on this keyboard ({0})",
     kb_back: "Back",
     kb_detail: "On this key",
+    kb_assign_head: "{0} is free in {1}. Pick the operation it runs:",
+    kb_assign: "Give it {0}",
+    kb_assign_tip: "Adds {0} to this operation; its other keys stay",
+    kb_free: "{0} is free — click to give it an operation",
 };
 
 pub const KEYS_JA: KeyWords = KeyWords {
@@ -204,6 +216,10 @@ pub const KEYS_JA: KeyWords = KeyWords {
     kb_unplaced: "このキーボードに無いキー（{0}）",
     kb_back: "戻る",
     kb_detail: "このキー",
+    kb_assign_head: "「{0}」は{1}で空いています。割り当てる操作を選んでください。",
+    kb_assign: "{0} にする",
+    kb_assign_tip: "この操作に {0} を足します（今のキーはそのまま）",
+    kb_free: "{0} は空いています（クリックで操作を選ぶ）",
 };
 
 impl KeyWords {
@@ -607,6 +623,7 @@ fn page<A>(
     }
 
     // The rows shown, with the words each is found by.
+    let assign = assign_for(t, st, &layers, kb.is_some());
     let q = st.query.trim().to_lowercase();
     let shown: Vec<(&Row, String, String, String)> = all
         .iter()
@@ -617,10 +634,14 @@ fn page<A>(
             let hay = format!("{desc}\n{}\n{}\n{layer}\n{}", r.desc, r.run, keys.join("\n")).to_lowercase();
             let capturing = st.capture.as_ref().is_some_and(|cap| cap.layer == r.layer && cap.run == r.run);
             let keep = capturing
-                || ((layer_at == 0 || r.layer == st.layer)
-                    && (!st.changed_only || r.changed())
-                    && (q.is_empty() || hay.contains(&q))
-                    && (st.by_key.is_empty() || r.keys.iter().any(|k| k.on.starts_with(&st.by_key))));
+                || if let Some(a) = &assign {
+                    r.layer == a.layer && (q.is_empty() || hay.contains(&q))
+                } else {
+                    (layer_at == 0 || r.layer == st.layer)
+                        && (!st.changed_only || r.changed())
+                        && (q.is_empty() || hay.contains(&q))
+                        && (st.by_key.is_empty() || r.keys.iter().any(|k| k.on.starts_with(&st.by_key)))
+                };
             keep.then_some((r, desc, layer, hay))
         })
         .collect();
@@ -653,13 +674,30 @@ fn page<A>(
                 }
             });
             ui.add_space(ito_theme::scale::space::XS);
+            if let Some(a) = &assign {
+                crate::sep(ui, l);
+                ui.add_space(ito_theme::scale::space::MD);
+                let human = human_seq_for(&a.keys, t.sup);
+                let head = fill(w.kb_assign_head, &[&human, &(t.layer_name)(&a.layer)]);
+                let r = ui
+                    .scope(|ui| {
+                        ui.label(RichText::new(&head).size(z(ui, 12.5)).color(c.dim));
+                        for note in key_notes(w, t, &a.layer, &a.keys) {
+                            ui.label(RichText::new(note).size(z(ui, 12.0)).color(c.dim));
+                        }
+                    })
+                    .response;
+                ito_a11y::say(&r, ito_a11y::Role::Label, &head);
+                ito_a11y::test_id(&r, "settings.keys.assign");
+                ui.add_space(ito_theme::scale::space::SM);
+            }
             if shown.is_empty() {
                 crate::sep(ui, l);
                 ui.add_space(ito_theme::scale::space::MD);
                 ui.label(RichText::new(w.nothing).size(z(ui, 12.5)).color(c.dim));
                 ui.add_space(ito_theme::scale::space::SM);
             }
-            for (row, desc, layer, hay) in &shown {
+            for (n, (row, desc, layer, hay)) in shown.iter().enumerate() {
                 crate::sep(ui, l);
                 let lit = !l.q.is_empty() && hay.contains(l.q);
                 if lit {
@@ -682,7 +720,7 @@ fn page<A>(
                     ui.allocate_ui_with_layout(egui::vec2(keys_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                         ui.set_width(keys_w);
                         ui.add_space(ito_theme::scale::space::SM);
-                        keys_cell(ui, l, w, t, row, layer, st, &mut out);
+                        keys_cell(ui, l, w, t, row, layer, st, &mut out, assign.as_ref().map(|a| (a, n)));
                         ui.add_space(ito_theme::scale::space::SM);
                     });
                     if !one_layer {
@@ -706,7 +744,17 @@ fn page<A>(
 /// the defaults under it when it was, and while keys are pressed for it,
 /// what they are and what they take.
 #[allow(clippy::too_many_arguments)]
-fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: &Row, layer: &str, st: &mut KeysEdit, out: &mut Vec<Edit>) {
+fn keys_cell<A>(
+    ui: &mut egui::Ui,
+    l: Look,
+    w: &KeyWords,
+    t: &KeyTable<A>,
+    row: &Row,
+    layer: &str,
+    st: &mut KeysEdit,
+    out: &mut Vec<Edit>,
+    assign: Option<(&Assign, usize)>,
+) {
     let c = l.c;
     let own = |from: &str| from == t.own;
     let editable = |from: &str| from == BUILT_IN || own(from);
@@ -815,6 +863,18 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
                 st.capture = None;
             }
         }
+        // The keys picked on the picture are free: this operation may take them.
+        if let (Some((a, n)), None) = (assign, &this) {
+            let human = human_seq_for(&a.keys, t.sup);
+            let r = crate::button_with(ui, l, &fill(w.kb_assign, &[&human]), Tone::Plain).on_hover_text(fill(w.kb_assign_tip, &[&human]));
+            ito_a11y::test_id(&r, &format!("settings.keys.assign.{n}"));
+            if r.clicked() {
+                let cap = Capture { layer: row.layer.clone(), run: row.run.clone(), keys: a.keys.clone(), replace: None };
+                out.extend(set(&cap, Some(row)));
+                st.capture = None;
+                st.listening = false;
+            }
+        }
     });
     if row.changed() {
         let d: Vec<String> = row.defaults.iter().map(|d| human_seq_for(d, t.sup)).collect();
@@ -843,16 +903,51 @@ fn keys_cell<A>(ui: &mut egui::Ui, l: Look, w: &KeyWords, t: &KeyTable<A>, row: 
             if prefixes > PREFIXES_SHOWN {
                 said.push(fill(w.more, &[&(prefixes - PREFIXES_SHOWN).to_string()]));
             }
-            if let Some(k) = ito_keymap::common_for(&cap.keys, t.sup) {
-                let first = human_seq_for(&cap.keys[..1], t.sup);
-                said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
-            }
-            said.extend((t.extra)(&cap.layer, &cap.keys));
+            said.extend(key_notes(w, t, &cap.layer, &cap.keys));
             for s in said {
                 ui.label(RichText::new(s).size(z(ui, 12.0)).color(c.wait));
             }
         }
     }
+}
+
+/// What else is worth knowing about giving `layer` these keys: the key every
+/// app keeps for itself, and what the app says (`KeyTable::extra`).
+fn key_notes<A>(w: &KeyWords, t: &KeyTable<A>, layer: &str, keys: &[Key]) -> Vec<String> {
+    let mut said = Vec::new();
+    if let Some(k) = ito_keymap::common_for(keys, t.sup) {
+        let first = human_seq_for(&keys[..1], t.sup);
+        said.push(fill(w.clash_common, &[&first, w.common_what[k]]));
+    }
+    said.extend((t.extra)(layer, keys));
+    said
+}
+
+/// The bindings of a layer (none for a name the keymap does not have).
+pub(crate) fn layer_bindings<'a, A>(t: &'a KeyTable<A>, layer: &str) -> &'a [Binding<A>] {
+    t.now.iter().find(|(n, _)| n == layer).map_or(&[][..], |(_, b)| b.as_slice())
+}
+
+/// Nothing is on these keys in a layer: no binding on them, none that starts
+/// with them and none they start with.
+pub(crate) fn keys_are_free<A>(t: &KeyTable<A>, layer: &str, keys: &[Key]) -> bool {
+    clashes(layer_bindings(t, layer), keys, "", t.noop).is_empty()
+}
+
+/// The keys the table offers to give an operation, and the layer.
+struct Assign {
+    layer: String,
+    keys: Vec<Key>,
+}
+
+/// The keys to give an operation, when the page has a picture and the keys
+/// picked are free in the layer it shows.
+fn assign_for<A>(t: &KeyTable<A>, st: &KeysEdit, layers: &[&str], kb: bool) -> Option<Assign> {
+    if !kb || st.by_key.is_empty() || layers.is_empty() {
+        return None;
+    }
+    let (_, layer) = crate::keyboard::shown_layer(layers, &st.layer);
+    keys_are_free(t, &layer, &st.by_key).then(|| Assign { layer, keys: st.by_key.clone() })
 }
 
 #[cfg(test)]
@@ -1382,6 +1477,10 @@ desc = "Close the help"
                 w.kb_follows_legend,
                 w.kb_mod_count,
                 w.kb_unlock,
+                w.kb_assign_head,
+                w.kb_assign,
+                w.kb_assign_tip,
+                w.kb_free,
             ];
             v.extend(w.common_what);
             v
@@ -1425,6 +1524,19 @@ desc = "Close the help"
         width: f32,
         layout: ito_common::Keyboard,
     ) -> (Ids, KeysOut, Vec<(String, egui::Rect)>) {
+        kb_run_with(ctx, files, st, events, width, layout, &[])
+    }
+
+    /// [`kb_run`] with operations that have no key.
+    fn kb_run_with(
+        ctx: &egui::Context,
+        files: &[(&str, &str)],
+        st: &mut KeysEdit,
+        events: Vec<egui::Event>,
+        width: f32,
+        layout: ito_common::Keyboard,
+        unbound: &[(&str, &str, &str)],
+    ) -> (Ids, KeysOut, Vec<(String, egui::Rect)>) {
         ctx.enable_accesskit();
         let (now, built_in) = keymap(files);
         let layer_name = |n: &str| if n == "list" { "List".to_owned() } else { "Help".to_owned() };
@@ -1438,7 +1550,7 @@ desc = "Close the help"
             layer_name: &layer_name,
             tr: &tr,
             extra: &extra,
-            unbound: &[],
+            unbound,
             sup: false,
         };
         let nav = Nav { pages: &[("Keys", "")], index: &[], words: &EN, file: "config.toml" };
@@ -1494,6 +1606,153 @@ desc = "Close the help"
         kb_frame(ctx, files, st, vec![button(p, true)], width, US);
         kb_frame(ctx, files, st, vec![button(p, false)], width, US);
         kb_frame(ctx, files, st, Vec::new(), width, US).0
+    }
+
+    // ---- giving a free key an operation ----
+
+    const UNBOUND: [(&str, &str, &str); 2] = [("list", "rename", "Rename"), ("help", "scroll", "Scroll")];
+
+    fn assign_frame(
+        ctx: &egui::Context,
+        files: &[(&str, &str)],
+        st: &mut KeysEdit,
+        events: Vec<egui::Event>,
+    ) -> (Ids, KeysOut, Vec<(String, egui::Rect)>) {
+        kb_run_with(ctx, files, st, events, 1400.0, US, &UNBOUND)
+    }
+
+    /// The edits a real click on the thing with this test ID hands back.
+    fn assign_click(ctx: &egui::Context, files: &[(&str, &str)], st: &mut KeysEdit, name: &str) -> Vec<Edit> {
+        let (ids, _, _) = assign_frame(ctx, files, st, Vec::new());
+        let p = id_rect(&ids, name).unwrap_or_else(|| panic!("{name} is drawn")).center();
+        assign_frame(ctx, files, st, vec![egui::Event::PointerMoved(p)]);
+        assign_frame(ctx, files, st, vec![button(p, true)]);
+        assign_frame(ctx, files, st, vec![button(p, false)]).1.edits
+    }
+
+    fn assign_ids(ids: &[ito_a11y::TestIdEntry]) -> Vec<String> {
+        let mut v: Vec<String> = ids.iter().filter(|e| e.name.starts_with("settings.keys.assign")).map(|e| e.name.clone()).collect();
+        v.sort();
+        v
+    }
+
+    fn add(layer: &str, on: &str, run: &str, desc: &str) -> Edit {
+        Edit::Add { layer: layer.into(), on: keys(on), run: run.into(), desc: desc.into() }
+    }
+
+    #[test]
+    fn a_free_key_offers_the_operations_of_its_layer() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("0"), ..Default::default() };
+        let (ids, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(id_rect(&ids, "settings.keys.assign").is_some());
+        let head = fill(KEYS_EN.kb_assign_head, &["0", "List"]);
+        assert!(has(&texts, &head), "{head}");
+        assert!(!has(&texts, KEYS_EN.nothing));
+        // Copy, Paste, Go to the top, Visual mode, and Rename (no key) of the list layer; not the help layer's.
+        let want: Vec<String> = ["", ".0", ".1", ".2", ".3", ".4"].iter().map(|n| format!("settings.keys.assign{n}")).collect();
+        assert_eq!(assign_ids(&ids), want);
+
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.4");
+        assert_eq!(edits, vec![add("list", "0", "rename", "Rename")]);
+        assert_eq!(st.by_key, keys("0"), "the keys stay picked");
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.1");
+        assert_eq!(edits, vec![add("list", "0", "paste", "Paste")]);
+
+        // The folded picture does not matter.
+        st.kb_hidden = true;
+        let (ids, _, _) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(id_rect(&ids, "settings.keys.assign").is_some());
+        assert!(id_rect(&ids, "settings.keys.kb.key.keyg").is_none());
+    }
+
+    #[test]
+    fn once_the_key_is_bound_the_table_is_the_plain_filter() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("0"), ..Default::default() };
+        let own = "[[list.keymap]]\non = \"0\"\nrun = \"rename\"\ndesc = \"Rename\"\n";
+        let (ids, _, texts) = assign_frame(&ctx, &[(OWN, own)], &mut st, Vec::new());
+        assert!(assign_ids(&ids).is_empty(), "{:?}", assign_ids(&ids));
+        assert!(!has(&texts, "is free in"));
+        assert!(!has(&texts, KEYS_EN.nothing), "the row with the key is listed");
+    }
+
+    #[test]
+    fn the_search_narrows_the_operations_offered() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("0"), query: "paste".into(), ..Default::default() };
+        let (ids, _, _) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert_eq!(assign_ids(&ids), ["settings.keys.assign", "settings.keys.assign.0"]);
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.0");
+        assert_eq!(edits, vec![add("list", "0", "paste", "Paste")]);
+        st.query = "no such operation".into();
+        let (ids, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert_eq!(assign_ids(&ids), ["settings.keys.assign"]);
+        assert!(has(&texts, KEYS_EN.nothing), "the head, and nothing under it");
+    }
+
+    #[test]
+    fn the_layer_is_the_one_the_picture_shows() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("0"), layer: "help".into(), ..Default::default() };
+        let (ids, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(has(&texts, &fill(KEYS_EN.kb_assign_head, &["0", "Help"])));
+        assert_eq!(assign_ids(&ids), ["settings.keys.assign", "settings.keys.assign.0", "settings.keys.assign.1"]);
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.1");
+        assert_eq!(edits, vec![add("help", "0", "scroll", "Scroll")]);
+        // A layer the keymap does not have is the first one.
+        st.layer = "gone".into();
+        let (_, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(has(&texts, &fill(KEYS_EN.kb_assign_head, &["0", "List"])));
+    }
+
+    #[test]
+    fn a_modifier_and_a_follow_up_are_keys_too() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("<C-0>"), ..Default::default() };
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.4");
+        assert_eq!(edits, vec![add("list", "<C-0>", "rename", "Rename")]);
+        let mut st = KeysEdit { by_key: keys("g x"), ..Default::default() };
+        let (_, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(has(&texts, &fill(KEYS_EN.kb_assign_head, &["g x", "List"])));
+        let edits = assign_click(&ctx, &[(OWN, "")], &mut st, "settings.keys.assign.4");
+        assert_eq!(edits, vec![add("list", "g x", "rename", "Rename")]);
+    }
+
+    #[test]
+    fn keys_that_are_taken_offer_nothing() {
+        let ctx = egui::Context::default();
+        // `g` starts `g g`; `y` is on a binding; `g g g` starts with one.
+        for taken in ["g", "y", "g g g"] {
+            let mut st = KeysEdit { by_key: keys(taken), ..Default::default() };
+            let (ids, _, _) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+            assert!(assign_ids(&ids).is_empty(), "{taken}: {:?}", assign_ids(&ids));
+        }
+    }
+
+    #[test]
+    fn the_page_without_a_picture_offers_nothing() {
+        let ctx = egui::Context::default();
+        let mut st = KeysEdit { by_key: keys("0"), ..Default::default() };
+        let (texts, _) = page(&ctx, "", &mut st, Vec::new());
+        assert!(!has(&texts, "is free in"));
+        assert!(at(&texts, KEYS_EN.nothing).is_some());
+    }
+
+    #[test]
+    fn a_key_every_app_keeps_says_so_under_the_head() {
+        let ctx = egui::Context::default();
+        // F1 is the help in every app and the test keymap does not bind it.
+        let mut st = KeysEdit { by_key: keys("<F1>"), ..Default::default() };
+        let (ids, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(id_rect(&ids, "settings.keys.assign").is_some());
+        let k = ito_keymap::common_for(&st.by_key, false).expect("F1 is a common key");
+        let note = fill(KEYS_EN.clash_common, &["F1", KEYS_EN.common_what[k]]);
+        assert!(has(&texts, &note), "{note}");
+        // A key that is not common has no such line.
+        let mut st = KeysEdit { by_key: keys("0"), ..Default::default() };
+        let (_, _, texts) = assign_frame(&ctx, &[(OWN, "")], &mut st, Vec::new());
+        assert!(!has(&texts, "keeps for"));
     }
 
     #[test]
