@@ -24,6 +24,7 @@
 | ふつうのボタン | `button(ui, look, "文言")` |
 | 主な操作・取り返しのつかない操作 | `button_with(…, Tone::Primary / Tone::Danger)` |
 | **アイコン＋文字のボタン** | `icon_button(ui, Mark, "文言", "読み上げ")`（`IconButton` で Tone・キーの札・`wide`） |
+| 枠も塗りも無いボタン（行・ツールバー・カードの脇の操作） | `ghost_button(ui, Mark, "文言", "読み上げ")`（`IconButton::ghost()` で Tone・キーの札。大きさは枠ありと同じ） |
 | アイコンだけのボタン（ツールバー） | `mark_button(ui, Mark, "読み上げ", 大きさ)` |
 | 印そのもの（80 個。`Mark::…`） | `mark(painter, rect, Mark, 色)`。**アイコンが足りなければ描かずに ito に頼む** |
 | 区切りのボタン（タブ風） | `seg` |

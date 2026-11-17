@@ -24,7 +24,7 @@ mod mark;
 mod more;
 mod nav;
 pub use keys::{keys_index, keys_page, keys_page_kb, Capture, KeyTable, KeyWords, KeysEdit, KeysOut, KEYS_EN, KEYS_JA};
-pub use mark::{icon_button, mark, mark_button, IconButton, Mark};
+pub use mark::{ghost_button, icon_button, mark, mark_button, IconButton, Mark};
 mod compose;
 mod date;
 mod emoji;

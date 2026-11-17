@@ -724,6 +724,26 @@ pub(crate) fn tone_look(c: &ito_theme::Colors, tone: Tone, hot: bool) -> (Color3
     }
 }
 
+/// The ink of the words (and, but for `Plain`, of the mark) of a ghost [`IconButton`]: the tone's colour moved toward `fg` in steps
+/// of 0.05 until it reads (4.5:1) on every ground it may sit on, or all the way to `fg`.
+pub(crate) fn ghost_ink(c: &ito_theme::Colors, tone: Tone) -> Color32 {
+    let base = match tone {
+        Tone::Plain => return c.fg,
+        Tone::Primary => c.run,
+        Tone::Danger => c.err,
+        Tone::Warn => c.wait,
+    };
+    let grounds = [c.bg, c.side, c.panel, c.raised()];
+    let mut t = 0.0_f32;
+    loop {
+        let ink = mix(base, c.fg, t);
+        if t >= 1.0 || grounds.iter().all(|g| ito_theme::contrast(ink, *g) >= 4.5) {
+            return ink;
+        }
+        t = (t + 0.05).min(1.0);
+    }
+}
+
 /// What `IconButton::show` lays out, worked out once so `size` and `show` cannot drift.
 struct Measured {
     galley: std::sync::Arc<egui::Galley>,
@@ -751,6 +771,7 @@ pub struct IconButton<'a> {
     drag: bool,
     min_size: Vec2,
     text_size: Option<f32>,
+    ghost: bool,
 }
 
 impl<'a> IconButton<'a> {
@@ -766,6 +787,7 @@ impl<'a> IconButton<'a> {
             drag: false,
             min_size: Vec2::ZERO,
             text_size: None,
+            ghost: false,
         }
     }
 
@@ -778,6 +800,16 @@ impl<'a> IconButton<'a> {
     /// `Tone::Primary` for the one main action, `Tone::Danger` for the one that throws something away.
     pub fn tone(mut self, tone: Tone) -> Self {
         self.tone = tone;
+        self
+    }
+
+    /// The ghost form, for secondary actions in rows, toolbars and cards: at rest only the mark and the words show (no fill, no
+    /// edge); hot (under the pointer or with the keys) a translucent wash of the words' ink appears, stronger while pressed. The
+    /// [`tone`](Self::tone) picks the ink (a lifted `run`, `err` or `wait` so it reads on any surface; `Plain` is `fg`, with the
+    /// mark `dim` until hot), and a key chip is outlined in that ink. It is the same size as the outlined form, so swapping it in
+    /// moves no layout.
+    pub fn ghost(mut self) -> Self {
+        self.ghost = true;
         self
     }
 
@@ -858,9 +890,22 @@ impl<'a> IconButton<'a> {
         take_keys(ui, &r);
         if ui.is_rect_visible(rect) {
             let hot = r.hovered() || r.has_focus();
-            let (fill, edge, mark_ink, text_ink) = tone_look(&c, self.tone, hot);
+            let (fill, edge, mark_ink, text_ink) = if self.ghost {
+                let ink = ghost_ink(&c, self.tone);
+                let mark_ink = if self.tone == Tone::Plain && !hot { c.dim } else { ink };
+                let wash = if r.is_pointer_button_down_on() { GHOST_PRESSED } else { GHOST_HOT };
+                (if hot { ink.gamma_multiply(wash) } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, mark_ink, ink)
+            } else {
+                tone_look(&c, self.tone, hot)
+            };
             let p = ui.painter();
-            p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+            if self.ghost {
+                if fill != Color32::TRANSPARENT {
+                    p.rect_filled(rect, 6.0, fill);
+                }
+            } else {
+                p.rect(rect, 6.0, fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+            }
             let cy = rect.center().y;
             let glyph_at = |x: f32| Rect::from_center_size(Pos2::new(x + glyph / 2.0, cy), Vec2::splat(glyph));
             let mut x = if self.wide { rect.left() + pad } else { rect.left() + (rect.width() - content) / 2.0 };
@@ -878,8 +923,13 @@ impl<'a> IconButton<'a> {
             if let Some(g) = chip {
                 let cx = if self.wide { rect.right() - pad - chip_w } else { x + gap };
                 let cr = Rect::from_min_size(Pos2::new(cx, cy - z(ui, 8.0)), Vec2::new(chip_w, z(ui, 16.0)));
-                p.rect_stroke(cr, 4.0, Stroke::new(1.0, mix(fill, text_ink, 0.35)), StrokeKind::Inside);
-                p.galley(cr.center() - g.size() / 2.0, g, mix(fill, text_ink, 0.8));
+                let (line, letters) = if self.ghost {
+                    (text_ink.gamma_multiply(0.35), text_ink.gamma_multiply(0.8))
+                } else {
+                    (mix(fill, text_ink, 0.35), mix(fill, text_ink, 0.8))
+                };
+                p.rect_stroke(cr, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
+                p.galley(cr.center() - g.size() / 2.0, g, letters);
             }
         }
         focus_ring(ui, &r);
@@ -887,11 +937,22 @@ impl<'a> IconButton<'a> {
     }
 }
 
+/// The wash behind a hot ghost button, and behind a pressed one, as a share of the words' ink.
+const GHOST_HOT: f32 = 0.12;
+const GHOST_PRESSED: f32 = 0.22;
+
 /// A quiet outlined button with `mark` before `words`: the `raised` fill and a thin `border`, `hover` and `border_strong` under
 /// the pointer or with the keys, the mark in `dim` (`fg` when hot), the words in the body size of `ui`. `said` is its spoken
 /// name, and its tip when it differs from the words. For a tone, a key or the full width, build an [`IconButton`].
 pub fn icon_button(ui: &mut Ui, m: Mark, words: &str, said: &str) -> Response {
     IconButton::new(m, words).said(said).show(ui)
+}
+
+/// The ghost form of [`icon_button`]: `mark` before `words` with no fill and no edge at rest, and a translucent wash of the ink
+/// under the pointer or with the keys (stronger while pressed). The same size as [`icon_button`]. `said` is its spoken name, and
+/// its tip when it differs from the words. For a tone or a key, build an [`IconButton`] and call [`ghost`](IconButton::ghost).
+pub fn ghost_button(ui: &mut Ui, m: Mark, words: &str, said: &str) -> Response {
+    IconButton::new(m, words).said(said).ghost().show(ui)
 }
 
 /// Paint the square button face of a [`mark_button`] in `rect`, for a `r` the caller made.
@@ -1025,5 +1086,65 @@ mod tests {
         });
         assert!(big.x > plain.x, "{plain:?} {big:?}");
         assert!((shown - big).abs().max_elem() < 0.01, "{shown:?} {big:?}");
+    }
+
+    #[test]
+    fn a_ghost_is_the_size_of_the_outlined_form() {
+        run(|ui| {
+            for b in [
+                IconButton::new(Mark::Save, "Save"),
+                IconButton::new(Mark::Save, "Save").key("Ctrl+Enter"),
+                IconButton::new(Mark::Save, "Go").min_size(Vec2::new(200.0, 40.0)),
+                IconButton::new(Mark::Send, "Send").mark_last().tone(Tone::Danger),
+            ] {
+                assert_eq!(b.size(ui), b.ghost().size(ui));
+                assert_eq!(b.show(ui).rect.size(), b.ghost().show(ui).rect.size());
+            }
+        });
+    }
+
+    /// The fill and edge of every rect behind the button in a frame: any `Shape::Rect` inside the button's rect that spans most of
+    /// its width, whatever its height (the mark's own strokes are far narrower).
+    fn boxes(out: &egui::FullOutput, rect: Rect) -> Vec<(Color32, f32)> {
+        out.shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                Shape::Rect(r) if rect.expand(1.0).contains_rect(r.rect) && r.rect.width() >= rect.width() * 0.9 => {
+                    Some((r.fill, r.stroke.width))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_ghost_at_rest_paints_no_fill_and_no_edge() {
+        let mut rect = Rect::NOTHING;
+        let out = run(|ui| rect = IconButton::new(Mark::Save, "Save").tone(Tone::Danger).show(ui).rect);
+        let outlined = boxes(&out, rect);
+        assert!(outlined.iter().any(|(f, w)| *f != Color32::TRANSPARENT && *w > 0.0), "{outlined:?}");
+        let out = run(|ui| rect = IconButton::new(Mark::Save, "Save").tone(Tone::Danger).ghost().show(ui).rect);
+        let ghost = boxes(&out, rect);
+        assert!(ghost.iter().all(|(f, w)| *f == Color32::TRANSPARENT && *w == 0.0), "{ghost:?}");
+    }
+
+    #[test]
+    fn the_lifted_inks_read_on_every_ground_of_every_theme() {
+        for t in ito_theme::builtin() {
+            let c = t.colors;
+            for tone in [Tone::Primary, Tone::Danger, Tone::Warn] {
+                let ink = ghost_ink(&c, tone);
+                for g in [c.bg, c.side, c.panel, c.raised()] {
+                    assert!(ito_theme::contrast(ink, g) >= 4.5, "{} {tone:?} {ink:?} on {g:?}", t.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn primary_and_danger_inks_differ_on_every_theme() {
+        for t in ito_theme::builtin() {
+            assert_ne!(ghost_ink(&t.colors, Tone::Primary), ghost_ink(&t.colors, Tone::Danger), "{}", t.name);
+        }
     }
 }

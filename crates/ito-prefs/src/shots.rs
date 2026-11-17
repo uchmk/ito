@@ -1,5 +1,5 @@
-//! Screenshots of the name | value editor, the Shell card and the secret field, for looking at by eye. A test that does nothing unless
-//! `ITO_SHOTS=<folder>` is set; it draws with egui, rasterises the meshes on the CPU and writes PNGs.
+//! Screenshots of the name | value editor, the Shell card, the secret field and the ghost `IconButton`, for looking at by eye. A test
+//! that does nothing unless `ITO_SHOTS=<folder>` is set; it draws with egui, rasterises the meshes on the CPU and writes PNGs.
 //! Run: `ITO_SHOTS=<folder> cargo test -p ito-prefs shots -- --nocapture`.
 
 use std::collections::{BTreeMap, HashMap};
@@ -368,5 +368,81 @@ fn secret_shots() {
         s.frame(vec![Event::Text("fake-client-secret".to_owned())], &mut draw);
         s.frame(vec![], &mut draw);
         s.save(&dir, &format!("secret-take-{}", if dark { "dark" } else { "light" }));
+    }
+}
+
+/// The buttons of one row of the ghost picture: Plain, Primary with a key chip, Danger, Warn and one with the mark last. Returns
+/// each button's response, in that order.
+fn ghost_row(ui: &mut egui::Ui, ja: bool, ghost: bool) -> Vec<egui::Response> {
+    use crate::{IconButton, Mark};
+    let (a, b, c, d, e) = if ja {
+        ("再読み込み", "変更を保存してから続ける", "削除", "アップロード", "次へ")
+    } else {
+        ("Refresh", "Save", "Delete", "Upload", "Next")
+    };
+    let g = |b: IconButton<'static>| if ghost { b.ghost() } else { b };
+    let mut out = Vec::new();
+    ui.horizontal(|ui| {
+        out.push(g(IconButton::new(Mark::Refresh, a)).show(ui));
+        out.push(g(IconButton::new(Mark::Save, b).tone(Tone::Primary).key("Ctrl+Enter")).show(ui));
+        out.push(g(IconButton::new(Mark::Trash, c).tone(Tone::Danger)).show(ui));
+        out.push(g(IconButton::new(Mark::Upload, d).tone(Tone::Warn)).show(ui));
+        out.push(g(IconButton::new(Mark::ChevronRight, e).mark_last()).show(ui));
+    });
+    ui.horizontal(|ui| {
+        for (m, w) in [(Mark::Copy, "Copy"), (Mark::Plus, "Add"), (Mark::Pencil, "Edit"), (Mark::Expand, "Expand")] {
+            out.push(g(IconButton::new(m, w)).show(ui));
+        }
+    });
+    out
+}
+
+#[test]
+fn ghost_shots() {
+    let Ok(dir) = std::env::var("ITO_SHOTS") else { return };
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    for dark in [false, true] {
+        for ja in [false, true] {
+            // (state, the button it is on)
+            for (state, target) in [("rest", 0), ("hot", 1), ("pressed", 2), ("focus", 0)] {
+                let seen = std::cell::RefCell::new(Vec::new());
+                let mut draw = |ui: &mut egui::Ui| {
+                    let c = ito_theme::colors();
+                    let mut all = Vec::new();
+                    all.extend(ghost_row(ui, ja, true));
+                    ui.add_space(8.0);
+                    egui::Frame::new().fill(c.panel).inner_margin(8.0).corner_radius(6.0).show(ui, |ui| {
+                        all.extend(ghost_row(ui, ja, true));
+                    });
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(if ja { "枠あり（比較）" } else { "Outlined, for comparison" }).size(11.5).color(c.dim));
+                    ghost_row(ui, ja, false);
+                    *seen.borrow_mut() = all.iter().map(|r| (r.id, r.rect)).collect();
+                };
+                let mut s = Scene::new(dark, 760.0);
+                s.frame(vec![], &mut draw);
+                s.frame(vec![], &mut draw);
+                let (id, rect) = seen.borrow()[target];
+                let at = rect.center();
+                match state {
+                    "hot" => s.frame(vec![Event::PointerMoved(at)], &mut draw),
+                    "pressed" => {
+                        s.frame(vec![Event::PointerMoved(at)], &mut draw);
+                        let down =
+                            Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE };
+                        s.frame(vec![down], &mut draw);
+                    }
+                    "focus" => {
+                        s.ctx.memory_mut(|m| m.request_focus(id));
+                        s.frame(vec![], &mut draw);
+                    }
+                    _ => {}
+                }
+                s.frame(vec![], &mut draw);
+                let tag = format!("{}-{}-{state}", if dark { "dark" } else { "light" }, if ja { "ja" } else { "en" });
+                s.save(&dir, &format!("ghost-{tag}"));
+            }
+        }
     }
 }
