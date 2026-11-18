@@ -39,12 +39,26 @@ fi
 
 # 3. The notes only hold what changed since the previous release.
 prev=$(gh release list --repo "$repo" --limit 5 --json tagName --jq '.[].tagName' | grep -vxF "$tag" | head -1)
-# Notes may be long; only the part before the table counts.
-lines=$(printf '%s' "$body" | sed '/^<!-- checksums -->$/,$d' | grep -c . || true)
-if [ "$lines" -le 40 ]; then
-  say OK "notes: $lines lines since ${prev:-the start}"
+# Only the release's own notes count: the lines before the fixed tail an app
+# appends (from `### Platforms`: Platforms, Signing, ...) or the SHA-256 table,
+# whichever comes first. Up to 15 lines pass. Longer notes pass when they open
+# with `## Highlights` (the 3-5 main changes, up to 10 lines under the heading)
+# and keep the per-version notes under `## All changes since vPREV`.
+own=$(printf '%s\n' "$body" | tr -d '\r' | sed -e '/^### Platforms/,$d' -e '/^<!-- checksums -->$/,$d')
+lines=$(printf '%s\n' "$own" | grep -c . || true)
+high=
+case "$(printf '%s\n' "$own" | grep -m 1 .)" in
+  "## Highlights"*) high=$(printf '%s\n' "$own" | awk 'seen && /^## /{exit} !seen && /^## Highlights/{seen=1; next} seen && /./{n++} END{print n+0}') ;;
+esac
+since=${prev:-the start}
+if [ "$lines" -le 15 ]; then
+  say OK "notes: $lines lines since $since"
+elif [ -n "$high" ] && [ "$high" -le 10 ]; then
+  say OK "notes: $lines lines since $since, led by $high lines of Highlights"
+elif [ -n "$high" ]; then
+  say WARN "Highlights: $high lines; keep it to the 3-5 main changes (gh release edit $tag --notes-file ...)"
 else
-  say WARN "notes: $lines lines since ${prev:-the start}; put the 3-5 main changes first (gh release edit $tag --notes-file ...)"
+  say WARN "notes: $lines lines since $since; put \`## Highlights\` (the 3-5 main changes) first and the per-version notes under \`## All changes since $since\` (gh release edit $tag --notes-file ...)"
 fi
 
 [ "$fail" -eq 0 ] && echo "RELEASE OK: $tag" || echo "RELEASE INCOMPLETE: $tag"

@@ -3,6 +3,25 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.309.1] - 2026-11-18
+
+### 変更
+
+- `scripts/lanes/release-check.sh`: 3 つ目の確かめ（ノートの長さの WARN）は、そのリリースのノートだけを数えるようにした（kura のセッションの頼み。持ち主が了承）。
+  - 数えるのは、`### Platforms` の行か `<!-- checksums -->` の手前（先に来た方）まで。アプリが毎回足す決まった末尾（Platforms・Signing など）は数えない。
+    前は表の手前を全部数えたので、kura は末尾だけで約 39 行あり、40 行の上限でノートが短くても毎回 WARN になっていた。
+  - 15 行までは OK。先頭が `## Highlights` で、その節（次の `## ` まで。見出しの行は数えない）が 10 行までのときも OK。
+    これは yagura の形（`## Highlights` → `## All changes since vPREV` → 版ごとの `## vX.Y.Z: …`）。
+  - それ以外は WARN で、`## Highlights`（主な変更 3〜5 個）を先頭に、版ごとのノートを `## All changes since PREV` の下に置くよう言う。
+    Highlights が 10 行を超えるときは、Highlights を主な変更 3〜5 個にするよう言う。
+  - 本文の CR は落としてから数える。
+  - 今の各アプリの最新のリリースでは、kura v0.164.1（Highlights 4 行）・yagura v0.73.123（Highlights 5 行。前は WARN）・koyomi v0.37.0・fude v0.10.2 が OK、
+    michi v0.108.4 が WARN（21 行、Highlights なし。前は OK）。
+
+### 使う側がやること
+
+- ito の `rev` を上げて `scripts/lanes.sh sync` を流す。
+
 ## [0.309.0] - 2026-11-18
 
 ### 追加
