@@ -36,6 +36,7 @@ pub mod startup;
 pub mod text;
 pub mod update;
 pub mod web;
+pub mod which;
 pub mod window;
 pub mod writes;
 

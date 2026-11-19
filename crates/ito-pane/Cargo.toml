@@ -22,6 +22,7 @@ alacritty_terminal = { version = "0.26", default-features = false }
 crossbeam-channel = "0.5"
 polling = "3"
 egui = { version = "0.36", optional = true }
+ito-common = { path = "../ito-common" }
 ito-a11y = { path = "../ito-a11y", optional = true }
 ito-gpu = { path = "../ito-gpu", optional = true }
 ito-ime = { path = "../ito-ime", optional = true }

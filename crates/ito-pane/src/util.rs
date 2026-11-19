@@ -3,27 +3,13 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// `which`, near enough: an absolute or relative name is taken as it stands,
-/// and a bare one is looked for along `PATH`, trying each of `PATHEXT`'s
-/// suffixes so that `code` finds `code.cmd`.
+/// Where the program `exe` is: a name with a folder in it where it points, a bare one along `PATH` (on Windows with
+/// `.exe` added to a name without an extension, as CreateProcess does).
+/// On Windows only `.exe` counts as a suffix, because the shell is started by its bare name through CreateProcess,
+/// which appends nothing else and never reads App Paths (so `pwsh.cmd` is not `pwsh`).
 pub fn locate(exe: &str) -> Option<std::path::PathBuf> {
-    let raw = std::path::Path::new(exe);
-    if raw.components().count() > 1 {
-        return raw.is_file().then(|| raw.to_path_buf());
-    }
-    let exts: Vec<String> = match std::env::var("PATHEXT") {
-        Ok(v) => std::iter::once(String::new()).chain(v.split(';').map(|e| e.to_ascii_lowercase())).collect(),
-        Err(_) => vec![String::new()],
-    };
-    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
-        for ext in &exts {
-            let p = dir.join(format!("{exe}{ext}"));
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    None
+    const EXE: &[&str] = if cfg!(windows) { &[".exe"] } else { &[] };
+    ito_common::which::on_path_in(exe, &ito_common::which::path_dirs(), EXE).map(|p| p.path)
 }
 
 /// Lexically normalize a path (resolve `.`/`..`) without touching the filesystem.

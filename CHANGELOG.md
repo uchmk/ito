@@ -3,6 +3,39 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.311.0] - 2026-11-19
+
+### 追加
+
+- `ito-common::which`: プログラムを PATH と、Windows では App Paths（レジストリ）から探す共通の部品を足した（#243。kura のセッションの頼み）。
+  - `which(name)`: PATH（Windows は PATHEXT の拡張子を付けて）、見つからなければ App Paths（HKCU、次に HKLM）。Windows のシェル（`start`）が探す場所と同じで、「入っているか」を答える。
+  - `on_path(name)`: PATH だけ。`on_path_in(name, dirs, exts)`: 渡したフォルダーと拡張子だけで探す（環境変数もレジストリも読まない）。`app_path(name)`・`path_dirs()`・`path_exts()` も公開した。
+  - 返すのは `Program { path, via }`。`via` は `Given`（フォルダーの入った名前がそのファイルを指していた）・`Path`・`AppPaths`。
+  - 探し方は cmd の決まりどおり。拡張子が PATHEXT のどれかの名前（`code.cmd`）はその名前だけ、拡張子の無い名前は拡張子を付けたものだけを試す（拡張子の無いファイルは見ない。Git の `usr\bin\notepad` のようなスクリプトに当たらない）。ほかの拡張子の名前は、拡張子を付けたものの後にその名前を試す（`python3.12` は `python3.12.exe`、`tool.py` は `tool.py`）。フォルダーごとに、その中でこの順に見る。
+  - フォルダーの入った名前（`./x`・`C:\x\y.exe`）は、その場所（相対なら今のフォルダー）だけを見て、PATH と App Paths は見ない。
+  - 空の名前、`://` を含む名前（URL）、`:` を含む素の名前（`ms-settings:display`）、Windows で使えない文字（`<>"|?*`・制御文字）を含む素の名前は `None`。
+  - App Paths は、値が絶対パスで、そのファイルがあるものだけを返す。HKCU の値が古くて無いファイルを指していれば、HKLM を見る。`REG_EXPAND_SZ` は展開し、前後の `"` は外す。32 ビットの側は同じ場所を指すので、読むのは 1 回ずつ。
+  - PATH の空の項目は今のフォルダー（今までの 3 つの探し方と同じ）。Unix では実行の権限を見ない（ファイルならよい。今までと同じ）。
+  - ディスクとレジストリを読むので、UI のスレッドから呼ばない（無い名前は、PATH のフォルダーの数 × 拡張子の数だけ見る）。
+
+### 変更
+
+- ito-pane・ito-openin・ito-common（`apps`）が別々に持っていた PATH の探し方を `which::on_path_in` にまとめた。
+  - ito-pane の `locate`（既定のシェルと、設定のシェルの一覧）: Windows では `.exe` だけを見る。シェルは CreateProcess に素の名前で渡して起動し、CreateProcess は `.exe` しか足さないため（`pwsh.cmd` があっても `pwsh` は動かない）。拡張子の無い同名のファイルにも当たらなくなった。依存に ito-common を足した。
+  - ito-openin の `diff::detect`: PATH で見つかったのが `<名前>.exe` でないとき（`code.cmd` など）は、素の名前でなく `"` で囲んだフルパスを返す。`spawn` の `Command::new` は `.exe` しか足さないので、今まで Windows で `code` の差分が起動しなかった。拡張子の無い同名のファイルにも当たらなくなった。
+  - `apps` の PATH の探し方は結果が変わらない（アプリの名前は英小文字・数字・`-`・`_` だけ）。
+
+### 修正
+
+- Rust 1.100 の clippy（`needless_range_loop`）で落ちていた 2 つのループ（ito-mdview の `view.rs`、ito-prefs の設定の画面の左下のファイルのボタン）を、イテレーターに直した。動きは変わらない。
+
+### 使う側がやること
+
+- kura: `util::locate` を `ito_common::which` に置き換える。「〜で開く」の `start "" chrome %*` の `(not found)` の判定には `which`（App Paths まで見る）を使う。
+- App Paths で見つかったプログラム（`via == Via::AppPaths`）は、素の名前では `std::process::Command` で起動できない（CreateProcess は App Paths を読まない）。シェル（`start`）を通すか、`path` のフルパスで起動する。
+- `which`・`on_path` は UI のスレッドから呼ばず、ワーカーで呼んで結果を覚えておく。
+- ito-openin の `Found::program` は、Windows で `.cmd`・`.bat` が見つかったときに `"` で囲んだフルパスになる。テンプレートにそのまま入れているなら、何もしなくてよい。
+
 ## [0.310.0] - 2026-11-19
 
 ### 追加

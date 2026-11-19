@@ -115,8 +115,7 @@ pub fn show(ui: &mut egui::Ui, doc: &Doc, state: &mut State, opt: &Options) -> O
         let marks = opt.matcher.map(|m| doc.marks(m, first, last));
         let mut current_done = false;
         let painter = ui.painter().clone();
-        for i in first..last {
-            let l = &doc.lines[i];
+        for (i, l) in doc.lines.iter().enumerate().take(last).skip(first) {
             let top = origin.y + i as f32 * lh;
             let x0 = origin.x + pad;
             let row = Rect::from_min_size(Pos2::new(origin.x, top), Vec2::new(width, lh));

@@ -94,7 +94,8 @@ pub fn known(name: &str) -> Option<&'static Known> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Found {
     pub tool: &'static Known,
-    /// A bare name (found on PATH) or a quoted full path, ready for a template.
+    /// A bare name (found on PATH as `<name>.exe`, or as `<name>` on Unix) or a quoted full path (an install folder,
+    /// or a `.cmd`/`.bat` on PATH, which `Command::new` would not start by its bare name), ready for a template.
     pub program: String,
 }
 
@@ -131,8 +132,12 @@ pub fn detect_with(path_dirs: &[PathBuf], env: &dyn Fn(&str) -> Option<String>) 
     KNOWN
         .iter()
         .filter_map(|tool| {
-            if let Some(name) = tool.programs.iter().find(|n| on_path(n, path_dirs).is_some()) {
-                return Some(Found { tool, program: (*name).to_owned() });
+            if let Some((name, path)) = tool.programs.iter().find_map(|n| on_path(n, path_dirs).map(|p| (*n, p))) {
+                // `Command::new` appends only `.exe`: a `code.cmd` must be started by its full path.
+                let want = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+                let plain = path.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.eq_ignore_ascii_case(&want));
+                let program = if plain { name.to_owned() } else { format!("\"{}\"", path.display()) };
+                return Some(Found { tool, program });
             }
             tool.installs.iter().find_map(|(var, dir, file)| {
                 let full = Path::new(&env(var)?).join(dir).join(file);
@@ -144,8 +149,8 @@ pub fn detect_with(path_dirs: &[PathBuf], env: &dyn Fn(&str) -> Option<String>) 
 
 /// Where the program `name` is on `dirs` (with the executable extensions on Windows).
 pub fn on_path(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat", ".com"] } else { &[""] };
-    dirs.iter().find_map(|d| exts.iter().map(|x| d.join(format!("{name}{x}"))).find(|p| p.is_file()))
+    const EXTS: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat", ".com"] } else { &[] };
+    ito_common::which::on_path_in(name, dirs, EXTS).map(|p| p.path)
 }
 
 #[cfg(test)]
@@ -194,6 +199,17 @@ mod tests {
         let found = detect_with(std::slice::from_ref(&d), &|_| None);
         assert_eq!(found.iter().map(|f| f.tool.name).collect::<Vec<_>>(), ["meld"]);
         assert_eq!(found[0].diff_command(), "meld {left} {right}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_on_path_is_started_by_its_full_path() {
+        let d = scratch("cmd");
+        std::fs::write(d.join("code.cmd"), "").unwrap();
+        let found = detect_with(std::slice::from_ref(&d), &|_| None);
+        let code = found.iter().find(|f| f.program.ends_with("code.cmd\"")).expect("code found by full path");
+        assert!(code.program.starts_with('"'));
         let _ = std::fs::remove_dir_all(&d);
     }
 

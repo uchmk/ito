@@ -159,8 +159,8 @@ fn file_at(path: &Path) -> Option<PathBuf> {
 }
 
 fn on_path(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    dirs.iter().map(|d| d.join(&file)).find(|p| p.is_file())
+    const EXE: &[&str] = if cfg!(windows) { &[".exe"] } else { &[] };
+    crate::which::on_path_in(name, dirs, EXE).map(|p| p.path)
 }
 
 /// [`find`] over given places: common.toml's `[apps]`, the folder the apps

@@ -684,8 +684,7 @@ pub fn show_with(
     // The files last, so Tab comes to them after the page: the app's own, then the common one at the foot.
     let n = extras.files.len();
     let mut file = None;
-    for j in 0..=n {
-        let name = if j < n { extras.files[j] } else { nav.file };
+    for (j, name) in extras.files.iter().copied().chain(std::iter::once(nav.file)).enumerate() {
         let top = side.bottom() - 48.0 - FILE_STEP * (n - j) as f32;
         let foot = egui::Rect::from_min_max(egui::pos2(side.left() + 10.0, top), egui::pos2(side.right() - 10.0, top + 32.0));
         let words = format!("{} {}", nav.words.open, name);
