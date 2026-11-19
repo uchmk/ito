@@ -3,6 +3,36 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.310.0] - 2026-11-19
+
+### 追加
+
+- `scripts/lanes/pure-rust.py`・`pure-rust.txt`: C のツールチェーンが要るクレートがアプリの依存に入ったら落とす見張りを足した（#242。kura のセッションの頼み）。
+  - 6 つのターゲット（Windows・Linux・macOS × x64・ARM64）ごとに `cargo tree --locked --workspace -e normal,build` を読む。解決するだけなので、ターゲットを入れていなくても回る。
+  - 見つけるのは、ビルドの道具（`cc`・`cmake`・`nasm-rs`・`bindgen`・`pkg-config`・`system-deps`・`vcpkg`・`cxx-build`）と、名前が `-sys` で終わるクレート。
+  - 例外は、共有の `pure-rust.txt`（ito から写す）とアプリの `scripts/pure-rust.allow`。1 行は `<crate> [via <入れたクレート>] [with <機能> | without <機能>] <理由>`。
+    - `with`・`without` は、依存の木のその行の機能で確かめる（`via` があれば入れた側、無ければそのクレート自身）。resolver 2 で同じクレートがホスト用とターゲット用で違う機能になっても、1 つずつ見る。
+    - 理由のない行・形のおかしい行は効かず、そのことを言って落ちる。ビルドの道具は、入れたクレートを `via` で名指ししないと効かない。
+    - アプリの行が 6 つのどのターゲットでも何にも当たらなければ、消すように言って落ちる（共有の行は言わない）。
+  - `cargo tree` が失敗したとき、出力の行が読めないとき（形が変わった・親の無い行・メンバーが 1 つも無い）は、OK にせず、そう言って落ちる。
+  - 落ちたときは、クレート・入れたクレート・ターゲット・根からの最短の道（`koyomi-sql -> rusqlite -> libsqlite3-sys -> cc`）を 1 行ずつと、どうすればよいかを出す。
+  - 共有の表には、`build.rs` を読んで C をビルドしないと確かめた 15 行を入れた。
+    windows-sys・linux-raw-sys・inotify-sys・core-foundation-sys・security-framework-sys・fsevent-sys・objc-sys・dirs-sys・libbz2-rs-sys・renderdoc-sys・webview2-com-sys と、
+    `wayland-sys`（`dlopen` のとき）・`pkg-config via wayland-sys`（`dlopen` のとき）・`cc via wayland-backend`（`log` が無いとき）・`pkg-config via x11-dl`（libdir を聞くだけで、失敗しても `None`）。
+  - 名前で見る早めの知らせで、証明ではない（ほかの道で C を回す `build.rs` は見えない。本当の確かめは 6 つのターゲットのリリースのビルド）。
+    ワークスペース全体を既定の機能で見るので、`release.yml` が配るもの（`-p <crate>`）より厳しめになる。
+  - 今の各アプリの木では、kura・michi・fude が共有の表だけで OK。koyomi は `aws-lc-sys`・`cmake`（rustls の既定の暗号）・`ring`（rcgen）・`libsqlite3-sys`（rusqlite）で落ちる。
+    どれも本当に C をビルドするので、純 Rust に替えるか、理由を書いて `pure-rust.allow` に置くかは koyomi が決める。
+  - ここ（ito）では `--self-test` だけ回す（ito 自身は ito-store の rusqlite・ito-oauth の ring・ito-browser の objc2-exception-helper で落ちるが、アプリではない）。
+- `templates/app`: `lanes.conf` の `files=` に `pure-rust.py pure-rust.txt`、`ci.yml` の `ito-first` ジョブと `verify.sh` に `python3 scripts/pure-rust.py`、`CLAUDE.md` の ito first の節に説明を足した。
+
+### 使う側がやること
+
+- 取り込むアプリ（まず kura）は、ito の `rev` を上げ、`scripts/lanes.conf` の `files=` に `pure-rust.py pure-rust.txt` を足して `scripts/lanes.sh sync` を流す。
+- `.github/workflows/ci.yml`（雛形では `ito-first` ジョブ）と `scripts/verify.sh` に `python3 scripts/pure-rust.py` を足す。
+- 落ちたら、そのクレートの `build.rs` を読む。C をビルドしないものだけ、理由を付けて `scripts/pure-rust.allow` に書く。
+  どのアプリにも当てはまる行は、アプリに書かず ito に頼む（`pure-rust.txt` に入れる）。
+
 ## [0.309.1] - 2026-11-18
 
 ### 変更

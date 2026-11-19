@@ -79,11 +79,13 @@ jobs:
 
   # ito first: the app uses the ito crates and does not carry its own copy of
   # what they do (scripts/ito-first.py; exceptions in scripts/ito-first.allow).
+  # Pure Rust on the 6 targets (scripts/pure-rust.py; exceptions in scripts/pure-rust.allow).
   ito-first:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/ito-first.py
+      - run: python3 scripts/pure-rust.py
       - run: bash scripts/lanes.sh check
       - run: cargo run -q -p {{app}} --example make-testcheck -- --check
       - run: cargo run -q -p {{app}} --example make-bugform -- --check

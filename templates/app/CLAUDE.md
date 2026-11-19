@@ -14,6 +14,9 @@
 - `scripts/ito-first.py` が機械で見る。ito が受け持つ依存（`toml_edit`・`dirs`・`notify` …）を直接足すと落ちる。
   持つべき ito のクレート（keyscript・help・notify・bugreport …）が抜けていても落ちる。
   理由があって外すときだけ `scripts/ito-first.allow` に `<crate> <理由>` を書く（理由のない行は効かない）。
+- `scripts/pure-rust.py` が 6 つのターゲットの依存の木を見て、C のツールチェーンが要るクレート（`cc`・`cmake`・`pkg-config`・`*-sys` など）が
+  入ると落ちる。害のないもの（バインディングだけ・C の部分が切ってある機能の裏）は、`build.rs` を読んでから `scripts/pure-rust.allow` に
+  `<crate> [via <入れたクレート>] [with|without <機能>] <理由>` を書く（理由のない行は効かない）。
 - 全部の ito のクレートは 1 つの `rev` にそろえる。上げたら `scripts/lanes.sh sync`。
   `.github/workflows/` の build・arm64・checklists・release・release-sums は ito の雛形から `sync` が書く（`lanes.conf` の `workflows=`）。直すなら ito で。
 

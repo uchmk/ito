@@ -9,6 +9,8 @@ evidence.py
 ito-first.py
 ito-first.txt
 ito-required.txt
+pure-rust.py
+pure-rust.txt
 keys.ps1
 labels.sh
 lane-boot.ps1

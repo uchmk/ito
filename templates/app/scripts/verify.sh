@@ -73,4 +73,6 @@ run cargo run -q -p {{app}} --example make-bugform -- --check
 run scripts/lanes.sh check
 # ito first: no crate ito already stands in for, and every crate an app needs.
 run python3 scripts/ito-first.py
+# pure Rust: no crate that needs a C toolchain on the 6 targets.
+run python3 scripts/pure-rust.py
 echo "ALL OK: $tests"

@@ -1,0 +1,25 @@
+# Crates that `scripts/pure-rust.py` flags (a build helper such as `cc`, or any `*-sys` crate) but that build no C, so
+# every uchmk app may have them. The check fails when a C toolchain creeps into an app's build; these are the ones that
+# were read (build.rs and Cargo.toml) and found harmless.
+#
+# One line: <crate> [via <parent>] [with <feature> | without <feature>] <reason>. `via` limits it to one parent; `with` /
+# `without` is a condition on the feature set the dependency tree shows (the parent's when `via` is given, else the
+# crate's own). A line without a reason does not count; a build helper (cc, cmake ...) needs `via`.
+#
+# An app adds its own lines to scripts/pure-rust.allow (same shape). A line goes here only when it holds for every app
+# (and say so in CHANGELOG.md); an app's line that matches nothing is dropped as stale, these never are.
+windows-sys                              Win32 API bindings in Rust; no build.rs, nothing built or probed
+linux-raw-sys                            Linux kernel ABI bindings in Rust; no build.rs
+inotify-sys                              inotify bindings; its build.rs links a library only on NetBSD and OpenBSD
+core-foundation-sys                      macOS framework bindings; no build.rs, the framework ships with the OS
+security-framework-sys                   macOS framework bindings; no build.rs, the framework ships with the OS
+fsevent-sys                              macOS framework bindings; no build.rs, the framework ships with the OS
+objc-sys                                 Objective-C runtime bindings; its C is only behind unstable-exception, whose cc this check sees
+dirs-sys                                 home-folder lookups in Rust over libc / windows-sys; no build.rs
+libbz2-rs-sys                            a pure Rust port of bzip2 (sevenz-rust2); no build.rs
+renderdoc-sys                            RenderDoc API bindings, loaded at run time (wgpu-hal); no build.rs
+webview2-com-sys                         WebView2 COM bindings; its build.rs only links advapi32, which ships with Windows
+wayland-sys with dlopen                  loads libwayland at run time when dlopen is on; its build.rs returns before probing
+pkg-config via wayland-sys with dlopen   wayland-sys's build.rs returns before calling pkg-config when dlopen is on
+pkg-config via x11-dl                    x11-dl's build.rs only asks pkg-config for libdir paths and falls back to None on error
+cc via wayland-backend without log       wayland-backend's build.rs compiles log_shim.c only with the log feature

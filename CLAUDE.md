@@ -89,7 +89,10 @@ tsumugi（紬、ターミナル）と minato（港、GitHub）も使っていた
 - ito-power の `set_service_mode`・`service_session_change` は koyomi-service が呼ぶ。名前と形を変えるなら、CHANGELOG の「使う側がやること」に書いて koyomi に知らせる。
 - `scripts/lanes/ito-first.txt` は、移したクレートが使う依存（`zip`・`russh`・`rust_xlsxwriter` など）を禁じていない。koyomi の `koyomi-*` はこれらを直に使ってよく、`ito-first.allow` の行も要らない。ito に戻したときは、その依存を `ito-first.txt` に足すかを決める。
 
-**新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。ここ（提供側）では `--self-test` だけ回す。ito に無いものは `crate-request` の Issue で頼む。
+**新しいアプリは `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"`** で `templates/app` から作る（ito の必須のクレート・窓・テーマ・F12・`.com`・bug form・testcheck 入り。`-Rev` は push 済みの ito のコミット）。`scripts/lanes/ito-first.py`（`ito-first.txt` の禁止、`ito-required.txt` の必須）が、アプリが ito を使わず独自に書くのを落とす。例外はアプリの `scripts/ito-first.allow`（`<crate> <理由>`）。
+`scripts/lanes/pure-rust.py` は、6 つのターゲットの依存の木に C のツールチェーンが要るクレート（`cc`・`cmake`・`pkg-config`・`*-sys` など）が入るのを落とす。
+例外は共有の `pure-rust.txt`（どのアプリでも C をビルドしないと `build.rs` で確かめたもの）とアプリの `scripts/pure-rust.allow`（`<crate> [via <親>] [with|without <機能>] <理由>`）。
+どちらも、ここ（提供側）では `--self-test` だけ回す（ito 自身は ito-store・ito-oauth などで落ちるが、アプリではない）。ito に無いものは `crate-request` の Issue で頼む。
 
 **`scripts/lanes/`** は、アプリのテストのレーンが使うスクリプトの正（`FILES` に並べたもの: merge-lanes.py、claim.sh、push-main.sh、xrun.sh、keys.ps1 など）。
 見た目の行の検査の道具もここにある: `visual-check.py`（check spec と実行の folder → `machine/assertions.json`）、`evidence.py`（実行の folder・manifest・verdict）、`make-canary.py`（実際の回を写して測る値を壊し、検査が FAIL と言うか確かめる。種類は spec の横の `<行>.canary.toml`）。どれも標準ライブラリだけの Python で、ito は自己検査（`--self-test`）と `scripts/check-schemas.py`（`docs/schemas/*.v1.json` と例、両スクリプトが出す実物の検査）で確かめる。規則は [docs/visual-test.md](docs/visual-test.md)。

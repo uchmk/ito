@@ -76,7 +76,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # The lanes' scripts the apps copy (scripts/lanes/FILES): parsed, and
-  # the self-tests of merge-lanes.py, ito-first.py, visual-check.py and evidence.py run, and check-schemas.py checks
+  # the self-tests of merge-lanes.py, ito-first.py, pure-rust.py, visual-check.py and evidence.py run, and check-schemas.py checks
   # docs/schemas/ against its examples and what those self-tests emit. Nothing of them runs against a repository.
   lanes:
     runs-on: ubuntu-latest
@@ -85,6 +85,7 @@ jobs:
       - run: for f in scripts/lanes/*.sh; do bash -n "$f"; done
       - run: python3 scripts/lanes/merge-lanes.py --self-test
       - run: python3 scripts/lanes/ito-first.py --self-test
+      - run: python3 scripts/lanes/pure-rust.py --self-test
       - run: python3 scripts/lanes/visual-check.py --self-test
       - run: python3 scripts/lanes/make-canary.py --self-test
       - run: python3 scripts/lanes/evidence.py --self-test

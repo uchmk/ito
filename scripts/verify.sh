@@ -66,12 +66,13 @@ for t in $others; do
     esac
 done
 run cargo +stable clippy -q --workspace --all-targets -- -D warnings
-# The lanes' scripts (scripts/lanes/FILES): they run in the apps, so here they
-# are only parsed, and the self-tests of merge-lanes.py, ito-first.py, visual-check.py, make-canary.py and evidence.py run;
+# The lanes' scripts (scripts/lanes/FILES): they run in the apps, so here they are only parsed, and the self-tests
+# of merge-lanes.py, ito-first.py, pure-rust.py, visual-check.py, make-canary.py and evidence.py run;
 # check-schemas.py checks docs/schemas/ against its examples and against what those self-tests emit.
 for f in scripts/lanes/*.sh; do run bash -n "$f"; done
 run python3 scripts/lanes/merge-lanes.py --self-test
 run python3 scripts/lanes/ito-first.py --self-test
+run python3 scripts/lanes/pure-rust.py --self-test
 run python3 scripts/lanes/visual-check.py --self-test
 run python3 scripts/lanes/make-canary.py --self-test
 run python3 scripts/lanes/evidence.py --self-test

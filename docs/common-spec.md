@@ -456,7 +456,7 @@ scale: 100%           # 書くなら倍率を % で
 
 ## 新しいアプリを作るとき
 
-**まず `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"` で `templates/app` から作る**（下の項目の土台、ito のクレートの依存・窓の場所・テーマ・F12・`.com`・bug form・testcheck まで入る。残りは生成された `TODO.md`）。`scripts/ito-first.py` が、ito が受け持つ依存の直接の追加と、持つべき ito のクレートの欠けを落とす（外すときは `scripts/ito-first.allow` に `<crate> <理由>`）。ito に無いものは自分で書かず `crate-request` の Issue で頼む。
+**まず `pwsh -NoProfile -File scripts/new-app.ps1 -Name <app> -Description "…"` で `templates/app` から作る**（下の項目の土台、ito のクレートの依存・窓の場所・テーマ・F12・`.com`・bug form・testcheck まで入る。残りは生成された `TODO.md`）。`scripts/ito-first.py` が、ito が受け持つ依存の直接の追加と、持つべき ito のクレートの欠けを落とす（外すときは `scripts/ito-first.allow` に `<crate> <理由>`）。`scripts/pure-rust.py` が、6 つのターゲットの依存に C のツールチェーンが要るクレート（`cc`・`cmake`・`pkg-config`・`*-sys` など）が入るのを落とす（C をビルドしないと `build.rs` で確かめたものだけ `scripts/pure-rust.allow` に `<crate> [via <親>] [with|without <機能>] <理由>`）。ito に無いものは自分で書かず `crate-request` の Issue で頼む。
 
 1. `ito-common`（`clock`）・`ito-theme`・`ito-prefs`・`ito-i18n`・`ito-keys`・`ito-keymap` を同じ `rev` で足す。
 2. 設定は `ito_common::app_dir("<app>")/config.toml`、状態は `ito_common::state_dir("<app>")` に置く。
