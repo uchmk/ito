@@ -1,4 +1,4 @@
-//! Images for apps: a picture from the OS clipboard, and lossy WebP.
+//! Images for apps: a picture from the OS clipboard, lossy WebP, and JPEG XL.
 //!
 //! - [`clipboard_image`] reads what a screenshot tool (Win+Shift+S) or "Copy image"
 //!   put on the clipboard, as straight (not premultiplied) RGBA8. `None` when the
@@ -7,6 +7,8 @@
 //! - [`encode_webp`] writes lossy WebP (quality 0 to 100) and keeps transparency.
 //!   Pure Rust, so the six build targets stay light. It is slow for a big picture
 //!   (a 4K screenshot takes about a second): call it from a worker thread.
+//! - [`is_jxl`] tells a JPEG XL file by its first bytes. With the `jxl` feature (off by default, about 3 MB of code),
+//!   `decode_jxl` reads one to straight RGBA8 in sRGB (frame 0, orientation applied, size and memory limits). Pure Rust.
 //! - [`Rgba::content_hash`] is a key for "the same picture, the same file".
 //! - [`fake`] stands in for the clipboard in `--keys` tests.
 //!
@@ -17,10 +19,14 @@
 
 pub mod dib;
 pub mod fake;
+mod jxl;
 mod webp;
 
 use std::fmt;
 
+#[cfg(feature = "jxl")]
+pub use jxl::decode_jxl;
+pub use jxl::is_jxl;
 pub use webp::encode_webp;
 
 /// A picture as straight (not premultiplied) RGBA8, rows from the top, 4 bytes a pixel.

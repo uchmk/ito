@@ -3,6 +3,24 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.312.0] - 2026-11-20
+
+### 追加
+
+- `ito-image::is_jxl(bytes)`: JPEG XL かを先頭のバイトで見分ける（#244。kura#501 の頼み）。`FF 0A`（素のコードストリーム）か、ISOBMFF コンテナの 12 バイトの署名（`00 00 00 0C 4A 58 4C 20 0D 0A 87 0A`）なら true。機能も依存も要らない。
+- `ito-image` の機能 `jxl`（既定は OFF）と `decode_jxl(bytes, max_pixels) -> Result<Rgba, Error>`。jxl-oxide 0.12.6 以上（勧告の直った版）で、純 Rust。実行ファイルに約 3.3 MB 足す（リリースビルドの小さな例で測った）。
+  - 先頭の表示フレーム（キーフレーム 0）を、straight（premultiplied でない）の RGBA8・sRGB で返す。アニメーションの後ろのフレームは読まない。向きを直した大きさと画素で返す。
+  - 色は sRGB（Relative）に変換する。埋め込みの ICC は moxcms（純 Rust）で、`lcms2`（C）は使わない。グレーは R=G=B に、アルファの無い絵は不透明に、premultiplied のアルファは浮動小数のまま割って straight にする。CMYK も同じく、プロファイルを通して sRGB に変換する（CMS にできない変換はエラー。CMYK の試験用ファイルは無い）。
+  - 先にヘッダーだけを読み（4 KiB ずつ）、`幅 × 高さ` が `min(max_pixels, dib::MAX_PIXELS)` を超えれば、画素を 1 つも読まずに `TooLarge`。そのあとヘッダーの大きさから決めたメモリの上限（`AllocTracker`）をつけて読み直す。上限は 1024×1024 で測った最大の山（幅×高さ×チャンネル×4 バイトの 2.2 倍）の約 2.7 倍。大きさの確認は絵の大きさに比例するものすべてを縛り、デコーダー自身のバッファは上限の下にもある。ここで作る出力のバッファ（アルファが premultiplied のときは最大 幅×高さ×チャンネルの f32、それ以外は u8、それと RGBA8 の結果）は上限に数えない。埋め込みの ICC はどちらにも縛られない（jxl-oxide が 256 MiB で止める）。メモリ不足での中断（abort）は止められない。
+  - 壊れた・空・途中で切れたバイトは `Invalid`（panic もそうする）。最初のキーフレームが読めていれば、後ろが切れたアニメーションでもその絵を返す。
+  - 速度のため `rayon`（既定のスレッドプール = rayon のグローバルのプール。呼ぶごとに作らない）。止まって確保するので、ワーカースレッドから。
+  - 試験用の小さな JXL（可逆・非可逆・アルファ・アニメーション・16 ビット・グレー・向き 6・ICC）を `crates/ito-image/testdata/` に置いた。作り方は `make-jxl.sh`（ImageMagick 7 + libjxl）。premultiplied のアルファは作れなかったので、割り算だけを単体で試している。
+  - コンテナ（`jxlc`・`jxlp`）はデコーダーに渡さず、コードストリームだけを自前で取り出して渡す。Exif・XMP・JUMBF・brotli の `brob`・`jbrd` などのメタデータの箱は中身を読まない（`brob` を無制限に展開して確保が膨らむ爆弾を避ける）。
+
+### 使う側がやること
+
+- kura は `ito-image = { git = "…", rev = "…", features = ["jxl"] }` にし、拡張子でなく `is_jxl` で JXL かを見分けて `decode_jxl(bytes, 80_000_000)` を呼ぶ（ワーカースレッドから）。公開の `Error` の変種は増やしていない。`scripts/lanes/ito-first.txt` に `jxl-oxide` の行を足した。アプリが `jxl-oxide` を直に依存に入れると `ito-first.py` が落とす。ito-image を使う別のアプリは同じ `rev` にそろえる。
+
 ## [0.311.0] - 2026-11-19
 
 ### 追加
