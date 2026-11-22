@@ -176,14 +176,17 @@ pub enum Step {
     /// `<Lang:ja>`: likewise for the language (`en`, `ja`, ...).
     Lang(String),
     /// `<Click:Copy>`, `<RClick:Copy>`: the widget whose label is that text (the
-    /// exact label, else the one label that contains it), clicked at its centre.
+    /// exact label, else the one label that contains it), clicked at the centre of the part that is visible in its
+    /// area. A widget scrolled wholly out of view is scrolled into view first (AccessKit `ScrollIntoView`, innermost
+    /// scroll area); the step fails with "is out of view (scroll it first)" when that does not bring it in.
     /// Read from egui's AccessKit tree, so a popup that has just opened can be
     /// clicked by what it says. Missing or ambiguous text fails the run (#98).
     ClickText {
         right: bool,
         text: String,
     },
-    /// `<DClick:Copy>`: a double click at the centre of the widget with that text, which is looked up once.
+    /// `<DClick:Copy>`: a double click at the centre of the visible part of the widget with that text, which is looked
+    /// up once (scrolled into view first, as `<Click:Copy>`).
     DClickText(String),
     /// `<Assert:text>` / `<Assert:!text>`: some label or value in the window
     /// contains the text (or none does). Waits a few seconds for it, then fails the run.
@@ -669,11 +672,12 @@ pub const DELIVER_WAIT: Duration = Duration::from_secs(10);
 pub const READ_WAIT: Duration = Duration::from_secs(15);
 
 /// A labelled thing in the window, as egui's AccessKit tree names it.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     /// Its label, or its value (a text field's contents).
     pub text: String,
-    /// Where it is, in points.
+    /// Where it is, in points: the tree's bounds, not clipped by the scroll area or panel it sits in.
     pub rect: egui::Rect,
     pub disabled: bool,
     /// The node holds the keyboard focus. The window's active descendant counts too when the window itself has the
@@ -681,6 +685,25 @@ pub struct Item {
     pub focused: bool,
     /// A check box, switch or toggle button: whether it is on.
     pub toggled: Option<bool>,
+    /// The AccessKit node, for [`locate_or_scroll`] and the scroll request.
+    pub node: egui::accesskit::NodeId,
+    /// Where `<Click:text>` presses (the centre of the part that is visible in its area, in window coordinates), or why
+    /// it cannot.
+    pub click_at: Result<egui::Pos2, String>,
+    /// The node is wholly clipped away by an enclosing area, so scrolling it into view may help.
+    pub out_of_view: bool,
+}
+
+impl Item {
+    /// The same thing twice in the tree: the fields before `node` agree.
+    fn same_as(&self, o: &Item) -> bool {
+        self.text == o.text && self.rect == o.rect && self.disabled == o.disabled && self.focused == o.focused && self.toggled == o.toggled
+    }
+}
+
+/// The text of the "wholly clipped away" failure.
+fn out_of_view_text(text: &str) -> String {
+    format!("`{text}` is out of view (scroll it first)")
 }
 
 /// What [`observe`] collects after each pass.
@@ -862,7 +885,11 @@ fn click_point(
     {
         return Err(format!("`{name}` has no area to click ({r:?})"));
     }
-    let c = r.center();
+    landing(ctx, name, r.center(), layer, viewport_rect)
+}
+
+/// Whether a press at `c` (window coordinates) lands on `layer`: inside the window, not behind a modal, not covered.
+fn landing(ctx: &egui::Context, name: &str, c: egui::Pos2, layer: egui::LayerId, viewport_rect: egui::Rect) -> Result<egui::Pos2, String> {
     if !viewport_rect.contains(c) {
         return Err(format!("`{name}` is outside the window (at {c:?}, window {viewport_rect:?})"));
     }
@@ -873,6 +900,25 @@ fn click_point(
         Some(l) if l == layer => Ok(c),
         other => Err(format!("`{name}` is covered by {other:?} at {c:?}")),
     }
+}
+
+/// Where `<Click:text>` presses the node with bounds `b`, and whether it is wholly clipped away. `clip` is the visible
+/// part of the widget the node (or its nearest ancestor) was registered as; with none, the centre of `b` as it was.
+fn text_click(
+    ctx: &egui::Context,
+    text: &str,
+    b: egui::Rect,
+    clip: Option<&egui::WidgetRect>,
+    viewport_rect: egui::Rect,
+) -> (Result<egui::Pos2, String>, bool) {
+    let Some(w) = clip else { return (Ok(b.center()), false) };
+    let v = b.intersect(w.interact_rect);
+    let finite = v.min.x.is_finite() && v.min.y.is_finite() && v.max.x.is_finite() && v.max.y.is_finite();
+    if !finite || v.width() <= 0.0 || v.height() <= 0.0 {
+        return (Err(out_of_view_text(text)), true);
+    }
+    let t = ctx.layer_transform_to_global(w.layer_id).unwrap_or_default();
+    (landing(ctx, text, t * v.center(), w.layer_id, viewport_rect), false)
 }
 
 impl egui::Plugin for Tap {
@@ -922,14 +968,37 @@ impl egui::Plugin for Tap {
             dump(&nodes, root, focus, 0, &mut tree);
         }
         self.tree = tree;
+        let rect_now = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport_rect());
+        // The pass that just ended is `prev_pass` by now. Widget rects by AccessKit id, and each node's parent.
+        let widgets: std::collections::HashMap<egui::accesskit::NodeId, egui::WidgetRect> = ctx.viewport_for(egui::ViewportId::ROOT, |v| {
+            v.prev_pass.widgets.layers().flat_map(|(_, ws)| ws.iter()).map(|w| (w.id.accesskit_id(), *w)).collect()
+        });
+        let mut parents: std::collections::HashMap<egui::accesskit::NodeId, egui::accesskit::NodeId> = std::collections::HashMap::new();
+        for (id, node) in &update.nodes {
+            for c in node.children() {
+                parents.insert(*c, *id);
+            }
+        }
         for (id, node) in &update.nodes {
             let focused = *id == focus && focus != update.tree.as_ref().map_or(focus, |t| t.root);
             let toggled = toggled(node);
             let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
             let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+            let mut clip = widgets.get(id);
+            let mut at = *id;
+            for _ in 0..256 {
+                if clip.is_some() {
+                    break;
+                }
+                let Some(p) = parents.get(&at) else { break };
+                at = *p;
+                clip = widgets.get(&at);
+            }
             for text in [node.label(), node.value()].into_iter().flatten().filter(|t| !t.is_empty()) {
-                let item = Item { text: text.to_owned(), rect, disabled: node.is_disabled(), focused, toggled };
-                if !items.contains(&item) {
+                let (click_at, out_of_view) = text_click(ctx, text, rect, clip, rect_now);
+                let item =
+                    Item { text: text.to_owned(), rect, disabled: node.is_disabled(), focused, toggled, node: *id, click_at, out_of_view };
+                if !items.iter().any(|o| o.same_as(&item)) {
                     items.push(item);
                 }
             }
@@ -1215,17 +1284,43 @@ fn listed(found: &[&Item]) -> String {
     names.join(", ")
 }
 
-/// Where `<Click:text>` clicks: the centre of the one thing whose text is `text`, or else the one
-/// whose text contains it. An error says what was found instead.
+/// Where `<Click:text>` clicks: the centre of the part of the one thing whose text is `text` (or else the one whose
+/// text contains it) that is visible in its scroll area or panel. An error says what was found instead, or that the
+/// thing is out of view, covered by another layer, behind a modal or outside the window. A widget drawn over it in
+/// the same layer is not looked for.
+/// See [`locate_or_scroll`] to also scroll it into view.
 pub fn locate(ctx: &egui::Context, text: &str) -> Result<egui::Pos2, String> {
-    locate_in(&items(ctx), text)
+    pick(&items(ctx), text).and_then(|i| i.click_at.clone())
 }
 
-fn locate_in(all: &[Item], text: &str) -> Result<egui::Pos2, String> {
+/// Like [`locate`], and when the thing is wholly scrolled out of view it also asks its innermost scroll area to scroll
+/// it into view (an AccessKit `ScrollIntoView` request pushed into `raw`, and a repaint), so a caller that retries on
+/// later frames gets the click. Only the passes after this one see it in view.
+pub fn locate_or_scroll(ctx: &egui::Context, text: &str, raw: &mut egui::RawInput) -> Result<egui::Pos2, String> {
+    text_target(ctx, &items(ctx), text, raw)
+}
+
+/// [`locate_or_scroll`] over the items of one observation.
+fn text_target(ctx: &egui::Context, all: &[Item], text: &str, raw: &mut egui::RawInput) -> Result<egui::Pos2, String> {
+    let item = pick(all, text)?;
+    if item.out_of_view {
+        raw.events.push(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::ScrollIntoView,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.node,
+            data: None,
+        }));
+        ctx.request_repaint();
+    }
+    item.click_at.clone()
+}
+
+/// The one thing `<Click:text>` means: the exact text, else the one that contains it.
+fn pick<'a>(all: &'a [Item], text: &str) -> Result<&'a Item, String> {
     let exact: Vec<&Item> = all.iter().filter(|i| i.text == text).collect();
     let found = if exact.is_empty() { all.iter().filter(|i| i.text.contains(text)).collect() } else { exact };
     match found.as_slice() {
-        [one] => Ok(one.rect.center()),
+        [one] => Ok(one),
         [] => {
             let seen: Vec<&Item> = all.iter().collect();
             Err(format!("no `{text}` in the window; it has: {}", listed(&seen)))
@@ -2793,11 +2888,11 @@ impl Runner {
                 (pace::Taken::Changed { more: Vec::new() }, Some(Do::Lang(code.clone())))
             }
             Press::ClickText { right, text } => {
-                let found = self.fresh(ctx).and_then(|o| locate_in(&o.items, text)).map(|pos| click_frames(pos, *right));
+                let found = self.fresh(ctx).and_then(|o| text_target(ctx, &o.items, text, raw)).map(|pos| click_frames(pos, *right));
                 Self::pressed(raw, found)
             }
             Press::DClickText(text) => {
-                let found = self.fresh(ctx).and_then(|o| locate_in(&o.items, text)).map(dclick_frames);
+                let found = self.fresh(ctx).and_then(|o| text_target(ctx, &o.items, text, raw)).map(dclick_frames);
                 Self::pressed(raw, found)
             }
             Press::ClickId(name) => {
@@ -3872,6 +3967,174 @@ mod tests {
             }
         };
         assert_eq!(drive("<Click:Save><Clipboard:pressed>", false, app), Some(Do::Done));
+    }
+
+    /// What a scene recorded: presses of the two buttons, where Target was pressed, the scroll offset and the area's rect.
+    struct Hits {
+        row: std::cell::Cell<u32>,
+        target: std::cell::Cell<u32>,
+        at: std::cell::Cell<Option<egui::Pos2>>,
+        offset: std::cell::Cell<f32>,
+        area: std::cell::Cell<egui::Rect>,
+    }
+
+    impl Default for Hits {
+        fn default() -> Self {
+            Self {
+                row: Default::default(),
+                target: Default::default(),
+                at: Default::default(),
+                offset: Default::default(),
+                area: std::cell::Cell::new(egui::Rect::NOTHING),
+            }
+        }
+    }
+
+    /// Like koyomi's run page: a table in a bottom panel, and above it a scroll area with `Target` `spacer` points down.
+    fn scene(ui: &mut egui::Ui, h: &Hits, spacer: f32) {
+        egui::Panel::bottom("p").show(ui, |ui| {
+            if ui.add_sized([380.0, 100.0], egui::Button::new("Row")).clicked() {
+                h.row.set(h.row.get() + 1);
+            }
+        });
+        let out = egui::ScrollArea::vertical().id_salt("sa").auto_shrink(false).show(ui, |ui| {
+            ui.allocate_space(egui::vec2(10.0, spacer));
+            if ui.button("Target").clicked() {
+                h.target.set(h.target.get() + 1);
+                h.at.set(ui.input(|i| i.pointer.interact_pos()));
+            }
+            ui.allocate_space(egui::vec2(10.0, 1000.0));
+        });
+        h.offset.set(out.state.offset.y);
+        h.area.set(out.inner_rect);
+    }
+
+    fn small_window() -> egui::RawInput {
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() }
+    }
+
+    fn drive_small(script: &str, quick: bool, mut app: impl FnMut(&mut egui::Ui)) -> Option<Do> {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse(script).unwrap(), None);
+        for _ in 0..400 {
+            hurry(&mut r);
+            let mut raw = small_window();
+            if let Some(d) = r.input(&ctx, &mut raw) {
+                return Some(d);
+            }
+            ctx.run_ui(raw, |ui| app(ui)).drop_without_applying_deltas();
+            if quick {
+                expire(&mut r);
+            }
+        }
+        None
+    }
+
+    /// A context that has drawn `app` a few passes, with the tree on.
+    fn drawn_small(mut app: impl FnMut(&mut egui::Ui)) -> egui::Context {
+        let ctx = egui::Context::default();
+        observe(&ctx);
+        for _ in 0..4 {
+            ctx.run_ui(small_window(), |ui| app(ui)).drop_without_applying_deltas();
+        }
+        ctx
+    }
+
+    fn item_of(ctx: &egui::Context, text: &str) -> Item {
+        items(ctx).into_iter().find(|i| i.text == text).unwrap_or_else(|| panic!("no {text}"))
+    }
+
+    #[test]
+    fn a_click_on_a_node_hidden_under_a_panel_scrolls_it_in_and_never_presses_what_lies_there() {
+        let h = Hits::default();
+        let ctx = drawn_small(|ui| scene(ui, &h, 200.0));
+        let (target, row) = (item_of(&ctx, "Target"), item_of(&ctx, "Row"));
+        assert!(row.rect.contains(target.rect.center()), "{target:?} {row:?}: the precondition");
+        assert!(target.out_of_view, "{target:?}");
+        let h = Hits::default();
+        assert_eq!(drive_small("<Click:Target>", false, |ui| scene(ui, &h, 200.0)), Some(Do::Done));
+        assert_eq!((h.target.get(), h.row.get()), (1, 0));
+        assert!(h.offset.get() > 0.0, "scrolled: {}", h.offset.get());
+    }
+
+    #[test]
+    fn a_click_on_a_node_cut_by_the_edge_presses_the_visible_part() {
+        let h = Hits::default();
+        let ctx = drawn_small(|ui| scene(ui, &h, 175.0));
+        let target = item_of(&ctx, "Target");
+        let area = h.area.get();
+        assert!(target.rect.min.y < area.max.y && area.max.y < target.rect.max.y, "{target:?} {area:?}: straddles the edge");
+        assert!(!target.out_of_view);
+        let h = Hits::default();
+        assert_eq!(drive_small("<Click:Target>", false, |ui| scene(ui, &h, 175.0)), Some(Do::Done));
+        assert_eq!((h.target.get(), h.row.get()), (1, 0));
+        let at = h.at.get().unwrap();
+        assert!(target.rect.contains(at) && h.area.get().contains(at), "{at:?} in {target:?} and {:?}", h.area.get());
+        assert!(h.offset.get() == 0.0, "no scroll was needed");
+    }
+
+    fn ghost_scene(ui: &mut egui::Ui, h: &Hits) {
+        scene(ui, h, 200.0);
+        ui.scope(|ui| {
+            ui.set_clip_rect(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 20.0)));
+            if ui.put(egui::Rect::from_min_size(egui::pos2(10.0, 220.0), egui::vec2(80.0, 20.0)), egui::Button::new("Ghost")).clicked() {
+                h.target.set(h.target.get() + 10);
+            }
+        });
+    }
+
+    #[test]
+    fn a_node_that_cannot_be_scrolled_in_fails_the_step_and_presses_nothing() {
+        let h = Hits::default();
+        match drive_small("<Click:Ghost>", true, |ui| ghost_scene(ui, &h)) {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("`Ghost` is out of view (scroll it first)"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!((h.target.get(), h.row.get()), (0, 0));
+    }
+
+    #[test]
+    fn locate_refuses_a_hidden_node_and_locate_or_scroll_asks_for_one_scroll() {
+        let h = Hits::default();
+        let ctx = drawn_small(|ui| scene(ui, &h, 200.0));
+        let why = locate(&ctx, "Target").unwrap_err();
+        assert!(why.contains("`Target` is out of view (scroll it first)"), "{why}");
+        let mut raw = egui::RawInput::default();
+        assert_eq!(locate_or_scroll(&ctx, "Target", &mut raw), Err(why));
+        let node = item_of(&ctx, "Target").node;
+        let asked: Vec<_> = raw
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::AccessKitActionRequest(r) if r.action == egui::accesskit::Action::ScrollIntoView => Some(r.target_node),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked, [node]);
+        assert_eq!(raw.events.len(), 1);
+        // A node in view is not asked to scroll.
+        let mut raw = egui::RawInput::default();
+        assert!(locate_or_scroll(&ctx, "Row", &mut raw).is_ok());
+        assert!(raw.events.is_empty());
+    }
+
+    #[test]
+    fn two_nodes_with_the_same_text_and_rect_are_one_item() {
+        let rect = egui::Rect::from_min_size(egui::pos2(1.0, 2.0), egui::vec2(30.0, 10.0));
+        let a = Item {
+            text: "x".into(),
+            rect,
+            disabled: false,
+            focused: false,
+            toggled: None,
+            node: egui::accesskit::NodeId(1),
+            click_at: Ok(rect.center()),
+            out_of_view: false,
+        };
+        let b = Item { node: egui::accesskit::NodeId(2), click_at: Err("no".into()), out_of_view: true, ..a.clone() };
+        assert!(a.same_as(&b));
+        assert!(!a.same_as(&Item { disabled: true, ..b.clone() }));
+        assert!(!a.same_as(&Item { rect: rect.translate(egui::vec2(1.0, 0.0)), ..b }));
     }
 
     #[test]
