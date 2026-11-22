@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.313.1] - 2026-11-22
+
+### 修正
+
+- `Cargo.lock`: `url` を 2.5.8 から 2.5.9 に上げた（RUSTSEC-2026-0592: 入れ子の `blob:` の URL で `Url::origin()` がスタックを使い切る。2026-11-20 公開）。一緒に `form_urlencoded` が 1.2.2 から 1.2.3 になった。`ito-fetch` と、wry を通して `ito-browser` に入っていた。これで `cargo audit` が通る。
+
+### 使う側がやること
+
+- `ito-fetch`・`ito-browser` を使うアプリ: アプリの `Cargo.lock` の `url` が 2.5.9 より前なら `cargo update -p url`（kura は v0.168.0 で済み）。
+
 ## [0.313.0] - 2026-11-22
 
 ### 変更
