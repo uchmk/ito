@@ -3,6 +3,21 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.314.0] - 2026-11-25
+
+### 追加
+
+- `ito-notices::show_painted(ctx, anchor, notices, words)`: `show` と同じに描き、描いたものを `Painted` で返す（アプリのテストの読み出し用。kura の `--keys` の状態に「ベルの一覧が新しい順か・未読が明るいか」を出す）。
+  - `Painted { rect, rows }`。`rect` は一覧の枠のその回の形。`rows` は上から描いた順の `PaintedRow { id, title, elided, bright, filled, kind }`。
+  - `bright` は題と種類の言葉を `colors().fg` で描いたか（`read` から計算し直さない）、`filled` は点を塗ったか（輪なら `false`）、`elided` は題が切れたか。見えない行は入らない。
+  - egui の `Area` は最初のフレームが大きさを測るだけなので、開いた最初のフレームの `rows` は空になる。2 フレーム目から読める。
+  - `show` は `show_painted(..).0` になった。形も動きも今までどおり。
+- `ito-titlebar::Out::badge: Option<Badge>`、`Badge { unread, error }`: ベルにその回に描いたバッジ。`error` は赤（`colors().err`）で描いたか。未読が無いときと、ベルを隠したとき（`squeezed`）は `None`。`Out` は今までどおり `Clone, Copy, Debug, Default`。
+
+### 使う側がやること
+
+- なし（足しただけ）。テストの読み出しに使うアプリは、`ito_notices::show` を `show_painted` に替え、`Out::badge` を読む（kura は v0.168.4 で使う）。
+
 ## [0.313.1] - 2026-11-22
 
 ### 修正

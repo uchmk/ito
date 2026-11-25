@@ -101,6 +101,17 @@ pub struct Out {
     /// is hidden (`bell_rect` is `None`) and the box is the magnifier at the
     /// right edge. Stop the slot at [`left_limit`] to avoid it.
     pub squeezed: bool,
+    /// The badge as painted on the bell this frame; `None` when none was drawn (nothing unread, or the bell hidden).
+    pub badge: Option<Badge>,
+}
+
+/// What the bell's badge showed: for an app's test read-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Badge {
+    /// The count it was drawn for (the text is [`badge`]`(unread)`).
+    pub unread: usize,
+    /// Painted in the error colour (`colors().err`); false: the waiting colour (`wait`).
+    pub error: bool,
 }
 
 /// Where the left slot should stop (x), given the rect it was handed: the
@@ -213,7 +224,9 @@ pub fn show(ui: &mut Ui, spec: &Spec<'_>, left: impl FnOnce(&mut Ui, Rect) -> f3
     right(ui, free);
     out.search = search_box(ui, r, compact, &spec.words);
     if !out.squeezed {
-        out.bell = bell(ui, bell_rect, spec).clicked();
+        let (resp, badge) = bell(ui, bell_rect, spec);
+        out.bell = resp.clicked();
+        out.badge = badge;
         out.bell_rect = Some(bell_rect);
     }
     out
@@ -318,7 +331,7 @@ pub fn theme_tag(ui: &mut Ui, rect: Rect, dark_now: bool, words: &ThemeWords<'_>
 }
 
 /// The bell in `rect`, with the unread count on it.
-fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> egui::Response {
+fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> (egui::Response, Option<Badge>) {
     let c = ito_theme::colors();
     let resp = ui.interact(rect, ui.id().with("titlebar-bell"), Sense::CLICK).on_hover_text(spec.words.bell);
     ito_a11y::test_id_in(ui, &resp, "titlebar.bell", None);
@@ -333,13 +346,15 @@ fn bell(ui: &mut Ui, rect: Rect, spec: &Spec<'_>) -> egui::Response {
     p.add(egui::Shape::line(cup.iter().map(|&(x, y)| at + Vec2::new(x, y)).collect(), stroke));
     p.line_segment([at + Vec2::new(-6.5, 4.0), at + Vec2::new(6.5, 4.0)], stroke);
     p.circle_filled(at + Vec2::new(0.0, 6.2), 1.4, stroke.color);
+    let mut shown = None;
     if spec.unread > 0 {
         let color = if spec.any_error { c.err } else { c.wait };
+        shown = Some(Badge { unread: spec.unread, error: color == c.err });
         let at = rect.right_top() + Vec2::new(-5.0, 5.0);
         p.circle_filled(at, 7.0, color);
         p.text(at, Align2::CENTER_CENTER, badge(spec.unread), FontId::proportional(10.0), c.on_accent());
     }
-    resp
+    (resp, shown)
 }
 
 /// The count on the badge: 1 to 9, then `9+`.
@@ -543,6 +558,19 @@ mod tests {
         );
         full.textures_delta.clear();
         (out, l, r)
+    }
+
+    #[test]
+    fn the_badge_is_read_back_from_what_the_bell_painted() {
+        assert_eq!(run(1600.0, &spec(0, true), 120.0).0.badge, None);
+        assert_eq!(run(1600.0, &spec(3, true), 120.0).0.badge, Some(Badge { unread: 3, error: false }));
+        let mut s = spec(2, true);
+        s.any_error = true;
+        assert_eq!(run(1600.0, &s, 120.0).0.badge, Some(Badge { unread: 2, error: true }));
+        // Squeezed: the bell is hidden, so no badge.
+        let (out, _, _) = run(720.0, &spec(3, true), 540.0);
+        assert!(out.squeezed);
+        assert_eq!(out.badge, None);
     }
 
     #[test]

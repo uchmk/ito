@@ -10,6 +10,9 @@
 //! Colours are `ito_theme::colors()`.
 //!
 //! [`unread`] and [`any_error`] give the badge of `ito_titlebar::Spec`.
+//!
+//! [`show_painted`] is [`show`] that also hands back what it drew ([`Painted`]),
+//! for an app's test read-out: the painter records, the report prints that.
 
 use std::time::{Duration, SystemTime};
 
@@ -112,9 +115,50 @@ pub fn age(d: Duration) -> String {
     }
 }
 
+/// What [`show_painted`] drew this frame, top to bottom: for an app's test read-out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Painted {
+    /// The list's outer rect (the frame, in points), as laid out this frame.
+    pub rect: Rect,
+    /// The rows drawn, in the order they were drawn (top first). Rows scrolled wholly out of the
+    /// list's view are left out (`ui.is_rect_visible(rect)` false).
+    pub rows: Vec<PaintedRow>,
+}
+
+impl Default for Painted {
+    fn default() -> Self {
+        Self { rect: Rect::ZERO, rows: Vec::new() }
+    }
+}
+
+/// One row of [`Painted`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintedRow {
+    /// The notice's `id`.
+    pub id: u64,
+    /// The title as handed in (`Notice::title`).
+    pub title: String,
+    /// Whether the painted title galley was cut short (`galley.elided`).
+    pub elided: bool,
+    /// The title and the kind word were painted in the bright text colour (`colors().fg`); false: the dim one.
+    /// Taken from the colour actually used for the galleys, not from `read`.
+    pub bright: bool,
+    /// The kind's dot was painted filled (true) or as a ring (false).
+    pub filled: bool,
+    /// The kind (the dot's colour).
+    pub kind: Kind,
+}
+
 /// The list, under `anchor` (the bell) and ending at its right edge. Draw it
 /// while it is open; the answer is what the app does this frame.
 pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], words: &Words<'_>) -> Option<Action<T>> {
+    show_painted(ctx, anchor, notices, words).0
+}
+
+/// [`show`], and what it painted this frame ([`Painted`]) read back from the painting
+/// itself (the rect of the frame, each row's colour, dot and cut title), never recomputed.
+pub fn show_painted<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], words: &Words<'_>) -> (Option<Action<T>>, Painted) {
+    let mut painted = Painted::default();
     let c = ito_theme::colors();
     let mut action = None;
     let now = SystemTime::now();
@@ -204,10 +248,11 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
                             }
                             let color = n.kind.color();
                             let dot = rect.left_top() + vec2(10.0, 14.0);
-                            if n.read {
-                                p.circle_stroke(dot, 4.0, Stroke::new(1.2, color));
-                            } else {
+                            let filled = !n.read;
+                            if filled {
                                 p.circle_filled(dot, 4.0, color);
+                            } else {
+                                p.circle_stroke(dot, 4.0, Stroke::new(1.2, color));
                             }
                             // The age first, then the word, and the title cut short
                             // in what is left: a long one ran over both.
@@ -221,6 +266,16 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
                             let room = rect.width() - 22.0 - 6.0 - ago.size().x - 10.0;
                             let word = line(format!(" · {}", words.kinds[n.kind.index()]), 13.0, text_color, room / 2.0);
                             let title = line(n.title.clone(), 13.0, text_color, room - word.size().x);
+                            if ui.is_rect_visible(rect) {
+                                painted.rows.push(PaintedRow {
+                                    id: n.id,
+                                    title: n.title.clone(),
+                                    elided: title.elided,
+                                    bright: text_color == c.fg,
+                                    filled,
+                                    kind: n.kind,
+                                });
+                            }
                             let head = rect.left_top() + vec2(22.0, 6.0);
                             let after = head + vec2(title.size().x, 0.0);
                             p.galley(egui::pos2(rect.right() - 6.0 - ago.size().x, rect.top() + 6.0), ago, c.dim);
@@ -237,6 +292,7 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
                     });
             });
     });
+    painted.rect = resp.response.rect;
     keep_tab_inside(ctx, resp.response.layer_id, first);
     // A click on the bell is the app's to answer (it opens or closes the list):
     // the click that opened this list is also "elsewhere" to it on its first frame.
@@ -244,7 +300,7 @@ pub fn show<T: Clone>(ctx: &egui::Context, anchor: Rect, notices: &[Notice<T>], 
     if resp.response.clicked_elsewhere() && !on_bell && action.is_none() {
         action = Some(Action::Close);
     }
-    action
+    (action, painted)
 }
 
 /// Keeps the keys inside the list: when they are on nothing, or on a control
@@ -341,6 +397,63 @@ mod tests {
         assert!(!any_error(&list));
         let list = [notice(1, Kind::Err, false, None), notice(2, Kind::Ok, false, None)];
         assert!(any_error(&list));
+    }
+
+    /// The list over two frames (an Area's first frame is only its sizing pass); what the last painted and answered.
+    fn paint(notices: &[Notice<&'static str>], events: Vec<egui::Event>, anchor: Rect) -> (Option<Action<&'static str>>, Painted) {
+        let ctx = egui::Context::default();
+        let mut out = (None, Painted::default());
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                events: events.clone(),
+                ..Default::default()
+            };
+            let mut full = ctx.run_ui(input, |ui| {
+                out = show_painted(ui.ctx(), anchor, notices, &words());
+            });
+            full.textures_delta.clear();
+        }
+        out
+    }
+
+    fn bell() -> Rect {
+        Rect::from_min_size(egui::pos2(700.0, 8.0), vec2(28.0, 24.0))
+    }
+
+    #[test]
+    fn the_painted_rows_run_newest_first_with_unread_bright_and_filled() {
+        let list = [notice(1, Kind::Ok, false, None), notice(2, Kind::Err, true, None), notice(3, Kind::Wait, false, None)];
+        let (_, painted) = paint(&list, vec![], bell());
+        assert_eq!(painted.rows.iter().map(|r| r.id).collect::<Vec<_>>(), [3, 2, 1]);
+        assert_eq!(painted.rows.iter().map(|r| r.bright).collect::<Vec<_>>(), [true, false, true]);
+        assert_eq!(painted.rows.iter().map(|r| r.filled).collect::<Vec<_>>(), [true, false, true]);
+        assert_eq!(painted.rows[1].kind, Kind::Err);
+        assert_eq!(painted.rows[0].title, "n3");
+        assert!(!painted.rows[0].elided);
+    }
+
+    #[test]
+    fn the_painted_list_hangs_under_the_bell_at_its_right_edge() {
+        let anchor = bell();
+        let (_, painted) = paint(&[notice(1, Kind::Ok, false, None)], vec![], anchor);
+        assert!(painted.rect.top() >= anchor.bottom(), "{:?}", painted.rect);
+        assert!((painted.rect.right() - anchor.right()).abs() < 1.0, "{:?}", painted.rect);
+    }
+
+    #[test]
+    fn the_empty_list_paints_no_rows_but_has_a_rect() {
+        let (_, painted) = paint(&[], vec![], bell());
+        assert!(painted.rows.is_empty());
+        assert!(painted.rect.width() > 0.0);
+    }
+
+    #[test]
+    fn show_and_show_painted_answer_alike() {
+        let list = [notice(1, Kind::Ok, false, Some("x"))];
+        let esc = || vec![key(egui::Key::Escape)];
+        assert_eq!(run(&list, vec![esc()]), Some(Action::Close));
+        assert_eq!(paint(&list, esc(), bell()).0, Some(Action::Close));
     }
 
     #[test]
