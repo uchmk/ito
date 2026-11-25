@@ -3,6 +3,16 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.314.1] - 2026-11-25
+
+### 修正
+
+- `Cargo.lock`: `cookie` を 0.18.2 から 0.18.3 に上げた（RUSTSEC-2026-0594: fork するプロセスで、暗号化した cookie の nonce が繰り返されることがある）。wry を通して `ito-browser` に入っていた。0.314.0 の CI の Audit がこれで落ちていた。ito のコードは変わらない。
+
+### 使う側がやること
+
+- `ito-browser` を使うアプリ（いまは無い）: アプリの `Cargo.lock` の `cookie` が 0.18.3 より前なら `cargo update -p cookie`。
+
 ## [0.314.0] - 2026-11-25
 
 ### 追加
