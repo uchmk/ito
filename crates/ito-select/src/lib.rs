@@ -120,16 +120,37 @@ impl Select {
 
     /// The place at `at` among the texts of the last frame that show in
     /// `view`: inside one, or the nearest (so a drag past the end of a line or
-    /// below the last still lands).
+    /// below the last still lands). As in an editor, the row goes by the
+    /// pointer's height and the place in it by `x`: a drag that ends far to
+    /// the right of a short line, or below the last, takes that line, not a
+    /// longer one above it.
     pub fn place(&self, at: Pos2, view: Rect) -> Option<At> {
-        let near = |r: &Run| {
+        // How far `at` is from a text across and up or down; 0 inside.
+        let gap = |r: &Run| {
             let rect = r.rect();
             let dx = (rect.left() - at.x).max(at.x - rect.right()).max(0.0);
             let dy = (rect.top() - at.y).max(at.y - rect.bottom()).max(0.0);
-            dx * dx + dy * dy * 4.0
+            (dx, dy)
         };
-        let (run, r) =
-            self.last.iter().enumerate().filter(|(_, r)| r.rect().intersects(view)).min_by(|a, b| near(a.1).total_cmp(&near(b.1)))?;
+        let shown = || self.last.iter().enumerate().filter(|(_, r)| r.rect().intersects(view));
+        // The row: the text nearest in height (`x` breaks a tie).
+        let (_, row) = shown().min_by(|a, b| {
+            let (a, b) = (gap(a.1), gap(b.1));
+            a.1.total_cmp(&b.1).then(a.0.total_cmp(&b.0))
+        })?;
+        let band = row.rect().y_range();
+        // In it, the texts that share at least half the height of the shorter
+        // (the spans of the line, though one is taller; the cells of a table
+        // row; a column beside it), not the line above that touches it: the
+        // one nearest across.
+        let level = |r: &Run| {
+            let y = r.rect().y_range();
+            (y.max.min(band.max) - y.min.max(band.min)) * 2.0 >= y.span().min(band.span())
+        };
+        let (run, r) = shown().filter(|(_, r)| level(r)).min_by(|a, b| {
+            let (a, b) = (gap(a.1), gap(b.1));
+            a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+        })?;
         let c = r.galley.cursor_from_pos((at - r.pos).to_owned());
         Some(At { run, ch: c.index.0 })
     }
@@ -569,6 +590,60 @@ mod tests {
         // Texts outside the view do not count.
         let up = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 25.0));
         assert_eq!(s.place(pos2(300.0, 300.0), up).map(|a| a.run), Some(0));
+    }
+
+    #[test]
+    fn a_drag_ending_right_of_a_short_last_line_takes_it_to_its_end() {
+        let all = ["alpha, a much longer line", "beta, longer still than that", "xy"];
+        let mut s = two_frames(&all);
+        let last = s.last[2].rect();
+        let start = before(&s, 0, 0);
+        // On the short line, far to its right; below it, far to the right.
+        for end in [pos2(390.0, last.center().y), pos2(390.0, last.bottom() + 45.0)] {
+            assert_eq!(s.place(end, view()), Some(At { run: 2, ch: 2 }), "{end:?}");
+            let sel = s.dragged(start, end, view()).unwrap();
+            s.set(Some(sel));
+            assert_eq!(s.text().as_deref(), Some(all.join("\n").as_str()), "{end:?}");
+        }
+        // In the left margin: the start of the row it is level with.
+        assert_eq!(s.place(pos2(0.0, last.center().y), view()), Some(At { run: 2, ch: 0 }));
+        assert_eq!(s.place(pos2(0.0, s.last[1].rect().center().y), view()), Some(At { run: 1, ch: 0 }));
+    }
+
+    /// Two frames of texts placed by hand: (top left, font size, text, inline).
+    fn placed(texts: &[(Pos2, f32, &str, bool)]) -> Select {
+        let ctx = Context::default();
+        let mut s = Select::default();
+        for _ in 0..2 {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                let p = ui.painter().clone();
+                s.begin("a");
+                for &(at, size, t, inline) in texts {
+                    let g = p.layout_no_wrap(t.to_string(), FontId::monospace(size), Color32::WHITE);
+                    if inline {
+                        s.note_inline(&p, at, &g);
+                    } else {
+                        s.note(&p, at, &g);
+                    }
+                }
+            });
+            out.drop_without_applying_deltas();
+        }
+        s
+    }
+
+    #[test]
+    fn a_place_past_a_line_takes_its_last_span_though_another_is_taller() {
+        // A tall span, then a short one on the same line; the next line just under it.
+        let s =
+            placed(&[(pos2(10.0, 10.0), 28.0, "AB", false), (pos2(60.0, 10.0), 14.0, "cd", true), (pos2(10.0, 44.0), 14.0, "ef", false)]);
+        let tall = s.last[0].rect();
+        // Far right, level with the tall span's lower part (below the short one): the short one's end.
+        assert_eq!(s.place(pos2(390.0, tall.bottom() - 2.0), view()), Some(At { run: 1, ch: 2 }));
+        // A line that overlaps a little is not on the same row.
+        let s = placed(&[(pos2(10.0, 10.0), 14.0, "a much longer line", false), (pos2(10.0, 24.0), 14.0, "xy", false)]);
+        assert!(s.last[0].rect().bottom() > s.last[1].rect().top(), "the lines overlap");
+        assert_eq!(s.place(pos2(390.0, s.last[1].rect().center().y + 2.0), view()), Some(At { run: 1, ch: 2 }));
     }
 
     #[test]
