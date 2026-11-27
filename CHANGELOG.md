@@ -3,6 +3,43 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.316.0] - 2026-11-27
+
+### 追加
+
+- 新しいクレート `ito-viewport`: アプリの 2 つ目からの OS の窓（egui の deferred viewport。ログ・ジョブの出力・プロパティ）を、主の窓と同じように扱う（ito#247）。
+  - `Windows::new(id_salt, state_dir, body)` の `open(key, Spec, parent)` が窓を開く。同じキーの窓が開いていれば前に出す（`Opened::Focused`。最小化も戻す）。`close`・`close_all`・`is_open`・`keys`・`set_title`。
+  - `show(ctx)` を主の窓の毎パスで呼ぶ。閉じた窓を `Closed { key, why }` で返す（`Why::Button`・`Esc`・`Os`・`Parent`・`App`）。`parent` を渡した窓は親と一緒に閉じる。
+  - `Spec::esc_closes` で Esc が閉じる。中身がキーを取ったとき、キーのフォーカスを持つ部品があるとき（文字の欄や、Tab で移ったボタン。egui はその Esc でフォーカスを外す）、ポップアップが開いているときは閉じない。
+  - 場所は種類（`Spec::kind`）ごとに、状態のフォルダーの `window-<種類>.toml` に覚える。読むのも（開くとき）書くのも（閉じたとき）UI のスレッドの外で、新しい窓は場所を読み終えた次の `show` で出る。開いている窓をもう一度 `open` してもファイルは読まない。同じ種類の窓を重ねて開くと 24pt ずらす。
+  - バーは `ito-titlebar`（`set_words` でボタンの言葉、`icon` で窓のアイコン）。テーマ・字体・倍率は egui の `Context` ごと主の窓と共有する。`--keys` の名前は `Spec::name`（無ければ種類）。
+  - 中身の関数は `Fn(&mut egui::Ui, &K) + Send + Sync + 'static`。子の窓は主の窓と別のときに描かれるので、アプリを借りられない。読むものは `Arc<Mutex<…>>` などで共有し、変わったら `repaint(ctx, &key)`（ワーカーからは `ctx.request_repaint_of(windows.viewport_id(&key))`）。
+  - 限り: OS のスクリーンリーダーは子の窓を読めない（eframe 0.36 の AccessKit は主の窓だけ）。倍率の違う画面に画素で合わせる `put` は子の窓にはしない。閉じた瞬間にプロセスが終わると、そのときの場所は残らないことがある。
+- `ito-common::window`: 名前つきの場所。`path_named(dir, name)`（`window-<name>.toml`）・`is_window_name`（`[a-z0-9_-]`、1〜64 バイト）・`Saved::load_named(dir, name)`・`Tracker::at_file(file, loaded)`、機能 `egui` の `Saved::child_viewport(builder)`（覚えた大きさ・位置・最大化を子の窓の `ViewportBuilder` に）。
+- `ito-a11y`: 窓の `--keys` の名前。`window_name(ctx, name)`（今のパスの窓に名前を付ける。AccessKit が切れていれば何もしない）・`take_window_name(ctx, viewport)`（ito-keyscript が読む）・`MAIN_WINDOW`（`"main"`）。
+- `ito-keyscript`: 子の窓に向ける手順（ito#247）。
+  - `<Window:名前>`: その名前の窓が出るまで待ち、あとの手順（キー・クリック・木を読む手順・`<Tree:>`・`<Shot:>`・`<Size:>`）をその窓に向ける。`<Window:main>` で主の窓に戻る。同じ名前の窓が 2 つあれば失敗。
+  - `<Window:!名前>`: その名前の窓が消えるまで待つ（向けていた窓なら主の窓に戻る）。
+  - 向けていた窓が閉じたら、次の手順が `<Window:…>` でなければ失敗。描かれない（最小化・隠した）窓は `DELIVER_WAIT` で失敗。`<State:>`・`<Snap:>` は主の窓だけ。
+  - `Step::Window { name, gone }`・`Press::Window { name, gone }`、子の窓の木 `observation_of(ctx, viewport)`、名前のある窓の一覧 `windows(ctx)`。
+  - Shot の付属 JSON（`docs/schemas/shot.v1.json`）と `review::Meta` に `window`（子の窓の名前。主の窓は `null`。必須の欄）。`scripts/lanes/visual-check.py` がこの欄を確かめる（`evidence.py` は自己検査の例だけ直した）。
+  - Shot の絵は、どの窓のフレームに届いても拾う（eframe の wgpu は、撮った絵を次に描く窓のフレームに渡す）。
+
+### 修正
+
+- `ito-keyscript` のテスト `a_snap_writes_two_states_a_picture_and_a_side_json_that_agree` が、ほかのテストと並べて回すとまれに落ちた（変更前の main でも 8 回に 1 回）。run ID はプロセスで 1 回だけ決まり、別のテストが Snap の途中で決めると、前と後の状態の `run_id` が違って組にならなかった。テストの実行役が始める前に run ID を決める。アプリの動きは変わらない。
+
+### 使う側がやること
+
+- rev を上げるのと同じコミットで `scripts/lanes.sh sync` を流す（`visual-check.py` が Shot の付属 JSON の `window` を確かめるようになった。写さないと `lanes.sh check` が落ちる）。古い rev のアプリが書いた付属 JSON には `window` が無いので、新しい `visual-check.py` では `window: missing` で落ちる。rev と写しを分けずに上げ、撮り直す。
+- `review::Meta { … }` を全部の欄で書いているところ（kura の `src/script_run.rs` の `meta_of`）に `window: None` を足す（または `..Default::default()`）。
+- `ito_keyscript::Press`・`Step` を漏れなく `match` しているところ（kura の `src/script_run.rs` の `unsupported` と、手順を行う `match &entry.press`）に `Press::Window { .. }`（`Step::Window { .. }`）を足す。子の窓を持たない kura は `unsupported` で断る（例: `Some("a second window kura does not have")`）。
+- `ito-viewport` を使うアプリ:
+  - eframe は子の窓のフレームでも `App::raw_input_hook` を呼ぶ。`Runner::input_with` は自分で振り分けるのでそのままでよい。フックで自分の処理（キーなど）をしているなら、`raw.viewport_id` を見て主の窓（`ViewportId::ROOT`）のときだけにする。
+  - 中身の関数は `Send + Sync + 'static`。中身が読むデータが変わったら `repaint` する（しないと子の窓は描き直されない）。
+  - 同じ種類の 2 つの窓は `window-<種類>.toml` を共有する（あとから書いたほうの場所が残る）。
+  - OS のスクリーンリーダーは子の窓をまだ読めない。読み上げが要ることは主の窓にも出す。
+
 ## [0.315.0] - 2026-11-27
 
 ### 追加

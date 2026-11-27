@@ -107,6 +107,16 @@ runner が回数と時間で止める（§6 の上限）: 問題ごとに 30 分
 | Shot の失敗が文字列を返すだけ（`lib.rs` 1713 行）、付属 JSON の名前が `{name}.json` で State の JSON とぶつかりうる（1724 行） | Shot の失敗は手順の失敗（`keys: failed`）。付属 JSON は `shots/<name>.json`、状態は `state/<name>-before.json`・`-after.json` |
 | どちらの道で回したかが証拠に残らない | manifest に実行の種類（Runner か自前か）と ito の rev を書く |
 
+#### 子の窓（`<Window:名前>`、v0.316.0、ito#247）
+
+- アプリの 2 つ目からの OS の窓（`ito-viewport`）は、窓ごとに `ito_a11y::window_name(ctx, 名前)` で名前を持つ（ito-viewport が付ける。`Spec::name`、無ければ種類）。主の窓の名前は `main`。
+- `<Window:名前>` は、その名前の窓が出るまで待ち（`TEXT_WAIT`）、あとの手順（キー・クリック・木を読む手順・`<Tree:>`・`<Shot:>`・`<Size:>`）をその窓に向ける。同じ名前の窓が 2 つあれば失敗。`<Window:main>` ですぐ主の窓に戻る。`<Window:!名前>` はその名前の窓が消えるまで待ち、向けていた窓なら主の窓に戻る。
+- 向けていた窓が閉じたら、次の手順が `<Window:…>` でなければ失敗（入力が描かれる前に閉じたら、その場で失敗）。最小化・隠した窓は描かれないので `DELIVER_WAIT` で失敗。
+- `<State:>`・`<Snap:>` は主の窓だけ（子の窓に向けているときは失敗。先に `<Window:main>`）。`<Theme:>`・`<Lang:>`・クリップボードは窓に関わらない。
+- Shot の付属 JSON の `window` は子の窓の名前、主の窓は `null`。
+- eframe は子の窓のフレームでも `App::raw_input_hook`（`Runner::input_with`）を呼ぶ。Runner がフレームの `raw.viewport_id` で振り分けるので、Runner のアプリは何もしなくてよい。kura の自前の実行役は `<Window:>` を受けない（子の窓が無い）。
+- OS のスクリーンリーダーは子の窓を読めない（eframe 0.36 の AccessKit は主の窓だけ）。egui は子の窓の木も作るので、`--keys` は読める。
+
 ほかの穴（レーンのスクリプトの後片付け、窓の作業領域の推測値、OS の通知としてのトースト）は [視覚テストのページの穴の表](visual-test.md#gaps)にまとめた。
 
 ## 2. Test ID とテストモード

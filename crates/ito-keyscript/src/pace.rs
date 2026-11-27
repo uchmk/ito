@@ -120,7 +120,8 @@ pub fn kind(p: &Press) -> Kind {
         | Press::IdCheck(_)
         | Press::Announced(_)
         | Press::Clipboard(_)
-        | Press::ClipboardHas(_) => Kind::Check,
+        | Press::ClipboardHas(_)
+        | Press::Window { .. } => Kind::Check,
         Press::ClickText { .. } | Press::DClickText(_) | Press::ClickId(_) | Press::Tree(_) => Kind::Look,
         Press::Events(_)
         | Press::Paste

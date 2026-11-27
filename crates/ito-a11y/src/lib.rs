@@ -400,6 +400,44 @@ pub fn take_test_ids(ctx: &egui::Context, viewport: egui::ViewportId) -> Vec<Tes
     ctx.data_mut(|d| d.get_temp_mut_or_default::<TestIds>(test_ids_key()).0.remove(&viewport).map(|s| s.1).unwrap_or_default())
 }
 
+/// The name `--keys` knows the window by, `main` for the main window.
+pub const MAIN_WINDOW: &str = "main";
+
+#[cfg(feature = "egui")]
+#[derive(Clone, Default)]
+struct WindowNames(std::collections::HashMap<egui::ViewportId, String>);
+
+#[cfg(feature = "egui")]
+fn window_names_key() -> egui::Id {
+    egui::Id::new("ito-a11y.window-names")
+}
+
+/// Give the window being drawn (`ctx.viewport_id()`, a second OS window) the name `--keys` finds it by (`<Window:name>`).
+/// Call it every pass of that window. The main window is always [`MAIN_WINDOW`] and is not named with this. A name that
+/// is not [`is_test_id`], or is [`MAIN_WINDOW`], is not noted (and trips a `debug_assert!`). Like [`test_id`], it does
+/// nothing while AccessKit is off.
+#[cfg(feature = "egui")]
+pub fn window_name(ctx: &egui::Context, name: &str) {
+    if !is_test_id(name) || name == MAIN_WINDOW {
+        debug_assert!(false, "`{name}` is not a window name: a test ID other than `{MAIN_WINDOW}`");
+        return;
+    }
+    // egui makes the window's root node at the start of every pass while AccessKit is on, so this adds no node.
+    if ctx.accesskit_node_builder(egui::accesskit_root_id(), |_| ()).is_none() {
+        return;
+    }
+    let viewport = ctx.viewport_id();
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<WindowNames>(window_names_key()).0.insert(viewport, name.to_owned());
+    });
+}
+
+/// The name [`window_name`] gave `viewport` since the last call, taken out (`None` when it was not named since).
+#[cfg(feature = "egui")]
+pub fn take_window_name(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<String> {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<WindowNames>(window_names_key()).0.remove(&viewport))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,6 +537,38 @@ mod tests {
         pass(&ctx, &["c"]);
         let got = take_test_ids(&ctx, egui::ViewportId::ROOT);
         assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["c"]);
+    }
+
+    #[cfg(feature = "egui")]
+    fn child_pass(ctx: &egui::Context, viewport: egui::ViewportId, name: &str) {
+        let mut input = egui::RawInput { viewport_id: viewport, ..Default::default() };
+        input.viewports.insert(viewport, Default::default());
+        ctx.run_ui(input, |ui| window_name(ui.ctx(), name)).drop_without_applying_deltas();
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn a_window_name_is_noted_for_its_own_window() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let job = egui::ViewportId::from_hash_of("job");
+        let log = egui::ViewportId::from_hash_of("log");
+        child_pass(&ctx, job, "job");
+        child_pass(&ctx, log, "log");
+        child_pass(&ctx, job, "job-2");
+        assert_eq!(take_window_name(&ctx, job).as_deref(), Some("job-2"));
+        assert_eq!(take_window_name(&ctx, job), None);
+        assert_eq!(take_window_name(&ctx, log).as_deref(), Some("log"));
+        assert_eq!(take_window_name(&ctx, egui::ViewportId::ROOT), None);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn no_window_name_is_noted_while_accesskit_is_off() {
+        let ctx = egui::Context::default();
+        let job = egui::ViewportId::from_hash_of("job");
+        child_pass(&ctx, job, "job");
+        assert_eq!(take_window_name(&ctx, job), None);
     }
 
     #[cfg(feature = "egui")]

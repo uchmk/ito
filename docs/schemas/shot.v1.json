@@ -63,6 +63,13 @@
     "pixels_per_point": {
       "type": "number"
     },
+    "window": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The child window the picture is of (the name it gave with ito_a11y::window_name); null for the main window."
+    },
     "run_id": {
       "type": [
         "string",
@@ -152,6 +159,7 @@
     "rect",
     "time",
     "pixels_per_point",
+    "window",
     "run_id",
     "snapshot_seq",
     "capture_id",

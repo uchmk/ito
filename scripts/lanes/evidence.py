@@ -1970,7 +1970,7 @@ class Case:
             self.put_json("shots/top.json", {
                 "name": "top", "app": "demo", "version": "0.1.0", "theme": "dark", "theme_requested": "dark", "lang": "ja",
                 "lang_requested": "ja", "size": [90, 42], "zoom": 1, "state": "", "component": "window", "rect": [0, 0, 90, 42],
-                "time": 1731050000, "pixels_per_point": 1.5, "run_id": rid, "snapshot_seq": 1, "capture_id": "cap-1",
+                "time": 1731050000, "pixels_per_point": 1.5, "window": None, "run_id": rid, "snapshot_seq": 1, "capture_id": "cap-1",
                 "png": "top.png", "png_sha256": sha256_bytes(png), "size_px": [135, 63], "state_before": ref("before"),
                 "state_after": ref("after"), "state_unchanged": True, "requested_frame": 11, "received_frame": 12,
                 "env": {"os": "windows", "arch": "x86_64", "wgpu_backend": None, "font_set_sha256": None, "theme": "dark",

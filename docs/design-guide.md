@@ -15,6 +15,7 @@
 | 窓の下の帯（左にアプリの項目、右端に時計、倍率） | `ito-statusbar` |
 | 幅を変えられるパネル（ドラッグした幅を覚える） | `ito-layout` の `Panels::show` |
 | 窓の位置・大きさを覚える | `ito-common::window`（`Saved`・`Tracker`） |
+| **2 つ目の窓**（ログ・ジョブの出力・プロパティを別の OS の窓に。開いていれば前へ、親と一緒に閉じる、Esc で閉じる） | `ito-viewport`（`Windows::open`・`show`。同じタイトルバー・テーマ・字体・倍率、場所は種類ごとに `window-<種類>.toml`、`--keys` は `<Window:名前>`）。egui の `Window`（窓の中の浮く枠）で済むなら、そちらで |
 | 設定の画面（言語・時計・テーマ・キー・通知） | `ito-prefs`（`show_with`、`theme_page`、`keys_page`、`notify_page`、タブの設定は機能 `tabs` の `tabs_rows`） |
 
 ## ボタン・印・アイコン（`ito-prefs`）

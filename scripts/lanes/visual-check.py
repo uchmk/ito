@@ -449,7 +449,7 @@ SHAPES = {
         {
             "name": "str", "app": "str", "version": "str", "theme": "str", "theme_requested": "str", "lang": "str",
             "lang_requested": "str", "size": "nums:2", "zoom": "num", "state": "str", "component": "str",
-            "rect": "nums:4", "time": "num", "pixels_per_point": "num", "run_id": "?str", "snapshot_seq": "?int",
+            "rect": "nums:4", "time": "num", "pixels_per_point": "num", "window": "?str", "run_id": "?str", "snapshot_seq": "?int",
             "capture_id": "str", "png": "str", "png_sha256": "hash", "size_px": "ints:2", "state_before": "?obj:sref",
             "state_after": "?obj:sref", "state_unchanged": "?bool", "requested_frame": "int", "received_frame": "int",
             "env": "obj:env",
@@ -1854,7 +1854,7 @@ class Model:
         self.side = {
             "top": {
                 "name": "top", "app": "t", "version": "0.1.0", "theme": "dark", "theme_requested": "", "lang": "ja", "lang_requested": "",
-                "size": [200, 100], "zoom": 1, "state": "", "component": "", "rect": [0, 0, 0, 0], "time": 0, "pixels_per_point": 1.5,
+                "size": [200, 100], "zoom": 1, "state": "", "component": "", "rect": [0, 0, 0, 0], "time": 0, "pixels_per_point": 1.5, "window": None,
                 "run_id": run_id, "snapshot_seq": 2, "capture_id": "cap-top", "png": "top.png", "png_sha256": None,
                 "size_px": [IMG_W, IMG_H], "state_before": None, "state_after": None, "state_unchanged": True,
                 "requested_frame": 9, "received_frame": 10,

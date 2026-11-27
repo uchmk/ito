@@ -13,6 +13,7 @@
   "rect": [0, 0, 800, 600],
   "time": 1731050000,
   "pixels_per_point": 1.5,
+  "window": null,
   "run_id": null,
   "snapshot_seq": null,
   "capture_id": "2-main",

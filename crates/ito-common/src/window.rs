@@ -15,7 +15,9 @@
 //! not), [`Saved::viewport`] makes the window there (feature `egui`),
 //! [`Saved::put`] puts it on its pixels in eframe's creator, and
 //! [`Saved::tracker`] follows it ([`Tracker::follow`] each frame,
-//! [`Tracker::close`] when the app closes).
+//! [`Tracker::close`] when the app closes). A second kind of window keeps
+//! its own file, `window-<name>.toml` ([`path_named`], [`Saved::load_named`],
+//! [`Saved::child_viewport`]).
 
 use raw_window_handle::HasWindowHandle;
 use serde::{Deserialize, Serialize};
@@ -343,21 +345,41 @@ pub fn path(dir: &Path) -> PathBuf {
     dir.join("window.toml")
 }
 
+/// `window-<name>.toml` in `dir`: the place of a window kind other than the
+/// main one (`log`, `job`, ...). `name` should pass [`is_window_name`].
+pub fn path_named(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("window-{name}.toml"))
+}
+
+/// Whether `name` is a name for [`path_named`]: lower case letters, digits,
+/// `_` and `-`, not empty, at most 64 bytes. It cannot reach another folder.
+pub fn is_window_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'))
+}
+
 /// The saved place, if there is one and it is [`Window::sane`]. A file from
 /// before `scale` and `zoom` were kept reads with neither; [`load`] reads it
 /// at the zoom the app has now.
 pub fn read(dir: &Path) -> Option<Window> {
-    let text = std::fs::read_to_string(path(dir)).ok()?;
+    read_file(&path(dir))
+}
+
+fn read_file(file: &Path) -> Option<Window> {
+    let text = std::fs::read_to_string(file).ok()?;
     toml::from_str::<Window>(&text).ok().filter(Window::sane)
 }
 
 /// Save the place; a window that is not [`Window::sane`] is not written.
 pub fn write(dir: &Path, w: &Window) -> Result<(), String> {
+    write_file(&path(dir), w)
+}
+
+fn write_file(file: &Path, w: &Window) -> Result<(), String> {
     if !w.sane() {
         return Ok(());
     }
     let text = toml::to_string(w).map_err(|e| e.to_string())?;
-    crate::write_atomic(&path(dir), text)
+    crate::write_atomic(file, text)
 }
 
 /// The place to open the window at: the one saved in `dir`, if a screen
@@ -366,7 +388,11 @@ pub fn write(dir: &Path, w: &Window) -> Result<(), String> {
 /// common.toml's `scale`, the zoom the app sets once it has read the file,
 /// and is written again in this form with that zoom.
 pub fn load(dir: &Path) -> Option<Window> {
-    load_with(dir, zoom_now).filter(|w| w.reachable_now(PRIMARY_GUESS, GRAB))
+    load_file(&path(dir))
+}
+
+fn load_file(file: &Path) -> Option<Window> {
+    load_file_with(file, zoom_now).filter(|w| w.reachable_now(PRIMARY_GUESS, GRAB))
 }
 
 /// common.toml's `scale`, else 1.
@@ -378,14 +404,19 @@ fn zoom_now() -> f32 {
 /// before. Written again because the tracker writes only a place that
 /// changed: a maximized window's would stay as it was, and a later zoom
 /// would size it anew.
+#[cfg(test)]
 fn load_with(dir: &Path, zoom: impl FnOnce() -> f32) -> Option<Window> {
-    let text = std::fs::read_to_string(path(dir)).ok()?;
+    load_file_with(&path(dir), zoom)
+}
+
+fn load_file_with(file: &Path, zoom: impl FnOnce() -> f32) -> Option<Window> {
+    let text = std::fs::read_to_string(file).ok()?;
     let table: toml::Table = text.parse().ok()?;
     if table.contains_key("zoom") {
         return toml::from_str::<Window>(&text).ok().filter(Window::sane);
     }
     let w = before(&table, zoom())?;
-    let _ = write(dir, &w);
+    let _ = write_file(file, &w);
     Some(w)
 }
 
@@ -412,21 +443,37 @@ fn before(t: &toml::Table, zoom: f32) -> Option<Window> {
     w.sane().then_some(w)
 }
 
-/// A window's place for an app: the folder `window.toml` is in and the
-/// place read there when the app started. Without a folder (a window that
-/// keeps no place: one a script drives, one torn off another, a quake
-/// window) it reads, puts and follows nothing.
+/// A window's place for an app: the file (`window.toml`, or
+/// `window-<name>.toml` for [`Saved::load_named`]) and the place read there
+/// when the window was made. Without a folder (a window that keeps no place:
+/// one a script drives, one torn off another, a quake window) it reads, puts
+/// and follows nothing.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Saved {
-    dir: Option<PathBuf>,
+    file: Option<PathBuf>,
     place: Option<Window>,
 }
 
 impl Saved {
     /// The place saved in `dir` ([`load`]).
     pub fn load(dir: Option<PathBuf>) -> Saved {
-        let place = dir.as_deref().and_then(load);
-        Saved { dir, place }
+        Self::at(dir.map(|d| path(&d)))
+    }
+
+    /// The place of the window kind `name` (`window-<name>.toml` in `dir`),
+    /// read as [`load`] does. A name that fails [`is_window_name`] is a bug in
+    /// the app (`debug_assert!`); it keeps nothing.
+    pub fn load_named(dir: Option<PathBuf>, name: &str) -> Saved {
+        debug_assert!(is_window_name(name), "bad window name {name:?}");
+        if !is_window_name(name) {
+            return Saved::default();
+        }
+        Self::at(dir.map(|d| path_named(&d, name)))
+    }
+
+    fn at(file: Option<PathBuf>) -> Saved {
+        let place = file.as_deref().and_then(load_file);
+        Saved { file, place }
     }
 
     /// [`load`](Self::load) for an app whose `window.toml` used to be in
@@ -461,6 +508,23 @@ impl Saved {
         }
     }
 
+    /// `viewport` for a child window (`show_viewport_deferred`): made at the
+    /// place, and maximized by the builder itself. eframe does not hand out a
+    /// child's native window, so [`Window::put`] (the correction for a window
+    /// that is made on a screen of another scale than it was closed on)
+    /// cannot run: such a child may open a little off, which the user's next
+    /// move corrects. Without a place, as it is.
+    #[cfg(feature = "egui")]
+    pub fn child_viewport(&self, viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
+        match self.place {
+            Some(w) => {
+                let o = w.opened(false);
+                viewport.with_inner_size(o.size).with_position(o.pos).with_maximized(o.maximized)
+            }
+            None => viewport,
+        }
+    }
+
     /// [`Window::put`], in eframe's creator while the window is hidden.
     pub fn put(&self, window: &impl HasWindowHandle) {
         sys::follow_dpi(window);
@@ -472,7 +536,7 @@ impl Saved {
     /// The tracker that writes the place from now on, starting from the one
     /// read; none for a window that keeps no place.
     pub fn tracker(&self) -> Option<Tracker> {
-        self.dir.clone().map(|dir| Tracker::new(dir, self.place))
+        self.file.clone().map(|file| Tracker::at_file(file, self.place))
     }
 }
 
@@ -524,7 +588,7 @@ impl Seen {
 /// own, and kura #401 had to be fixed in each.
 #[derive(Debug)]
 pub struct Tracker {
-    dir: PathBuf,
+    file: PathBuf,
     /// Where the window is, and since when.
     now: Option<Window>,
     since: Instant,
@@ -545,7 +609,12 @@ impl Tracker {
     /// was made with ([`load`]), so a start that moves nothing writes
     /// nothing, and a window that opens maximized keeps the place under it.
     pub fn new(dir: impl Into<PathBuf>, loaded: Option<Window>) -> Self {
-        Tracker { dir: dir.into(), now: loaded, since: Instant::now(), saved: loaded }
+        Self::at_file(path(&dir.into()), loaded)
+    }
+
+    /// Writing into `file` itself (for a window kind: [`path_named`]).
+    pub fn at_file(file: impl Into<PathBuf>, loaded: Option<Window>) -> Self {
+        Tracker { file: file.into(), now: loaded, since: Instant::now(), saved: loaded }
     }
 
     /// Note what the window looks like this frame, and once its place has
@@ -561,9 +630,9 @@ impl Tracker {
             Due::Wait(left) => Some(left),
             Due::Write(place) => {
                 self.saved = Some(place);
-                let dir = self.dir.clone();
+                let file = self.file.clone();
                 let _ = std::thread::Builder::new().name("window-place".into()).spawn(move || {
-                    let _ = write(&dir, &place);
+                    let _ = write_file(&file, &place);
                 });
                 None
             }
@@ -585,7 +654,7 @@ impl Tracker {
         self.note(seen, Instant::now());
         if let Some(place) = self.now.filter(|p| self.saved != Some(*p)) {
             self.saved = Some(place);
-            let _ = write(&self.dir, &place);
+            let _ = write_file(&self.file, &place);
         }
     }
 
@@ -869,10 +938,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn places_by_name_are_their_own_files() {
+        assert!(is_window_name("log") && is_window_name("job-2_x") && is_window_name(&"a".repeat(64)));
+        for bad in ["", "Log", "a b", "../x", "a.b", "\u{65e5}\u{672c}", &"a".repeat(65)] {
+            assert!(!is_window_name(bad), "{bad:?}");
+        }
+        assert_eq!(path_named(Path::new("d"), "job"), Path::new("d").join("window-job.toml"));
+        let dir = fresh("named");
+        let saved = Saved::load_named(Some(dir.clone()), "job");
+        assert_eq!(saved.place(), None);
+        let mut t = saved.tracker().unwrap();
+        t.close(Some(Seen { scale: 1.0, ..seen(100.0, 80.0, 1100.0, 700.0) }));
+        let w = Window { scale: 1.0, ..win(100.0, 80.0, 1100.0, 700.0) };
+        assert_eq!(read_file(&path_named(&dir, "job")), Some(w));
+        assert!(!path(&dir).exists(), "window.toml is the main window's");
+        assert!(!path_named(&dir, "log").exists());
+        if w.reachable_now(PRIMARY_GUESS, GRAB) {
+            assert_eq!(Saved::load_named(Some(dir.clone()), "job").place(), Some(w));
+        }
+        assert_eq!(Saved::load_named(Some(dir.clone()), "log").place(), None, "a kind of its own");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_bad_name_keeps_nothing() {
+        let s = Saved::load_named(Some(PathBuf::from("d")), "../x");
+        assert_eq!((s.place(), s.tracker().is_none()), (None, true));
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn a_child_viewport_is_maximized_by_its_builder() {
+        let place = Window { maximized: true, scale: 1.5, ..win(160.0, 80.0, 1000.0, 800.0) };
+        let v = Saved { file: None, place: Some(place) }.child_viewport(egui::ViewportBuilder::default());
+        assert_eq!((v.position, v.inner_size, v.maximized), (Some(egui::pos2(160.0, 80.0)), Some(egui::vec2(1000.0, 800.0)), Some(true)));
+        let v = Saved::default().child_viewport(egui::ViewportBuilder::default().with_inner_size([300.0, 200.0]));
+        assert_eq!((v.position, v.maximized), (None, None));
+    }
+
     #[cfg(feature = "egui")]
     #[test]
     fn the_viewport_is_made_at_the_place() {
-        let at = Saved { dir: None, place: Some(Window { scale: 1.5, zoom: 1.25, ..win(160.0, 80.0, 1000.0, 800.0) }) };
+        let at = Saved { file: None, place: Some(Window { scale: 1.5, zoom: 1.25, ..win(160.0, 80.0, 1000.0, 800.0) }) };
         let v = at.viewport(egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]));
         assert_eq!((v.position, v.inner_size), (Some(egui::pos2(200.0, 100.0)), Some(egui::vec2(1250.0, 1000.0))));
         let v = Saved::default().viewport(egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]));

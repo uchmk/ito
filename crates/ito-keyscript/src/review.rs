@@ -34,6 +34,8 @@ pub struct Meta {
     pub time: u64,
     /// Pixels per point: ties the PNG's pixels to `rect`.
     pub pixels_per_point: f32,
+    /// The child window the picture is of (`<Window:name>`); `None` for the main window (written as `null`).
+    pub window: Option<String>,
 }
 
 pub(crate) fn esc(s: &str) -> String {
@@ -88,6 +90,7 @@ impl Meta {
             self.time,
             n(self.pixels_per_point),
         );
+        out.push_str(&format!(",\n  \"window\": {}", self.window.as_deref().map_or_else(|| "null".to_owned(), esc)));
         if let Some(c) = cap {
             let opt_u = |v: Option<u64>| v.map_or_else(|| "null".to_owned(), |v| v.to_string());
             let flag = c.state_unchanged.map_or_else(|| "null".to_owned(), |b| b.to_string());
@@ -344,6 +347,14 @@ mod tests {
     }
 
     #[test]
+    fn window_is_null_for_the_main_window_and_a_name_for_a_child() {
+        let main = Meta { name: "a".into(), ..Default::default() };
+        assert!(main.to_json().contains("\"window\": null"));
+        let child = Meta { name: "a".into(), window: Some("job".into()), ..Default::default() };
+        assert!(child.to_json().contains("\"window\": \"job\""));
+    }
+
+    #[test]
     fn json_has_every_field_and_escapes() {
         let m =
             Meta { name: "a\"b".into(), app: "weft".into(), size: [800.0, 600.5], zoom: 1.0, pixels_per_point: 1.5, ..Default::default() };
@@ -397,6 +408,7 @@ mod tests {
         let keys: Vec<&str> = j.lines().filter_map(|l| l.strip_prefix("  \"")).filter_map(|l| l.split('"').next()).collect();
         let tail = [
             "pixels_per_point",
+            "window",
             "run_id",
             "snapshot_seq",
             "capture_id",
@@ -493,6 +505,7 @@ mod tests {
             rect: [0.0, 0.0, 800.0, 600.0],
             time: 1_731_050_000,
             pixels_per_point: 1.5,
+            window: None,
         }
     }
 

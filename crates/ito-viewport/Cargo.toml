@@ -1,0 +1,18 @@
+[package]
+name = "ito-viewport"
+description = "Second OS windows for an app (egui deferred viewports): open and close by key, the window's own title bar, its place kept per kind, and a name for --keys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui = "0.36"
+ito-a11y = { path = "../ito-a11y", features = ["egui"] }
+ito-common = { path = "../ito-common", features = ["egui"] }
+ito-theme = { path = "../ito-theme" }
+ito-titlebar = { path = "../ito-titlebar" }
+
+[dev-dependencies]
+tempfile = "3"

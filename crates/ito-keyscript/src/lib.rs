@@ -18,9 +18,15 @@
 //! do it themselves); a [`Runner`] says how many steps are left
 //! for them ([`Runner::left`]) and watches for a stall itself ([`Runner::watch`]).
 //!
+//! Steps go to the main window until `<Window:name>` aims them at a child window that gave itself that name with
+//! [`ito_a11y::window_name`] (`<Window:!name>` waits for it to close, `<Window:main>` goes back). The clicks, keys,
+//! checks and `<Shot:>` that follow use that window's own tree and frames; [`windows`] lists the names and
+//! [`observation_of`] reads one window. `<State:>` and `<Snap:>` read the main window only.
+//!
 //! The pacing lives in [`pace`] (a state machine without a window); [`Runner`] is its egui host. A run ends with a [`Do`] out of
 //! [`Runner::input`], or [`Runner::end`] when the window closes; [`Runner::report`] has the tail of the done file.
 
+use egui::emath::GuiRounding as _;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -212,6 +218,15 @@ pub enum Step {
     },
     /// `<Tree:name>`: write the window's tree to `name.txt` beside the done file (see [`tree_text`]).
     Tree(String),
+    /// `<Window:name>` / `<Window:!name>`: the target window. `<Window:name>` waits until a live child window gave
+    /// itself that name (`ito_a11y::window_name`), then the steps after it read and drive that window. `<Window:main>`
+    /// goes back to the main window at once. `<Window:!name>` waits until no live window has that name; when the target
+    /// was that window, the target is the main window again. Not an action. `<State:>` and `<Snap:>` read the main
+    /// window only.
+    Window {
+        name: String,
+        gone: bool,
+    },
     /// `<Announced:text>`: a message `ito_a11y::announce`d after the last action contains the text. Actions are as for
     /// [`Step::Clipboard`]. Waits like `<Assert:>`.
     Announced(String),
@@ -392,6 +407,10 @@ pub enum Press {
         text: String,
     },
     Tree(String),
+    Window {
+        name: String,
+        gone: bool,
+    },
     Announced(String),
     ClickId(String),
     IdCheck(IdCheck),
@@ -453,6 +472,7 @@ pub fn press(step: &Step) -> Option<Press> {
         Step::ClipboardHas(text) => Some(Press::ClipboardHas(text.clone())),
         Step::Is { prop, text } => Some(Press::Is { prop: *prop, text: text.clone() }),
         Step::Tree(name) => Some(Press::Tree(name.clone())),
+        Step::Window { name, gone } => Some(Press::Window { name: name.clone(), gone: *gone }),
         Step::Announced(text) => Some(Press::Announced(text.clone())),
         Step::ClickId(name) => Some(Press::ClickId(name.clone())),
         Step::IdCheck(check) => Some(Press::IdCheck(check.clone())),
@@ -506,6 +526,7 @@ pub fn label(step: &Step) -> String {
         Step::ClipboardHas(text) => format!("<ClipboardHas:{}>", paste_text_escape(text)),
         Step::Is { prop, text } => format!("<{}:{}>", prop.name(), paste_text_escape(text)),
         Step::Tree(name) => format!("<Tree:{name}>"),
+        Step::Window { name, gone } => format!("<Window:{}{name}>", if *gone { "!" } else { "" }),
         Step::Announced(text) => format!("<Announced:{}>", paste_text_escape(text)),
         Step::ClickId(name) => format!("<ClickId:{name}>"),
         Step::IdCheck(check) => check.token(),
@@ -732,6 +753,33 @@ struct Tap {
     ids: BTreeMap<String, Result<IdNode, String>>,
     /// The state JSON waiting for a pass, the writer and its acknowledgements (see [`state`]).
     state: state::Hub,
+    /// Counts the trees of any window, the main one included. Each view keeps the value it was taken at.
+    seq: u64,
+    /// `seq` as of the last main-window tree.
+    root_seq: u64,
+    /// The views of the child windows that are alive, by viewport.
+    children: BTreeMap<egui::ViewportId, View>,
+    /// The pass count after the last pass of each child window, kept after the window is gone (a few at most).
+    last_pass: BTreeMap<egui::ViewportId, u64>,
+}
+
+/// What [`Tap`] keeps of one child window's last pass.
+#[derive(Default)]
+struct View {
+    items: Vec<Item>,
+    tree: Vec<String>,
+    ids: BTreeMap<String, Result<IdNode, String>>,
+    /// The name the window gave itself (`ito_a11y::window_name`); kept while later passes do not name it.
+    name: Option<String>,
+    /// Counts the passes of this window that brought a tree.
+    generation: u64,
+    /// The last pass brought a tree.
+    fresh: bool,
+    pass_nr: u64,
+    viewport_rect: Option<egui::Rect>,
+    minimized: Option<bool>,
+    focused: Option<bool>,
+    seq: u64,
 }
 
 /// A widget found by its test ID (`ito_a11y::test_id`), as the last main-window pass left it.
@@ -921,6 +969,103 @@ fn text_click(
     (landing(ctx, text, t * v.center(), w.layer_id, viewport_rect), false)
 }
 
+/// One line per named node, indented by depth (see [`tree_text`]).
+fn tree_lines(update: &egui::accesskit::TreeUpdate, focus: egui::accesskit::NodeId) -> Vec<String> {
+    let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
+    let mut tree = Vec::new();
+    if let Some(root) = update.tree.as_ref().map(|t| t.root) {
+        dump(&nodes, root, focus, 0, &mut tree);
+    }
+    tree
+}
+
+/// The labelled things in one window's tree. `viewport` is that window, whatever window egui is in now.
+fn items_of(
+    ctx: &egui::Context,
+    viewport: egui::ViewportId,
+    update: &egui::accesskit::TreeUpdate,
+    focus: egui::accesskit::NodeId,
+    rect_now: egui::Rect,
+) -> Vec<Item> {
+    let mut items: Vec<Item> = Vec::new();
+    // The pass that just ended is `prev_pass` by now. Widget rects by AccessKit id, and each node's parent.
+    let widgets: std::collections::HashMap<egui::accesskit::NodeId, egui::WidgetRect> = ctx.viewport_for(viewport, |v| {
+        v.prev_pass.widgets.layers().flat_map(|(_, ws)| ws.iter()).map(|w| (w.id.accesskit_id(), *w)).collect()
+    });
+    let mut parents: std::collections::HashMap<egui::accesskit::NodeId, egui::accesskit::NodeId> = std::collections::HashMap::new();
+    for (id, node) in &update.nodes {
+        for c in node.children() {
+            parents.insert(*c, *id);
+        }
+    }
+    for (id, node) in &update.nodes {
+        let focused = *id == focus && focus != update.tree.as_ref().map_or(focus, |t| t.root);
+        let toggled = toggled(node);
+        let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
+        let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
+        let mut clip = widgets.get(id);
+        let mut at = *id;
+        for _ in 0..256 {
+            if clip.is_some() {
+                break;
+            }
+            let Some(p) = parents.get(&at) else { break };
+            at = *p;
+            clip = widgets.get(&at);
+        }
+        for text in [node.label(), node.value()].into_iter().flatten().filter(|t| !t.is_empty()) {
+            let (click_at, out_of_view) = text_click(ctx, text, rect, clip, rect_now);
+            let item =
+                Item { text: text.to_owned(), rect, disabled: node.is_disabled(), focused, toggled, node: *id, click_at, out_of_view };
+            if !items.iter().any(|o| o.same_as(&item)) {
+                items.push(item);
+            }
+        }
+    }
+    items
+}
+
+impl Tap {
+    /// A pass of a child window ends. Everything is read for `vp`, the window the pass began for.
+    ///
+    /// The landing checks in [`join_ids`] and [`items_of`] ask egui's `Memory` (areas, modals, `layer_id_at`) without
+    /// a viewport. That is `vp`'s here: a deferred viewport's pass is the outermost one, and egui 0.36's `end_pass`
+    /// sets `Memory` back to the parent only for a nested (immediate) pass, so it is still on `vp` when the output
+    /// hook runs, even though `Context::viewport_id` already says the root. The test
+    /// `a_child_click_is_not_judged_by_the_main_windows_layers` keeps this honest when egui moves.
+    fn child_pass(&mut self, ctx: &egui::Context, vp: egui::ViewportId, output: &egui::FullOutput) {
+        let name = ito_a11y::take_window_name(ctx, vp);
+        let entries = ito_a11y::take_test_ids(ctx, vp);
+        if self.last_pass.len() > 64 {
+            self.last_pass.clear();
+        }
+        self.last_pass.insert(vp, ctx.cumulative_pass_nr_for(vp));
+        let view = self.children.entry(vp).or_default();
+        if name.is_some() {
+            view.name = name;
+        }
+        let Some(update) = &output.platform_output.accesskit_update else {
+            *view = View { name: view.name.take(), generation: view.generation, pass_nr: view.pass_nr, seq: view.seq, ..View::default() };
+            return;
+        };
+        let focus = focus_of(update);
+        let (info, rect) = ctx.input_for(vp, |i| (i.viewport().clone(), i.viewport_rect()));
+        view.tree = tree_lines(update, focus);
+        view.items = items_of(ctx, vp, update, focus, rect);
+        view.generation += 1;
+        view.fresh = true;
+        view.pass_nr = ctx.cumulative_pass_nr_for(vp);
+        let pass = view.pass_nr;
+        let entries: Vec<_> = entries.into_iter().filter(|e| e.pass + 1 == pass).collect();
+        view.ids = join_ids(ctx, entries, update, focus, rect);
+        view.viewport_rect = Some(rect);
+        view.minimized = info.minimized;
+        view.focused = info.focused;
+        self.seq += 1;
+        view.seq = self.seq;
+    }
+}
+
 impl egui::Plugin for Tap {
     fn debug_name(&self) -> &'static str {
         "ito-keyscript"
@@ -931,6 +1076,10 @@ impl egui::Plugin for Tap {
             self.passes.clear();
         }
         self.passes.push(raw.viewport_id);
+        // A window that is not listed any more is gone, with what was read from it.
+        if !raw.viewports.is_empty() {
+            self.children.retain(|id, _| raw.viewports.contains_key(id));
+        }
     }
 
     fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
@@ -943,8 +1092,10 @@ impl egui::Plugin for Tap {
         }
         // `Context::viewport_id` is already the parent's here, so the pass's own viewport is the one `input_hook` saw.
         // Nothing on the stack: the plugin was added in the middle of this pass, and whose it is is not known.
-        if self.passes.pop() != Some(egui::ViewportId::ROOT) {
-            return;
+        match self.passes.pop() {
+            Some(egui::ViewportId::ROOT) => {}
+            Some(vp) => return self.child_pass(ctx, vp, output),
+            None => return,
         }
         drawn::note_fonts(ctx);
         // The IDs a pass records are taken on every main-window pass, so none is left over for a later one.
@@ -960,51 +1111,14 @@ impl egui::Plugin for Tap {
             return;
         };
         // egui writes the whole tree each pass, so the last one is the window as it is.
-        let mut items: Vec<Item> = Vec::new();
-        let nodes: std::collections::HashMap<_, _> = update.nodes.iter().map(|(id, n)| (*id, n)).collect();
-        let mut tree = Vec::new();
         let focus = focus_of(update);
-        if let Some(root) = update.tree.as_ref().map(|t| t.root) {
-            dump(&nodes, root, focus, 0, &mut tree);
-        }
-        self.tree = tree;
+        self.tree = tree_lines(update, focus);
         let rect_now = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport_rect());
-        // The pass that just ended is `prev_pass` by now. Widget rects by AccessKit id, and each node's parent.
-        let widgets: std::collections::HashMap<egui::accesskit::NodeId, egui::WidgetRect> = ctx.viewport_for(egui::ViewportId::ROOT, |v| {
-            v.prev_pass.widgets.layers().flat_map(|(_, ws)| ws.iter()).map(|w| (w.id.accesskit_id(), *w)).collect()
-        });
-        let mut parents: std::collections::HashMap<egui::accesskit::NodeId, egui::accesskit::NodeId> = std::collections::HashMap::new();
-        for (id, node) in &update.nodes {
-            for c in node.children() {
-                parents.insert(*c, *id);
-            }
-        }
-        for (id, node) in &update.nodes {
-            let focused = *id == focus && focus != update.tree.as_ref().map_or(focus, |t| t.root);
-            let toggled = toggled(node);
-            let Some(b) = node.bounds().filter(|_| !node.is_hidden()) else { continue };
-            let rect = egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32));
-            let mut clip = widgets.get(id);
-            let mut at = *id;
-            for _ in 0..256 {
-                if clip.is_some() {
-                    break;
-                }
-                let Some(p) = parents.get(&at) else { break };
-                at = *p;
-                clip = widgets.get(&at);
-            }
-            for text in [node.label(), node.value()].into_iter().flatten().filter(|t| !t.is_empty()) {
-                let (click_at, out_of_view) = text_click(ctx, text, rect, clip, rect_now);
-                let item =
-                    Item { text: text.to_owned(), rect, disabled: node.is_disabled(), focused, toggled, node: *id, click_at, out_of_view };
-                if !items.iter().any(|o| o.same_as(&item)) {
-                    items.push(item);
-                }
-            }
-        }
+        let items = items_of(ctx, egui::ViewportId::ROOT, update, focus, rect_now);
         self.items = items;
         self.generation += 1;
+        self.seq += 1;
+        self.root_seq = self.seq;
         self.fresh = true;
         self.pass_nr = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
         let (info, rect) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.viewport().clone(), i.viewport_rect()));
@@ -1026,16 +1140,16 @@ fn will_discard(ctx: &egui::Context, output: &egui::FullOutput) -> bool {
     output.platform_output.requested_discard() && output.platform_output.num_completed_passes < ctx.options(|o| o.max_passes.get())
 }
 
-/// What [`observe`] saw in the main window's last pass.
+/// What [`observe`] saw in a window's last pass (the main window's, from [`observation`]).
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct Observation {
-    /// Counts up by one for each main-window pass that brought a tree; never goes back.
+    /// Counts up by one for each pass of that window that brought a tree; never goes back.
     pub generation: u64,
     pub items: Vec<Item>,
     /// One line per named node (the body of [`tree_text`], without announcements).
     pub tree: Vec<String>,
-    /// `cumulative_pass_nr_for(ROOT)` after the pass that produced it.
+    /// `cumulative_pass_nr_for(viewport)` after the pass that produced it.
     pub pass_nr: u64,
     pub viewport: egui::ViewportId,
     pub viewport_rect: egui::Rect,
@@ -1044,6 +1158,8 @@ pub struct Observation {
     /// The widgets with a test ID (`ito_a11y::test_id`), by name; an `Err` is a name with a problem (a duplicate, two
     /// names on one widget). Empty while AccessKit is off.
     pub ids: BTreeMap<String, Result<IdNode, String>>,
+    /// The tap's sequence number of the tree, which counts the trees of every window.
+    seq: u64,
 }
 
 impl Observation {
@@ -1074,6 +1190,16 @@ pub fn generation(ctx: &egui::Context) -> u64 {
     ctx.with_plugin::<Tap, _>(|t| t.generation).unwrap_or(0)
 }
 
+/// The pass count after the last pass the tap saw of the child window `viewport`, also once the window is gone.
+fn drawn_pass(ctx: &egui::Context, viewport: egui::ViewportId) -> u64 {
+    ctx.with_plugin::<Tap, _>(|t| t.last_pass.get(&viewport).copied()).flatten().unwrap_or(0)
+}
+
+/// The tap's sequence number: counts the trees of every window, so a window's reading can be compared with an action.
+fn seq(ctx: &egui::Context) -> u64 {
+    ctx.with_plugin::<Tap, _>(|t| t.seq).unwrap_or(0)
+}
+
 /// The main window's last observation, if the last main-window pass brought a tree; `None` otherwise.
 pub fn observation(ctx: &egui::Context) -> Option<Observation> {
     ctx.with_plugin::<Tap, _>(|t| {
@@ -1087,13 +1213,43 @@ pub fn observation(ctx: &egui::Context) -> Option<Observation> {
             minimized: t.minimized,
             focused: t.focused,
             ids: t.ids.clone(),
+            seq: t.root_seq,
         })
     })
     .flatten()
 }
 
+/// The last observation of the window `viewport` (a child window or the main one), if its last pass brought a tree.
+pub fn observation_of(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Observation> {
+    if viewport == egui::ViewportId::ROOT {
+        return observation(ctx);
+    }
+    ctx.with_plugin::<Tap, _>(|t| {
+        let v = t.children.get(&viewport).filter(|v| v.fresh)?;
+        Some(Observation {
+            generation: v.generation,
+            items: v.items.clone(),
+            tree: v.tree.clone(),
+            pass_nr: v.pass_nr,
+            viewport,
+            viewport_rect: v.viewport_rect.unwrap_or(egui::Rect::NOTHING),
+            minimized: v.minimized,
+            focused: v.focused,
+            ids: v.ids.clone(),
+            seq: v.seq,
+        })
+    })
+    .flatten()
+}
+
+/// The child windows that are alive and named themselves (`ito_a11y::window_name`), by name and viewport, in viewport
+/// order. The main window is not listed (it is `main`).
+pub fn windows(ctx: &egui::Context) -> Vec<(String, egui::ViewportId)> {
+    ctx.with_plugin::<Tap, _>(|t| t.children.iter().filter_map(|(id, v)| v.name.clone().map(|n| (n, *id))).collect()).unwrap_or_default()
+}
+
 /// The labelled things as of the last main-window pass; empty before [`observe`] has seen a tree, and empty again
-/// after a main-window pass that brought none. Passes of child windows are not observed.
+/// after a main-window pass that brought none. Child windows have their own, see [`observation_of`].
 pub fn items(ctx: &egui::Context) -> Vec<Item> {
     ctx.with_plugin::<Tap, _>(|t| t.items.clone()).unwrap_or_default()
 }
@@ -1310,7 +1466,7 @@ fn text_target(ctx: &egui::Context, all: &[Item], text: &str, raw: &mut egui::Ra
             target_node: item.node,
             data: None,
         }));
-        ctx.request_repaint();
+        ctx.request_repaint_of(raw.viewport_id);
     }
     item.click_at.clone()
 }
@@ -1781,6 +1937,23 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 let text = search_text(&format!("<ReadHas:{text}>"), "ReadHas")?;
                 Step::ReadHas { tag: (*tag).to_owned(), text }
             }
+            None if token.starts_with("<Window:!") => {
+                let name = token.strip_prefix("<Window:!").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+                if name == ito_a11y::MAIN_WINDOW {
+                    return Err(format!("`{token}`: the main window never goes away; write `<Window:main>` to go back to it"));
+                }
+                if !ito_a11y::is_test_id(name) {
+                    return Err(format!("`{token}` is not a window name; {TEST_ID_HELP}"));
+                }
+                Step::Window { name: name.to_owned(), gone: true }
+            }
+            None if token.starts_with("<Window:") => {
+                let name = token.strip_prefix("<Window:").and_then(|t| t.strip_suffix('>')).unwrap_or("");
+                if !ito_a11y::is_test_id(name) {
+                    return Err(format!("`{token}` is not a window name; {TEST_ID_HELP}"));
+                }
+                Step::Window { name: name.to_owned(), gone: false }
+            }
             None if token.starts_with("<Tree:") => Step::Tree(named(token, "Tree", "tree name")?),
             None if token.starts_with("<Announced:") => Step::Announced(search_text(token, "Announced")?),
             None if Prop::ALL.iter().any(|p| token.starts_with(&format!("<{}:", p.name()))) => {
@@ -1813,8 +1986,9 @@ pub fn parse_with(script: &str, dialect: &Dialect) -> Result<Vec<Step>, String> 
                 | Step::ClickId(_)
                 | Step::IdCheck(_)
                 | Step::ReadHas { .. }
+                | Step::Window { .. }
         );
-        if matches!(step, Step::ClickId(_) | Step::IdCheck(_) | Step::ReadHas { .. })
+        if matches!(step, Step::ClickId(_) | Step::IdCheck(_) | Step::ReadHas { .. } | Step::Window { .. })
             && rest.strip_prefix('*').is_some_and(|after| after.starts_with(|d: char| d.is_ascii_digit()))
         {
             return Err(format!("`{token}` cannot be repeated with `*N`; write it once"));
@@ -2111,8 +2285,12 @@ fn watch_progress(progress: Arc<Mutex<Progress>>, labels: Vec<String>, done: Pat
 /// way it ended when it ends. One that never ends (a crash, a kill) leaves `running`.
 pub struct Runner {
     pace: pace::Pace,
+    /// The window the script drives (`<Window:>`); the main window until one is picked.
+    aim: Aim,
     /// The picture asked for.
     shot: Option<PendingShot>,
+    /// The picture of the `<Shot:>` asked for, caught in a frame's input (it may come in the frame of another window).
+    shot_image: Option<Arc<egui::ColorImage>>,
     /// The run's folder: the app writes its `<State:>` files ([`Do::State`]) here, and `shots/` and `run.json` go in it.
     pub dir: PathBuf,
     /// What the app says about its shots (`app`, `version`, `component`, `state`, `zoom`; see [`Runner::app`]).
@@ -2168,9 +2346,64 @@ pub struct Runner {
     skew: Duration,
 }
 
+/// The window a script drives: the main window until a `<Window:>` step picks a child window.
+///
+/// Pace sees one window, so every frame gets a mapped pass: `base + (cnt - start)`, where `cnt` is the pass count of the
+/// target. With the main window as the target (`base` 0, `start` 0) that is the pass count itself. A switch makes
+/// `base` the last pass given and `start` the new target's count, so the pass never goes down and only the target
+/// drawing moves it on.
+struct Aim {
+    target: egui::ViewportId,
+    /// `main` for the main window, else the name the window gave itself.
+    name: String,
+    base: u64,
+    start: u64,
+    /// The target's pass count at the last frame it was seen alive.
+    last_cnt: u64,
+    /// The last mapped pass given to Pace.
+    last_pass: u64,
+    /// The tap's `seq` when the target was picked: a reading needs a tree newer than this.
+    switch_seq: u64,
+    /// The name of a target window that closed; the next step must be a `<Window:>` step.
+    gone: Option<String>,
+    /// The target's pass count when an input went in, until the target is seen to have drawn it.
+    sent_at: Option<u64>,
+    /// When the target last had a frame.
+    last_frame: Instant,
+}
+
+impl Aim {
+    fn new(now: Instant) -> Self {
+        Self {
+            target: egui::ViewportId::ROOT,
+            name: ito_a11y::MAIN_WINDOW.to_owned(),
+            base: 0,
+            start: 0,
+            last_cnt: 0,
+            last_pass: 0,
+            switch_seq: 0,
+            gone: None,
+            sent_at: None,
+            last_frame: now,
+        }
+    }
+
+    fn is_main(&self) -> bool {
+        self.target == egui::ViewportId::ROOT
+    }
+
+    /// The mapped pass now.
+    fn pass(&self, ctx: &egui::Context) -> u64 {
+        let cnt = ctx.cumulative_pass_nr_for(self.target).max(self.last_cnt);
+        self.base + cnt.saturating_sub(self.start)
+    }
+}
+
 /// A picture asked for with `<Shot:>`.
 struct PendingShot {
     name: String,
+    /// The window the picture is of.
+    viewport: egui::ViewportId,
     /// The index of the script step.
     idx: usize,
     /// The picture is the middle stage of a `<Snap:>`.
@@ -2279,13 +2512,18 @@ impl Runner {
     pub(crate) fn with_pace(config: pace::Config, steps: Vec<Step>, now: Instant) -> Self {
         let reads_window = steps.iter().any(|s| {
             matches!(s, Step::ClickText { .. } | Step::DClickText(_) | Step::Assert { .. } | Step::Clipboard(_) | Step::ClipboardHas(_))
-                || matches!(s, Step::Is { .. } | Step::Tree(_) | Step::Announced(_) | Step::ClickId(_) | Step::IdCheck(_))
+                || matches!(
+                    s,
+                    Step::Is { .. } | Step::Tree(_) | Step::Announced(_) | Step::ClickId(_) | Step::IdCheck(_) | Step::Window { .. }
+                )
         });
         let wake = Some(now + config.first_wait);
         Self {
             labels: steps.iter().map(label).collect(),
             pace: pace::Pace::new(config, &steps, now),
+            aim: Aim::new(now),
             shot: None,
+            shot_image: None,
             dir: PathBuf::from("."),
             info: review::Meta { zoom: 1.0, component: "window".into(), ..Default::default() },
             run: evidence::Run::new(evidence::RUNNER, steps.len()),
@@ -2556,6 +2794,7 @@ impl Runner {
     /// hand back what was kept.
     fn keep(&mut self, mut e: pace::Ended, delivered: bool) -> pace::Ended {
         self.shot = None;
+        self.shot_image = None;
         self.state_out = None;
         self.state_settled = None;
         self.snap = None;
@@ -2734,29 +2973,150 @@ impl Runner {
         self.start_run();
         let now = self.now();
         self.drain_state(ctx, now);
+        self.catch_picture(raw);
+        if let Some(did) = self.aim_frame(ctx, raw, now) {
+            self.sync();
+            return Some(did);
+        }
         let writes = ito_common::writes::ledger().status();
-        // eframe hands what is left over to whichever window comes next: if the main window was not drawn, the input
+        // eframe hands what is left over to whichever window comes next: if the target was not drawn, the input
         // would land in another viewport's frame, which Pace sees as one.
-        let viewport = (raw.viewport_id != egui::ViewportId::ROOT).then(|| format!("{:?}", raw.viewport_id));
-        let frame = pace::Frame {
-            pass: ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT),
-            now,
-            viewport: viewport.as_deref(),
-            settled: None,
-            writes: Some(&writes),
-            generation: generation(ctx),
-        };
+        let viewport = (raw.viewport_id != self.aim.target).then(|| format!("{:?}", raw.viewport_id));
+        let pass = self.aim.pass(ctx);
+        self.aim.last_pass = self.aim.last_pass.max(pass);
+        let frame = pace::Frame { pass, now, viewport: viewport.as_deref(), settled: None, writes: Some(&writes), generation: seq(ctx) };
         let did = match self.decide(&frame) {
             Decided::Hold => None,
             Decided::Out(d) => Some(d),
             Decided::Take(entry) => {
                 let (taken, out) = self.host(ctx, raw, reader, &entry);
+                if !self.aim.is_main() && matches!(taken, pace::Taken::Input { flight: true, .. } | pace::Taken::Changed { .. }) {
+                    self.aim.sent_at = Some(self.aim.last_cnt);
+                }
                 self.act_rule(&entry, &taken, now, || mark(ctx));
                 self.answer(&frame, taken, out)
             }
         };
         self.sync();
+        // The target gets frames while the script wants them; the root's hook is where that is asked.
+        if !self.aim.is_main() {
+            if let Some(d) = self.due() {
+                ctx.request_repaint_after_for(d.min(Duration::from_secs(1)), self.aim.target);
+            }
+        }
         did
+    }
+
+    /// Keep the picture of the pending `<Shot:>` when this frame's input holds it: the capture queue is shared, so it
+    /// comes in the next frame of whichever window is drawn first.
+    fn catch_picture(&mut self, raw: &egui::RawInput) {
+        let Some(p) = self.shot.as_ref().filter(|p| p.sent) else { return };
+        if let Some(image) = picture_in(&raw.events, &p.name, p.viewport) {
+            self.shot_image = Some(image);
+        }
+    }
+
+    /// What the frame says about the target window: that it is still there, that it drew what was put into it, that
+    /// it has not been drawn for too long. A failure ends the run.
+    fn aim_frame(&mut self, ctx: &egui::Context, raw: &egui::RawInput, now: Instant) -> Option<Do> {
+        let a = &mut self.aim;
+        if a.is_main() {
+            a.last_cnt = a.last_cnt.max(ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT));
+            return None;
+        }
+        let live = raw.viewports.is_empty() || raw.viewports.contains_key(&a.target);
+        // A window that has just closed has drawn its last pass: the tap kept the count.
+        a.last_cnt = a.last_cnt.max(ctx.cumulative_pass_nr_for(a.target)).max(drawn_pass(ctx, a.target));
+        if live && raw.viewport_id == a.target {
+            a.last_frame = now;
+        }
+        if a.sent_at.is_some_and(|s| a.last_cnt > s) {
+            a.sent_at = None;
+        }
+        if self.ended.is_some() || self.quitting {
+            return None;
+        }
+        let a = &mut self.aim;
+        let label = format!("<Window:{}>", a.name);
+        let name = a.name.clone();
+        if !live {
+            if a.sent_at.is_some() {
+                let why = format!("the window `{name}` closed before the input was drawn");
+                return self.fail_host(&label, why);
+            }
+            // The main window goes on with the pass counted upward from here.
+            a.base = a.last_pass + 1;
+            a.start = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+            a.last_cnt = a.start;
+            a.target = egui::ViewportId::ROOT;
+            a.name = ito_a11y::MAIN_WINDOW.to_owned();
+            a.gone = Some(name);
+            a.sent_at = None;
+            a.switch_seq = seq(ctx);
+            a.last_frame = now;
+            return None;
+        }
+        if raw.viewport_id != a.target && now.saturating_duration_since(a.last_frame) >= DELIVER_WAIT {
+            let why = format!(
+                "the window `{name}` was not drawn for {} s (it may be minimized or hidden)",
+                now.saturating_duration_since(a.last_frame).as_secs()
+            );
+            return self.fail_host(&label, why);
+        }
+        None
+    }
+
+    /// The run fails outside a step.
+    fn fail_host(&mut self, label: &str, why: String) -> Option<Do> {
+        let e = self.pace.host_failed(label, why)?;
+        let e = self.keep(e, true);
+        Some(do_of(&e))
+    }
+
+    /// `<Window:name>` / `<Window:!name>`, once per frame while it waits.
+    fn window_step(&mut self, ctx: &egui::Context, raw: &egui::RawInput, name: &str, gone: bool) -> pace::Taken {
+        self.aim.gone = None;
+        let live = |id: &egui::ViewportId| raw.viewports.is_empty() || raw.viewports.contains_key(id);
+        let named: Vec<egui::ViewportId> = windows(ctx).into_iter().filter(|(n, id)| n == name && live(id)).map(|(_, id)| id).collect();
+        if gone {
+            if !named.is_empty() {
+                return pace::Taken::Again { why: format!("the window `{name}` is still open") };
+            }
+            if !self.aim.is_main() && self.aim.name == name {
+                self.switch(ctx, egui::ViewportId::ROOT, ito_a11y::MAIN_WINDOW);
+            }
+            return pace::Taken::Done;
+        }
+        if name == ito_a11y::MAIN_WINDOW {
+            if !self.aim.is_main() {
+                self.switch(ctx, egui::ViewportId::ROOT, ito_a11y::MAIN_WINDOW);
+            }
+            return pace::Taken::Done;
+        }
+        match named.as_slice() {
+            [] => pace::Taken::Again { why: format!("no window is named `{name}`") },
+            [id] => {
+                if self.aim.target != *id {
+                    self.switch(ctx, *id, name);
+                }
+                pace::Taken::Done
+            }
+            _ => pace::Taken::Failed(format!("two windows are named `{name}`")),
+        }
+    }
+
+    /// The steps after this one go to `target`.
+    fn switch(&mut self, ctx: &egui::Context, target: egui::ViewportId, name: &str) {
+        let now = self.now();
+        let a = &mut self.aim;
+        a.base = a.last_pass;
+        a.start = ctx.cumulative_pass_nr_for(target);
+        a.last_cnt = a.start;
+        a.target = target;
+        a.name = name.to_owned();
+        a.switch_seq = seq(ctx);
+        a.sent_at = None;
+        a.last_frame = now;
     }
 
     /// What Pace says for this frame.
@@ -2818,8 +3178,8 @@ impl Runner {
     /// The window as a reading step may judge it: seen after the last input was drawn by the main window, and not
     /// minimized.
     fn fresh(&self, ctx: &egui::Context) -> Result<Observation, String> {
-        let o = observation(ctx).ok_or_else(|| pace::fresh(0, 0, false, None).unwrap_err())?;
-        pace::fresh(o.generation, self.pace.action_gen(), o.viewport == egui::ViewportId::ROOT, o.minimized)?;
+        let o = observation_of(ctx, self.aim.target).ok_or_else(|| pace::fresh(0, 0, false, None).unwrap_err())?;
+        pace::fresh(o.seq, self.pace.action_gen().max(self.aim.switch_seq), o.viewport == self.aim.target, o.minimized)?;
         Ok(o)
     }
 
@@ -2857,7 +3217,18 @@ impl Runner {
         entry: &pace::Entry,
     ) -> (pace::Taken, Option<Do>) {
         let input = || pace::Taken::Input { flight: true, more: Vec::new() };
+        if let Some(gone) = &self.aim.gone {
+            if !matches!(entry.press, Press::Window { .. }) {
+                let why = format!("the window `{gone}` closed (`<Window:!{gone}>` waits for that)");
+                return (pace::Taken::Failed(why), None);
+            }
+        }
         match &entry.press {
+            Press::Window { name, gone } => (self.window_step(ctx, raw, name, *gone), None),
+            Press::State(_) | Press::Snap { .. } if !self.aim.is_main() => {
+                let step = if matches!(entry.press, Press::State(_)) { "<State:>" } else { "<Snap:>" };
+                (pace::Taken::Failed(format!("{step} reads the main window; `<Window:main>` first")), None)
+            }
             Press::Events(events) => {
                 raw.events.extend(events.iter().cloned());
                 (input(), None)
@@ -2871,11 +3242,11 @@ impl Runner {
                 (input(), None)
             }
             p @ (Press::Click { .. } | Press::DClick { .. } | Press::Hover { .. } | Press::Wheel { .. } | Press::Drag { .. }) => {
-                let rect = raw.screen_rect.unwrap_or_else(|| ctx.content_rect());
+                let rect = raw.screen_rect.unwrap_or_else(|| ctx.input_for(raw.viewport_id, |i| i.content_rect()).round_ui());
                 (Self::pointer_input(raw, pointer_frames(p, rect)), None)
             }
             Press::Size { w, h } => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(f32::from(*w), f32::from(*h))));
+                ctx.send_viewport_cmd_to(self.aim.target, egui::ViewportCommand::InnerSize(egui::vec2(f32::from(*w), f32::from(*h))));
                 // The window lays out again at the new size before the next step.
                 (pace::Taken::Changed { more: vec![pace::More::Step(Press::Wait(SETTLE))] }, None)
             }
@@ -3032,28 +3403,27 @@ impl Runner {
         let pending = self.shot.as_mut()?;
         let name = pending.name.clone();
         if !pending.sent {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(name.clone())));
+            let target = self.aim.target;
+            ctx.send_viewport_cmd_to(target, egui::ViewportCommand::Screenshot(egui::UserData::new(name.clone())));
             // What is in force now is what the picture shows; the image arrives a frame or more later. Freeze it all.
             pending.sent = true;
-            pending.requested_frame = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+            pending.viewport = target;
+            pending.requested_frame = self.aim.pass(ctx);
             let theme = ito_theme::name().unwrap_or_default();
             let lang = ito_i18n::in_force().unwrap_or_default();
-            pending.meta = frozen_meta(&self.info, &name, (&theme, &lang), ctx.content_rect().size(), ctx.pixels_per_point());
+            let (screen, ppp) = ctx.input_for(target, |i| (i.content_rect().round_ui().size(), i.pixels_per_point()));
+            pending.meta = frozen_meta(&self.info, &name, (&theme, &lang), screen, ppp);
+            pending.meta.window = (!self.aim.is_main()).then(|| self.aim.name.clone());
             drawn::note_fonts(ctx);
             pending.env = review::Env::of(&pending.meta);
             return None;
         }
-        let image = ctx.input(|i| {
-            i.raw.events.iter().find_map(|e| match e {
-                egui::Event::Screenshot { user_data, image, .. }
-                    if user_data.data.as_ref().and_then(|d| d.downcast_ref::<String>()) == Some(&name) =>
-                {
-                    Some(image.clone())
-                }
-                _ => None,
-            })
-        })?;
-        let received = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
+        let viewport = pending.viewport;
+        let image = match self.shot_image.take() {
+            Some(image) => image,
+            None => ctx.input(|i| picture_in(&i.raw.events, &name, viewport))?,
+        };
+        let received = self.aim.pass(ctx);
         let (meta, env, idx, snap, requested) = {
             let p = self.shot.as_ref()?;
             (p.meta.clone(), p.env.clone(), p.idx, p.snap, p.requested_frame)
@@ -3069,6 +3439,7 @@ impl Runner {
             idx,
             snap,
             sent: false,
+            viewport: egui::ViewportId::ROOT,
             meta: review::Meta::default(),
             env: review::Env::default(),
             requested_frame: 0,
@@ -3195,6 +3566,18 @@ fn encode_png<W: std::io::Write>(out: W, image: &egui::ColorImage) -> Result<(),
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(&rgba).map_err(|e| e.to_string())
+}
+
+/// The picture asked for as `name` for the window `viewport`, if `events` holds it.
+fn picture_in(events: &[egui::Event], name: &str, viewport: egui::ViewportId) -> Option<Arc<egui::ColorImage>> {
+    events.iter().find_map(|e| match e {
+        egui::Event::Screenshot { viewport_id, user_data, image }
+            if *viewport_id == viewport && user_data.data.as_ref().and_then(|d| d.downcast_ref::<String>()).is_some_and(|n| n == name) =>
+        {
+            Some(Arc::clone(image))
+        }
+        _ => None,
+    })
 }
 
 /// What the side JSON says about the frame a picture is of, as it is when the picture is asked for.
@@ -5202,6 +5585,9 @@ mod tests {
 
     /// A Runner with state JSON on, writing under a fresh temp folder; `deadline` bounds the wait for the acknowledgement.
     fn state_runner(script: &str, tag: &str, deadline: Duration) -> (Runner, PathBuf) {
+        // The run id is decided once per process, and another test may decide it in the middle of a run. A snap's before
+        // and after states must carry the same one, so decide it before the run starts.
+        run_id("ITO_TEST_UNSET_PREFIX").unwrap();
         let dir = std::env::temp_dir().join(format!("ito-runner-state-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -5956,5 +6342,343 @@ keys: done
         let ctx = egui::Context::default();
         let r = Runner::new(parse("<Assert:x>").unwrap(), None);
         assert!(r.fresh(&ctx).is_err());
+    }
+
+    // ---- `<Window:name>`: a child window as the target ----
+
+    fn job() -> egui::ViewportId {
+        egui::ViewportId::from_hash_of("job")
+    }
+
+    fn log() -> egui::ViewportId {
+        egui::ViewportId::from_hash_of("log")
+    }
+
+    /// One frame of the window `vp` as eframe makes it: the hook, then the pass. `live` are the child windows eframe
+    /// lists (`raw.viewports`) with the name each gives itself; a child that is `vp` draws a button `go`.
+    fn win_frame(
+        r: &mut Runner,
+        ctx: &egui::Context,
+        vp: egui::ViewportId,
+        live: &[(egui::ViewportId, &str)],
+    ) -> (Vec<egui::Event>, Option<Do>) {
+        win_frame_with(r, ctx, vp, live, false)
+    }
+
+    /// As [`win_frame`]; with `cover`, the main window also draws a foreground area over all of itself.
+    fn win_frame_with(
+        r: &mut Runner,
+        ctx: &egui::Context,
+        vp: egui::ViewportId,
+        live: &[(egui::ViewportId, &str)],
+        cover: bool,
+    ) -> (Vec<egui::Event>, Option<Do>) {
+        hurry(r);
+        ctx.set_embed_viewports(false);
+        let mut raw = window();
+        raw.viewport_id = vp;
+        raw.viewports.insert(egui::ViewportId::ROOT, egui::ViewportInfo::default());
+        for (id, _) in live {
+            raw.viewports.insert(*id, egui::ViewportInfo::default());
+        }
+        let did = r.input(ctx, &mut raw);
+        let events = raw.events.clone();
+        let name = live.iter().find(|(id, _)| *id == vp).map(|(_, n)| *n);
+        draw(ctx, raw, |ui| match name {
+            Some(n) => {
+                ito_a11y::window_name(ui.ctx(), n);
+                let b = ui.button("Go");
+                ito_a11y::test_id(&b, "go");
+            }
+            None => {
+                ui.label("hello");
+                if cover {
+                    egui::Area::new(egui::Id::new("cover")).order(egui::Order::Foreground).fixed_pos(egui::Pos2::ZERO).show(
+                        ui.ctx(),
+                        |ui| {
+                            ui.allocate_exact_size(egui::vec2(400.0, 300.0), egui::Sense::click());
+                        },
+                    );
+                }
+                // The main window declares its children each pass, or egui drops them.
+                for (id, _) in live {
+                    ui.ctx().show_viewport_deferred(*id, egui::ViewportBuilder::default(), |_, _| {});
+                }
+            }
+        });
+        (events, did)
+    }
+
+    type Got = Vec<(egui::ViewportId, Vec<egui::Event>)>;
+
+    /// Plays `script` in rounds: the main window's frame, then each live child's. `live(round, got)` says which
+    /// children are listed. Returns how it ended and the events each window's frames got.
+    fn play_windows(
+        script: &str,
+        rounds: usize,
+        live: impl FnMut(usize, &Got) -> Vec<(egui::ViewportId, &'static str)>,
+    ) -> (Option<Do>, Got) {
+        play_windows_with(script, rounds, live, false)
+    }
+
+    /// As [`play_windows`]; `cover` as in [`win_frame_with`].
+    fn play_windows_with(
+        script: &str,
+        rounds: usize,
+        mut live: impl FnMut(usize, &Got) -> Vec<(egui::ViewportId, &'static str)>,
+        cover: bool,
+    ) -> (Option<Do>, Got) {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse(script).unwrap(), None);
+        let mut got: Got = Vec::new();
+        for round in 0..rounds {
+            let listed = live(round, &got);
+            let mut frames = vec![egui::ViewportId::ROOT];
+            frames.extend(listed.iter().map(|(id, _)| *id));
+            for vp in frames {
+                let (events, did) = win_frame_with(&mut r, &ctx, vp, &listed, cover);
+                got.push((vp, events));
+                if did.is_some() {
+                    return (did, got);
+                }
+            }
+        }
+        (None, got)
+    }
+
+    fn clicked(events: &[egui::Event]) -> bool {
+        events.iter().any(|e| matches!(e, egui::Event::PointerButton { .. }))
+    }
+
+    fn click_seen(got: &Got) -> bool {
+        got.iter().any(|(vp, e)| *vp == job() && clicked(e))
+    }
+
+    #[test]
+    fn window_steps_parse() {
+        for ok in ["<Window:job>", "<Window:!job>", "<Window:main>", "<Window:a.b-c_d>"] {
+            parse(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        assert_eq!(parse("<Window:job>").unwrap(), vec![Step::Window { name: "job".into(), gone: false }]);
+        assert_eq!(parse("<Window:!job>").unwrap(), vec![Step::Window { name: "job".into(), gone: true }]);
+        for bad in ["<Window:>", "<Window:!>", "<Window:!main>", "<Window:Bad Name>", "<Window:!Bad Name>"] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_child_window_is_listed_by_name_with_its_own_observation() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Window:job>").unwrap(), None);
+        let live = [(job(), "job")];
+        for _ in 0..3 {
+            win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &live);
+            win_frame(&mut r, &ctx, job(), &live);
+        }
+        assert_eq!(windows(&ctx), vec![("job".to_owned(), job())]);
+        let o = observation_of(&ctx, job()).expect("a tree");
+        assert!(o.id("go").unwrap().is_some());
+        let main = observation_of(&ctx, egui::ViewportId::ROOT).expect("a tree");
+        assert!(main.id("go").unwrap().is_none());
+        // A window that is not listed any more is dropped at the next frame.
+        win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &[]);
+        assert!(windows(&ctx).is_empty());
+        assert!(observation_of(&ctx, job()).is_none());
+    }
+
+    #[test]
+    fn a_click_goes_into_the_target_windows_own_frame() {
+        let (did, got) = play_windows("<Window:job><Click:0.5,0.5>", 80, |_, _| vec![(job(), "job")]);
+        assert_eq!(did, Some(Do::Done), "{did:?}");
+        assert!(click_seen(&got));
+        assert!(!got.iter().any(|(vp, e)| *vp == egui::ViewportId::ROOT && clicked(e)));
+    }
+
+    /// The main window's foreground area covers the place where the child's button is in the child's own window.
+    /// A click by ID or by text there is judged by the child's layers, not the main window's.
+    #[test]
+    fn a_child_click_is_not_judged_by_the_main_windows_layers() {
+        for script in ["<Window:job><ClickId:go><Id:go>", "<Window:job><Click:Go>"] {
+            let (did, got) = play_windows_with(script, 80, |_, _| vec![(job(), "job")], true);
+            assert_eq!(did, Some(Do::Done), "{script}: {did:?}");
+            assert!(click_seen(&got), "{script}");
+            assert!(!got.iter().any(|(vp, e)| *vp == egui::ViewportId::ROOT && clicked(e)), "{script}");
+        }
+        // Judged by the main window's layers, the same press would be refused: the test tells the two apart.
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Window:main>").unwrap(), None);
+        win_frame_with(&mut r, &ctx, egui::ViewportId::ROOT, &[], true);
+        win_frame_with(&mut r, &ctx, egui::ViewportId::ROOT, &[], true);
+        let whole = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+        let why = landing(&ctx, "go", egui::pos2(20.0, 20.0), egui::LayerId::background(), whole).unwrap_err();
+        assert!(why.contains("is covered by"), "{why}");
+    }
+
+    #[test]
+    fn a_window_that_nobody_names_fails_after_the_wait() {
+        let (did, _) = play_windows("<Window:job>", 90, |_, _| Vec::new());
+        match did {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("no window is named `job`"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_windows_with_one_name_fail_the_step() {
+        let (did, _) = play_windows("<Window:job>", 80, |_, _| vec![(job(), "job"), (log(), "job")]);
+        match did {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("two windows are named `job`"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn window_main_goes_back_at_once() {
+        let (did, got) = play_windows("<Window:job><Window:main><Assert:hello>", 120, |_, _| vec![(job(), "job")]);
+        assert_eq!(did, Some(Do::Done), "{did:?}");
+        assert!(!click_seen(&got));
+    }
+
+    #[test]
+    fn window_gone_waits_for_the_window_to_close() {
+        let (did, got) =
+            play_windows(
+                "<Window:job><Window:!job><Assert:hello>",
+                200,
+                |round, _| {
+                    if round < 12 {
+                        vec![(job(), "job")]
+                    } else {
+                        Vec::new()
+                    }
+                },
+            );
+        assert_eq!(did, Some(Do::Done), "{did:?}");
+        assert!(got.len() > 12 * 2, "it waited for the window to close");
+    }
+
+    /// The window closes in the frame after its click was drawn.
+    fn closes_after_click(closed_at: &mut Option<usize>, round: usize, got: &Got) -> Vec<(egui::ViewportId, &'static str)> {
+        if closed_at.is_none() && click_seen(got) {
+            *closed_at = Some(round + 1);
+        }
+        if closed_at.is_some_and(|c| round >= c) {
+            Vec::new()
+        } else {
+            vec![(job(), "job")]
+        }
+    }
+
+    #[test]
+    fn a_target_that_closes_after_its_input_was_drawn_lands_it() {
+        let mut closed_at = None;
+        let (did, got) =
+            play_windows("<Window:job><Click:0.5,0.5><Window:!job><Assert:hello>", 200, |r, g| closes_after_click(&mut closed_at, r, g));
+        assert_eq!(did, Some(Do::Done), "{did:?}");
+        assert!(click_seen(&got));
+    }
+
+    #[test]
+    fn a_step_after_a_closed_target_must_be_a_window_step() {
+        let mut closed_at = None;
+        let (did, _) = play_windows("<Window:job><Click:0.5,0.5><Assert:hello>", 200, |r, g| closes_after_click(&mut closed_at, r, g));
+        match did {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("the window `job` closed (`<Window:!job>` waits for that)"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_target_that_closes_before_its_input_was_drawn_fails_at_once() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Window:job><Click:0.5,0.5>").unwrap(), None);
+        let live = [(job(), "job")];
+        let mut injected = false;
+        for _ in 0..80 {
+            win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &live);
+            hurry(&mut r);
+            let mut raw = window();
+            raw.viewport_id = job();
+            raw.viewports.insert(egui::ViewportId::ROOT, egui::ViewportInfo::default());
+            raw.viewports.insert(job(), egui::ViewportInfo::default());
+            assert!(r.input(&ctx, &mut raw).is_none(), "ended early");
+            if clicked(&raw.events) {
+                // The input went in; the window is never drawn and closes.
+                injected = true;
+                break;
+            }
+            draw(&ctx, raw, |ui| {
+                ito_a11y::window_name(ui.ctx(), "job");
+                let b = ui.button("Go");
+                ito_a11y::test_id(&b, "go");
+            });
+        }
+        assert!(injected);
+        hurry(&mut r);
+        let mut raw = window();
+        raw.viewports.insert(egui::ViewportId::ROOT, egui::ViewportInfo::default());
+        match r.input(&ctx, &mut raw) {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("the window `job` closed before the input was drawn"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_target_that_is_never_drawn_fails_after_the_delivery_wait() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Window:job><Click:0.5,0.5>").unwrap(), None);
+        let live = [(job(), "job")];
+        for _ in 0..4 {
+            win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &live);
+            win_frame(&mut r, &ctx, job(), &live);
+        }
+        // From here the window is hidden: only the main window gets frames.
+        let mut ended = None;
+        for _ in 0..250 {
+            let (_, did) = win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &live);
+            if did.is_some() {
+                ended = did;
+                break;
+            }
+        }
+        match ended {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("the window `job` was not drawn for"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn state_reads_the_main_window_only() {
+        let ctx = egui::Context::default();
+        let mut r = Runner::new(parse("<Window:job><State:window-only>").unwrap(), None);
+        let live = [(job(), "job")];
+        let mut ended = None;
+        for _ in 0..80 {
+            let (_, a) = win_frame(&mut r, &ctx, egui::ViewportId::ROOT, &live);
+            let (_, b) = win_frame(&mut r, &ctx, job(), &live);
+            if let Some(d) = a.or(b) {
+                ended = Some(d);
+                break;
+            }
+        }
+        match ended {
+            Some(Do::Failed { why, .. }) => assert!(why.contains("reads the main window; `<Window:main>` first"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_picture_is_taken_for_its_own_window_from_any_frame() {
+        let shot = |vp, name: &str| egui::Event::Screenshot {
+            viewport_id: vp,
+            user_data: egui::UserData::new(name.to_owned()),
+            image: Arc::new(egui::ColorImage::filled([2, 2], egui::Color32::WHITE)),
+        };
+        let events = vec![shot(egui::ViewportId::ROOT, "s"), shot(job(), "other")];
+        assert!(picture_in(&events, "s", job()).is_none());
+        assert!(picture_in(&events, "s", egui::ViewportId::ROOT).is_some());
+        let events = vec![shot(job(), "s")];
+        assert!(picture_in(&events, "s", job()).is_some());
+        assert!(picture_in(&events, "s", egui::ViewportId::ROOT).is_none());
     }
 }
