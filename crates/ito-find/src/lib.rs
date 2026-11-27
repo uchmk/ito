@@ -9,6 +9,11 @@
 //! result back with [`FindBar::set_result`], which drops one that is stale.
 //!
 //! Keys by command name, for the keymap and `--keys`: [`cmd`].
+//!
+//! For read-only text (a log view) use [`FindBar::read_only`]: no Replace toggle or row and no "in selection" toggle.
+//! The parts carry test IDs for `--keys` (`find.query`, `find.case`, `find.word`, `find.regex`, `find.selection`,
+//! `find.label`, `find.prev`, `find.next`, `find.close`, `find.replace.toggle`, `find.replace.query`,
+//! `find.replace.one`, `find.replace.all`); [`FindBar::ids`] changes the `find` prefix.
 
 use std::ops::Range;
 
@@ -85,11 +90,37 @@ pub struct FindBar {
     pub whole_word: bool,
     pub in_selection: bool,
     pub status: Status,
+    /// Find only, for read-only text: no Replace toggle or row, no "in selection" toggle; `open_replace` and the
+    /// `replace.*` commands act as `find.open` / do nothing, and `ranges` ignores `in_selection`.
+    pub find_only: bool,
     version: u64,
     focus_find: bool,
+    ids: Option<String>,
 }
 
 impl FindBar {
+    /// A bar for read-only text: [`FindBar::find_only`] on.
+    pub fn read_only() -> Self {
+        Self { find_only: true, ..Self::default() }
+    }
+
+    /// The prefix of the bar's test IDs (`find` by default), e.g. `run.log.find`. Must be an `ito_a11y::is_test_id`;
+    /// a bad one trips a `debug_assert!` and keeps the default.
+    pub fn ids(mut self, prefix: impl Into<String>) -> Self {
+        let prefix = prefix.into();
+        if ito_a11y::is_test_id(&prefix) {
+            self.ids = Some(prefix);
+        } else {
+            debug_assert!(false, "`{prefix}` is not a test ID prefix");
+        }
+        self
+    }
+
+    /// The prefix in force.
+    pub fn id_prefix(&self) -> &str {
+        self.ids.as_deref().unwrap_or("find")
+    }
+
     /// Ctrl+F: show the bar with focus in the Find field. `seed` (the selected word) replaces the query when given.
     pub fn open_find(&mut self, seed: Option<&str>) {
         self.open = true;
@@ -103,7 +134,9 @@ impl FindBar {
     /// Ctrl+H: as `open_find`, with the Replace row.
     pub fn open_replace(&mut self, seed: Option<&str>) {
         self.open_find(seed);
-        self.replace_open = true;
+        if !self.find_only {
+            self.replace_open = true;
+        }
     }
 
     pub fn close(&mut self) {
@@ -118,8 +151,8 @@ impl FindBar {
             cmd::REPLACE_OPEN => self.open_replace(seed),
             cmd::NEXT => out.next = true,
             cmd::PREV => out.prev = true,
-            cmd::REPLACE_ONE => out.replace_one = true,
-            cmd::REPLACE_ALL => out.replace_all = true,
+            cmd::REPLACE_ONE => out.replace_one = !self.find_only,
+            cmd::REPLACE_ALL => out.replace_all = !self.find_only,
             _ => {}
         }
         out
@@ -151,7 +184,7 @@ impl FindBar {
             return Ok(Vec::new());
         }
         let s = Subst::from_query(&self.find, "", self.query())?;
-        let within = if self.in_selection { within } else { None };
+        let within = if self.in_selection && !self.find_only { within } else { None };
         let edits = s.edits_in(text, within.unwrap_or(0..text.len()));
         Ok(edits.into_iter().map(|(r, _)| r).filter(|r| r.start < r.end).collect())
     }
@@ -186,6 +219,9 @@ impl FindBar {
             return out;
         }
         let c = look.c;
+        let p = self.id_prefix().to_owned();
+        let find_only = self.find_only;
+        let replace_row = self.replace_open && !find_only;
         // While a composition is going on, Enter / Esc belong to the IME.
         let composing = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Ime(_))));
         egui::Frame::new()
@@ -195,15 +231,20 @@ impl FindBar {
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let arrow = if self.replace_open { "▾" } else { "▸" };
-                    let t = ui.add(egui::Button::new(arrow).frame(false)).on_hover_text(w.toggle_replace);
-                    ito_a11y::say(&t, ito_a11y::Role::Button, w.toggle_replace);
-                    if t.clicked() {
-                        self.replace_open = !self.replace_open;
+                    if !find_only {
+                        let arrow = if self.replace_open { "▾" } else { "▸" };
+                        let t = ui.add(egui::Button::new(arrow).frame(false)).on_hover_text(w.toggle_replace);
+                        ito_a11y::say(&t, ito_a11y::Role::Button, w.toggle_replace);
+                        ito_a11y::test_id(&t, &format!("{p}.replace.toggle"));
+                        if t.clicked() {
+                            self.replace_open = !self.replace_open;
+                        }
                     }
-                    let before = (self.find.clone(), self.regex, self.match_case, self.whole_word, self.in_selection);
+                    let sel = |b: &Self| b.in_selection && !b.find_only;
+                    let before = (self.find.clone(), self.regex, self.match_case, self.whole_word, sel(self));
                     let f = ui.add(egui::TextEdit::singleline(&mut self.find).hint_text(w.find_hint).desired_width(240.0));
                     ito_a11y::say(&f, ito_a11y::Role::Label, w.find_hint);
+                    ito_a11y::test_id(&f, &format!("{p}.query"));
                     if std::mem::take(&mut self.focus_find) {
                         f.request_focus();
                     }
@@ -215,11 +256,13 @@ impl FindBar {
                         }
                         f.request_focus();
                     }
-                    toggle(ui, &c, &mut self.match_case, "Aa", w.match_case);
-                    toggle(ui, &c, &mut self.whole_word, "ab", w.whole_word);
-                    toggle(ui, &c, &mut self.regex, ".*", w.regex);
-                    toggle(ui, &c, &mut self.in_selection, "≡", w.in_selection);
-                    if before != (self.find.clone(), self.regex, self.match_case, self.whole_word, self.in_selection) {
+                    toggle(ui, &c, &mut self.match_case, "Aa", w.match_case, &format!("{p}.case"));
+                    toggle(ui, &c, &mut self.whole_word, "ab", w.whole_word, &format!("{p}.word"));
+                    toggle(ui, &c, &mut self.regex, ".*", w.regex, &format!("{p}.regex"));
+                    if !find_only {
+                        toggle(ui, &c, &mut self.in_selection, "≡", w.in_selection, &format!("{p}.selection"));
+                    }
+                    if before != (self.find.clone(), self.regex, self.match_case, self.whole_word, sel(self)) {
                         self.changed();
                         out.query_changed = true;
                     }
@@ -230,28 +273,36 @@ impl FindBar {
                         let col = if bad { c.err } else { c.dim };
                         let r = ui.label(RichText::new(format!("{mark}{label}")).color(col).size(ito_theme::zoomed(ui.ctx(), 12.0)));
                         ito_a11y::say(&r, ito_a11y::Role::Label, &label);
+                        ito_a11y::test_id(&r, &format!("{p}.label"));
                     }
-                    for (words, glyph, flag) in [(w.prev, "↑", &mut out.prev), (w.next, "↓", &mut out.next)] {
+                    for (words, glyph, flag, id) in [(w.prev, "↑", &mut out.prev, "prev"), (w.next, "↓", &mut out.next, "next")] {
                         let r = ui.add(egui::Button::new(glyph).min_size(egui::vec2(24.0, 24.0))).on_hover_text(words);
                         ito_a11y::say(&r, ito_a11y::Role::Button, words);
+                        ito_a11y::test_id(&r, &format!("{p}.{id}"));
                         focus_ring(ui, &r);
                         *flag |= r.clicked();
                     }
                     let x = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(w.close);
                     ito_a11y::say(&x, ito_a11y::Role::Button, w.close);
+                    ito_a11y::test_id(&x, &format!("{p}.close"));
                     out.closed |= x.clicked();
                 });
-                if self.replace_open {
+                if replace_row {
                     ui.horizontal(|ui| {
                         ui.add_space(ito_theme::scale::space::XL);
                         let r = ui.add(egui::TextEdit::singleline(&mut self.replace).hint_text(w.replace_hint).desired_width(240.0));
                         ito_a11y::say(&r, ito_a11y::Role::Label, w.replace_hint);
+                        ito_a11y::test_id(&r, &format!("{p}.replace.query"));
                         if r.lost_focus() && !composing && ui.input(|i| i.key_pressed(Key::Enter)) {
                             out.replace_one = true;
                             r.request_focus();
                         }
-                        out.replace_one |= button_with(ui, look, w.replace, Tone::Plain).clicked();
-                        out.replace_all |= button_with(ui, look, w.replace_all, Tone::Primary).clicked();
+                        let one = button_with(ui, look, w.replace, Tone::Plain);
+                        ito_a11y::test_id(&one, &format!("{p}.replace.one"));
+                        out.replace_one |= one.clicked();
+                        let all = button_with(ui, look, w.replace_all, Tone::Primary);
+                        ito_a11y::test_id(&all, &format!("{p}.replace.all"));
+                        out.replace_all |= all.clicked();
                     });
                 }
             });
@@ -266,7 +317,7 @@ impl FindBar {
 }
 
 /// A small on/off button. On is told by a fill, a frame and an underline, not by colour alone; the reader hears on / off.
-fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, words: &str) {
+fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, words: &str, id: &str) {
     let text = if *on { RichText::new(glyph).strong().underline().color(c.on_accent()) } else { RichText::new(glyph).color(c.fg) };
     let mut b = egui::Button::new(text).min_size(egui::vec2(26.0, 24.0));
     if *on {
@@ -274,6 +325,7 @@ fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, 
     }
     let r = ui.add(b).on_hover_text(words);
     ito_a11y::say(&r, ito_a11y::Role::Button, &format!("{words}: {}", if *on { "on" } else { "off" }));
+    ito_a11y::test_id(&r, id);
     focus_ring(ui, &r);
     if r.clicked() {
         *on = !*on;
@@ -365,5 +417,62 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert!(!out.closed && b.open);
+    }
+
+    #[test]
+    fn read_only_hides_replace_and_selection() {
+        let mut b = FindBar::read_only();
+        b.command(cmd::REPLACE_OPEN, Some("w"));
+        assert!(b.open && b.find == "w" && !b.replace_open);
+        assert_eq!(b.command(cmd::REPLACE_ONE, None), Output::default());
+        assert_eq!(b.command(cmd::REPLACE_ALL, None), Output::default());
+        b.in_selection = true;
+        assert_eq!(b.ranges("w x w", Some(0..1)).unwrap().len(), 2);
+    }
+
+    fn drawn_ids(b: &mut FindBar) -> Vec<String> {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            b.show(ui, Look { c: ito_theme::colors(), q: "" }, &W);
+        })
+        .drop_without_applying_deltas();
+        ito_a11y::take_test_ids(&ctx, egui::ViewportId::ROOT).into_iter().map(|e| e.name).collect()
+    }
+
+    #[test]
+    fn default_bar_has_all_test_ids() {
+        let mut b = FindBar::default();
+        b.open_replace(Some("x"));
+        b.status = Status::Found { current: Some(1), total: 2 };
+        let ids = drawn_ids(&mut b);
+        for part in ["query", "case", "word", "regex", "selection", "label", "prev", "next", "close"] {
+            assert!(ids.contains(&format!("find.{part}")), "missing find.{part} in {ids:?}");
+        }
+        for part in ["toggle", "query", "one", "all"] {
+            assert!(ids.contains(&format!("find.replace.{part}")), "missing find.replace.{part} in {ids:?}");
+        }
+    }
+
+    #[test]
+    fn read_only_bar_leaves_out_replace_and_selection() {
+        let mut b = FindBar::read_only().ids("run.log.find");
+        assert_eq!(b.id_prefix(), "run.log.find");
+        b.open_find(Some("x"));
+        b.replace_open = true;
+        b.in_selection = true;
+        b.status = Status::Found { current: Some(1), total: 2 };
+        let ids = drawn_ids(&mut b);
+        for part in ["query", "case", "word", "regex", "label", "prev", "next", "close"] {
+            assert!(ids.contains(&format!("run.log.find.{part}")), "missing {part} in {ids:?}");
+        }
+        assert!(ids.iter().all(|n| !n.ends_with(".selection") && !n.contains(".replace.")), "{ids:?}");
+        assert_eq!(b.version(), 1, "a forced in_selection does not change the query");
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn bad_prefix_keeps_default() {
+        assert_eq!(FindBar::default().ids("Bad Prefix").id_prefix(), "find");
     }
 }

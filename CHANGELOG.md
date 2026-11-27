@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.315.0] - 2026-11-27
+
+### 追加
+
+- `ito-find`: 読むだけの文字（ログ・プレビュー・ヘルプ）のための「検索だけ」の形（ito#248）。
+  - `FindBar::find_only`（欄）と、それを ON にした `FindBar::read_only()`。置き換えの開閉（`▸`/`▾`）・置き換えの行・「選択範囲の中」（`≡`）を描かない。`replace_open`・`in_selection` が残っていても描かず、効かない。
+  - `open_replace` と `replace.open` のコマンドは `find.open` と同じ（置き換えの行を開かない）。`replace.one`・`replace.all` は何もしない（空の `Output`）。`ranges` は `within` を見ない。
+- `ito-find`: バーの部品にテストの ID（`--keys` の `<ClickId:>`・`<ValueId:>`・`<Id:>`）。接頭辞は `FindBar::ids(prefix)` で変えられ、既定は `find`（`id_prefix()` で読める）。
+  - `{p}.query`（検索の欄）・`{p}.case`・`{p}.word`・`{p}.regex`・`{p}.label`（件数。出ているときだけ）・`{p}.prev`・`{p}.next`・`{p}.close`。
+  - 検索だけでないときは `{p}.selection`・`{p}.replace.toggle` も。置き換えの行を開いているときは、さらに `{p}.replace.query`・`{p}.replace.one`・`{p}.replace.all`。
+  - 1 つの窓に 2 つのバーを出すときは、`ids` で接頭辞を分ける（同じ ID が 2 つあると `--keys` が 1 つに決められない）。
+
+### 使う側がやること
+
+- なし（足しただけ）。読むだけの文字に検索を付けるアプリは `FindBar::read_only().ids("…")` を使う。今までのバーにも `find.*` のテストの ID が付く。
+
 ## [0.314.2] - 2026-11-26
 
 ### 修正
