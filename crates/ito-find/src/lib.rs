@@ -143,6 +143,12 @@ impl FindBar {
         self.open = false;
     }
 
+    /// Empty the query: a new [`Self::version`] (a search still running for the old one is dropped) and no status.
+    pub fn clear_query(&mut self) {
+        self.find.clear();
+        self.changed();
+    }
+
     /// Run the keymap command `name` ([`cmd`]); the ones that step or replace come back as an [`Output`].
     pub fn command(&mut self, name: &str, seed: Option<&str>) -> Output {
         let mut out = Output::default();
@@ -224,6 +230,8 @@ impl FindBar {
         let replace_row = self.replace_open && !find_only;
         // While a composition is going on, Enter / Esc belong to the IME.
         let composing = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Ime(_))));
+        // The bar's widgets: Esc closes the bar when one of them had the keyboard focus.
+        let mut mine: Vec<egui::Id> = Vec::new();
         egui::Frame::new()
             .fill(c.raised())
             .stroke(egui::Stroke::new(1.0, c.border_strong()))
@@ -234,6 +242,7 @@ impl FindBar {
                     if !find_only {
                         let arrow = if self.replace_open { "▾" } else { "▸" };
                         let t = ui.add(egui::Button::new(arrow).frame(false)).on_hover_text(w.toggle_replace);
+                        mine.push(t.id);
                         ito_a11y::say(&t, ito_a11y::Role::Button, w.toggle_replace);
                         ito_a11y::test_id(&t, &format!("{p}.replace.toggle"));
                         if t.clicked() {
@@ -243,6 +252,7 @@ impl FindBar {
                     let sel = |b: &Self| b.in_selection && !b.find_only;
                     let before = (self.find.clone(), self.regex, self.match_case, self.whole_word, sel(self));
                     let f = ui.add(egui::TextEdit::singleline(&mut self.find).hint_text(w.find_hint).desired_width(240.0));
+                    mine.push(f.id);
                     ito_a11y::say(&f, ito_a11y::Role::Label, w.find_hint);
                     ito_a11y::test_id(&f, &format!("{p}.query"));
                     if std::mem::take(&mut self.focus_find) {
@@ -256,11 +266,11 @@ impl FindBar {
                         }
                         f.request_focus();
                     }
-                    toggle(ui, &c, &mut self.match_case, "Aa", w.match_case, &format!("{p}.case"));
-                    toggle(ui, &c, &mut self.whole_word, "ab", w.whole_word, &format!("{p}.word"));
-                    toggle(ui, &c, &mut self.regex, ".*", w.regex, &format!("{p}.regex"));
+                    mine.push(toggle(ui, &c, &mut self.match_case, "Aa", w.match_case, &format!("{p}.case")));
+                    mine.push(toggle(ui, &c, &mut self.whole_word, "ab", w.whole_word, &format!("{p}.word")));
+                    mine.push(toggle(ui, &c, &mut self.regex, ".*", w.regex, &format!("{p}.regex")));
                     if !find_only {
-                        toggle(ui, &c, &mut self.in_selection, "≡", w.in_selection, &format!("{p}.selection"));
+                        mine.push(toggle(ui, &c, &mut self.in_selection, "≡", w.in_selection, &format!("{p}.selection")));
                     }
                     if before != (self.find.clone(), self.regex, self.match_case, self.whole_word, sel(self)) {
                         self.changed();
@@ -277,12 +287,14 @@ impl FindBar {
                     }
                     for (words, glyph, flag, id) in [(w.prev, "↑", &mut out.prev, "prev"), (w.next, "↓", &mut out.next, "next")] {
                         let r = ui.add(egui::Button::new(glyph).min_size(egui::vec2(24.0, 24.0))).on_hover_text(words);
+                        mine.push(r.id);
                         ito_a11y::say(&r, ito_a11y::Role::Button, words);
                         ito_a11y::test_id(&r, &format!("{p}.{id}"));
                         focus_ring(ui, &r);
                         *flag |= r.clicked();
                     }
                     let x = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(w.close);
+                    mine.push(x.id);
                     ito_a11y::say(&x, ito_a11y::Role::Button, w.close);
                     ito_a11y::test_id(&x, &format!("{p}.close"));
                     out.closed |= x.clicked();
@@ -291,6 +303,7 @@ impl FindBar {
                     ui.horizontal(|ui| {
                         ui.add_space(ito_theme::scale::space::XL);
                         let r = ui.add(egui::TextEdit::singleline(&mut self.replace).hint_text(w.replace_hint).desired_width(240.0));
+                        mine.push(r.id);
                         ito_a11y::say(&r, ito_a11y::Role::Label, w.replace_hint);
                         ito_a11y::test_id(&r, &format!("{p}.replace.query"));
                         if r.lost_focus() && !composing && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -298,15 +311,23 @@ impl FindBar {
                             r.request_focus();
                         }
                         let one = button_with(ui, look, w.replace, Tone::Plain);
+                        mine.push(one.id);
                         ito_a11y::test_id(&one, &format!("{p}.replace.one"));
                         out.replace_one |= one.clicked();
                         let all = button_with(ui, look, w.replace_all, Tone::Primary);
+                        mine.push(all.id);
                         ito_a11y::test_id(&all, &format!("{p}.replace.all"));
                         out.replace_all |= all.clicked();
                     });
                 }
             });
-        if !composing && ui.input(|i| i.key_pressed(Key::Escape)) && ui.memory(|m| m.focused().is_some()) {
+        // egui takes the focus away on Esc before any widget is drawn, so ask who had it when the pass began.
+        // A modal drawn over the bar (it leaves the focus where it was) owns the Esc.
+        if !composing
+            && ui.input(|i| i.key_pressed(Key::Escape))
+            && ui.memory(|m| m.is_above_modal_layer(ui.layer_id()))
+            && ui.memory(|m| mine.iter().any(|id| m.had_focus_last_frame(*id) || m.has_focus(*id)))
+        {
             out.closed = true;
         }
         if out.closed {
@@ -317,7 +338,7 @@ impl FindBar {
 }
 
 /// A small on/off button. On is told by a fill, a frame and an underline, not by colour alone; the reader hears on / off.
-fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, words: &str, id: &str) {
+fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, words: &str, id: &str) -> egui::Id {
     let text = if *on { RichText::new(glyph).strong().underline().color(c.on_accent()) } else { RichText::new(glyph).color(c.fg) };
     let mut b = egui::Button::new(text).min_size(egui::vec2(26.0, 24.0));
     if *on {
@@ -330,6 +351,7 @@ fn toggle(ui: &mut egui::Ui, c: &ito_theme::Colors, on: &mut bool, glyph: &str, 
     if r.clicked() {
         *on = !*on;
     }
+    r.id
 }
 
 #[cfg(test)]
@@ -468,6 +490,96 @@ mod tests {
         }
         assert!(ids.iter().all(|n| !n.ends_with(".selection") && !n.contains(".replace.")), "{ids:?}");
         assert_eq!(b.version(), 1, "a forced in_selection does not change the query");
+    }
+
+    fn key(k: Key, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key { key: k, physical_key: Some(k), pressed: true, repeat: false, modifiers }
+    }
+
+    /// One pass with `events`; what the bar said.
+    fn pass(ctx: &egui::Context, b: &mut FindBar, events: Vec<egui::Event>) -> Output {
+        let mut out = Output::default();
+        ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            out = b.show(ui, Look { c: ito_theme::colors(), q: "" }, &W);
+        })
+        .drop_without_applying_deltas();
+        out
+    }
+
+    /// A bar opened with Ctrl+F, after the passes that put the focus in the query field.
+    fn focused_bar(ctx: &egui::Context) -> FindBar {
+        let mut b = FindBar::default();
+        b.open_replace(Some("x"));
+        pass(ctx, &mut b, vec![]);
+        pass(ctx, &mut b, vec![]);
+        assert!(ctx.memory(|m| m.focused().is_some()), "the query field has the focus");
+        b
+    }
+
+    #[test]
+    fn esc_in_the_query_field_closes_the_bar() {
+        let ctx = egui::Context::default();
+        let mut b = focused_bar(&ctx);
+        let out = pass(&ctx, &mut b, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(out.closed && !b.open, "{out:?}");
+        assert_eq!(pass(&ctx, &mut b, vec![]), Output::default(), "a closed bar draws nothing");
+    }
+
+    #[test]
+    fn esc_on_a_button_reached_with_tab_closes_the_bar() {
+        let ctx = egui::Context::default();
+        let mut b = focused_bar(&ctx);
+        let field = ctx.memory(|m| m.focused());
+        pass(&ctx, &mut b, vec![key(Key::Tab, Modifiers::NONE)]);
+        pass(&ctx, &mut b, vec![]);
+        let now = ctx.memory(|m| m.focused());
+        assert!(now.is_some() && now != field, "Tab moved the focus on: {field:?} -> {now:?}");
+        assert!(pass(&ctx, &mut b, vec![key(Key::Escape, Modifiers::NONE)]).closed);
+    }
+
+    #[test]
+    fn esc_without_the_bars_focus_or_while_composing_keeps_the_bar() {
+        let ctx = egui::Context::default();
+        let mut b = FindBar::default();
+        b.open_find(Some("x"));
+        b.focus_find = false;
+        pass(&ctx, &mut b, vec![]);
+        assert!(!pass(&ctx, &mut b, vec![key(Key::Escape, Modifiers::NONE)]).closed, "the focus is elsewhere (the editor)");
+        assert!(b.open);
+        let mut b = focused_bar(&ctx);
+        let ime = egui::Event::Ime(egui::ImeEvent::Preedit { text: "か".into(), active_range_chars: None });
+        assert!(!pass(&ctx, &mut b, vec![ime, key(Key::Escape, Modifiers::NONE)]).closed, "Esc belongs to the IME");
+        assert!(b.open);
+    }
+
+    #[test]
+    fn esc_under_a_modal_belongs_to_the_modal() {
+        let ctx = egui::Context::default();
+        let mut b = focused_bar(&ctx);
+        let with_modal = |b: &mut FindBar, events: Vec<egui::Event>| {
+            let mut out = Output::default();
+            ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                out = b.show(ui, Look { c: ito_theme::colors(), q: "" }, &W);
+                egui::Modal::new(egui::Id::new("confirm")).show(ui.ctx(), |ui| ui.label("Save?"));
+            })
+            .drop_without_applying_deltas();
+            out
+        };
+        with_modal(&mut b, vec![]);
+        assert!(ctx.memory(|m| m.focused().is_some()), "the modal left the focus in the query field");
+        assert!(!with_modal(&mut b, vec![key(Key::Escape, Modifiers::NONE)]).closed);
+        assert!(b.open);
+    }
+
+    #[test]
+    fn clear_query_empties_it_and_moves_the_version_on() {
+        let mut b = FindBar::default();
+        b.open_find(Some("cat"));
+        let v = b.version();
+        assert!(b.set_result(v, Ok(Status::Found { current: Some(1), total: 3 })));
+        b.clear_query();
+        assert!(b.find.is_empty() && b.version() == v + 1 && b.status == Status::Idle);
+        assert!(!b.set_result(v, Ok(Status::Found { current: Some(1), total: 3 })), "the old search is dropped");
     }
 
     #[cfg(not(debug_assertions))]

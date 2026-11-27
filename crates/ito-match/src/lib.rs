@@ -18,4 +18,4 @@ mod subst;
 pub use glob::{glob_match, has_wildcard};
 pub use matcher::Matcher;
 pub use nav::{nth_after, nth_before};
-pub use subst::{Query, Subst};
+pub use subst::{Query, Stopped, Subst};

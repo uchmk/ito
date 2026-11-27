@@ -26,6 +26,16 @@ impl Default for Query {
     }
 }
 
+/// A search the engine gave up on: the pattern backtracked too much (a
+/// runaway pattern such as `(a|b|ab)*(?=c)` over a long run of `ab`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stopped {
+    /// The edits found before the engine gave up, as [`Subst::edits`] gives them.
+    pub found: Vec<(Range<usize>, String)>,
+    /// The byte the abandoned search started from: matches at or after it were not checked.
+    pub at: usize,
+}
+
 /// A compiled substitution.
 #[derive(Clone, Debug)]
 pub struct Subst {
@@ -57,7 +67,8 @@ impl Subst {
 
     /// Every replacement `apply` would make, as `(byte range, new text)`,
     /// ascending and not overlapping, with `$1` / `${name}` expanded. Empty
-    /// matches are included (`^` -> `> ` quotes lines). A runaway pattern ends the list.
+    /// matches are included (`^` -> `> ` quotes lines). A runaway pattern ends the list
+    /// without a word; [`Self::edits_checked`] says so.
     pub fn edits(&self, text: &str) -> Vec<(Range<usize>, String)> {
         self.edits_in(text, 0..text.len())
     }
@@ -65,11 +76,35 @@ impl Subst {
     /// Like [`Self::edits`] but only matches lying wholly inside `range`
     /// (a selection). Lookaround and anchors still see the whole `text`.
     pub fn edits_in(&self, text: &str, range: Range<usize>) -> Vec<(Range<usize>, String)> {
+        self.scan(text, range).0
+    }
+
+    /// Like [`Self::edits`], but says when a runaway pattern made the engine
+    /// give up: `Err` holds the edits found before it, so a caller can show
+    /// them and say the search stopped early.
+    pub fn edits_checked(&self, text: &str) -> Result<Vec<(Range<usize>, String)>, Stopped> {
+        self.edits_in_checked(text, 0..text.len())
+    }
+
+    /// [`Self::edits_in`] that says when the engine gave up, as [`Self::edits_checked`].
+    pub fn edits_in_checked(&self, text: &str, range: Range<usize>) -> Result<Vec<(Range<usize>, String)>, Stopped> {
+        match self.scan(text, range) {
+            (found, None) => Ok(found),
+            (found, Some(at)) => Err(Stopped { found, at }),
+        }
+    }
+
+    /// The edits, and the byte where the engine gave up, if it did.
+    fn scan(&self, text: &str, range: Range<usize>) -> (Vec<(Range<usize>, String)>, Option<usize>) {
         let mut out = Vec::new();
         let end = range.end.min(text.len());
         let mut pos = range.start;
         while pos <= end && text.is_char_boundary(pos) {
-            let Ok(Some(caps)) = self.re.captures_from_pos(text, pos) else { break };
+            let caps = match self.re.captures_from_pos(text, pos) {
+                Ok(Some(caps)) => caps,
+                Ok(None) => break,
+                Err(_) => return (out, Some(pos)),
+            };
             let Some(m) = caps.get(0) else { break };
             if m.end() > end {
                 break;
@@ -89,7 +124,7 @@ impl Subst {
                 }
             };
         }
-        out
+        (out, None)
     }
 
     /// `text` with the match(es) replaced. A runaway pattern counts as no match.
@@ -178,6 +213,17 @@ mod tests {
         let w = Query { whole_word: true, ..Query::default() };
         assert_eq!(q("cat", w).apply("cat concat cat_ cat"), "[cat] concat cat_ [cat]");
         assert!(Subst::from_query("(", "", Query::default()).is_err());
+    }
+
+    #[test]
+    fn a_runaway_pattern_says_where_it_stopped() {
+        let s = Subst::new(r"x=\d|(a|b|ab)*(?=c)", "!", true, false).unwrap();
+        let text = format!("x=1 {}", "ab".repeat(60));
+        let stopped = s.edits_checked(&text).unwrap_err();
+        assert_eq!(stopped, Stopped { found: vec![(0..3, "!".to_owned())], at: 3 });
+        assert_eq!(s.edits(&text), stopped.found, "edits ends the list there without a word");
+        assert_eq!(s.edits_checked("x=1 x=2 ab").unwrap().len(), 2);
+        assert_eq!(s.edits_in_checked("x=1 x=2", 4..7).unwrap(), vec![(4..7, "!".to_owned())]);
     }
 
     #[test]
