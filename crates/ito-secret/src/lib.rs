@@ -3,35 +3,158 @@
 //! `get`, `set` and `delete` by `(app, name)`; the store is Windows'
 //! Credential Manager, macOS' Keychain, and on Linux the Secret Service
 //! (through `secret-tool` of libsecret, the value passed on its stdin, never
-//! on a command line). Where no store runs, every call is an `Err` that says
-//! so. Secrets are written only to the OS store; nothing falls back to a file
-//! for storing.
+//! on a command line). Where no OS store runs, every call to it is an `Err`
+//! that says so. Nothing falls back to a file when the store fails: a file
+//! store exists only when an app chooses it (below), and its files are
+//! encrypted.
 //!
-//! The one exception is reading, on Linux: a service that systemd started
-//! with `LoadCredential=` finds each credential as a file
+//! One thing is read from a file on Linux without any choice: a service that
+//! systemd started with `LoadCredential=` finds each credential as a file
 //! `$CREDENTIALS_DIRECTORY/<app>_<name>`, and `get` looks there first. That
-//! folder is a read-only source: this crate never writes it, and `set` and
-//! `delete` do not touch it.
+//! folder is a read-only source: this crate never writes it. `set` and
+//! `delete` leave it alone (with [`Store::SystemdCreds`] they refuse a name it
+//! holds, see [`is_provided`]).
+//!
+//! # Opt-in: systemd-creds files (Linux)
+//!
+//! A service user often has no Secret Service. An app can instead choose
+//! [`Store::SystemdCreds`] with `use_store(app, Store::SystemdCreds)`: one file
+//! per secret in `credentials_dir(app)`, encrypted by `systemd-creds --user`
+//! (systemd 256 or later). The value goes to the tool's stdin only. Call
+//! `use_store` at the start of every process that uses the secrets (the service
+//! and its command line both); `ito-notify` and `ito-oauth` call `get`, `set`
+//! and `delete` and so follow the choice with no change.
+//!
+//! * Precedence: `$CREDENTIALS_DIRECTORY` first, then the files. `secret-tool`
+//!   is never asked for an app that chose the files.
+//! * `get` returns exactly what `set` stored (no line end is stripped; that
+//!   is only done for `$CREDENTIALS_DIRECTORY`).
+//! * Without systemd-creds, or with systemd older than 256, `get` finds
+//!   nothing there (`None`) and `set` and `delete` are `Unsupported`.
+//! * Backups: a file opens again only with the same machine's host key
+//!   (`/var/lib/systemd/credential.secret`, and the TPM if systemd bound it)
+//!   and the same UID. Restoring to another machine or user means setting the
+//!   secrets again.
+//! * Entries already in the Secret Service do not move over by themselves.
 //!
 //! These block (the store may ask the user to unlock), so call them from a
 //! worker thread, not the UI thread.
 
 use std::io;
+use std::sync::Mutex;
+
+#[cfg(any(test, target_os = "linux"))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod creds;
+
+/// Where `get`, `set` and `delete` keep one app's secrets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Store {
+    /// The OS store: Credential Manager, Keychain, the Secret Service through secret-tool. The default.
+    #[default]
+    Os,
+    /// Linux only: one file per secret in `credentials_dir(app)`, encrypted by `systemd-creds --user` (systemd 256 or later),
+    /// for a service user without a Secret Service. Choose it with [`use_store`]. `$CREDENTIALS_DIRECTORY` is read first
+    /// and `secret-tool` is never asked; see the crate docs for backups.
+    ///
+    /// Errors, by kind: `InvalidInput` a bad app or name, a name over 255 bytes once encoded, a value over 1 MiB;
+    /// `ReadOnlyFilesystem` with [`is_provided`] a name that `$CREDENTIALS_DIRECTORY` owns; `Unsupported` off Linux, no
+    /// systemd-creds, or systemd older than 256 (`get` answers `None` then); `NotFound` neither `HOME` nor `XDG_DATA_HOME` gives a root;
+    /// `InvalidData` a stored file that is not a regular file, is too large, or decrypts to non-UTF-8; `Other` the tool
+    /// failed (a wrong host key, another UID, a damaged file, the service down: exit 1 cannot tell them apart) or the
+    /// version probe failed; `TimedOut` the tool did not finish in 30 seconds; `PermissionDenied` from `set`, a folder open
+    /// to other users, owned by another user, or that is a link; any other OS error kind as it comes (a file where the
+    /// folder should be is `AlreadyExists`).
+    SystemdCreds,
+}
+
+static CHOSEN: Mutex<Vec<(String, Store)>> = Mutex::new(Vec::new());
+
+/// Choose where `app`'s secrets go, for this process (write once). Call it at start in every process that uses them (the
+/// service and its command line both), before the first `get`, `set` or `delete`. Repeating the same choice is `Ok`; a
+/// different choice for an app already chosen is `Err(AlreadyExists)`. [`Store::SystemdCreds`] off Linux is
+/// `Err(Unsupported)` and changes nothing; with it, a bad `app` (empty, a leading dot, NUL, `/`, `\` or `_`) is
+/// `Err(InvalidInput)`.
+pub fn use_store(app: &str, store: Store) -> io::Result<()> {
+    if store == Store::SystemdCreds {
+        #[cfg(not(target_os = "linux"))]
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "systemd-creds files are only for Linux"));
+        #[cfg(target_os = "linux")]
+        creds::check_app(app)?;
+    }
+    let mut chosen = CHOSEN.lock().unwrap_or_else(|e| e.into_inner());
+    match chosen.iter().find(|(a, _)| a == app) {
+        Some((_, s)) if *s == store => Ok(()),
+        Some((_, s)) => Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("the secrets of {app} already use {s:?}"))),
+        None => {
+            chosen.push((app.to_owned(), store));
+            Ok(())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_creds(app: &str) -> bool {
+    let chosen = CHOSEN.lock().unwrap_or_else(|e| e.into_inner());
+    chosen.iter().any(|(a, s)| a == app && *s == Store::SystemdCreds)
+}
+
+/// The folder of `app`'s systemd-creds files (Linux only): `$XDG_DATA_HOME/uchmk/<app>/credentials` when `XDG_DATA_HOME` is
+/// set, non-empty and absolute, else `$HOME/.local/share/uchmk/<app>/credentials` when `HOME` is set, non-empty and
+/// absolute, else `None`. `None` too when `app` breaks the name rules. There is no UID in the path: both processes of a
+/// service must resolve the same folder and run as the same user.
+#[cfg(target_os = "linux")]
+pub fn credentials_dir(app: &str) -> Option<std::path::PathBuf> {
+    creds::folder_from(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"), app)
+}
+
+/// The error `set` and `delete` give for a name that systemd provides through `$CREDENTIALS_DIRECTORY`.
+#[derive(Debug)]
+#[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
+struct Provided {
+    file: String,
+}
+
+impl std::fmt::Display for Provided {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} is provided by systemd (LoadCredential); change it in the unit", self.file)
+    }
+}
+
+impl std::error::Error for Provided {}
+
+#[cfg(any(test, target_os = "linux"))]
+fn provided_error(file: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::ReadOnlyFilesystem, Provided { file: file.to_owned() })
+}
+
+/// Whether `e` came from `set` or `delete` refusing a name that systemd provides through `$CREDENTIALS_DIRECTORY`
+/// (`LoadCredential=`): change it in the unit, not here. Its kind is `ReadOnlyFilesystem`, but a store folder on a
+/// read-only file system gives that kind too, so tell them apart with this. Always `false` off Linux.
+pub fn is_provided(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|x| x.is::<Provided>())
+}
 
 /// The store's name for `(app, name)`.
 fn target(app: &str, name: &str) -> String {
     format!("uchmk/{app}/{name}")
 }
 
-/// The secret kept as `name` for `app`; `None` when there is none.
+/// The secret kept as `name` for `app`; `None` when there is none. Follows the store [`use_store`] chose for `app`.
 ///
 /// On Linux a systemd credential (`$CREDENTIALS_DIRECTORY/<app>_<name>`) wins over the store; the store is asked
 /// only when there is no such credential. A credential that exists but cannot be read is an `Err`, not a fall-through.
 pub fn get(app: &str, name: &str) -> io::Result<Option<String>> {
     #[cfg(target_os = "linux")]
-    if let Some(dir) = std::env::var_os("CREDENTIALS_DIRECTORY") {
-        if let Some(value) = read_credential(std::path::Path::new(&dir), app, name)? {
-            return Ok(Some(value));
+    {
+        if let Some(dir) = std::env::var_os("CREDENTIALS_DIRECTORY") {
+            if let Some(value) = read_credential(std::path::Path::new(&dir), app, name)? {
+                return Ok(Some(value));
+            }
+        }
+        if systemd_creds(app) {
+            return creds::get(app, name);
         }
     }
     sys::get(&target(app, name))
@@ -56,14 +179,22 @@ fn read_credential(dir: &std::path::Path, app: &str, name: &str) -> io::Result<O
     }
 }
 
-/// Keep `value` as `name` for `app`, replacing what was there.
+/// Keep `value` as `name` for `app`, replacing what was there. Follows the store [`use_store`] chose for `app`.
 pub fn set(app: &str, name: &str, value: &str) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    if systemd_creds(app) {
+        return creds::set(app, name, value);
+    }
     sys::set(&target(app, name), value)
 }
 
 /// Forget `name` of `app`; no error when there was none. An `Err` means the store failed (a locked keyring, no store
-/// running) and the secret may still be there.
+/// running) and the secret may still be there. Follows the store [`use_store`] chose for `app`.
 pub fn delete(app: &str, name: &str) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    if systemd_creds(app) {
+        return creds::delete(app, name);
+    }
     sys::delete(&target(app, name))
 }
 
@@ -347,6 +478,33 @@ mod tests {
         assert_eq!(sys::get_with(&sh("printf pw"), "uchmk/a/b").unwrap().as_deref(), Some("pw"));
         assert_eq!(sys::get_with(&sh("exit 1"), "uchmk/a/b").unwrap(), None);
         assert!(sys::get_with(&sh("echo 'secret-tool: locked' >&2; exit 1"), "uchmk/a/b").is_err());
+    }
+
+    #[test]
+    fn a_choice_is_written_once() {
+        use_store("reg-same", Store::Os).unwrap();
+        use_store("reg-same", Store::Os).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(use_store("reg-same", Store::SystemdCreds).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+            use_store("reg-sd", Store::SystemdCreds).unwrap();
+            use_store("reg-sd", Store::SystemdCreds).unwrap();
+            assert_eq!(use_store("reg-sd", Store::Os).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+            assert_eq!(use_store("bad_app", Store::SystemdCreds).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            assert_eq!(use_store("reg-sd", Store::SystemdCreds).unwrap_err().kind(), io::ErrorKind::Unsupported);
+            use_store("reg-sd", Store::Os).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_provided_name_is_told_from_a_read_only_folder() {
+        assert!(is_provided(&provided_error("app_n")));
+        assert!(provided_error("app_n").to_string().contains("app_n"));
+        assert!(!is_provided(&io::Error::from(io::ErrorKind::ReadOnlyFilesystem)));
+        assert!(!is_provided(&io::Error::other("x")));
     }
 
     fn cred_dir(tag: &str) -> std::path::PathBuf {

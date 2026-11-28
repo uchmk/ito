@@ -3,6 +3,22 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.318.0] - 2026-11-28
+
+### 追加
+
+- `ito-secret`: Linux で、Secret Service の無いサービスのユーザー向けに、秘密を `systemd-creds --user`（systemd 256 から）で暗号化したファイルに置く、選んで使うストア（ito#251。koyomi の依頼）。
+  - `use_store(app, Store::SystemdCreds)` で、そのプロセスの `app` の `get`・`set`・`delete` がファイルに向く。1 回だけ選べる（同じ選び直しは `Ok`、違う選び直しは `AlreadyExists`）。Linux の外では `Unsupported` で、何も変わらない。選ばないアプリは今までどおり `secret-tool`。
+  - `get` は `$CREDENTIALS_DIRECTORY/<app>_<name>` を先に読み、次にファイル。`secret-tool` には聞かない。`set` したものがそのまま返る（行末を削らない）。systemd-creds が無い・systemd が 256 より古いときは `Ok(None)`、`set`・`delete` は `Unsupported`。
+  - ファイルは `credentials_dir(app)`: `$XDG_DATA_HOME/uchmk/<app>/credentials`（絶対パスのとき）か `$HOME/.local/share/uchmk/<app>/credentials`。フォルダーは 0700、ファイルは 0600 で作り、同じフォルダーの一時ファイルから名前を替える。ほかのユーザーに開いたフォルダー・他人のフォルダーには書かない。値は systemd-creds の stdin にだけ渡す（コマンドラインにも文にも出ない）。30 秒で終わらなければ止める。
+  - 失敗は `io::ErrorKind` で分かる: `InvalidInput`（名前・長さ）、`ReadOnlyFilesystem`（`$CREDENTIALS_DIRECTORY` が持つ名前の `set`・`delete`。読み取り専用の場所と見分けるのは `is_provided(&e)`）、`Unsupported`、`NotFound`（`HOME` も `XDG_DATA_HOME` も無い）、`InvalidData`（壊れた・普通のファイルでない・UTF-8 でない）、`Other`（systemd-creds の失敗。ホストの鍵・UID の違い・ファイルの破損・サービスの停止は終了コードでは分からない）、`TimedOut`、`PermissionDenied`。
+- `ito-oauth`: リフレッシュ トークンの置き場（`ito-secret`）も、アプリが `use_store` で選んだストアに従う（コードの変更なし）。
+
+### 使う側がやること
+
+- なし（rev を上げるだけ）。ファイルのストアを使うアプリだけ、秘密を使うどのプロセスでも（サービスとコマンドラインの両方）、最初の `get`・`set`・`delete` の前に `ito_secret::use_store("<app>", ito_secret::Store::SystemdCreds)` を呼ぶ。2 つのプロセスは同じユーザーで、同じ `HOME`・`XDG_DATA_HOME` にする。
+- バックアップ: ファイルは同じ機械のホストの鍵（`/var/lib/systemd/credential.secret`、TPM を使っていればそれも）と同じ UID でしか開けない。別の機械・別のユーザーに戻したときは、秘密を入れ直す。Secret Service にある秘密は移らない。
+
 ## [0.317.1] - 2026-11-28
 
 ### 修正

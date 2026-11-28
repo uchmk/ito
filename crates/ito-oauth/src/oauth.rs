@@ -282,7 +282,8 @@ pub(crate) trait Store: Send {
     fn delete(&self, key: &str) -> std::io::Result<()>;
 }
 
-/// The OS credential store, through `ito-secret`.
+/// The OS credential store, through `ito-secret`. It follows the store `ito_secret::use_store` chose for the app
+/// (systemd-creds files for a Linux service).
 struct Os(String);
 
 impl Store for Os {
