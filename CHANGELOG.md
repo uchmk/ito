@@ -3,6 +3,18 @@
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、版のつけ方は
 [セマンティックバージョニング](https://semver.org/lang/ja/) に従う。版はルートの `Cargo.toml` の `[workspace.package]` の `version` が正。
 
+## [0.317.1] - 2026-11-28
+
+### 修正
+
+- `ito-secret`: Linux の `delete` が、`secret-tool clear` の失敗（鍵束がロックされている・D-Bus のセッションが無い）でも `Ok` を返していた（ito#249。koyomi の報告）。`secret-tool` の答えを libsecret の `tool/secret-tool.c` のとおりに読む: 何も一致しなかったときは黙って終了コード 1、失敗したときは stderr に 1 行書いて 1。黙った 1 は「消すものが無かった」なので `Ok`、stderr に何か書いた失敗・ほかの終了コード・シグナルでの終わりは `Err`（その行を文に入れる。秘密は入らない）。
+- `ito-secret`: Linux の `get` も同じ読み違いで、`secret-tool lookup` の失敗を「無い」（`Ok(None)`）にしていた。失敗は `Err` になり、`ito-notify` の webhook・メールの警告は「ストアに無い」ではなく「ストアから読めない」と理由つきで出る。空の秘密は `Err` ではなく `Some("")`（Windows・macOS と同じ）。
+
+### 使う側がやること
+
+- なし（rev を上げるだけ）。koyomi の、`delete` のあとに `get` で確かめる回り道は外してよい（前の `get` は同じ失敗を `None` と読んでいたので、確かめにもならなかった）。
+- Linux で秘密のストアが動いていない機械では、`get` がこれまでの `Ok(None)` でなく `Err` を返す。`Err` を「設定されていない」と同じに扱っていたところは、そのままでよい。
+
 ## [0.317.0] - 2026-11-27
 
 ### 追加

@@ -61,7 +61,8 @@ pub fn set(app: &str, name: &str, value: &str) -> io::Result<()> {
     sys::set(&target(app, name), value)
 }
 
-/// Forget `name` of `app`; no error when there was none.
+/// Forget `name` of `app`; no error when there was none. An `Err` means the store failed (a locked keyring, no store
+/// running) and the secret may still be there.
 pub fn delete(app: &str, name: &str) -> io::Result<()> {
     sys::delete(&target(app, name))
 }
@@ -184,21 +185,22 @@ mod sys {
         }
     }
 
+    /// The program and the arguments before the action: `secret-tool`, or a stand-in in the tests.
+    const TOOL: &[&str] = &["secret-tool"];
+
+    fn tool(base: &[&str]) -> Command {
+        let mut c = Command::new(base[0]);
+        c.args(&base[1..]);
+        c
+    }
+
     pub fn get(target: &str) -> io::Result<Option<String>> {
-        let out = Command::new("secret-tool")
-            .args(["lookup", "ito", target])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(missing)?;
-        // `lookup` exits 1 with nothing printed when there is no such entry.
-        if out.status.success() && !out.stdout.is_empty() {
-            Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
-        } else if out.status.code() == Some(1) && out.stdout.is_empty() {
-            Ok(None)
-        } else {
-            Err(io::Error::other("secret-tool lookup failed (is the keyring unlocked?)"))
-        }
+        get_with(TOOL, target)
+    }
+
+    pub(crate) fn get_with(base: &[&str], target: &str) -> io::Result<Option<String>> {
+        let out = tool(base).args(["lookup", "ito", target]).stdin(Stdio::null()).output().map_err(missing)?;
+        super::lookup_said(out.status.code(), &out.stdout, &out.stderr)
     }
 
     pub fn set(target: &str, value: &str) -> io::Result<()> {
@@ -217,9 +219,52 @@ mod sys {
     }
 
     pub fn delete(target: &str) -> io::Result<()> {
-        // `clear` of an entry that is not there is not an error worth reporting.
-        Command::new("secret-tool").args(["clear", "ito", target]).stdin(Stdio::null()).stderr(Stdio::null()).status().map_err(missing)?;
-        Ok(())
+        delete_with(TOOL, target)
+    }
+
+    pub(crate) fn delete_with(base: &[&str], target: &str) -> io::Result<()> {
+        let out = tool(base).args(["clear", "ito", target]).stdin(Stdio::null()).output().map_err(missing)?;
+        super::clear_said(out.status.code(), &out.stderr)
+    }
+}
+
+// What `secret-tool` says, read as libsecret's tool/secret-tool.c writes it: `lookup` and `clear` exit 1 in silence when
+// nothing matched, and exit 1 after a line on stderr when the store failed (a locked keyring, no D-Bus session). Any
+// other word on stderr with a failing exit is taken as a failure too: the secret may still be there.
+
+/// `secret-tool lookup`'s answer: the secret on stdout, `None` for a silent "no such entry", `Err` for anything else.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+fn lookup_said(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> io::Result<Option<String>> {
+    match (code, said(stderr)) {
+        (Some(0), _) => Ok(Some(String::from_utf8_lossy(stdout).into_owned())),
+        (Some(1), None) if stdout.is_empty() => Ok(None),
+        (_, why) => Err(failed("lookup", why)),
+    }
+}
+
+/// `secret-tool clear`'s answer: `Ok` when it cleared or there was nothing to clear, `Err` when it failed.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+fn clear_said(code: Option<i32>, stderr: &[u8]) -> io::Result<()> {
+    match (code, said(stderr)) {
+        (Some(0), _) | (Some(1), None) => Ok(()),
+        (_, why) => Err(failed("clear", why)),
+    }
+}
+
+/// The first non-blank line the tool wrote to stderr, trimmed and cut to 200 characters (it names the failure, never a
+/// secret).
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+fn said(stderr: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(stderr);
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(line.chars().take(200).collect())
+}
+
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+fn failed(action: &str, why: Option<String>) -> io::Error {
+    match why {
+        Some(why) => io::Error::other(format!("secret-tool {action} failed: {why}")),
+        None => io::Error::other(format!("secret-tool {action} failed (is the keyring unlocked?)")),
     }
 }
 
@@ -265,6 +310,43 @@ mod tests {
         delete(app, &name).unwrap();
         assert_eq!(get(app, &name).unwrap(), None);
         delete(app, &name).unwrap();
+    }
+
+    #[test]
+    fn clear_tells_nothing_to_clear_from_a_failure() {
+        assert!(clear_said(Some(0), b"").is_ok(), "cleared");
+        assert!(clear_said(Some(1), b"").is_ok(), "nothing matched: secret-tool exits 1 in silence");
+        assert!(clear_said(Some(1), b" \n").is_ok(), "blank lines say nothing");
+        let e = clear_said(Some(1), b"secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY\n").unwrap_err();
+        assert_eq!(e.to_string(), "secret-tool clear failed: secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY");
+        assert!(clear_said(Some(2), b"").is_err(), "another exit code");
+        assert!(clear_said(None, b"").is_err(), "ended by a signal");
+    }
+
+    #[test]
+    fn lookup_tells_no_entry_from_a_failure() {
+        assert_eq!(lookup_said(Some(0), b"pw", b"").unwrap().as_deref(), Some("pw"));
+        assert_eq!(lookup_said(Some(0), b"", b"").unwrap().as_deref(), Some(""), "an empty secret, as on Windows and macOS");
+        assert_eq!(lookup_said(Some(1), b"", b"").unwrap(), None);
+        let e = lookup_said(Some(1), b"", b"secret-tool: Cannot create an item in a locked collection\n").unwrap_err();
+        assert!(e.to_string().ends_with("locked collection"), "{e}");
+        assert!(lookup_said(Some(1), b"x", b"").is_err());
+        assert!(lookup_said(None, b"", b"").is_err());
+        assert_eq!(said(&[b'x'; 300]).map(|s| s.chars().count()), Some(200), "a long line is cut");
+    }
+
+    /// The real processes, with `sh` standing in for `secret-tool` (`$0` is the stand-in's name, `$1` the action).
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn a_stand_in_tool_is_read_the_same() {
+        let sh = |script: &'static str| ["sh", "-c", script, "secret-tool"];
+        assert!(sys::delete_with(&sh("exit 1"), "uchmk/a/b").is_ok());
+        assert!(sys::delete_with(&sh("[ \"$1 $2 $3\" = 'clear ito uchmk/a/b' ] || exit 9"), "uchmk/a/b").is_ok());
+        let e = sys::delete_with(&sh("echo 'secret-tool: no D-Bus' >&2; exit 1"), "uchmk/a/b").unwrap_err();
+        assert!(e.to_string().ends_with("no D-Bus"), "{e}");
+        assert_eq!(sys::get_with(&sh("printf pw"), "uchmk/a/b").unwrap().as_deref(), Some("pw"));
+        assert_eq!(sys::get_with(&sh("exit 1"), "uchmk/a/b").unwrap(), None);
+        assert!(sys::get_with(&sh("echo 'secret-tool: locked' >&2; exit 1"), "uchmk/a/b").is_err());
     }
 
     fn cred_dir(tag: &str) -> std::path::PathBuf {
